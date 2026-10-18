@@ -13,8 +13,13 @@ export interface Wizard { key: string; userId: string; chatId: string; topicId: 
 export interface ProcessedUpdate { key: string; status: 'CLAIMED' | 'DONE' | 'UNKNOWN'; leaseUntil: number; }
 export interface Operation { id: string; updateKey: string; kind: 'CHAT_LEAVE'; chatId: string; policyVersion: number; status: OperationStatus; startedAt?: number; }
 export interface AuditRecord { updateKey: string; decision: 'ALLOW' | 'DENY' | 'NOOP'; reason: string; policyVersion: number; at: number; }
+export type RestrictionKind = 'NONE' | 'MUTE' | 'BAN';
+export interface ModerationReason { chatId: string; memberId: string; source: 'MANUAL' | 'SUBSCRIPTION'; reference: string; kind: 'MUTE' | 'BAN'; createdBy: string; active: boolean; }
+export interface ModerationOperation { id: string; chatId: string; memberId: string; actorId: string; kind: RestrictionKind; reasonFingerprint: string; policyVersion: number; status: OperationStatus; createdAt: number; }
+export interface Warning { chatId: string; memberId: string; reference: string; actorId: string; at: number; active: boolean; }
+export interface SubscriptionRequirement { chatId: string; channelIds: string[]; mode: 'ALL' | 'ANY'; version: number; }
 export interface BotState {
-  schemaVersion: 1;
+  schemaVersion: 2;
   chats: Chat[];
   grants: Grant[];
   privateAI: PrivateAIMode;
@@ -24,11 +29,16 @@ export interface BotState {
   callbacks: CallbackRecord[];
   wizards: Wizard[];
   audit: AuditRecord[];
+  moderationReasons: ModerationReason[];
+  moderationOperations: ModerationOperation[];
+  subscriptionRequirements: SubscriptionRequirement[];
+  warnings: Warning[];
 }
 const empty = (): BotState => ({
-  schemaVersion: 1, chats: [], grants: [], privateAI: 'OFF',
+  schemaVersion: 2, chats: [], grants: [], privateAI: 'OFF',
   privateFeatures: { 'owner.dashboard': true, 'education.navigate': true, 'subscription.verify': true, 'support.use': true, 'content.upload': false },
-  updates: [], operations: [], callbacks: [], wizards: [], audit: []
+  updates: [], operations: [], callbacks: [], wizards: [], audit: [],
+  moderationReasons: [], moderationOperations: [], subscriptionRequirements: [], warnings: []
 });
 
 // A per-process serialized file transaction; atomic rename prevents torn JSON on a crash.
@@ -39,8 +49,12 @@ export class BotStore {
   private async read(): Promise<BotState> {
     try {
       const state: unknown = JSON.parse(await readFile(this.file, 'utf8'));
-      if (!state || typeof state !== 'object' || (state as BotState).schemaVersion !== 1) throw new Error('Unsupported state schema');
-      return state as BotState;
+      if (!state || typeof state !== 'object') throw new Error('Unsupported state schema');
+      // B1 -> B2 migration is explicit and additive; never wipe B1 authorizations or ledgers.
+      const previous = state as Record<string, unknown>;
+      if (previous.schemaVersion === 1) return { ...previous, schemaVersion: 2, moderationReasons: [], moderationOperations: [], subscriptionRequirements: [], warnings: [] } as unknown as BotState;
+      if (previous.schemaVersion !== 2 || !Array.isArray(previous.moderationReasons) || !Array.isArray(previous.moderationOperations) || !Array.isArray(previous.subscriptionRequirements) || !Array.isArray(previous.warnings)) throw new Error('Unsupported state schema');
+      return previous as unknown as BotState;
     } catch (err) {
       if ((err as NodeJS.ErrnoException).code === 'ENOENT') return empty();
       throw err; // NEVER silently reset corrupted production data.

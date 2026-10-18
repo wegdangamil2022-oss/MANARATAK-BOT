@@ -1,13 +1,14 @@
 import { BotStore, type AuditRecord, type BotState } from './store.js';
 import { Policy } from './policy.js';
 import { CallbackActionCodec } from './callback.js';
+import type { SubscriptionGate } from './subscription.js';
 
 export interface BotUpdate {
   botId: string; updateId: number;
   kind: 'message' | 'callback' | 'membership' | 'inline';
   chatKind?: 'private' | 'group' | 'channel'; chatId?: string;
   actorId?: string; mentionTarget?: string; callbackRef?: string;
-  hasFile?: boolean; subscriptionVerified?: boolean; moderationAllowed?: boolean;
+  hasFile?: boolean; subscriptionVerified?: boolean; moderationAllowed?: boolean; // simulated legacy flags; membership claims are never trusted
   transportVerified?: boolean;
 }
 export type PipelineResult = { status: 'DENIED' | 'NOOP' | 'ALLOWED' | 'DUPLICATE' | 'UNKNOWN'; reason: string };
@@ -26,7 +27,7 @@ export class FakeTelegramGateway implements TelegramGateway {
 
 /** B1 simulation only. The live Telegram transport does not exist in this package. */
 export class UpdatePipeline {
-  constructor(private readonly store: BotStore, private readonly policy: Policy, private readonly gateway: TelegramGateway, private readonly callbacks: CallbackActionCodec, private readonly clock: () => number = Date.now) {}
+  constructor(private readonly store: BotStore, private readonly policy: Policy, private readonly gateway: TelegramGateway, private readonly callbacks: CallbackActionCodec, private readonly clock: () => number = Date.now, private readonly subscription?: SubscriptionGate) {}
   private invalid(u: BotUpdate): boolean {
     return u.transportVerified === false || !u.botId || !Number.isSafeInteger(u.updateId) || u.updateId < 0 ||
       !['message', 'callback', 'membership', 'inline'].includes(u.kind) ||
@@ -90,8 +91,15 @@ export class UpdatePipeline {
     }
     if (update.mentionTarget === 'bot') {
       if (!this.policy.canUseChat(s, chatId, 'assistant') || !this.policy.mayAskGroup(s, chatId, update.actorId, true)) return this.finish(key, 'DENIED', 'GROUP_AI_DENIED', revision);
-      if (update.subscriptionVerified === false) return this.finish(key, 'DENIED', 'SUBSCRIPTION_REQUIRED', revision);
-      // Capability is allowed by policy, but no AI provider, downloads or generation exist in B1.
+      // Ignore user-supplied `subscriptionVerified`: membership must come from a trusted provider.
+      const requirement = (await this.store.snapshot()).subscriptionRequirements.find(x => x.chatId === chatId && x.channelIds.length);
+      if (requirement) {
+        if (!this.subscription) return this.finish(key, 'DENIED', 'SUBSCRIPTION_UNAVAILABLE', revision);
+        const checked = await this.subscription.verify(chatId, update.actorId ?? '');
+        if (checked.status === 'NOT_MEMBER') return this.finish(key, 'DENIED', 'SUBSCRIPTION_REQUIRED', revision);
+        if (!['MEMBER', 'NOT_REQUIRED'].includes(checked.status)) return this.finish(key, 'DENIED', 'SUBSCRIPTION_UNAVAILABLE', revision);
+      }
+      // Capability is allowed by policy, but no AI provider, downloads or generation exist in B2.
       return this.finish(key, 'DENIED', 'AI_NOT_CONFIGURED', revision);
     }
     return this.finish(key, 'NOOP', 'NO_ACTION_IN_B1', revision);

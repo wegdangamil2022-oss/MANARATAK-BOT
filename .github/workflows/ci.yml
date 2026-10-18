@@ -1,7 +1,7 @@
-name: B1 typecheck and mock tests
+name: Bot typecheck and mock tests
 on:
   push:
-    branches: ["feature/b0-b1-simulated-core"]
+    branches: ["feature/b0-b1-simulated-core", "feature/b2-core-simulation"]
   pull_request:
 permissions:
   contents: read
