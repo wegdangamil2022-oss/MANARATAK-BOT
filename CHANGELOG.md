@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.3.1 — 2026-10-19 — B3 approved FAQ, links and admin facade (mock only)
+
+- Curated FAQ drafts, publisher approval, bounded aliases, explicit ambiguity and source visibility gates.
+- Short server-side share references with TTL, group membership verification port and post-check revocation enforcement.
+- Minimal transport-independent admin facade with guarded Telegram-private and web admin contexts.
+- Privacy-safe resource projections for student views; v3→v4 additive migration.
+- 16 focused new security and flow tests, 57 total; typecheck and offline demos.
+- No Telegram/Web connectivity, webhook, AI provider, paid service, live publication or production migration.
+
 ## 0.3.0 — 2026-10-19 — B3 education/import simulation
 
 - Education category tree scoped by approved chats/private feature, sort order, visibility and archive.

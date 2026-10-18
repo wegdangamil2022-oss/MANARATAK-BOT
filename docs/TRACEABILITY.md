@@ -22,6 +22,12 @@
 | B3: DOCFLOW-001/002؛ T12-09/10/12/16 جزئيًا | ingestion.ts / education.ts | TESTED_MOCK (شريحة) | ملفات CSV/JSON/MD/TXT وهمية؛ تقرير عد وتكرار/غموض؛ لا معالجة PDF ولا ذكاء اصطناعي |
 | B3: DOCFLOW-004؛ T12-22 | education.ts | TESTED_MOCK (شريحة) | فصل الصلاحيتين ومرحلة الاعتماد عن النشر المحلي؛ منع نشر غامض/مكرر |
 | B3: تخزين/إعادة تشغيل | store.ts + b3-education.test.ts | TESTED_MOCK | ترحيل v2→v3؛ hash dedupe؛ نشر متزامن واحد؛ 11 اختبار B3 جديد |
-| B3 FAQ وروابط موارد متقدمة؛ B4 / B2-Advanced / B5 / B6 / B7 | — | PLANNED | لا وصل حي أو AI أو نشر Telegram |
+| B3: S121-10؛ T121-13 / QARCH | education-interactions.ts | TESTED_MOCK | FAQ بمصدر منشور ومراجعة ومطابقة محددة، يمنع عند OFF واللبس وأرشفة المصدر |
+| B3: S121-11؛ T121-14 / HUBCFG-003/004 | education-interactions.ts | TESTED_MOCK | مراجع قصيرة، تحقق عضو موثوق، TTL، actor binding، سحب تصريح/restart، إعادة فحص بعد await |
+| B3: واجهة الإدارة المحاكية | education-admin.ts | TESTED_MOCK عقد فقط | تحقق سياق سابقًا من adapter خارجي، وفصل upload عن publish؛ لا HTTP/Telegram فعلي |
+| B3: الخصوصية | education.ts | TESTED_MOCK | خرج الطالب منقح ولا يحتوي بيانات المراجع أو import IDs |
+| B3: schema v4 | store.ts | TESTED_MOCK | ترحيل 1→2→3→4 مع احتفاظ بالمنح والموارد، 57 اختبارًا |
+| B3: اتصال Telegram/Web حقيقي، مسح الملفات ومراجعة المصادر | — | PLANNED | لم تُفعل واجهات نقل أو تحقق حي |
+| B4 / B2-Advanced / B5 / B6 / B7 | — | PLANNED | لا نشر أو AI أو مصالحة فعلية |
 
 `TESTED_MOCK` لا يعني `TESTED_LIVE_PRIVATE` أو `ACTIVATED`. لا يُزعم إتمام 703 متطلبًا؛ الوثيقة أصل التتبع الكامل، وهذا الملف يختص بما تم تنفيذه جزئيًا من B0/B1/B2-Core وشريحة B3.

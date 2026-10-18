@@ -4,6 +4,12 @@ import { Policy } from './policy.js';
 import { parseDocument, type ImportFormat } from './ingestion.js';
 
 type Origin = 'TELEGRAM_ADMIN' | 'ADMIN_WEB';
+/** Public resource projections must not reveal internal audit identities or import job IDs. */
+export type PublicEducationResource = Pick<EducationResource,'id'|'categoryId'|'scope'|'title'|'university'|'cycle'|'degree'|'seats'>;
+export function publicEducationResource(r:EducationResource):PublicEducationResource {
+  const {id,categoryId,scope,title,university,cycle,degree,seats}=r;
+  return {id,categoryId,scope,title,university,cycle,degree,seats};
+}
 const goodId = (id: string): boolean => /^[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}$/.test(id);
 
 /** B3 core is intentionally simulated. Telegram and web upload adapters are not connected. */
@@ -108,11 +114,11 @@ export class EducationService {
       return resource;
     });
   }
-  async listResources(viewer:string,scope:string,categoryId:string):Promise<EducationResource[]> {
+  async listResources(viewer:string,scope:string,categoryId:string):Promise<PublicEducationResource[]> {
     const s=await this.store.snapshot(); if(!this.canBrowse(s,viewer,scope)) return [];
     const category=s.educationCategories.find(c=>c.id===categoryId && c.scope===scope);
     if(!category || !this.visibleCategory(s,category)) return [];
-    return s.educationResources.filter(r=>r.scope===scope&&r.categoryId===categoryId&&r.status==='PUBLISHED');
+    return s.educationResources.filter(r=>r.scope===scope&&r.categoryId===categoryId&&r.status==='PUBLISHED').map(publicEducationResource);
   }
   async archiveResource(actor:string,id:string):Promise<void> {
     await this.store.transaction(s=>{
