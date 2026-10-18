@@ -1,54 +1,43 @@
 # بوت منارتك — MANARATAK BOT
 
-**B0 + B1 + B2-Core (v0.2)، محاكاة فقط — 18 أكتوبر 2026.** مشروع بوت Telegram مستقل ومبني بـTypeScript. لا يوجد موصل Telegram حي، ولا توكن، ولا ذكاء اصطناعي متصل، ولا تعديل على منصة منارتك.
+**B0/B1 + B2-Core + B3 core (v0.3.0). Simulation only, no live Telegram bot.**
 
-## البدء
+An independent TypeScript/Node.js 22 project based on `docs/MANARATAK_BOT_MASTER_v1.2.1_AR.md` and `docs/START_HERE_MANARATAK_BOT_v1.2.1_AR.md`. B0/B1 supply the secure baseline; B2-Core adds individual moderation and subscription policies; B3 adds the first locally tested education content flow.
 
-- Node.js 22 أو أحدث، و npm.
-- `npm install` لتثبيت devDependencies (TypeScript و@types/node فقط).
-- `npm run check` لتشغيل فحص الأنواع و30 اختبارًا بمحاكاة وتخزين مؤقت معزول.
-- `npm run demo` لعرض حالة المنع ومثال سؤال AI مرفوض لأنه لم يهيأ.
-- `npm run build` للبناء فقط. **لا يوجد أمر لتشغيل بوت حي في B2-Core.**
+## Commands
 
-راجع `.env.example` للتوثيق؛ لا يلزم أي متغير بيئة لإجراء الاختبارات. هوية المالك تُحقن من إعداد موثوق في طبقة التشغيل المستقبلية، وليست أول مستخدم يكتب `/start`. أرقام المعرفات في الاختبارات والملفات وهمية.
+```sh
+npm install
+npm run check         # typecheck + all node:test cases (41 as of v0.3)
+npm run demo          # previous B1 simulation
+npm run demo:education # example document -> count -> manual approve -> visible resource
+```
 
-## ما يعمل بالفعل في المحاكاة
+Node 22+, TypeScript; tests use synthetic identities and temporary JSON state only. No Telegram token, live webhook, AI provider, real file uploads, publishing to Telegram, or production platform database access.
 
-- `Policy`: مالك موثوق، قائمة سماح ونطاقات مجموعات/قنوات، إلغاء صلاحيات مستقل عن وجود البوت، تفويض داخل نطاق محدد ووقت انتهاء، عدم تصعيد أو تفويض فرعي، مفاتيح مستقلة لمساعد المجموعة والخاص والخدمات.
-- `UpdatePipeline`: فحص مغلف الحدث، بوابات مختلفة للرسائل/الأزرار/العضوية/inline، منع غير المعتمد قبل القراءة أو التحميل أو AI، عقد Telegram وهمي، تسجيل قرار منقح قبل أثر المغادرة، idempotency وفق `(botId, updateId)`, leases قابلة للاسترداد ونتيجة غير معروفة تمنع الإعادة الصامتة.
-- `CallbackActionCodec`: مراجع قصيرة عشوائية بلا أسرار، تحقق خادمي بالنطاق والضاغط والنسخة وTTL، أزرار عامة ومتعلقة بالمالك، استهلاك زر حساس مرة واحدة.
-- `OutboundPriorityPolicy`: جدولة P0/P1/P2 عادلة بشكل محدود مع fake clock واحترام `retry_after` وإعادة التحقق عند الإخراج، بدون إرسال حقيقي.
-- `WizardSessionStore`: جلسات معزولة حسب المستخدم/المحادثة/الموضوع/المسار، CAS وتزامن، رجوع وإلغاء وانتهاء واستعادة بعد إعادة إنشاء المخزن.
-- `BotStore`: ملف JSON محلي ذري التبديل ومحمي من تعديلات متوازية داخل نفس العملية. ليس قاعدة تشغيل متعددة العمليات، ويُستبدل في B2 قبل أي تشغيل حي.
+## B3 features built and tested
 
-## إضافة B2-Core — إشراف فردي واشتراك قابل للتحقق (محاكاة)
+- Owner-managed, nested, ordered, enabled/disabled category tree with strictly scoped `private` or specifically approved group navigation. A disabled parent hides children.
+- A deterministic importer for MD/TXT/CSV/JSON. Limits UTF-8 input to 256 KiB / 1,000 records. Rejects mislabeled files, invalid CSV/JSON and nested JSON data. Structured headings or key-value fields only; **this does not analyze arbitrary prose or scanned documents**.
+- Import report distinguishes sections, unique universities, *candidate* scholarship opportunities, potential duplicates, ambiguous records and **only explicitly stated** seats. Counts are not official verification. Unstructured records remain `NEEDS_REVIEW`.
+- Content hash deduplicates identical imports within the same approved scope, across renamed files and process restart. It does **not** deduplicate all similar scholarships across independent files or years.
+- Upload permission (`content.upload`) does not confer content approval/publication (`content.publish`). Candidate review and local resource publication are two explicit actions; duplicates and ambiguous rows cannot auto-publish. Local resource metadata and audit are persisted without full raw document bodies.
+- Navigation returns `PUBLISHED` resources only from permitted scope + enabled category. Revoking chat permission, disabling a category, or archiving a resource prevents further browsing. The internal JSON store is for local simulation, **not production or multi-process concurrency**.
 
-- `src/moderation.ts`: إنذارات فردية بمراجع حالات غير قابلة لإعادة التشغيل؛ كتم وحظر فردي بمرجع سبب، مع تجميع **BAN > MUTE > NONE**. مسح سبب اشتراك لا يزيل كتمًا يدويًا، وإلغاء الحظر يُبقي الكتم إن بقي سببه. لا تتغير صلاحيات Telegram الفعلية إلا عبر عقد gateway، والنسخة الحالية تستخدم fake فقط.
-- لكل أثر تقييد يسجّل `INTENT` أولًا، ثم يفحص أذونات المجموعة والفاعل والبوت وحماية الهدف قبل `STARTED`، ويحفظ `CONFIRMED/FAILED_CONFIRMED/UNKNOWN_OUTCOME`. النتيجة المجهولة تمنع إعادة المحاولة أو فك القيد تلقائيًا حتى المصالحة بمراجعة ودليل لاحقًا.
-- `src/subscription.ts`: اعتماد مجموعة وقنوات لازمة ونتائج عضو من موصل عضوية وهمي (`MEMBER/NOT_MEMBER/UNKNOWN`)، مع منطق `ALL/ANY`، وفشل مغلق حين يتعذر التحقق. توجد مزامنة اختيارية لسبب كتم الاشتراك فقط؛ زر التحقق/المساعدة لا يُحجب بنفس شرط الاشتراك.
-- `UpdatePipeline` أصبح يتحقق من الاشتراك من **الـgateway الموثوق** قبل مسار المنشن؛ العلم `subscriptionVerified` في حدث وارد ليس دليلًا ويُتجاهل. عند طلب الاشتراك دون تمرير `SubscriptionGate` مُهيأ: الرفض الآمن `SUBSCRIPTION_UNAVAILABLE`.
-- إضافة `schemaVersion: 2` مع ترقية إضافية آمنة من حالة B1؛ تنبيه: مخزن JSON هنا **لعملية محاكاة واحدة** فقط. لم تُثبت الاستعادة عبر عمليات متعددة أو اتساق حقيقي مع Telegram.
-- 15 اختبارًا إضافيًا لـB2 بجانب 15 اختبار B1. الأعداد تشمل اجتياز البناء وفحص النوع، وليس اختبارًا حيًا على Telegram.
+Run `npm run demo:education` for a self-contained example. The upload `origin` values (`TELEGRAM_ADMIN` / `ADMIN_WEB`) are labels in tests, **not operational adapters**. No students receive messages in this phase. Display layers that may later render imported content MUST treat imported strings as untrusted and escape them.
 
-## حدود واضحة
+## Project structure
 
-**ممنوع التشغيل الحي الآن:** الحظر والكتم والنشر والإرسال والهمسات ومستورد المنح وAI وقاعدة بيانات إنتاج منارتك كلها غير موجودة وظيفيًا. الـFakeGateway لا يرسل شيئًا، ولا تُولد أي إجابة مزعومة. موافقات Telegram الفعلية وwebhook وحقوق الإدارة وموصل المنصة والتعافي عبر عدة عمليات تحتاج إثباتًا عند تنفيذ دفعات لاحقة.
+- `src/store.ts`, `src/policy.ts`, `src/pipeline.ts`, `src/callback.ts`, `src/outbound.ts`, `src/wizard.ts` — B1 core.
+- `src/moderation.ts`, `src/subscription.ts` — B2-Core simulations.
+- `src/ingestion.ts` — deterministic text-file extraction / counts.
+- `src/education.ts` — category hierarchy, permissions, approval, local resource catalog.
+- `src/education-demo.ts` — safe B3 walkthrough with synthetic CSV.
+- `tests/*.test.ts` — 41 tests covering B1/B2/B3 including security, revocation, restart and concurrency.
+- `docs/DECISIONS.md`, `docs/TRACEABILITY.md`, `CHANGELOG.md` — stage boundaries, evidence, decisions.
 
-ليس وجود `Policy` أو `TelegramGateway` أو ملف إعداد إثباتًا لجاهزية التشغيل. حالة النواة `TESTED_MOCK` فقط، لا `TESTED_LIVE_PRIVATE` أو `ACTIVATED`. وجود المستودع العام لا يعني أن bot token أو أسرار تصلح للمشاركة.
+## Boundaries and next slices
 
-## توزيع الملفات
+**TESTED_MOCK only.** No live Telegram rights or upload/download, HTML/Markdown sanitizing renderer, production transactional DB or backups, verified official scholarship source, user-facing resource UI, real FAQ/question matching, real file retention erasure, real content moderation, PDF/XLSX/DOCX/OCR or AI provider. Those require separate tested work; B3 currently covers its first acceptance slice, **not every B3 enhancement or any of 703 requirements**.
 
-- `src/store.ts`: نماذج الحالة والتخزين المحلي والتحكم بالمعالجة المتكررة/نتائج الآثار.
-- `src/policy.ts`: التفويض وسياسات المجموعات والخاص.
-- `src/pipeline.ts`: بوابات الأحداث وعقد Telegram الوهمي.
-- `src/callback.ts`: عقود الأزرار ذات مرجع قصير.
-- `src/outbound.ts`: جدولة أولويات المخرجات (وهمية).
-- `src/wizard.ts`: جلسات الحوارات التفاعلية.
-- `src/moderation.ts`: إنذار وكتم/حظر مركب وآثار مراقبة بالنتيجة.
-- `src/subscription.ts`: شرط اشتراك ومراجعة عضوية بالقنوات المصرح بها.
-- `tests/core.test.ts`: اختبارات B1 (node:test).
-- `docs/DECISIONS.md`: B0 وحدود التصميم والأمان؛ `docs/TRACEABILITY.md`: التتبع؛ `CHANGELOG.md`: ما تم.
-
-## الدفعات التالية
-
-B3 ثم B4 ثم B2-Advanced ثم B5 ثم B6 ثم شرائح B7 **بتكليف مستقل**، وفق MASTER v1.2.1 الموجودة في فرع `docs/bot-specs-v1.2.1`. لا دمج أو اتصال تلقائي بمنصة منارتك.
+Further B3 work may add trusted FAQ/resource-link slices and genuine admin Telegram and web adapters, but none is enabled automatically. B4 publishing and campaigns, B2-Advanced moderation, B5 platform APIs, and B6 AI remain PLANNED. Do not run live services or merge PR chains without distinct review and authorization.

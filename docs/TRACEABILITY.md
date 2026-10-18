@@ -18,6 +18,10 @@
 | B2-Core: MOD-004/005 قيود | moderation.ts | TESTED_MOCK | سبب يدوي/اشتراك متداخل، BAN>MUTE، outcome مجهول وتزامن وسحب التفويض |
 | B2-Core: GATE-001..003/006/009 | subscription.ts + pipeline.ts | TESTED_MOCK جزئيًا | ALL/ANY، قناة غير مصرح بها، UNAVAILABLE، عدم الثقة بعلم حدث وارد |
 | B2-Core التخزين | store.ts | TESTED_MOCK | ترحيل schemaVersion 1 إلى 2 بأمان وفحص الحالة السابقة |
-| B3 / B4 / B2-Advanced / B5 / B6 / B7 | — | PLANNED | لم يبدأ |
+| B3: HUBCFG-001/003؛ T12-17 جزئيًا | education.ts | TESTED_MOCK (شريحة) | شجرة فئات وتصفّح قائم على السماح وإبطال الظهور بعد التعطيل/السحب |
+| B3: DOCFLOW-001/002؛ T12-09/10/12/16 جزئيًا | ingestion.ts / education.ts | TESTED_MOCK (شريحة) | ملفات CSV/JSON/MD/TXT وهمية؛ تقرير عد وتكرار/غموض؛ لا معالجة PDF ولا ذكاء اصطناعي |
+| B3: DOCFLOW-004؛ T12-22 | education.ts | TESTED_MOCK (شريحة) | فصل الصلاحيتين ومرحلة الاعتماد عن النشر المحلي؛ منع نشر غامض/مكرر |
+| B3: تخزين/إعادة تشغيل | store.ts + b3-education.test.ts | TESTED_MOCK | ترحيل v2→v3؛ hash dedupe؛ نشر متزامن واحد؛ 11 اختبار B3 جديد |
+| B3 FAQ وروابط موارد متقدمة؛ B4 / B2-Advanced / B5 / B6 / B7 | — | PLANNED | لا وصل حي أو AI أو نشر Telegram |
 
-`TESTED_MOCK` لا يعني `TESTED_LIVE_PRIVATE` أو `ACTIVATED`. لا يُزعم إتمام 703 متطلبًا؛ الوثيقة أصل التتبع الكامل، وهذا الملف يختص بما تم تنفيذه جزئيًا من B0/B1 فقط.
+`TESTED_MOCK` لا يعني `TESTED_LIVE_PRIVATE` أو `ACTIVATED`. لا يُزعم إتمام 703 متطلبًا؛ الوثيقة أصل التتبع الكامل، وهذا الملف يختص بما تم تنفيذه جزئيًا من B0/B1/B2-Core وشريحة B3.

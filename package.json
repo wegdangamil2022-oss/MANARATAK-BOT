@@ -1,9 +1,9 @@
 {
   "name": "manaratak-bot",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "private": true,
   "type": "module",
-  "description": "MANARATAK BOT B0/B1/B2-Core: simulation-only core, moderation and subscription policies",
+  "description": "MANARATAK BOT B0/B1/B2-Core/B3: simulated secure core, moderation, import review and education resources",
   "engines": {
     "node": ">=22"
   },
@@ -12,7 +12,8 @@
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "test": "npm run build && node --test dist/tests/*.test.js",
     "check": "npm run typecheck && npm test",
-    "demo": "npm run build && node dist/src/demo.js --simulate"
+    "demo": "npm run build && node dist/src/demo.js --simulate",
+    "demo:education": "npm run build && node dist/src/education-demo.js"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",
