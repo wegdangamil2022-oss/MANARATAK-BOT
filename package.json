@@ -1,0 +1,21 @@
+{
+  "name": "manaratak-bot",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "MANARATAK BOT B0/B1: simulation-only, default-deny core",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "npm run build && node --test dist/tests/*.test.js",
+    "check": "npm run typecheck && npm test",
+    "demo": "npm run build && node dist/src/demo.js --simulate"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "typescript": "^5.8.3"
+  }
+}

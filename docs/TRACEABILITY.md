@@ -1,0 +1,20 @@
+# مصفوفة التتبع / القبول
+
+مرجع: MANARATAK_BOT_MASTER_v1.2.1_AR.md و START_HERE_MANARATAK_BOT_v1.2.1_AR.md على `docs/bot-specs-v1.2.1`.
+
+| المتطلب أو الاختبار | التطبيق | الحالة | الإثبات |
+|---|---|---|---|
+| B0 جرد وفرع مستقل | docs/DECISIONS.md | IMPLEMENTED | جرد الفرعين وAGENTS |
+| v0.1 النواة والمالك والسماح والتفويض | store.ts / policy.ts | TESTED_MOCK | اختبارات owner, grant, revoke, default-deny |
+| S121-01؛ T121-01..04 | pipeline.ts / store.ts | TESTED_MOCK جزئيًا | تكرار/lease/restart/UNKNOWN ومنع قبل المحتوى والبوابة وحقوق وهمية |
+| S121-02؛ T121-05 | callback.ts | TESTED_MOCK | actor/scope/version/TTL/one-shot/public/reference bytes |
+| S121-03؛ T121-06 | outbound.ts | TESTED_MOCK | P0/P1/P2, retry-after, stale authorization, UNKNOWN exclusion |
+| S121-04؛ T121-07 | wizard.ts | TESTED_MOCK | topic/flow isolation, CAS, cancel/back/restart/expire |
+| ASKCFG-001؛ T12-01..03 | policy.ts / pipeline.ts | TESTED_MOCK سياسة فقط | owner/staff/all mention؛ لا AI متصل |
+| ASKCFG-002/003؛ T12-05 | policy.ts | TESTED_MOCK سياسة فقط | private AI OFF مقابل dashboard/verify/education |
+| ASKCFG-004؛ T12-06 | gateway boundary / policy reevaluation | IMPLEMENTED عقد جزئي | إعادة تحقق خروج؛ لا يوجد AI job حي لإثبات إلغاء أثناء التوليد |
+| T12-07 | pipeline.ts | TESTED_MOCK | مجهول group لا تنزيل ولا AI، fake leave |
+| B2-Core | — | PLANNED | لا حظر أو اشتراك حي |
+| B3 / B4 / B2-Advanced / B5 / B6 / B7 | — | PLANNED | لم يبدأ |
+
+`TESTED_MOCK` لا يعني `TESTED_LIVE_PRIVATE` أو `ACTIVATED`. لا يُزعم إتمام 703 متطلبًا؛ الوثيقة أصل التتبع الكامل، وهذا الملف يختص بما تم تنفيذه جزئيًا من B0/B1 فقط.

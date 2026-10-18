@@ -1,0 +1,18 @@
+name: B1 typecheck and mock tests
+on:
+  push:
+    branches: ["feature/b0-b1-simulated-core"]
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: npm install --no-audit --no-fund
+      - run: npm run check
+      - run: npm run demo
