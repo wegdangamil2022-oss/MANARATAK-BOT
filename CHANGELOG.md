@@ -1,15 +1,19 @@
-# سجل التغييرات
-
-## v0.2.0 — B2-Core (محاكاة فقط)
-
-- نواة الإشراف الفردي: الإنذار، الكتم والحظر بمراجع أسباب منفصلة، وتفادي إلغاء سبب يمس سببًا آخر.
-- سجل آثار قيود بمعاملات `INTENT/STARTED/CONFIRMED/FAILED_CONFIRMED/UNKNOWN_OUTCOME/CANCELLED`، ولا إعادة صامتة بعد النتيجة المجهولة.
-- بوابة اشتراكات متعددة ALL/ANY لقنوات معتمدة وقابلة للتحقق، وتمييز `NOT_MEMBER` عن `UNAVAILABLE` دون اعتبار الفشل مخالفة.
-- تكامل بوابة الاشتراك مع مسار سؤال المجموعة؛ تجاهل علامة عضوية غير موثوقة في الحدث.
-- ترقية حالة JSON من schema1 إلى schema2 دون إسقاط البيانات القديمة؛ بقيت غير مخصصة للإنتاج متعدد العمليات.
-- 15 اختبارًا جديدًا، المجموع 30 اختبارًا محليًا/محاكاة. لا موصل حي ولا تحريك صلاحيات Telegram.
-
 # Changelog
+
+## 0.3.0 — 2026-10-19 — B3 education/import simulation
+
+- Education category tree scoped by approved chats/private feature, sort order, visibility and archive.
+- Deterministic importer for MD, TXT, CSV, JSON with input bounds and source evidence.
+- Separate university, potential scholarship, duplicate, ambiguity and explicit-seat counts.
+- Independent upload/approve/publish actions; no AI or Telegram publishing.
+- Content-hash replay protection, state schema v3 additive migration, B3 offline demo.
+- 11 new B3 tests, 41 total tests, documented remaining gaps.
+
+## 0.2.0 — 2026-10-18 — B2-Core mock moderation and subscription
+
+- Simulated member warning ledger, manual/subscription restrictions, ban vs mute precedence, safe reconciliation.
+- Approved-channel subscription checks ALL/ANY, unknown verification is not a confirmed violation.
+- Migration from B1 to B2 storage. No real Telegram actions.
 
 ## 0.1.0 — 2026-10-18 — B0/B1 simulated core
 
