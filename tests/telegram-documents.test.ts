@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtemp, rm } from 'node:fs/promises';
+import { once } from 'node:events';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { BotStore } from '../src/store.js';
@@ -170,7 +171,6 @@ test('B3 document formats MD, TXT and JSON import as candidate records, not as o
 
 test('B3 signed local webhook forwards document to gated handler, but never sends Telegram replies',async()=>{
   const {createServer}=await import('node:http');
-  const {once}=await import('node:events');
   const {telegramWebhookListener}=await import('../src/telegram-transport.js');
   const g=fake(),c=await setup(g.port);
   const webhookSecret='FAKE_LOCAL_WEBHOOK_ONLY_1234567890';
