@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.3.3 — 2026-10-19 — B3 file intake and Mini App authorization (offline)
+
+- Simulated Telegram document intake with pre-download authorization, file ID/type/size checks, strict UTF-8 and reauthorization after asynchronous fake download.
+- Telegram Mini App server-side HMAC verification, signed identity and freshness; bounded localhost-only JSON admin actions.
+- End-to-end cross-transport test: fake Telegram document → web approval and local publication → safe group browsing and revocation.
+- 21 additional tests since v0.3.2, **91/91 successful locally**; GitHub CI verified separately when pushed.
+- No real Bot API download, live group messages, browser UI, campaigns or AI; no production connection.
+
+
 ## 0.3.2 — 2026-10-19 — B3 inbound Telegram transport, test-only
 
 - Inbound localhost-only webhook listener with Telegram shared-secret validation, JSON/size/type/route checks and no outbound delivery.

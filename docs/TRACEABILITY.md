@@ -26,11 +26,14 @@
 | B3: S121-11؛ T121-14 / HUBCFG-003/004 | education-interactions.ts | TESTED_MOCK | مراجع قصيرة، تحقق عضو موثوق، TTL، actor binding، سحب تصريح/restart، إعادة فحص بعد await |
 | B3: واجهة الإدارة المحاكية | education-admin.ts | TESTED_MOCK عقد فقط | تحقق سياق سابقًا من adapter خارجي، وفصل upload عن publish؛ لا HTTP/Telegram فعلي |
 | B3: الخصوصية | education.ts | TESTED_MOCK | خرج الطالب منقح ولا يحتوي بيانات المراجع أو import IDs |
-| B3: schema v4 | store.ts | TESTED_MOCK | ترحيل 1→2→3→4 مع احتفاظ بالمنح والموارد، 70 اختبارًا |
+| B3: schema v4 | store.ts | TESTED_MOCK | ترحيل 1→2→3→4 مع احتفاظ بالمنح والموارد، 91 اختبارًا |
 | B3: غلاف Telegram الوارد / T12-07 | telegram-transport.ts + telegram-transport.test.ts | TESTED_MOCK (HTTP محلي) | سر webhook وهمي، مخطط update موثق، حد 64KiB، مخرجات reply-plans فقط بلا إرسال |
 | B3: ضبط وصول الخاص لنطاق مجموعة / T12-21 | telegram-transport.ts | TESTED_MOCK | تحقق VERIFIED واشتراك إن لزم وإعادة تفويض بعد async؛ منع تسرب فئات/موارد |
 | B3: بوابة اشتراك FAQ المعتمد / T121-13 | telegram-transport.test.ts | TESTED_MOCK | أمر /ask@Bot يخضع لشرط الاشتراك بالضبط مثل /categories |
-| B3: اتصال Telegram/Web حي ومسح الملفات ومراجعة المصادر | — | PLANNED | لا webhook منشور أو إرسال، ولا auth واجهة ويب أو تنزيل ملف Telegram |
+| B3: تحميل مستندات Telegram / DOCFLOW-001، T12-09 جزئيًا | telegram-transport.ts + telegram-documents.test.ts | TESTED_MOCK | مرجع ملف تجريبي، فحص الحجم والصيغة وUTF-8 والمستخدم والتصريح قبل التنزيل وبعده؛ لا getFile فعلي أو مضاد فيروسات |
+| B3: مصادقة Mini App / SEC-003 وSEC-004 جزئيًا | web-admin-auth.ts + web-admin-auth.test.ts | TESTED_MOCK (HTTP محلي) | تحقق HMAC وauth_date ومنع تزوير الهوية ورفض تكرار الحقول وHTTP مصرح؛ ليس Mini App منشورًا |
+| B3: تكامل Telegram→Mini App→مكتبة مع سحب الإذن / DOCFLOW-004 جزئيًا | tests/b3-cross-transport.test.ts | TESTED_MOCK | HTTP محلي بتوكن مزيّف؛ لا نشر Telegram حقيقي؛ 91/91 اختبارًا ناجحًا |
+| B3: اتصال Telegram/Web حي ومسح الملفات ومراجعة المصادر | — | PLANNED | لا webhook منشور أو إرسال، ولا تنزيل فعلي ولا فحص فيروسات أو لوحة ويب مستضافة |
 | B4 / B2-Advanced / B5 / B6 / B7 | — | PLANNED | لا نشر أو AI أو مصالحة فعلية |
 
 `TESTED_MOCK` لا يعني `TESTED_LIVE_PRIVATE` أو `ACTIVATED`. لا يُزعم إتمام 703 متطلبًا؛ الوثيقة أصل التتبع الكامل، وهذا الملف يختص بما تم تنفيذه جزئيًا من B0/B1/B2-Core وشريحة B3.

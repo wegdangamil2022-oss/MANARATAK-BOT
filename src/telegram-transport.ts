@@ -8,16 +8,33 @@ import { ApprovedAnswerService, ResourceLinkService, type MembershipPort } from 
 import type { ImportFormat } from './ingestion.js';
 import type { SubscriptionGate } from './subscription.js';
 
+/** Inbound-only boundary. A test double may supply bytes; there is intentionally no live HTTP implementation. */
+export interface TelegramDocumentPort {
+  download(fileId: string, maxBytes: number): Promise<Uint8Array>;
+}
+const MAX_DOCUMENT_BYTES = 256 * 1024;
+const documentFormats: Readonly<Record<string, ImportFormat>> = {
+  csv: 'csv', json: 'json', md: 'md', txt: 'txt'
+};
+const acceptedMimes: Readonly<Record<ImportFormat, ReadonlySet<string>>> = {
+  csv: new Set(['text/csv','text/plain','application/octet-stream','application/vnd.ms-excel']),
+  json: new Set(['application/json','text/plain','application/octet-stream']),
+  md: new Set(['text/markdown','text/plain','application/octet-stream']),
+  txt: new Set(['text/plain','application/octet-stream'])
+};
+interface IncomingDocument {
+  fileId: string; filename: string; size: number; format: ImportFormat; caption: string;
+}
 /** Offline B3 application adapter: creates plans, NEVER sends a message or connects to Telegram. */
 export interface TelegramReplyPlan { chatId: string; parseMode: 'HTML'; text: string; }
 export interface TelegramResult { status: 'APPLIED' | 'DUPLICATE' | 'DENIED' | 'IGNORED' | 'UNKNOWN'; reason: string; plan?: TelegramReplyPlan; }
 export interface TelegramApplicationOptions {
   store: BotStore; policy: Policy; education: EducationService; admin: EducationAdminFacade;
   faq: ApprovedAnswerService; links: ResourceLinkService; membership: MembershipPort;
-  botId: string; botUsername: string; subscription?: SubscriptionGate; clock?: () => number;
+  botId: string; botUsername: string; subscription?: SubscriptionGate; clock?: () => number; documentDownload?: TelegramDocumentPort;
 }
 
-type Event = {updateId: number; actorId: string; chatId: string; kind: 'private' | 'group'; text: string; forwarded: boolean};
+type Event = {updateId: number; actorId: string; chatId: string; kind: 'private' | 'group'; text: string; document?: IncomingDocument};
 const isObject=(x:unknown):x is Record<string,unknown>=>Boolean(x)&&typeof x==='object'&&!Array.isArray(x);
 const positiveId=(x:unknown): x is number=>typeof x==='number'&&Number.isSafeInteger(x)&&x>0;
 const chatId=(x:unknown): x is number=>typeof x==='number'&&Number.isSafeInteger(x)&&x!==0;
@@ -32,9 +49,26 @@ function eventFrom(value:unknown):{event?:Event;reason:string} {
   if(msg.sender_chat!==undefined||msg.via_bot!==undefined||msg.forward_origin!==undefined||msg.forward_date!==undefined||msg.is_automatic_forward===true)return {reason:'UNTRUSTED_FORWARD'};
   const kind=msg.chat.type==='private'?'private':msg.chat.type==='group'||msg.chat.type==='supergroup'?'group':null;
   if(!kind || (kind==='private'&&(msg.chat.id!==msg.from.id))||(kind==='group'&&msg.chat.id>=0))return {reason:'INVALID_CHAT_CONTEXT'};
+  if(msg.document!==undefined){
+    // Telegram must not attach both an ordinary text command and a document.
+    if (!isObject(msg.document) || msg.text!==undefined) return {reason:'INVALID_DOCUMENT'};
+    const d=msg.document;
+    if(typeof d.file_id!=='string'||!/^[A-Za-z0-9_-]{8,512}$/.test(d.file_id)
+      ||typeof d.file_name!=='string'||d.file_name.length>120
+      ||/[\u0000-\u001f\u007f/\\\u202a-\u202e\u2066-\u2069]/u.test(d.file_name)
+      ||!Number.isSafeInteger(d.file_size)||typeof d.file_size!=='number'||d.file_size<1||d.file_size>MAX_DOCUMENT_BYTES)
+      return {reason:'INVALID_DOCUMENT'};
+    const extension=d.file_name.split('.').at(-1)?.toLowerCase()??'';
+    const format=documentFormats[extension];
+    if(!format || typeof d.mime_type!=='undefined' && (typeof d.mime_type!=='string'||!acceptedMimes[format].has(d.mime_type.toLowerCase())))
+      return {reason:'INVALID_DOCUMENT'};
+    if(msg.caption!==undefined&&(typeof msg.caption!=='string'||msg.caption.length>100))return {reason:'INVALID_DOCUMENT_CAPTION'};
+    const document:IncomingDocument={fileId:d.file_id,filename:d.file_name,size:d.file_size,format,caption:typeof msg.caption==='string'?msg.caption:''};
+    return {event:{updateId:value.update_id as number,actorId:String(msg.from.id),chatId:String(msg.chat.id),kind,text:'',document},reason:'VALID'};
+  }
   if(typeof msg.text!=='string'||msg.text.length<1||msg.text.length>4096)return {reason:'UNSUPPORTED_MESSAGE'};
   if(/\u0000/u.test(msg.text))return {reason:'INVALID_TEXT'};
-  return {event:{updateId:value.update_id as number,actorId:String(msg.from.id),chatId:String(msg.chat.id),kind,text:msg.text,forwarded:false},reason:'VALID'};
+  return {event:{updateId:value.update_id as number,actorId:String(msg.from.id),chatId:String(msg.chat.id),kind,text:msg.text},reason:'VALID'};
 }
 
 const isScope=(scope:string):boolean=>scope==='private'||/^-[1-9]\d{0,18}$/.test(scope);
@@ -74,7 +108,38 @@ export class TelegramUpdateApplication {
     if(!this.opts.policy.canUseChat(after,scope,'navigation'))return 'CHAT_NOT_AUTHORIZED';
     return null;
   }
+  private async handleDocument(event:Event):Promise<TelegramResult> {
+    const {actorId,chatId,kind,document}=event;
+    if(!document)throw Error('MISSING_DOCUMENT');
+    // Even approved groups must not download documents or process them as admin commands.
+    if(kind!=='private')return {status:'DENIED',reason:'PRIVATE_ADMIN_UPLOAD_ONLY'};
+    const scopeMatch=/^\/upload\s+(private|-[1-9]\d{0,18})$/u.exec(document.caption);
+    if(!scopeMatch)return {status:'DENIED',reason:'INVALID_DOCUMENT_CAPTION'};
+    const scope=scopeMatch[1]!;
+    const ctx:VerifiedAdminContext={origin:'TELEGRAM_PRIVATE',actorId,chatId,verified:true};
+    const panel=await this.opts.admin.panel(ctx,scope);
+    // The permission gate MUST precede any expensive or external download request.
+    if(!panel.canUpload)return {status:'DENIED',reason:'UPLOAD_DENIED'};
+    if(!this.opts.documentDownload)return {status:'DENIED',reason:'DOCUMENT_DOWNLOAD_NOT_CONFIGURED'};
+    let data:Uint8Array;
+    try{data=await this.opts.documentDownload.download(document.fileId,MAX_DOCUMENT_BYTES);}
+    catch{return {status:'DENIED',reason:'DOCUMENT_DOWNLOAD_UNAVAILABLE'};}
+    if(!(data instanceof Uint8Array) || data.byteLength!==document.size || data.byteLength>MAX_DOCUMENT_BYTES)
+      return {status:'DENIED',reason:'DOCUMENT_SIZE_MISMATCH'};
+    let text:string;
+    try{text=new TextDecoder('utf-8',{fatal:true}).decode(data);}
+    catch{return {status:'DENIED',reason:'DOCUMENT_NOT_UTF8'};}
+    if(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/u.test(text))
+      return {status:'DENIED',reason:'DOCUMENT_BINARY_CONTENT'};
+    // EducationService rechecks upload authorization under its state transaction
+    // after the asynchronous download; revocation wins over a stale preflight.
+    const run=await this.opts.admin.upload(ctx,scope,document.format,document.filename,text);
+    const report=run.report;
+    return {status:'APPLIED',reason:'RESPONSE_PLANNED_ONLY',plan:this.plan(chatId,
+      `<b>تقرير استيراد ملف Telegram تجريبي</b>\nالمعرف: <code>${escapeTelegramHtml(run.id)}</code>\nالأقسام: ${report.sections}\nالجامعات: ${report.universities}\nفرص مرشحة: ${report.opportunities}\nيتطلب المراجعة قبل الاعتماد والنشر المحلي.`)};
+  }
   private async process(event:Event):Promise<{status:TelegramResult['status'];reason:string;plan?:TelegramReplyPlan}> {
+    if(event.document)return this.handleDocument(event);
     const {actorId,chatId,kind,text}=event;
     if(kind==='group'&&!this.opts.policy.canUseChat(await this.opts.store.snapshot(),chatId,'navigation'))return {status:'DENIED',reason:'CHAT_NOT_AUTHORIZED'};
     const adminCtx:VerifiedAdminContext={origin:'TELEGRAM_PRIVATE',actorId,chatId,verified:true};
