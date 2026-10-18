@@ -14,7 +14,10 @@
 | ASKCFG-002/003؛ T12-05 | policy.ts | TESTED_MOCK سياسة فقط | private AI OFF مقابل dashboard/verify/education |
 | ASKCFG-004؛ T12-06 | gateway boundary / policy reevaluation | IMPLEMENTED عقد جزئي | إعادة تحقق خروج؛ لا يوجد AI job حي لإثبات إلغاء أثناء التوليد |
 | T12-07 | pipeline.ts | TESTED_MOCK | مجهول group لا تنزيل ولا AI، fake leave |
-| B2-Core | — | PLANNED | لا حظر أو اشتراك حي |
+| B2-Core: MOD-003 إنذار | moderation.ts | TESTED_MOCK | منع المحمي وتدقيق الحالات والإلغاء بمراجع |
+| B2-Core: MOD-004/005 قيود | moderation.ts | TESTED_MOCK | سبب يدوي/اشتراك متداخل، BAN>MUTE، outcome مجهول وتزامن وسحب التفويض |
+| B2-Core: GATE-001..003/006/009 | subscription.ts + pipeline.ts | TESTED_MOCK جزئيًا | ALL/ANY، قناة غير مصرح بها، UNAVAILABLE، عدم الثقة بعلم حدث وارد |
+| B2-Core التخزين | store.ts | TESTED_MOCK | ترحيل schemaVersion 1 إلى 2 بأمان وفحص الحالة السابقة |
 | B3 / B4 / B2-Advanced / B5 / B6 / B7 | — | PLANNED | لم يبدأ |
 
 `TESTED_MOCK` لا يعني `TESTED_LIVE_PRIVATE` أو `ACTIVATED`. لا يُزعم إتمام 703 متطلبًا؛ الوثيقة أصل التتبع الكامل، وهذا الملف يختص بما تم تنفيذه جزئيًا من B0/B1 فقط.

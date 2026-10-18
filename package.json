@@ -1,9 +1,9 @@
 {
   "name": "manaratak-bot",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "type": "module",
-  "description": "MANARATAK BOT B0/B1: simulation-only, default-deny core",
+  "description": "MANARATAK BOT B0/B1/B2-Core: simulation-only core, moderation and subscription policies",
   "engines": {
     "node": ">=22"
   },
