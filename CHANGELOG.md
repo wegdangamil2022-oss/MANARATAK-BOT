@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.3.2 — 2026-10-19 — B3 inbound Telegram transport, test-only
+
+- Inbound localhost-only webhook listener with Telegram shared-secret validation, JSON/size/type/route checks and no outbound delivery.
+- Offline Telegram message parser and safe reply-plan renderer for admin, import, review, catalog and curated FAQ commands.
+- Fixed private-chat enumeration of group resources: require fresh trusted group membership before listing; recheck chat permission after async lookup.
+- Regression tests for subscription-gated FAQ (including denied/unavailable), private group membership and revocation during verification.
+- 13 new tests over v0.3.1, 70 total tests; all mock/local only; GitHub CI pending until uploaded.
+- No live Telegram token, real document download, web admin auth, outbound send, AI or channel publication.
+
 ## 0.3.1 — 2026-10-19 — B3 approved FAQ, links and admin facade (mock only)
 
 - Curated FAQ drafts, publisher approval, bounded aliases, explicit ambiguity and source visibility gates.

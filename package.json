@@ -1,9 +1,9 @@
 {
   "name": "manaratak-bot",
-  "version": "0.3.1",
+  "version": "0.3.2",
   "private": true,
   "type": "module",
-  "description": "MANARATAK BOT B0/B1/B2-Core/B3: simulated secure core, moderation, import review, FAQ and scoped resource links",
+  "description": "MANARATAK BOT B0/B1/B2-Core/B3: offline secure core, moderation, curated FAQ, scoped resources and a local Telegram inbound adapter",
   "engines": {
     "node": ">=22"
   },
