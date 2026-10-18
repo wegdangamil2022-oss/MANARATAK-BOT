@@ -1,0 +1,2 @@
+# MANARATAK-BOT
+bot
