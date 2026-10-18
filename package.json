@@ -1,9 +1,9 @@
 {
   "name": "manaratak-bot",
-  "version": "0.3.2",
+  "version": "0.3.3",
   "private": true,
   "type": "module",
-  "description": "MANARATAK BOT B0/B1/B2-Core/B3: offline secure core, moderation, curated FAQ, scoped resources and a local Telegram inbound adapter",
+  "description": "MANARATAK BOT B0-B3 offline secure core: scoped education, simulated Telegram documents and signed Mini App admin API",
   "engines": {
     "node": ">=22"
   },
