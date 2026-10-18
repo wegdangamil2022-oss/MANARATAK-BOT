@@ -24,8 +24,22 @@ export interface Warning { chatId: string; memberId: string; reference: string; 
 export interface SubscriptionRequirement { chatId: string; channelIds: string[]; mode: 'ALL' | 'ANY'; version: number; }
 export interface FAQEntry { id: string; scope: string; question: string; aliases: string[]; answer: string; sourceResourceId: string; createdBy: string; approvedBy?: string; status: 'DRAFT' | 'APPROVED' | 'ARCHIVED'; createdAt: number; }
 export interface ResourceLink { ref: string; scope: string; resourceId: string; resourceRevision: number; policyVersion: number; expiresAt: number; boundUserId?: string; issuedBy: string; revoked: boolean; }
+/** B4 uses snapshots of reviewed content; never treat an item ID as proof of its current revision. */
+export interface PublicationPreview { resourceId: string; revision: string; text: string; }
+export type CampaignStatus = 'DRAFT' | 'APPROVED' | 'PAUSED' | 'CANCELLED' | 'COMPLETED';
+export interface PublicationCampaign {
+  id: string; sourceScope: string; destination: string; createdBy: string; approvedBy?: string;
+  status: CampaignStatus; scheduledAt: number; createdAt: number; sourcePolicyVersion: number; destinationPolicyVersion: number;
+  previews: PublicationPreview[];
+}
+export type DeliveryStatus = 'QUEUED' | 'SENDING' | 'SENT' | 'FAILED_CONFIRMED' | 'UNKNOWN_OUTCOME' | 'CANCELLED' | 'SKIPPED';
+export interface PublicationDelivery {
+  id: string; campaignId: string; resourceId: string; destination: string; revision: string;
+  status: DeliveryStatus; attemptId?: string; startedAt?: number; messageId?: string;
+  reviewReason?: string;
+}
 export interface BotState {
-  schemaVersion: 4;
+  schemaVersion: 5;
   chats: Chat[];
   grants: Grant[];
   privateAI: PrivateAIMode;
@@ -44,13 +58,15 @@ export interface BotState {
   importRuns: ImportRun[];
   faqEntries: FAQEntry[];
   resourceLinks: ResourceLink[];
+  campaigns: PublicationCampaign[];
+  deliveries: PublicationDelivery[];
 }
 const empty = (): BotState => ({
-  schemaVersion: 4, chats: [], grants: [], privateAI: 'OFF',
+  schemaVersion: 5, chats: [], grants: [], privateAI: 'OFF',
   privateFeatures: { 'owner.dashboard': true, 'education.navigate': true, 'subscription.verify': true, 'support.use': true, 'content.upload': false },
   updates: [], operations: [], callbacks: [], wizards: [], audit: [],
   moderationReasons: [], moderationOperations: [], subscriptionRequirements: [], warnings: [],
-  educationCategories: [], educationResources: [], importRuns: [], faqEntries: [], resourceLinks: []
+  educationCategories: [], educationResources: [], importRuns: [], faqEntries: [], resourceLinks: [], campaigns: [], deliveries: []
 });
 
 // A per-process serialized file transaction; atomic rename prevents torn JSON on a crash.
@@ -75,7 +91,10 @@ export class BotStore {
       if (previous.schemaVersion === 3) {
         previous.schemaVersion = 4; previous.faqEntries = []; previous.resourceLinks = [];
       }
-      if (previous.schemaVersion !== 4 || !Array.isArray(previous.faqEntries) || !Array.isArray(previous.resourceLinks) || !Array.isArray(previous.moderationReasons) || !Array.isArray(previous.moderationOperations) || !Array.isArray(previous.subscriptionRequirements) || !Array.isArray(previous.warnings) || !Array.isArray(previous.educationCategories) || !Array.isArray(previous.educationResources) || !Array.isArray(previous.importRuns)) throw new Error('Unsupported state schema');
+      if (previous.schemaVersion === 4) {
+        previous.schemaVersion = 5; previous.campaigns = []; previous.deliveries = [];
+      }
+      if (previous.schemaVersion !== 5 || !Array.isArray(previous.campaigns) || !Array.isArray(previous.deliveries) || !Array.isArray(previous.faqEntries) || !Array.isArray(previous.resourceLinks) || !Array.isArray(previous.moderationReasons) || !Array.isArray(previous.moderationOperations) || !Array.isArray(previous.subscriptionRequirements) || !Array.isArray(previous.warnings) || !Array.isArray(previous.educationCategories) || !Array.isArray(previous.educationResources) || !Array.isArray(previous.importRuns)) throw new Error('Unsupported state schema');
       return previous as unknown as BotState;
     } catch (err) {
       if ((err as NodeJS.ErrnoException).code === 'ENOENT') return empty();
