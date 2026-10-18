@@ -1,3 +1,13 @@
+## 0.4.0 — 2026-10-19 — B4 campaign/receipt ledger (mock-only, initial slice)
+
+- Versioned plain-text publication previews based on locally approved education resources, destination `publishing` authorizations and explicit campaign approval.
+- Durable local test campaign + per-item delivery state, cross-campaign duplicate reservation and restart-safe `UNKNOWN_OUTCOME` on orphaned `SENDING`.
+- Pre-send validation of approver grant, source/destination policy revisions, category status, approved text, and fake bot posting rights.
+- Confirmation vs confirmed failure vs ambiguous delivery, trusted receipt reconciliation, explicit retry of confirmed failure, manual skip recorded distinctly.
+- Scheduled/paused/cancelled flows and ordered delivery (a pending uncertainty blocks later items); no real Telegram API, worker queue or production multi-process storage.
+- 19 new tests (110/110 total), local publishing demo, `schemaVersion 4→5` migration; B0–B3 tests retained.
+- All B4 functions are `TESTED_MOCK`, **not real sends, real campaign publication, B4 completion or production readiness**.
+
 # Changelog
 
 ## 0.3.3 — 2026-10-19 — B3 file intake and Mini App authorization (offline)

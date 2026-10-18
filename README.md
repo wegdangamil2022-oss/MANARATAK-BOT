@@ -1,6 +1,6 @@
 # بوت منارتك — MANARATAK BOT
 
-**B0/B1 + B2-Core + B3 authenticated document intake and admin slice (v0.3.3). Offline/test-only — no live Telegram bot.**
+**B0/B1 + B2-Core + B3 + first B4 campaign/receipt slice (v0.4.0). Offline/test-only — no live Telegram bot.**
 
 An independent TypeScript/Node.js 22 project based on `docs/MANARATAK_BOT_MASTER_v1.2.1_AR.md` and `docs/START_HERE_MANARATAK_BOT_v1.2.1_AR.md`. B0/B1 supply the secure baseline; B2-Core adds individual moderation and subscription policies; B3 adds the first locally tested education content flow.
 
@@ -8,10 +8,11 @@ An independent TypeScript/Node.js 22 project based on `docs/MANARATAK_BOT_MASTER
 
 ```sh
 npm install
-npm run check         # typecheck + all node:test cases (91 as of v0.3.3)
+npm run check         # typecheck + all node:test cases (110 as of v0.4.0)
 npm run demo          # previous B1 simulation
 npm run demo:education # example document -> count -> manual approve -> visible resource
 npm run demo:faq       # FAQ approvals, membership-gated resource links and admin facade
+npm run demo:publishing # local reviewed campaign and fake delivery receipts
 ```
 
 Node 22+, TypeScript; tests use synthetic identities and temporary JSON state only. No real Telegram token, live webhook deployment, outbound Telegram delivery, AI provider, real Bot API downloads, or production platform database access.
@@ -33,7 +34,7 @@ Run `npm run demo:education` for a self-contained example. The upload `origin` v
 - Resource share references are opaque server-side `r_...` tokens, bounded by expiry and optional actor binding. For group resources, a trusted Telegram membership adapter **must** return `VERIFIED`; `UNKNOWN` and unverified user claims fail closed. Chat permission version and resource visibility are re-evaluated **after** the external membership check. A public short link is never a bypass to a private or revoked source.
 - Student-facing resource projections exclude `reviewedBy`, internal import IDs and source locators. Renderers must escape user-provided strings, and no real Telegram messages are sent by this package.
 - `EducationAdminFacade` provides a common application-level interface for uploading a UTF-8 text payload, showing upload/publish capability flags, approving records and local publication. An **authenticated adapter**, not the user's JSON body, must populate its `VerifiedAdminContext`. `verified=true` here is a *test fixture*, **not cryptographic Telegram authentication** or deployed web authentication. An inbound **localhost HTTP listener for tests** is now available in `src/telegram-transport.ts`; a separate locally tested signed Mini App admin JSON listener is also implemented in v0.3.3. There is still no deployed endpoint, live Bot API download, active callback button or outbound delivery.
-- Schema v4 retains earlier B1/B2/B3 state and adds FAQ/link metadata. JSON remains a **single-process test store only**. Production needs transactional persistence, resource versioning, source policy review, retention, explicit Telegram delivery adapter, and hardened transport authentication.
+- Schema v5 retains earlier B1/B2/B3 state and adds FAQ/link metadata. JSON remains a **single-process test store only**. Production needs transactional persistence, resource versioning, source policy review, retention, explicit Telegram delivery adapter, and hardened transport authentication.
 
 
 ## B3 offline Telegram inbound transport (v0.3.2)
@@ -52,9 +53,19 @@ The inbound Telegram adapter now accepts synthetic `message.document` updates **
 
 The separate `TelegramMiniAppAuth` validates signed `Telegram.WebApp.initData` using the official HMAC mechanism, a 10-minute authentication window and a signed Telegram user ID. It rejects duplicate keys and untrusted identifiers in the HTTP request body. A local-only JSON listener exposes `/admin/panel`, `/admin/import`, `/admin/approve` and `/admin/publish`, each with permission checks. There is **no live web deployment, browser UX, real bot token, or outbound Telegram gateway**. Tests use a deliberately fake token and loopback HTTP only.
 
-The 91-test suite includes a combined cross-transport scenario: fake Telegram document upload → owner approval through a signed local Mini App request → group library browse with HTML-escaped source text → group revocation blocks browsing. No real students, channels, Bot API calls or AI model are involved.
+The B3 suite includes a combined cross-transport scenario: fake Telegram document upload → owner approval through a signed local Mini App request → group library browse with HTML-escaped source text → group revocation blocks browsing. No real students, channels, Bot API calls or AI model are involved.
 
 **Before deployment:** secure actual Telegram file-download/retention and malware scanning; HTTPS/origin/CSRF and rate limiting; durable transactional storage; authenticated browser UI; bot rights validation; outbound receipts, explicit owner activation and private Telegram integration testing. This stage remains **TESTED_MOCK**, not `TESTED_LIVE_PRIVATE` or `ACTIVATED`.
+
+## B4 controlled campaign preview + delivery ledger (v0.4.0, TESTED_MOCK slice)
+
+`PublicationService` adds a **reviewed campaign** path that is deliberately separate from B3's local resource visibility. The owner/publisher must explicitly approve a **snapshot preview** containing the exact plain-text content and an authorized destination. A Telegram channel requires its own `publishing` scope and publisher grant; bot presence or `navigation` rights are not enough. Campaigns may be scheduled, paused, resumed or cancelled.
+
+A durable **local mock ledger** reserves `(resourceId, content revision, destination)` across campaigns. For each item the worker saves `SENDING` and a unique attempt ID **before** touching the injected gateway. Confirmed outcomes store the message ID. Timeouts and post-send exceptions become `UNKNOWN_OUTCOME`: they block later campaign items and **must never be retried automatically**. Restart turns an orphaned `SENDING` into an unresolved outcome. A verified receipt from a trusted provider-specific port can reconcile one specific attempt (not similar text or the last post in a channel). `FAILED_CONFIRMED` needs an explicit authorized retry. Manual skip is recorded separately from successful publication, and cannot disguise ambiguous delivery as a success.
+
+Re-authorization and current resource/parent-category status are checked at dispatch time; owner/publisher privileges, exact approved content revision and destination permission are not inferred from a button or an earlier approval. An offline fake gateway supplies mock receipts and no network calls. Tests cover two competing workers in one process, interruption/restart, revocation, stale previews, approval separation, and cross-campaign duplicates. **There is no live Telegram send adapter, rate-limited durable production queue, real channel posting, content template editor, Chinese campaign reconciliation, or automated provider receipt verification yet**. The one-process JSON store cannot ensure transactional uniqueness across machines. This slice is **not full B4**; follow-up implementation is required before activation.
+
+Run `npm run demo:publishing` for a harmless example using an invented scholarship and mock destination. Never describe `mock-message-*` as a Telegram receipt. The existing B3 source/FAQ and B2 moderation remain independent of this work.
 
 ## Project structure
 
@@ -66,14 +77,16 @@ The 91-test suite includes a combined cross-transport scenario: fake Telegram do
 - `src/education-interactions.ts` — approved FAQ and opaque resource reference authorization.
 - `src/education-admin.ts` — transport-agnostic owner/staff admin operations (no live adapter).
 - `src/telegram-transport.ts` — bounded webhook and synthetic text/document intake; injected fake downloader; reply plans only, **never sends Telegram messages**.
+- `src/publishing.ts`, `src/publishing-demo.ts` — B4 preview/approval, scoped queue ledger, fake gateway, receipt reconciliation; mock only.
+- `tests/b4-publishing.test.ts` — 19 offline ledger, authorization, crash and reconciliation tests.
 - `src/web-admin-auth.ts` — validates Mini App signed `initData` and exposes locally tested authenticated JSON operations; no deployed UI.
 - `tests/telegram-documents.test.ts`, `tests/web-admin-auth.test.ts`, `tests/b3-cross-transport.test.ts` — file safety, signed identity, grant revocation, and end-to-end fake upload→web approval→group browse.
 - `tests/telegram-transport.test.ts` — localhost webhook and authorization tests for the inbound adapter.
-- `tests/*.test.ts` — 91 tests covering B1/B2/B3 including authentication, document guards, cross-transport approvals, revocation, restart and concurrency.
+- `tests/*.test.ts` — 110 tests covering B1/B2/B3 including authentication, document guards, cross-transport approvals, revocation, restart and concurrency.
 - `docs/DECISIONS.md`, `docs/TRACEABILITY.md`, `CHANGELOG.md` — stage boundaries, evidence, decisions.
 
 ## Boundaries and next slices
 
 **TESTED_MOCK only.** No live Telegram rights or upload/download, HTML/Markdown sanitizing renderer, production transactional DB or backups, verified official scholarship source, user-facing resource UI, AI-generated question answering, real file retention erasure, real content moderation, PDF/XLSX/DOCX/OCR or AI provider. Those require separate tested work; B3 currently covers its first acceptance slice, **not every B3 enhancement or any of 703 requirements**.
 
-Further B3 work must add outbound Telegram delivery with reliable receipts, **actual Telegram document download with security scanning**, a production-hardened web admin interface (the signed local JSON adapter is mock-tested), and source retention/approval review. The implemented interfaces do **not** authorize a live rollout. B4 publishing and campaigns, B2-Advanced moderation, B5 platform APIs, and B6 AI remain PLANNED. Do not run live services or merge PR chains without distinct review and authorization.
+Further B3 work must add outbound Telegram delivery with reliable receipts, **actual Telegram document download with security scanning**, a production-hardened web admin interface (the signed local JSON adapter is mock-tested), and source retention/approval review. The implemented interfaces do **not** authorize a live rollout. B4 advanced campaign reconciliation, queueing, formatting and real delivery, B2-Advanced moderation, B5 platform APIs, and B6 AI remain PLANNED. Do not run live services or merge PR chains without distinct review and authorization.

@@ -174,7 +174,7 @@ test('B2 reads B1 file without losing B1 grants and refuses corrupt unknown sche
     delete legacy.moderationReasons; delete legacy.moderationOperations; delete legacy.subscriptionRequirements;
     await writeFile(c.file, JSON.stringify(legacy));
     const upgraded = await new BotStore(c.file).snapshot();
-    assert.equal(upgraded.schemaVersion, 4);
+    assert.equal(upgraded.schemaVersion, 5);
     assert.equal(upgraded.chats.length, original.chats.length);
     assert.deepEqual(upgraded.moderationReasons, []);
     assert.deepEqual(upgraded.subscriptionRequirements, []);

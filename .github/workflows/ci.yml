@@ -1,7 +1,7 @@
 name: Bot typecheck and mock tests
 on:
   push:
-    branches: ["feature/b0-b1-simulated-core", "feature/b2-core-simulation", "feature/b3-education-import-core", "feature/b3-faq-resource-links", "feature/b3-telegram-inbound", "feature/b3-documents-miniapp-auth"]
+    branches: ["feature/b0-b1-simulated-core", "feature/b2-core-simulation", "feature/b3-education-import-core", "feature/b3-faq-resource-links", "feature/b3-telegram-inbound", "feature/b3-documents-miniapp-auth", "feature/b4-publishing-ledger"]
   pull_request:
 permissions:
   contents: read
@@ -18,3 +18,4 @@ jobs:
       - run: npm run demo
       - run: npm run demo:education
       - run: npm run demo:faq
+      - run: npm run demo:publishing

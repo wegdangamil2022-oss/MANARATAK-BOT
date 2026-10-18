@@ -14,7 +14,7 @@ export class Policy {
   async approveChat(actor: string, chatId: string, scopes: string[]): Promise<void> {
     this.requireOwner(actor);
     if (!/^-[0-9]+$/.test(chatId)) throw new Error('Only explicit Telegram group/channel IDs can be approved');
-    if (!scopes.length || scopes.some(x => !['navigation', 'assistant', 'moderation', 'verification'].includes(x))) throw new Error('Invalid scopes');
+    if (!scopes.length || scopes.some(x => !['navigation', 'assistant', 'moderation', 'verification', 'publishing'].includes(x))) throw new Error('Invalid scopes');
     await this.store.transaction(s => {
       const c = s.chats.find(c => c.id === chatId);
       if (c) { c.approved = true; c.scopes = [...new Set(scopes)]; c.version++; }
