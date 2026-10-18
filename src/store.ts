@@ -22,8 +22,10 @@ export interface ModerationReason { chatId: string; memberId: string; source: 'M
 export interface ModerationOperation { id: string; chatId: string; memberId: string; actorId: string; kind: RestrictionKind; reasonFingerprint: string; policyVersion: number; status: OperationStatus; createdAt: number; }
 export interface Warning { chatId: string; memberId: string; reference: string; actorId: string; at: number; active: boolean; }
 export interface SubscriptionRequirement { chatId: string; channelIds: string[]; mode: 'ALL' | 'ANY'; version: number; }
+export interface FAQEntry { id: string; scope: string; question: string; aliases: string[]; answer: string; sourceResourceId: string; createdBy: string; approvedBy?: string; status: 'DRAFT' | 'APPROVED' | 'ARCHIVED'; createdAt: number; }
+export interface ResourceLink { ref: string; scope: string; resourceId: string; resourceRevision: number; policyVersion: number; expiresAt: number; boundUserId?: string; issuedBy: string; revoked: boolean; }
 export interface BotState {
-  schemaVersion: 3;
+  schemaVersion: 4;
   chats: Chat[];
   grants: Grant[];
   privateAI: PrivateAIMode;
@@ -40,13 +42,15 @@ export interface BotState {
   educationCategories: EducationCategory[];
   educationResources: EducationResource[];
   importRuns: ImportRun[];
+  faqEntries: FAQEntry[];
+  resourceLinks: ResourceLink[];
 }
 const empty = (): BotState => ({
-  schemaVersion: 3, chats: [], grants: [], privateAI: 'OFF',
+  schemaVersion: 4, chats: [], grants: [], privateAI: 'OFF',
   privateFeatures: { 'owner.dashboard': true, 'education.navigate': true, 'subscription.verify': true, 'support.use': true, 'content.upload': false },
   updates: [], operations: [], callbacks: [], wizards: [], audit: [],
   moderationReasons: [], moderationOperations: [], subscriptionRequirements: [], warnings: [],
-  educationCategories: [], educationResources: [], importRuns: []
+  educationCategories: [], educationResources: [], importRuns: [], faqEntries: [], resourceLinks: []
 });
 
 // A per-process serialized file transaction; atomic rename prevents torn JSON on a crash.
@@ -68,7 +72,10 @@ export class BotStore {
         previous.schemaVersion = 3;
         previous.educationCategories = []; previous.educationResources = []; previous.importRuns = [];
       }
-      if (previous.schemaVersion !== 3 || !Array.isArray(previous.moderationReasons) || !Array.isArray(previous.moderationOperations) || !Array.isArray(previous.subscriptionRequirements) || !Array.isArray(previous.warnings) || !Array.isArray(previous.educationCategories) || !Array.isArray(previous.educationResources) || !Array.isArray(previous.importRuns)) throw new Error('Unsupported state schema');
+      if (previous.schemaVersion === 3) {
+        previous.schemaVersion = 4; previous.faqEntries = []; previous.resourceLinks = [];
+      }
+      if (previous.schemaVersion !== 4 || !Array.isArray(previous.faqEntries) || !Array.isArray(previous.resourceLinks) || !Array.isArray(previous.moderationReasons) || !Array.isArray(previous.moderationOperations) || !Array.isArray(previous.subscriptionRequirements) || !Array.isArray(previous.warnings) || !Array.isArray(previous.educationCategories) || !Array.isArray(previous.educationResources) || !Array.isArray(previous.importRuns)) throw new Error('Unsupported state schema');
       return previous as unknown as BotState;
     } catch (err) {
       if ((err as NodeJS.ErrnoException).code === 'ENOENT') return empty();
