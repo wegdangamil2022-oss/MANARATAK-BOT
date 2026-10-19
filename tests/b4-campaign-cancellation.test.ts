@@ -27,7 +27,7 @@ async function fixture(engine:'json'|'sqlite'='json') {
   await edu.createCategory(OWNER,{id:'grant',scope:SOURCE,title:'المنح',order:1});
   const imp=await edu.submitText(OWNER,SOURCE,'ADMIN_WEB','csv','grants.csv',
     'title,university\nGrant One,University A\nGrant Two,University B\n');
-  const resources=[];
+  const resources: Array<{id:string}> = [];
   for(let i=0;i<2;i++){await edu.approveCandidate(OWNER,imp.id,i,'grant');resources.push(await edu.publishCandidate(OWNER,imp.id,i,'grant'));}
   const draft=async (multipart:boolean, ids=[resources[0]!.id])=>{
     if(multipart)await edu.setPublicationText(OWNER,resources[0]!.id,LONG);

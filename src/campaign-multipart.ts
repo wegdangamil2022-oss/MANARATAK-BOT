@@ -3,9 +3,10 @@ import { BotStore, type BotState } from './store.js';
 import { Policy } from './policy.js';
 import { planPublicationPreview, type PublicationRenderPart, type PublicationRenderPlan } from './publication-preview-plan.js';
 import { nextDispatchLease, leaseExpired } from './publication-worker-lease.js';
+import { settleCancelledMultipart } from './publication-cancellation.js';
 
 /** B4 offline contract: the parts live INSIDE the original BotStore delivery, not a second ledger. */
-type PartStatus = 'QUEUED'|'SENDING'|'SENT'|'FAILED_CONFIRMED'|'UNKNOWN_OUTCOME';
+type PartStatus = 'QUEUED'|'SENDING'|'SENT'|'FAILED_CONFIRMED'|'UNKNOWN_OUTCOME'|'CANCELLED';
 export interface CampaignPart { index:number; payload:PublicationRenderPart; status:PartStatus; attemptId?:string; leaseUntil?:number; messageId?:string; }
 export interface AttachedParts { fingerprint:string; parts:CampaignPart[]; }
 type Campaign = {
@@ -111,6 +112,7 @@ export class CampaignMultipartService {
       if(all.length===c.previews.length&&all.every(x=>['SENT','CANCELLED','SKIPPED'].includes(x.status)))c.status='COMPLETED';
     }
   }
+  if(c.status==='CANCELLED')settleCancelledMultipart(d);
  }
  async dispatchNext(campaignId:string,resourceId:string):Promise<CampaignPartResult> {
   const claim=await this.store.transaction(s=>{
@@ -147,7 +149,12 @@ export class CampaignMultipartService {
       return false; // old worker must never reach the gateway after its lease expires
     }
     if(allowed&&d.id===claim.deliveryId&&d.status==='MULTIPART'&&c.status==='APPROVED'&&this.authorized(s,c))return true;
-    p.status='QUEUED';delete p.attemptId;delete p.leaseUntil;delete p.leaseUntil;return false;
+    if(c.status==='CANCELLED'){
+      p.status='CANCELLED';
+      settleCancelledMultipart(d);
+      return false;
+    }
+    p.status='QUEUED';delete p.attemptId;delete p.leaseUntil;return false;
   });
   if(!current)return {status:'BLOCKED'};
   let outcome:CampaignPartOutcome;
@@ -165,7 +172,10 @@ export class CampaignMultipartService {
       this.markComplete(s,c,d);
       return {status:'SENT' as const,index:part.index,messageId:outcome.messageId};
     }
-    part.status=outcome.status==='FAILED_CONFIRMED'?'FAILED_CONFIRMED':'UNKNOWN_OUTCOME';
+    part.status=outcome.status==='FAILED_CONFIRMED'
+      ? (c.status==='CANCELLED'?'CANCELLED':'FAILED_CONFIRMED')
+      : 'UNKNOWN_OUTCOME';
+    if(c.status==='CANCELLED')settleCancelledMultipart(d);
     return {status:part.status,index:part.index};
   });
  }
