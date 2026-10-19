@@ -9,7 +9,7 @@ import { Policy } from '../src/policy.js';
 import { planPublicationPreview } from '../src/publication-preview-plan.js';
 import { CampaignMultipartService, type CampaignPartGateway, type CampaignPartReceipt } from '../src/campaign-multipart.js';
 
-type Compat = BotState & { campaigns: any[]; deliveries: any[] };
+type Compat = Omit<BotState, 'campaigns' | 'deliveries'> & { campaigns: any[]; deliveries: any[] };
 const source='-100', dest='-200', owner='100',text='منحة جامعية موثقة '.repeat(300);
 const hash=(s:unknown)=>createHash('sha256').update(JSON.stringify(s)).digest('hex');
 async function fixture() {
