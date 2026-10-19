@@ -1,6 +1,6 @@
 {
   "name": "manaratak-bot",
-  "version": "0.4.0",
+  "version": "0.4.1",
   "private": true,
   "type": "module",
   "description": "MANARATAK BOT B0-B4 mock-only core: Telegram intake, scoped education and reviewed campaign deliveries",
@@ -15,7 +15,8 @@
     "demo": "npm run build && node dist/src/demo.js --simulate",
     "demo:education": "npm run build && node dist/src/education-demo.js",
     "demo:faq": "npm run build && node dist/src/faq-demo.js",
-    "demo:publishing": "npm run build && node dist/src/publishing-demo.js"
+    "demo:publishing": "npm run build && node dist/src/publishing-demo.js",
+    "demo:preview-migration": "npm run build && node dist/src/preview-migration-demo.js"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",

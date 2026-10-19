@@ -1,3 +1,9 @@
+## 0.4.1 — 2026-10-19 — B4 offline review-only preview and migration planning
+
+- Deterministic Telegram text/photo/link-preview planning; conservative UTF-16 length boundaries, explicit text fallback, no URL splitting or rendering guarantee.
+- Historical publication review preview: item-specific trustworthy evidence required, duplicate receipt conflicts require review, last-forwarded/ordinal cutoff never verifies earlier items, manual skip is a separate non-published state.
+- 25 new offline tests plus sample preview/migration report; no Telegram sends and no production migration.
+
 ## 0.4.0 — 2026-10-19 — B4 campaign/receipt ledger (mock-only, initial slice)
 
 - Versioned plain-text publication previews based on locally approved education resources, destination `publishing` authorizations and explicit campaign approval.

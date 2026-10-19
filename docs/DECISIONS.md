@@ -69,3 +69,9 @@
 - `MANUALLY_SKIPPED` مستقل ولا يثبت النشر. أفعال `pause/resume/cancel/retry` مفوضة ولا تلغي اتصالًا غادر العملية بالفعل.
 - تخزين JSON المحلي محاكاة وحيدة العملية؛ لا DB متعددة العمال، لا ضمان Exactly Once لشبكة Telegram، لا rate-limit إنتاجي، ولا خطة الصين أو صور معاينة. يجب تنفيذها واختبارها مستقلًا قبل أي تمكين.
 - B4 لا تزال جزئية؛ لا بداية تلقائية B2-Advanced أو تكامل AI.
+
+## ADR — B4 v0.4.1 formatting and legacy review are pure preflight
+
+- Rendering is planned as bounded plain text/photo with approved fallback; it does not secretly send or change the B4 campaign delivery graph. Fragmented multi-part sends require their own per-part receipts before integration, otherwise they would break existing item-level idempotency.
+- Legacy migration only computes a review report. Callers must authenticate reviewers and provide trusted evidence verification; an `evidenceId` or a forwarded message alone is not proof. No bulk ordinal cutoff, last post or year-based inference. No state is written to the active delivery ledger and no manual skip is a verified publication.
+- No production readiness claims, live Telegram/MANARATAK platform operations or paid services. Default-deny on ambiguous evidence, media, or authority.

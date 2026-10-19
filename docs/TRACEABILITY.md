@@ -41,3 +41,6 @@
 `TESTED_MOCK` لا يعني `TESTED_LIVE_PRIVATE` أو `ACTIVATED`. لا يُزعم إتمام 703 متطلبًا؛ الوثيقة أصل التتبع الكامل، وهذا الملف يختص بما تم تنفيذه جزئيًا من B0/B1/B2-Core وشريحة B3.
 
 الدفعة B4 هنا شريحة اختبار محلي فقط، وليست تفعيلًا للحملات أو إثباتًا لأي رسالة Telegram فعلية.
+
+| B4: S121-07؛ T121-10 (حدود العرض والمعاينة) | publication-preview-plan.ts + b4-preview-migration.test.ts | TESTED_MOCK (مخطط مستقل) | نص 4096/وصف صورة 1024/منع تقسيم URL وتجزئة سليمة/بديل لا يعمل إلا باعتماد صريح؛ لا عرض مرئي Telegram مثبت |
+| B4: S121-09؛ T121-12 (ترحيل الصين) | legacy-publication-migration.ts + b4-preview-migration.test.ts | TESTED_MOCK (تقرير فقط) | لا إثبات تلقائي للمنشورات السابقة من آخر منشور، إثبات منفرد من verifier خارجي، UNKNOWN منفصل عن MANUALLY_SKIPPED ومراجعة التعارض؛ لا ترحيل DB إنتاجي |
