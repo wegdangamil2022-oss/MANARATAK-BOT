@@ -1,7 +1,7 @@
-import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
+import { mkdir, open, readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
 import { randomUUID } from 'node:crypto';
-import { DatabaseSync } from 'node:sqlite';
+import { DatabaseSync, backup } from 'node:sqlite';
 import { resolve } from 'node:path';
 
 export type Capability = 'ai.ask' | 'ai.settings.manage' | 'content.publish' | 'content.upload' | 'chat.manage' | 'education.navigate' | 'owner.dashboard' | 'subscription.verify' | 'support.use';
@@ -221,6 +221,34 @@ export class BotStore {
       throw err;
     } finally { db.close(); }
   }
+  /**
+   * Online SQLite snapshot uses SQLite's backup API, NOT a raw copy of a live WAL file.
+   * Reserve a new output path with O_EXCL; never overwrite an existing backup.
+   */
+  static async backupSqlite(sourceFile: string, backupFile: string): Promise<void> {
+    if (resolve(sourceFile) === resolve(backupFile)) throw new Error('BACKUP_DESTINATION_COLLISION');
+    await stat(sourceFile); // do not create a new empty database for a missing source
+    await mkdir(dirname(backupFile), {recursive:true});
+    let reserved;
+    try { reserved = await open(backupFile, 'wx', 0o600); }
+    catch (err) {
+      if ((err as NodeJS.ErrnoException).code === 'EEXIST') throw new Error('BACKUP_ALREADY_EXISTS');
+      throw err;
+    }
+    await reserved.close();
+    const source = new BotStore(sourceFile,{engine:'sqlite'});
+    try {
+      const db = await source.openSqlite();
+      try { await backup(db,backupFile); }
+      finally { db.close(); }
+      // Reopen and validate before treating this backup as a usable recovery checkpoint.
+      await new BotStore(backupFile,{engine:'sqlite'}).snapshot();
+    } catch (err) {
+      await rm(backupFile,{force:true});
+      throw err;
+    }
+  }
+
   async claim(key: string, now: number, leaseMs = 30_000): Promise<'CLAIMED' | 'DUPLICATE' | 'UNKNOWN'> {
     return this.transaction(s => {
       const found = s.updates.find(x => x.key === key);
