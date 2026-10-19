@@ -4,6 +4,7 @@ import { Policy } from './policy.js';
 import { planPublicationPreview } from './publication-preview-plan.js';
 import { CampaignMultipartService } from './campaign-multipart.js';
 import { nextDispatchLease, leaseExpired } from './publication-worker-lease.js';
+import { cancelQueuedMultipartParts } from './publication-cancellation.js';
 
 export interface PublicationReceipt { destination: string; attemptId: string; messageId: string; }
 export type PublicationOutcome = { status: 'SENT'; messageId: string } | { status: 'FAILED_CONFIRMED' } | { status: 'UNKNOWN_OUTCOME' };
@@ -183,8 +184,12 @@ export class PublicationService {
         return false;
       }
       if(canPost&&c.status==='APPROVED'&&this.validate(s,c)) return true;
-      d.status='QUEUED'; delete d.leaseUntil; delete d.attemptId; delete d.startedAt;
-      if(c.status==='APPROVED') c.status='PAUSED';
+      if(c.status==='CANCELLED') d.status='CANCELLED';
+      else {
+        d.status='QUEUED';
+        if(c.status==='APPROVED') c.status='PAUSED';
+      }
+      delete d.leaseUntil; delete d.attemptId; delete d.startedAt;
       return false;
     });
     if(!eligible) return {status:'BLOCKED'};
@@ -226,8 +231,17 @@ export class PublicationService {
       if(change==='PAUSED'&&c.status!=='APPROVED')throw new Error('NOT_ACTIVE');
       if(change==='APPROVED'&&(c.status!=='PAUSED'||!this.validate(s,c)))throw new Error('PREVIEW_STALE_OR_NOT_PAUSED');
       if(change==='CANCELLED'&&c.status==='COMPLETED')throw new Error('ALREADY_COMPLETED');
+      if(change==='CANCELLED' && c.status==='CANCELLED') return;
       c.status=change;
-      if(change==='CANCELLED')for(const d of s.deliveries)if(d.campaignId===id&&d.status==='QUEUED')d.status='CANCELLED';
+      if(change==='CANCELLED'){
+        for(const d of s.deliveries) {
+          if(d.campaignId!==id) continue;
+          if(d.status==='QUEUED'||d.status==='FAILED_CONFIRMED') d.status='CANCELLED';
+          else cancelQueuedMultipartParts(d);
+        }
+        s.audit.push({updateKey:`b4:cancel:${id}`,actorId:actor,decision:'ALLOW',
+          reason:'CAMPAIGN_CANCELLED',policyVersion:c.destinationPolicyVersion,at:this.clock()});
+      }
     });
   }
   async pause(actor:string,id:string):Promise<void>{return this.mutateCampaign(actor,id,'PAUSED');}
@@ -271,9 +285,11 @@ export class PublicationService {
       const d=s.deliveries.find(x=>x.id===deliveryId);if(!d)throw new Error('DELIVERY_NOT_FOUND');
       const c=s.campaigns.find(x=>x.id===d.campaignId)!;
       if(!this.allowed(s,actor,c.sourceScope,c.destination))throw new Error('PUBLISH_DENIED');
+      if(d.status==='CANCELLED'||d.status==='SKIPPED')throw new Error('NOT_REVIEWABLE');
       if(d.status==='SENDING'||d.status==='MULTIPART'||d.status==='UNKNOWN_OUTCOME'||d.status==='SENT')throw new Error('REVIEW_REQUIRED');
       d.status='SKIPPED';d.reviewReason=reason.trim();
-      s.audit.push({updateKey:`b4:skip:${d.id}`,decision:'ALLOW',reason:'MANUALLY_SKIPPED_UNVERIFIED',policyVersion:c.destinationPolicyVersion,at:this.clock()});
+      s.audit.push({updateKey:`b4:skip:${d.id}`,actorId:actor,decision:'ALLOW',
+        reason:'MANUALLY_SKIPPED_UNVERIFIED',policyVersion:c.destinationPolicyVersion,at:this.clock()});
       this.finalize(s,c);
     });
   }

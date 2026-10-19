@@ -113,3 +113,11 @@
 - Missing legacy lease or expired lease is treated as UNKNOWN_OUTCOME and never as a confirmed failure or new queued send. Late workers are fenced before network sending if an attempt is already expired. The lease cannot turn an ambiguous HTTP response into a guarantee of non-delivery, nor is it a background renewal mechanism.
 - A human editor acting on a multipart retry or provider-evidence reconciliation must hold **both** source and destination content.publish rights. Reevaluate after async provider verification: an authorized campaign approver's rights never substitute for those of the reviewer invoking the operation.
 - No live gateway, channel operations, platform DB access or auto-merges are permitted in this phase. Production operational heartbeat, schema-normalized outbox and externally verified receipts remain outstanding.
+
+## B4 v0.4.7 — preserving partial publish receipts during cancellation (20 October 2026)
+
+- A campaign cancellation is a durable **decision to stop future outbound attempts**, not proof that any in-flight Telegram request was successfully withdrawn. The canonical delivery record preserves each `SENT` part, `UNKNOWN_OUTCOME` attempt and reviewed text part identity.
+- `QUEUED` and `FAILED_CONFIRMED` multipart tails become `CANCELLED` rather than remaining in a misleading pending state. Aggregate multipart status becomes `CANCELLED` only when no pending send/unknown attempt survives (even if earlier parts are already SENT). Verified receipts after a cancellation may resolve uncertainty without reopening delivery.
+- Cancellation during async gateway permission probing must not requeue an item into a cancelled campaign or perform a network call. A result from an already-issued remote request may still arrive and be recorded.
+- Idempotent cancellations have one immutable audit event with `actorId`; manual skip cannot overwrite terminal cancelled/skipped review status. Additive optional actor field requires no schema version change.
+- No automatic retry of unknown external outcomes, no direct Telegram posts or production activation; all examples are simulation behavior, not an assertion of Telegram exactly-once delivery.

@@ -1,12 +1,25 @@
 # بوت منارتك — MANARATAK BOT
 
-**B0/B1 + B2-Core + B3 + B4 fenced worker/recovery simulations (v0.4.6). Offline/test-only — no live Telegram bot.**
+**B0/B1 + B2-Core + B3 + B4 cancellation-safe, fenced campaign simulations (v0.4.7). Offline/test-only — no live Telegram bot.**
 
 An independent TypeScript/Node.js 22 project based on `docs/MANARATAK_BOT_MASTER_v1.2.1_AR.md` and `docs/START_HERE_MANARATAK_BOT_v1.2.1_AR.md`. B0/B1 supply the secure baseline; B2-Core adds individual moderation and subscription policies; B3 adds the first locally tested education content flow.
 
 
 
 
+
+
+## B4 v0.4.7 — cancellation-safe multipart campaigns (offline)
+
+An explicit `PublicationService.cancel(actor, campaignId)` now settles the **entire approved campaign** without discarding item-specific delivery evidence:
+
+- An unsent single delivery becomes `CANCELLED`. A multipart delivery cancels all `QUEUED` and confirmed-failed parts atomically in the canonical `BotStore.deliveries` record (no second queue).
+- Any `SENT` part keeps its original verified mock message ID. If no `SENDING` or `UNKNOWN_OUTCOME` parts remain, the aggregate delivery becomes `CANCELLED` even when it contains some confirmed parts. It does **not** pretend the entire document was published.
+- Already `SENDING` or `UNKNOWN_OUTCOME` parts are never erased or falsely declared cancelled. They preserve the durable attempt for later evidence reconciliation. A late successful fake gateway response still records an actual receipt; a confirmed failure closes safely, while an unknown response remains unresolved.
+- If cancellation happens during the async `canPost` check **before** the outbound call, the in-flight intent becomes `CANCELLED`; the paused worker cannot turn it back into `QUEUED` or issue a send.
+- Source/destination publisher authorization is still mandatory. A second cancellation is idempotent, with one `CAMPAIGN_CANCELLED` audit entry including the acting reviewer ID. Previously cancelled or manually skipped items cannot be relabelled by the manual-skip API.
+
+This offline behavior is verified with separate JSON and SQLite fixtures, before/after mock send races, timeout-UNKNOWN reconciliation and audit-history tests. It is **not** an external Telegram cancellation operation: network requests already sent cannot be withdrawn, and no real bot, platform database, scheduled job or channel operation is enabled. An `UNKNOWN_OUTCOME` remains unresolved until independently proven; never automatically retry it.
 
 ## B4 v0.4.6 — fenced worker recovery and scoped multipart review (offline)
 

@@ -1,3 +1,13 @@
+## 0.4.7 — 2026-10-20 — Cancellation-safe campaign parts, evidence and reviewer audit (mock-only)
+
+- Fixed B4 campaign cancellation leaving queued multipart parts in a misleading pending state. Cancel unstarted/confirmed-failed tails while preserving previously SENT parts and real mock receipts.
+- Keep active SENDING or unresolved UNKNOWN parts in the canonical delivery ledger until send returns or independent evidence arrives. Do not allow a late worker to requeue or send a part after cancellation while preflight was awaiting canPost.
+- Settlement after verified receipt of a formerly UNKNOWN part closes the aggregate cancelled delivery without claiming that unsent parts were published.
+- Terminal CANCELLED and SKIPPED deliveries cannot be relabelled or have their manual-review reason overwritten.
+- Add an actor-specific, exactly-once cancellation audit record in BotState; individual manual-skip audit now includes the reviewer.
+- Added JSON + SQLite test coverage for cancelled multi-part flows, preflight and in-flight races, timeouts, part-history retention and idempotence, retaining the same single B4 publishing ledger.
+- **No real Telegram adapter, live platform interaction or production activation.** SQLite and offline gateways are still simulations requiring operational and security review.
+
 ## 0.4.6 — 2026-10-19 — Fenced dispatch recovery and tightened multipart permissions (mock-only)
 
 - Added a per-attempt durable 120-second recovery lease to both single publication deliveries and multipart parts, stored in the original canonical BotStore ledger. SENDING intents are persisted before the mock gateway request.
