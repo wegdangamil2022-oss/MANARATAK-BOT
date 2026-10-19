@@ -102,4 +102,59 @@ export class HistoricalPublicationReviewService {
       return structuredClone(results);
     });
   }
+  /**
+   * Resolve an existing uncertain historical item using new item-specific evidence.
+   * The reservation remains in the review registry; this does not emit a Telegram message.
+   */
+  async reconcileEvidence(actor:string,reviewId:string,evidence:LegacyEvidence):Promise<HistoricalPublicationRecord> {
+    if(!isId(actor)||!isId(reviewId))throw new Error('INVALID_REVIEW');
+    const before=await this.store.snapshot();
+    const found=before.historicalPublications.find(x=>x.id===reviewId);
+    if(!found)throw new Error('REVIEW_NOT_FOUND');
+    if(!this.allowed(before,actor,found.sourceScope,found.destination))throw new Error('PUBLISH_DENIED');
+    if(found.status!=='UNVERIFIED'&&found.status!=='REVIEW_REQUIRED')throw new Error('REVIEW_ALREADY_SETTLED');
+    const result=await reconcileLegacyCatalog({
+      items:[{id:found.resourceId,revision:found.revision,destination:found.destination}],
+      evidence:[evidence]
+    },this.verify,async()=>false);
+    const resolved=result.records[0];
+    if(resolved?.status!=='PUBLISHED_VERIFIED'||!resolved.proof)throw new Error('RECEIPT_NOT_VERIFIED');
+    const proof=resolved.proof;
+    return this.store.transaction(s=>{
+      const current=s.historicalPublications.find(x=>x.id===reviewId);
+      if(!current||current.status!==found.status||current.revision!==found.revision||
+         current.destination!==found.destination||current.resourceId!==found.resourceId)
+        throw new Error('REVIEW_CHANGED');
+      if(!this.allowed(s,actor,current.sourceScope,current.destination))throw new Error('PUBLISH_DENIED');
+      if(s.historicalPublications.some(x=>x.id!==current.id&&
+         ((x.destination===current.destination&&x.proof?.messageId===proof.messageId)||
+          x.proof?.evidenceId===proof.evidenceId)) ||
+         s.deliveries.some(d=>d.destination===current.destination&&
+         (d.messageId===proof.messageId||d.multipart?.parts.some(part=>part.messageId===proof.messageId))))
+        throw new Error('RECEIPT_CONFLICT');
+      current.status='PUBLISHED_VERIFIED'; current.diagnostic='UNIQUE_TRUSTED_EVIDENCE';
+      current.proof=structuredClone(proof);delete current.skip;
+      s.audit.push({updateKey:`b4:historic:reconcile:${current.id}`,decision:'ALLOW',
+        reason:'HISTORIC_PROVIDER_RECEIPT_VERIFIED',policyVersion:this.policy.chatRevision(s,current.destination),at:this.clock()});
+      return structuredClone(current);
+    });
+  }
+
+  /** Deliberate, logged decision to skip a historical item. Never records an invented receipt. */
+  async markManuallySkipped(actor:string,reviewId:string,reason:string):Promise<HistoricalPublicationRecord> {
+    if(!isId(actor)||!isId(reviewId)||typeof reason!=='string'||!reason.trim()||
+       reason.length>200||/[\u0000-\u001F\u007F]/u.test(reason))throw new Error('INVALID_SKIP');
+    return this.store.transaction(s=>{
+      const item=s.historicalPublications.find(x=>x.id===reviewId);
+      if(!item)throw new Error('REVIEW_NOT_FOUND');
+      if(!this.allowed(s,actor,item.sourceScope,item.destination))throw new Error('PUBLISH_DENIED');
+      if(item.status!=='UNVERIFIED'&&item.status!=='REVIEW_REQUIRED')throw new Error('REVIEW_ALREADY_SETTLED');
+      item.status='MANUALLY_SKIPPED';item.diagnostic='EXPLICIT_REVIEWED_SKIP';
+      item.skip={actor,reason:reason.trim()};delete item.proof;
+      s.audit.push({updateKey:`b4:historic:skip:${item.id}`,decision:'ALLOW',
+        reason:'HISTORIC_MANUALLY_SKIPPED_UNVERIFIED',policyVersion:this.policy.chatRevision(s,item.destination),at:this.clock()});
+      return structuredClone(item);
+    });
+  }
+
 }
