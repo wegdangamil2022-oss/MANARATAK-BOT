@@ -1,9 +1,9 @@
 {
   "name": "manaratak-bot",
-  "version": "0.4.6",
+  "version": "0.4.7",
   "private": true,
   "type": "module",
-  "description": "MANARATAK BOT B0-B4 mock-only core: reviewed campaigns with fenced SQLite worker recovery",
+  "description": "MANARATAK BOT B0-B4 mock-only core: immutable publication plans and hardened receipt integrity",
   "engines": {
     "node": ">=22"
   },

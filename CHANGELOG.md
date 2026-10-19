@@ -1,3 +1,11 @@
+## 0.4.7 — 2026-10-19 — Canonical message-part checks and receipt integrity (mock-only)
+
+- Reconstruct canonical multipart text/parts from the current approved resource copy at every dispatch, including legacy campaigns without a retained render-plan object. Tampering the stored approved fingerprint or staged text cannot bypass review.
+- Verify provider `messageId` input shape for single and multipart fake results and receipt reconciliation: malformed, control/BiDi, blank, whitespace-padded and oversized identifiers never become confirmed sends.
+- Fail closed when a malformed or migrated state contains duplicate reservations or a matching historical review claim for the same resource revision and destination. Recheck after await, after simulated network completion, during explicit confirmed-failure retries and during UNKNOWN proof reconciliation.
+- In-flight historical conflicts quarantine ambiguous replies as UNKNOWN_OUTCOME rather than claiming SENT, preserving attempts for independent review; no network resend is triggered.
+- Added adversarial integration tests across JSON/SQLite and legacy/multipart/single senders. This remains TESTED_MOCK only; all real Telegram/outbound verification and normalized production DB work is still blocked.
+
 ## 0.4.6 — 2026-10-19 — Fenced dispatch recovery and tightened multipart permissions (mock-only)
 
 - Added a per-attempt durable 120-second recovery lease to both single publication deliveries and multipart parts, stored in the original canonical BotStore ledger. SENDING intents are persisted before the mock gateway request.

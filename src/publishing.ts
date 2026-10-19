@@ -3,6 +3,8 @@ import { BotStore, type BotState, type PublicationCampaign, type PublicationPrev
 import { Policy } from './policy.js';
 import { planPublicationPreview } from './publication-preview-plan.js';
 import { CampaignMultipartService } from './campaign-multipart.js';
+import { validPublicationMessageId } from './publication-receipts.js';
+import { hasExclusivePublicationReservation } from './publication-reservation-integrity.js';
 import { nextDispatchLease, leaseExpired } from './publication-worker-lease.js';
 
 export interface PublicationReceipt { destination: string; attemptId: string; messageId: string; }
@@ -158,8 +160,11 @@ export class PublicationService {
       if(c.scheduledAt>this.clock()) return { kind:'NOT_DUE' as const };
       const d=s.deliveries.find(x=>x.campaignId===c.id && !['SENT','SKIPPED','CANCELLED'].includes(x.status));
       // An uncertain/failed/in-flight earlier item blocks later campaign items until human review.
+      if(d?.status==='MULTIPART' && !hasExclusivePublicationReservation(s,d))
+        return {kind:'BLOCKED' as const};
       if(d?.status==='MULTIPART') return {kind:'MULTIPART' as const,resourceId:d.resourceId};
       if(!d || d.status!=='QUEUED') return {kind:'EMPTY' as const};
+      if(!hasExclusivePublicationReservation(s,d)) return {kind:'BLOCKED' as const};
       if(!this.validate(s,c)) {c.status='PAUSED';return {kind:'BLOCKED' as const};}
       d.status='SENDING';d.attemptId=randomUUID();d.startedAt=this.clock();d.leaseUntil=nextDispatchLease(this.clock());
       return {kind:'SEND' as const,id:d.id,attemptId:d.attemptId,text:c.previews.find(x=>x.resourceId===d.resourceId)!.text,destination:c.destination};
@@ -182,7 +187,7 @@ export class PublicationService {
         d.status='UNKNOWN_OUTCOME';
         return false;
       }
-      if(canPost&&c.status==='APPROVED'&&this.validate(s,c)) return true;
+      if(canPost&&c.status==='APPROVED'&&hasExclusivePublicationReservation(s,d)&&this.validate(s,c)) return true;
       d.status='QUEUED'; delete d.leaseUntil; delete d.attemptId; delete d.startedAt;
       if(c.status==='APPROVED') c.status='PAUSED';
       return false;
@@ -194,7 +199,15 @@ export class PublicationService {
       const d=s.deliveries.find(x=>x.id===claim.id)!;
       const c=s.campaigns.find(x=>x.id===campaignId)!;
       if(d.status!=='SENDING'||d.attemptId!==claim.attemptId) return {status:'UNKNOWN_OUTCOME' as const};
-      if(result.status==='SENT' && typeof result.messageId==='string' && result.messageId.length>0 &&
+      // A historical/duplicate claim imported during network I/O must not be
+      // silently accepted as proof that publishing this version is safe.
+      if(!hasExclusivePublicationReservation(s,d)) {
+        d.status='UNKNOWN_OUTCOME';
+        s.audit.push({updateKey:`b4:delivery:conflict:${d.id}`,decision:'DENY',
+          reason:'RESERVATION_CONFLICT_AFTER_NETWORK',policyVersion:c.destinationPolicyVersion,at:this.clock()});
+        return {status:'UNKNOWN_OUTCOME' as const};
+      }
+      if(result.status==='SENT' && validPublicationMessageId(result.messageId) &&
         !s.deliveries.some(x=>x.destination===claim.destination &&
           (x.messageId===result.messageId || x.multipart?.parts.some(y=>y.messageId===result.messageId))) &&
         !s.historicalPublications.some(h=>h.destination===claim.destination&&h.proof?.messageId===result.messageId)) {
@@ -240,6 +253,7 @@ export class PublicationService {
       if(!this.validate(s,c)||c.status!=='APPROVED')throw new Error('PREVIEW_STALE');
       const d=s.deliveries.find(x=>x.campaignId===c.id&&x.resourceId===resourceId);
       if(d?.status!=='FAILED_CONFIRMED')throw new Error('NOT_CONFIRMED_FAILED');
+      if(!hasExclusivePublicationReservation(s,d))throw new Error('DELIVERY_RESERVATION_CONFLICT');
       d.status='QUEUED'; delete d.attemptId;delete d.startedAt;delete d.leaseUntil;
     });
   }
@@ -248,7 +262,8 @@ export class PublicationService {
     if(!d)throw new Error('DELIVERY_NOT_FOUND');
     const c=pre.campaigns.find(x=>x.id===d.campaignId)!;
     if(!this.allowed(pre,actor,c.sourceScope,c.destination))throw new Error('PUBLISH_DENIED');
-    if(d.status!=='UNKNOWN_OUTCOME'||d.attemptId!==receipt.attemptId||d.destination!==receipt.destination||!receipt.messageId)
+    if(d.status!=='UNKNOWN_OUTCOME'||d.attemptId!==receipt.attemptId||d.destination!==receipt.destination||
+      !validPublicationMessageId(receipt.messageId)||!hasExclusivePublicationReservation(pre,d))
       throw new Error('UNVERIFIED_EVIDENCE');
     if(!await this.gateway.verifyReceipt(receipt))throw new Error('UNVERIFIED_EVIDENCE');
     return this.store.transaction(s=>{
@@ -256,6 +271,7 @@ export class PublicationService {
       const currentC=s.campaigns.find(x=>x.id===current.campaignId)!;
       if(!this.allowed(s,actor,currentC.sourceScope,currentC.destination))throw new Error('PUBLISH_DENIED');
       if(current.status!=='UNKNOWN_OUTCOME'||current.attemptId!==receipt.attemptId||current.destination!==receipt.destination||
+         !hasExclusivePublicationReservation(s,current)||
          s.deliveries.some(x=>x.destination===receipt.destination&&
            ((x.id!==current.id&&x.messageId===receipt.messageId)||x.multipart?.parts.some(y=>y.messageId===receipt.messageId))) ||
          s.historicalPublications.some(h=>h.destination===receipt.destination&&h.proof?.messageId===receipt.messageId)) throw new Error('UNVERIFIED_EVIDENCE');

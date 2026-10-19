@@ -113,3 +113,10 @@
 - Missing legacy lease or expired lease is treated as UNKNOWN_OUTCOME and never as a confirmed failure or new queued send. Late workers are fenced before network sending if an attempt is already expired. The lease cannot turn an ambiguous HTTP response into a guarantee of non-delivery, nor is it a background renewal mechanism.
 - A human editor acting on a multipart retry or provider-evidence reconciliation must hold **both** source and destination content.publish rights. Reevaluate after async provider verification: an authorized campaign approver's rights never substitute for those of the reviewer invoking the operation.
 - No live gateway, channel operations, platform DB access or auto-merges are permitted in this phase. Production operational heartbeat, schema-normalized outbox and externally verified receipts remain outstanding.
+
+## B4 v0.4.7 — immutable approved content and provider evidence (19 October 2026)
+
+- A stored `renderPlan` or fingerprint does not supersede approved B3 text. Every multipart send reconstructs the canonical plan from the approved copy, including historic v5 campaigns that lack renderPlan. Mismatches are BLOCKED, without an outbound request.
+- The receipt input validator rejects dangerous printable/control/BiDi shapes and oversized IDs; this is a bounded format check **not** a claim that a Telegram message exists. An actual future gateway must attest chat ID, message ID, sender, attempt linkage and uniqueness.
+- Campaigns never assume an imported historical review is a successful send. A matching historical registry entry or a duplicate canonical delivery reservation blocks sending and explicit retries. Conflicts discovered after network contact become UNKNOWN_OUTCOME to avoid falsely concluding the channel was updated or automatically posting again.
+- The v0.4.7 slice changes no persisted schema; schema v7 is retained and deliberately contains the same one canonical B4 delivery/receipt ledger. A damaged or inconsistent state requires operator review, not silent deduplication or deletion.
