@@ -3,6 +3,11 @@ on:
   push:
     branches: ["feature/b0-b1-simulated-core", "feature/b2-core-simulation", "feature/b3-education-import-core", "feature/b3-faq-resource-links", "feature/b3-telegram-inbound", "feature/b3-documents-miniapp-auth", "feature/b4-publishing-ledger", "feature/b4-multipart-ledger-wip", "feature/b4-reviewed-multipart-flow", "feature/b4-legacy-campaign-guard", "feature/b4-sqlite-transaction-store", "feature/b4-fenced-worker-recovery", "feature/b4-immutable-parts-receipts"]
   pull_request:
+# Keep only the newest push or PR run for the same development branch.
+# Otherwise each test-first commit queues a redundant full mock suite.
+concurrency:
+  group: manaratak-bot-ci-${{ github.head_ref || github.ref_name }}
+  cancel-in-progress: true
 permissions:
   contents: read
 jobs:
