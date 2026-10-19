@@ -75,3 +75,10 @@
 - Rendering is planned as bounded plain text/photo with approved fallback; it does not secretly send or change the B4 campaign delivery graph. Fragmented multi-part sends require their own per-part receipts before integration, otherwise they would break existing item-level idempotency.
 - Legacy migration only computes a review report. Callers must authenticate reviewers and provide trusted evidence verification; an `evidenceId` or a forwarded message alone is not proof. No bulk ordinal cutoff, last post or year-based inference. No state is written to the active delivery ledger and no manual skip is a verified publication.
 - No production readiness claims, live Telegram/MANARATAK platform operations or paid services. Default-deny on ambiguous evidence, media, or authority.
+
+
+## B4 v0.4.2 WIP handoff
+
+- Multipart staging for existing B4 campaigns uses `PublicationDelivery.multipart` in the main state (no second operational ledger). `MULTIPART` prevents the core single-send worker or manual skip from consuming an in-progress multipart delivery.
+- `MultipartTestStore` and `MultipartPublicationService` are isolated **proof-of-concept only**; they must never run alongside the operational `BotStore` for the same destination. They were preserved to avoid losing local work and to supply behavioral examples.
+- **Do not mark B4 complete**: ordinary B4 resource preview limits currently block >4000-code-point content, so integrated long campaigns require a redesign of preflight approval and part-based scheduling. Verify against live provider only after explicit owner authorization and a real durable multi-worker store; no real messages are sent in these tests.

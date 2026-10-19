@@ -130,6 +130,7 @@ export class PublicationService {
       if(c.scheduledAt>this.clock()) return { kind:'NOT_DUE' as const };
       const d=s.deliveries.find(x=>x.campaignId===c.id && !['SENT','SKIPPED','CANCELLED'].includes(x.status));
       // An uncertain/failed/in-flight earlier item blocks later campaign items until human review.
+      if(d?.status==='MULTIPART') return {kind:'BLOCKED' as const};
       if(!d || d.status!=='QUEUED') return {kind:'EMPTY' as const};
       if(!this.validate(s,c)) {c.status='PAUSED';return {kind:'BLOCKED' as const};}
       d.status='SENDING';d.attemptId=randomUUID();d.startedAt=this.clock();
@@ -224,7 +225,7 @@ export class PublicationService {
       const d=s.deliveries.find(x=>x.id===deliveryId);if(!d)throw new Error('DELIVERY_NOT_FOUND');
       const c=s.campaigns.find(x=>x.id===d.campaignId)!;
       if(!this.allowed(s,actor,c.sourceScope,c.destination))throw new Error('PUBLISH_DENIED');
-      if(d.status==='SENDING'||d.status==='UNKNOWN_OUTCOME'||d.status==='SENT')throw new Error('REVIEW_REQUIRED');
+      if(d.status==='SENDING'||d.status==='MULTIPART'||d.status==='UNKNOWN_OUTCOME'||d.status==='SENT')throw new Error('REVIEW_REQUIRED');
       d.status='SKIPPED';d.reviewReason=reason.trim();
       s.audit.push({updateKey:`b4:skip:${d.id}`,decision:'ALLOW',reason:'MANUALLY_SKIPPED_UNVERIFIED',policyVersion:c.destinationPolicyVersion,at:this.clock()});
       this.finalize(s,c);

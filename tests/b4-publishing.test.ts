@@ -257,3 +257,22 @@ test('B4: owner can review a draft after original editor loses a grant; future s
    assert.equal((await f.publishing.dispatchNext(c.id)).status,'SENT');
  }finally{await f.dispose();}
 });
+
+test('B4 safety: core dispatcher and manual skip cannot consume a staged multipart delivery',async()=>{
+  const f=await fixture();try{
+    const campaign=await f.publishing.draft(OWNER,SOURCE,DEST,[f.first.id]);
+    await f.publishing.approve(OWNER,campaign.id);
+    const delivery=(await f.store.snapshot()).deliveries.find(d=>d.campaignId===campaign.id)!;
+    await f.store.transaction(s=>{
+      const d=s.deliveries.find(x=>x.id===delivery.id)!;
+      d.status='MULTIPART';
+      d.multipart={fingerprint:'staged-offline-only',parts:[
+        {index:0,payload:{kind:'TEXT',text:'approved part'},status:'SENT',messageId:'mock-part-1'},
+        {index:1,payload:{kind:'TEXT',text:'approved part 2'},status:'QUEUED'}
+      ]};
+    });
+    assert.equal((await f.publishing.dispatchNext(campaign.id)).status,'BLOCKED');
+    await assert.rejects(f.publishing.markManuallySkipped(OWNER,delivery.id,'skip staged parts'),/REVIEW_REQUIRED/);
+    assert.equal((await f.store.snapshot()).deliveries.find(d=>d.id===delivery.id)?.status,'MULTIPART');
+  }finally{await f.dispose();}
+});

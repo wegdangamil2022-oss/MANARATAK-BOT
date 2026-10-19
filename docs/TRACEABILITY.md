@@ -44,3 +44,6 @@
 
 | B4: S121-07؛ T121-10 (حدود العرض والمعاينة) | publication-preview-plan.ts + b4-preview-migration.test.ts | TESTED_MOCK (مخطط مستقل) | نص 4096/وصف صورة 1024/منع تقسيم URL وتجزئة سليمة/بديل لا يعمل إلا باعتماد صريح؛ لا عرض مرئي Telegram مثبت |
 | B4: S121-09؛ T121-12 (ترحيل الصين) | legacy-publication-migration.ts + b4-preview-migration.test.ts | TESTED_MOCK (تقرير فقط) | لا إثبات تلقائي للمنشورات السابقة من آخر منشور، إثبات منفرد من verifier خارجي، UNKNOWN منفصل عن MANUALLY_SKIPPED ومراجعة التعارض؛ لا ترحيل DB إنتاجي |
+
+| B4 v0.4.2 multipart WIP | campaign-multipart.ts + b4-campaign-multipart.test.ts | TESTED_MOCK جزئيًا | تحفظ حالات أجزاء الرسالة وإيصالاتها عبر ملف تجريبي؛ تم منع dispatcher التقليدي من استهلاك MULTIPART، ولم يثبت المسار الكامل لمسودة B4 عادية أو إرسال Telegram حي |
+| B4 experimental separate ledger | multipart-publishing.ts + b4-multipart-publishing.test.ts | EXPERIMENTAL_TEST_ONLY | نموذج موازٍ للاختبار فقط وغير مسموح ربطه بحملات الإنتاج |

@@ -32,11 +32,18 @@ export interface PublicationCampaign {
   status: CampaignStatus; scheduledAt: number; createdAt: number; sourcePolicyVersion: number; destinationPolicyVersion: number;
   previews: PublicationPreview[];
 }
-export type DeliveryStatus = 'QUEUED' | 'SENDING' | 'SENT' | 'FAILED_CONFIRMED' | 'UNKNOWN_OUTCOME' | 'CANCELLED' | 'SKIPPED';
+export type DeliveryStatus = 'QUEUED' | 'MULTIPART' | 'SENDING' | 'SENT' | 'FAILED_CONFIRMED' | 'UNKNOWN_OUTCOME' | 'CANCELLED' | 'SKIPPED';
 export interface PublicationDelivery {
   id: string; campaignId: string; resourceId: string; destination: string; revision: string;
   status: DeliveryStatus; attemptId?: string; startedAt?: number; messageId?: string;
   reviewReason?: string;
+  /** B4 offline-only part-level receipts; populated only by CampaignMultipartService. */
+  multipart?: {
+    fingerprint: string;
+    parts: { index: number; payload: import('./publication-preview-plan.js').PublicationRenderPart;
+      status: 'QUEUED' | 'SENDING' | 'SENT' | 'FAILED_CONFIRMED' | 'UNKNOWN_OUTCOME';
+      attemptId?: string; messageId?: string; }[];
+  };
 }
 export interface BotState {
   schemaVersion: 5;
