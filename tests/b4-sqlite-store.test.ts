@@ -187,3 +187,32 @@ test('B4 sqlite: older B4 schema v5 is upgraded during explicit import without e
   assert.deepEqual(after.historicalPublications,[]);
  }finally{await f.close()}
 });
+
+test('B4 sqlite: readers never see partial uncommitted publication state from another connection',async()=>{
+ const f=await fixture();try{
+  let resolveReady!:()=>void,resolveCommit!:()=>void;
+  const ready=new Promise<void>(resolve=>resolveReady=resolve);
+  const gate=new Promise<void>(resolve=>resolveCommit=resolve);
+  const pending=f.store.transaction(async s=>{
+    s.audit.push({updateKey:'sqlite-inflight',decision:'NOOP',reason:'UNCOMMITTED',policyVersion:0,at:1000});
+    resolveReady();
+    await gate;
+  });
+  await ready;
+  try{
+    const before=await new BotStore(f.file,{engine:'sqlite'}).snapshot();
+    assert.equal(before.audit.some(x=>x.updateKey==='sqlite-inflight'),false);
+  }finally{resolveCommit();await pending;}
+  const after=await new BotStore(f.file,{engine:'sqlite'}).snapshot();
+  assert.equal(after.audit.filter(x=>x.updateKey==='sqlite-inflight').length,1);
+ }finally{await f.close()}
+});
+
+test('B4 sqlite: corrupted JSON import source never overwrites or creates a destination ledger',async()=>{
+ const f=await fixture();try{
+  const input=join(f.dir,'corrupt.json'),output=join(f.dir,'never.sqlite');
+  await writeFile(input,'{broken json');
+  await assert.rejects(BotStore.importJsonToSqlite(input,output));
+  await assert.rejects(readFile(output),/ENOENT/);
+ }finally{await f.close()}
+});
