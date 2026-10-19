@@ -98,3 +98,10 @@ Further B3 work must add outbound Telegram delivery with reliable receipts, **ac
 - `src/legacy-publication-migration.ts`: تقرير مراجعة لعناصر سجل منشورات سابقة؛ كل عنصر **UNVERIFIED** حتى يصل دليل مطابق منفرد ويتحقق عبر مصدر موثوق. لا يعتمد ترتيب الجامعة أو آخر منشور لإثبات السابق. `MANUALLY_SKIPPED` لا يساوي `PUBLISHED_VERIFIED`، وتعارض الأدلة يعيد العنصر لمراجعة بشرية.
 - `npm run demo:preview-migration` ينتج تقريرًا ببيانات وهمية فقط، و`npm run check` يفحص حدود Telegram والسحب والتعارض والازدواجية.
 - **هذه واجهات تخطيط ومراجعة مستقلة غير موصولة بعد بمرحلة إرسال حملات `PublicationService` أو قاعدة تخزين تشغيلية، ولا تستدعي Telegram أو توثّق منشورات الصين الحقيقية.** اعتماد خطة العرض/ترحيل السجل والإرسال الفعلي قضايا لاحقة.
+
+
+## B4 v0.4.2 — Multipart handoff (unfinished, mock only)
+
+These **previously unpushed local changes** are retained in `src/campaign-multipart.ts` and `tests/b4-campaign-multipart.test.ts`. They stage deterministic text parts into the **existing** B4 campaign's delivery record with separate attempt IDs, guard against unauthorized sending, preserve receipt evidence and stop after UNKNOWN_OUTCOME. The legacy core dispatcher refuses to handle staged `MULTIPART` deliveries; manual skip is prohibited while parts may have been sent. `src/multipart-publishing.ts` and its test file are an **experimental isolated proof-of-concept**, with a second JSON ledger; do not connect it to the production flow.
+
+This is **not B4 completion**. In particular: the core B4 preview limit still rejects content over 4000 Unicode code points during ordinary campaign drafting; the integration tests construct a synthetic approved campaign, not one made through the full B4 draft API. Do **not** raise that limit or enable direct sends without adding proper authorization/preview and per-part retry semantics. The B4 JSON store is single-process-only, and nothing has been published to Telegram. Next task: merge approval/render planning into one atomic and auditable campaign preflight, add migration and safe orchestration, then test full draft→approval→multipart→restart→receipts against a transactional fake.
