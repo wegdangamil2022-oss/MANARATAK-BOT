@@ -144,3 +144,46 @@ test('B4 sqlite: malformed state remains an error and never silently resets acco
   reopened.close();
  }finally{await f.close()}
 });
+
+test('B4 sqlite: online backup is a restorable point-in-time snapshot, not a writable alias',async()=>{
+ const f=await fixture();try{
+  const c=await f.publishing.draft(OWNER,SOURCE,DEST,[f.resources[0]!.id]);
+  await f.publishing.approve(OWNER,c.id);await f.publishing.dispatchNext(c.id);
+  const original=await f.store.snapshot();
+  const file=join(f.dir,'snapshot.sqlite');
+  await BotStore.backupSqlite(f.file,file);
+  assert.deepEqual(await new BotStore(file,{engine:'sqlite'}).snapshot(),original);
+  await f.store.transaction(s=>{s.audit.push({updateKey:'after-backup',decision:'NOOP',reason:'TEST',policyVersion:0,at:1000});});
+  assert.notDeepEqual(await f.store.snapshot(),original);
+  assert.deepEqual(await new BotStore(file,{engine:'sqlite'}).snapshot(),original);
+  await assert.rejects(BotStore.backupSqlite(f.file,file),/BACKUP_ALREADY_EXISTS/);
+  assert.deepEqual(await new BotStore(file,{engine:'sqlite'}).snapshot(),original);
+ }finally{await f.close()}
+});
+
+test('B4 sqlite: cannot back up a nonexistent store or mistake missing source for a valid empty database',async()=>{
+ const f=await fixture();try{
+  const noSource=join(f.dir,'no-source.sqlite'),backup=join(f.dir,'backup.sqlite');
+  await assert.rejects(BotStore.backupSqlite(noSource,backup),/ENOENT/);
+  await assert.rejects(BotStore.importJsonToSqlite(join(f.dir,'missing.json'),backup),/ENOENT/);
+ }finally{await f.close()}
+});
+
+test('B4 sqlite: older B4 schema v5 is upgraded during explicit import without erasing historic receipts',async()=>{
+ const f=await fixture();try{
+  const c=await f.publishing.draft(OWNER,SOURCE,DEST,[f.resources[0]!.id]);
+  await f.publishing.approve(OWNER,c.id);await f.publishing.dispatchNext(c.id);
+  const before=await f.store.snapshot();
+  const legacy=join(f.dir,'legacy5.json'),target=join(f.dir,'migrated5.sqlite');
+  const data:Record<string,unknown>={...before,schemaVersion:5};
+  delete data.historicalPublications;
+  await writeFile(legacy,JSON.stringify(data));
+  await BotStore.importJsonToSqlite(legacy,target);
+  const after=await new BotStore(target,{engine:'sqlite'}).snapshot();
+  assert.equal(after.schemaVersion,7);
+  assert.deepEqual(after.deliveries,before.deliveries);
+  assert.deepEqual(after.campaigns,before.campaigns);
+  assert.deepEqual(after.educationResources,before.educationResources);
+  assert.deepEqual(after.historicalPublications,[]);
+ }finally{await f.close()}
+});
