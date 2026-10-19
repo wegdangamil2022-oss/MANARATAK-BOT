@@ -1,11 +1,24 @@
 # بوت منارتك — MANARATAK BOT
 
-**B0/B1 + B2-Core + B3 + B4 transactional-storage experiment (v0.4.5). Offline/test-only — no live Telegram bot.**
+**B0/B1 + B2-Core + B3 + B4 fenced worker/recovery simulations (v0.4.6). Offline/test-only — no live Telegram bot.**
 
 An independent TypeScript/Node.js 22 project based on `docs/MANARATAK_BOT_MASTER_v1.2.1_AR.md` and `docs/START_HERE_MANARATAK_BOT_v1.2.1_AR.md`. B0/B1 supply the secure baseline; B2-Core adds individual moderation and subscription policies; B3 adds the first locally tested education content flow.
 
 
 
+
+
+## B4 v0.4.6 — fenced worker recovery and scoped multipart review (offline)
+
+B4 stores a **120-second durable lease** alongside each single-send or multipart-part SENDING intent in the existing canonical delivery. See `src/publication-worker-lease.ts` and the new regression suite `tests/b4-fenced-recovery.test.ts`. The lease is only a recovery grace interval, **not permission to auto-retry or a guarantee of exactly-once Telegram sending**.
+
+- A second worker (including an independent SQLite process) calling `recoverPending()` **does not touch actively leased attempts**. Expired attempts, and legacy SENDING records lacking a lease, become `UNKNOWN_OUTCOME`. This quarantine requires independent proof review and never permits automatic replay.
+- If an in-flight worker returns after its lease has expired, the authorization check fences it **before** contacting the gateway; its attempt is recorded UNKNOWN. A worker that has already crossed the gateway boundary may still have an ambiguous result: the original UNKNOWN outcome rule remains authoritative, and no automatic resend is permitted.
+- The same rule applies to regular one-message campaigns and all parts of multipart campaigns. An explicit confirmed failure can be retried only with the existing publisher authorization; retries clear the previous lease and attempt ID.
+- Multipart `retryFailed` and `reconcileUnknown` now require the *acting editor* to possess `content.publish` in both the source and destination chats, not merely destination rights. Evidence review checks this both **before** and **after** awaiting an external verifier.
+- Tests simulate pending `canPost` calls, live competing recovery and expiry, source-right revocation while verifying a receipt, orphaned legacy records, and an independent SQLite worker process. This only uses fake clocks, fake gateways and local files. No real bot token/channel is read.
+
+**Operational limitation:** a lease is fixed at 120 seconds and is not automatically renewed. A delayed operation that exceeds the lease is intentionally quarantined and may require manual reconciliation. This is a conservative simulation policy, not a fully supervised worker or production outbox, nor does it certify active multi-host high availability. For production: deploy operational heartbeat/leases under database constraints, transaction outbox, documented operator recovery, real receipt verification, power-loss tests and authorization review.
 
 ## B4 v0.4.5 — optional transactional SQLite storage (offline)
 

@@ -1,3 +1,12 @@
+## 0.4.6 — 2026-10-19 — Fenced dispatch recovery and tightened multipart permissions (mock-only)
+
+- Added a per-attempt durable 120-second recovery lease to both single publication deliveries and multipart parts, stored in the original canonical BotStore ledger. SENDING intents are persisted before the mock gateway request.
+- Recovery from a restarted or competing worker leaves active attempts alone. Expired leases and legacy unleased orphan attempts are quarantined UNKNOWN_OUTCOME, with no automatic resend. A delayed worker also checks expiry after asynchronous gateway-permission checks before initiating a send.
+- Closed a scoped authorization gap in multipart retry and receipt reconciliation: the acting reviewer requires content.publish on BOTH source and destination, before and after provider verification.
+- Kept existing no-automatic-retry, unique verified receipts and immutable B3 content approval. Confirmed retries clear old attempt and lease metadata.
+- Added 15 tests spanning JSON and SQLite storage, independent SQLite recovery processes, forced expiry, crash-compatibility, and revocation during evidence verification. 214 total passing tests after build/typecheck and mock demos.
+- TESTED_MOCK only; leases are conservative quarantine fences, not distributed worker heartbeats or authorization for real Telegram.
+
 ## 0.4.5 — 2026-10-19 — B4 transactional SQLite test backend
 
 - Added opt-in `BotStore(file, {engine:'sqlite'})` while keeping existing JSON simulations unchanged. One canonical BotState and B4 reservation/receipt ledger, not a second publishing engine.
