@@ -41,7 +41,7 @@ export type DispatchResult = {
   messageId?: string;
 };
 const sha = (v: unknown) => createHash('sha256').update(JSON.stringify(v)).digest('hex');
-const validResource = (s: BotState, id: string, sourceScope: string): PublicationPreview | undefined => {
+export const validResource = (s: BotState, id: string, sourceScope: string): PublicationPreview | undefined => {
   const r = s.educationResources.find(x => x.id === id && x.scope === sourceScope && x.status === 'PUBLISHED');
   if (!r) return undefined;
   const category = s.educationCategories.find(x => x.id === r.categoryId && x.scope === sourceScope && x.enabled);
@@ -115,6 +115,8 @@ export class PublicationService {
         // Durable identity: same approved content version cannot be sent twice to one chat across campaigns.
         if(s.deliveries.some(d=>d.destination===c.destination&&d.resourceId===p.resourceId&&d.revision===p.revision))
           throw new Error('DELIVERY_ALREADY_RESERVED');
+        if(s.historicalPublications.some(h=>h.destination===c.destination&&h.resourceId===p.resourceId&&h.revision===p.revision))
+          throw new Error('HISTORICAL_REVIEW_BLOCKS_REPUBLICATION');
       }
       c.approvedBy=actor;c.status='APPROVED';
       for(const p of c.previews) {
@@ -188,7 +190,8 @@ export class PublicationService {
       if(d.status!=='SENDING'||d.attemptId!==claim.attemptId) return {status:'UNKNOWN_OUTCOME' as const};
       if(result.status==='SENT' && typeof result.messageId==='string' && result.messageId.length>0 &&
         !s.deliveries.some(x=>x.destination===claim.destination &&
-          (x.messageId===result.messageId || x.multipart?.parts.some(y=>y.messageId===result.messageId)))) {
+          (x.messageId===result.messageId || x.multipart?.parts.some(y=>y.messageId===result.messageId))) &&
+        !s.historicalPublications.some(h=>h.destination===claim.destination&&h.proof?.messageId===result.messageId)) {
         d.status='SENT'; d.messageId=result.messageId;
         s.audit.push({updateKey:`b4:delivery:${d.id}`,decision:'ALLOW',reason:'DELIVERY_CONFIRMED',policyVersion:c.destinationPolicyVersion,at:this.clock()});
         this.finalize(s,c);
@@ -248,7 +251,8 @@ export class PublicationService {
       if(!this.allowed(s,actor,currentC.sourceScope,currentC.destination))throw new Error('PUBLISH_DENIED');
       if(current.status!=='UNKNOWN_OUTCOME'||current.attemptId!==receipt.attemptId||current.destination!==receipt.destination||
          s.deliveries.some(x=>x.destination===receipt.destination&&
-           ((x.id!==current.id&&x.messageId===receipt.messageId)||x.multipart?.parts.some(y=>y.messageId===receipt.messageId)))) throw new Error('UNVERIFIED_EVIDENCE');
+           ((x.id!==current.id&&x.messageId===receipt.messageId)||x.multipart?.parts.some(y=>y.messageId===receipt.messageId))) ||
+         s.historicalPublications.some(h=>h.destination===receipt.destination&&h.proof?.messageId===receipt.messageId)) throw new Error('UNVERIFIED_EVIDENCE');
       current.status='SENT';current.messageId=receipt.messageId;
       s.audit.push({updateKey:`b4:reconcile:${current.id}`,decision:'ALLOW',reason:'PROVIDER_RECEIPT_VERIFIED',policyVersion:currentC.destinationPolicyVersion,at:this.clock()});
       this.finalize(s,currentC);

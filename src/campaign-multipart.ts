@@ -154,7 +154,8 @@ export class CampaignMultipartService {
     if(!part||part.status!=='SENDING'||part.attemptId!==claim.attemptId)return {status:'BLOCKED' as const};
     if(outcome.status==='SENT'&&isSafeId(outcome.messageId)&&
       !state(s).deliveries.some(x=>x.destination===claim.destination &&
-       (x.messageId===outcome.messageId||x.multipart?.parts.some(y=>y!==part&&y.messageId===outcome.messageId)))){
+       (x.messageId===outcome.messageId||x.multipart?.parts.some(y=>y!==part&&y.messageId===outcome.messageId))) &&
+       !s.historicalPublications.some(h=>h.destination===claim.destination&&h.proof?.messageId===outcome.messageId)){
       part.status='SENT';part.messageId=outcome.messageId;
       this.markComplete(s,c,d);
       return {status:'SENT' as const,index:part.index,messageId:outcome.messageId};
@@ -184,7 +185,8 @@ export class CampaignMultipartService {
     const current=currentD.multipart?.parts[index];
     if(!this.authorized(s,currentC)||!this.policy.has(s,actor,'content.publish',currentC.destination,this.clock()))throw new Error('PUBLISH_DENIED');
     if(!current||current.status!=='UNKNOWN_OUTCOME'||current.attemptId!==receipt.attemptId||currentD.destination!==receipt.destination||
-      state(s).deliveries.some(x=>x.destination===receipt.destination&&(x.messageId===receipt.messageId||x.multipart?.parts.some(y=>y.messageId===receipt.messageId))))throw new Error('RECEIPT_INVALID');
+      (state(s).deliveries.some(x=>x.destination===receipt.destination&&(x.messageId===receipt.messageId||x.multipart?.parts.some(y=>y.messageId===receipt.messageId))) ||
+      s.historicalPublications.some(h=>h.destination===receipt.destination&&h.proof?.messageId===receipt.messageId)))throw new Error('RECEIPT_INVALID');
     current.status='SENT';current.messageId=receipt.messageId;this.markComplete(s,currentC,currentD);return clone(current);
   });
  }
