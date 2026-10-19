@@ -1,9 +1,40 @@
 # بوت منارتك — MANARATAK BOT
 
-**B0/B1 + B2-Core + B3 + B4 reviewed multipart integration (v0.4.3). Offline/test-only — no live Telegram bot.**
+**B0/B1 + B2-Core + B3 + B4 reviewed multipart and historic-review guard (v0.4.4). Offline/test-only — no live Telegram bot.**
 
 An independent TypeScript/Node.js 22 project based on `docs/MANARATAK_BOT_MASTER_v1.2.1_AR.md` and `docs/START_HERE_MANARATAK_BOT_v1.2.1_AR.md`. B0/B1 supply the secure baseline; B2-Core adds individual moderation and subscription policies; B3 adds the first locally tested education content flow.
 
+
+
+## B4 v0.4.4 — historical publication review guard (offline)
+
+The former China / historical publication planner in `src/legacy-publication-migration.ts` was a **read-only report** and did not reserve against B4 campaigns. The new `HistoricalPublicationReviewService` in `src/legacy-campaign-review.ts` makes a separately authorized, explicit import of its per-item results into `BotStore.historicalPublications`. This is a **review registry, not a second delivery ledger, worker or publishing gateway**. Only `BotStore.deliveries` performs outbound reservation and receipt tracking.
+
+Example local workflow after importing and approving B3 resource IDs:
+
+```ts
+const review = new HistoricalPublicationReviewService(store, policy, trustedLegacyEvidenceVerifier, clock);
+const report = await review.review(publisherActor, {
+  sourceScope: approvedSourceChat,
+  destination: approvedDestinationChat,
+  resourceIds: [resourceId1, resourceId2],
+  evidence: [itemSpecificEvidence], // actual independent verification required
+  lastSeenOrdinal: 2, // UI hint ONLY, not proof of previous items
+});
+// The register preserves UNVERIFIED, REVIEW_REQUIRED, MANUALLY_SKIPPED and PUBLISHED_VERIFIED distinctly.
+// Later, if independent evidence arrives:
+// await review.reconcileEvidence(publisherActor, historicalRecordId, newlyVerifiedReceipt);
+// Or an authorized reviewer can explicitly omit it:
+// await review.markManuallySkipped(publisherActor, historicalRecordId, 'documented reason');
+```
+
+- Every historical item is matched to a **currently reviewed B3 resource's immutable revision and destination**. Imported or forwarded last-message IDs do not prove any earlier items. A caller must inject a genuinely trusted `VerifyLegacyEvidence` implementation; the fake verifier in tests is NOT a production verifier.
+- The review operation checks scoped publication rights before and after awaiting verification. Existing B4 delivery reservations, duplicate historical registrations, reused evidence IDs and colliding message IDs are refused or marked `REVIEW_REQUIRED`.
+- Any registered historical state (even `UNVERIFIED` or `MANUALLY_SKIPPED`) blocks approval of the exact same resource revision/destination in a new B4 campaign. It does not count an unverified or manually skipped item as a confirmed Telegram publication. Neither state silently expires or requeues for sending.
+- Evidence can later settle an `UNVERIFIED` or `REVIEW_REQUIRED` record in-place after independent verification and renewed authorization. Explicit late manual skips never invent a `messageId` and cannot overwrite confirmed proofs. The original review ID and audit trail remain.
+- Schema v6→v7 is additive. Earlier B4 campaigns, multipart receipts, and education records remain untouched. Never downgrade the JSON state file or use it for live multi-worker publishing.
+
+Run `npm run check` to execute all mock tests. This capability is **TESTED_MOCK only**: no Telegram Bot API reads, no historical channel scraping, no automated mass import, no real verifier, and no production platform access. Long-term B4 completion still requires transactional multi-worker persistence, a real verified evidence adapter and deployment-safe operations.
 
 ## B4 v0.4.3 — approved long-form multipart campaign flow (offline only)
 

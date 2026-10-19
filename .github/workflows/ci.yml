@@ -1,7 +1,7 @@
 name: Bot typecheck and mock tests
 on:
   push:
-    branches: ["feature/b0-b1-simulated-core", "feature/b2-core-simulation", "feature/b3-education-import-core", "feature/b3-faq-resource-links", "feature/b3-telegram-inbound", "feature/b3-documents-miniapp-auth", "feature/b4-publishing-ledger", "feature/b4-multipart-ledger-wip", "feature/b4-reviewed-multipart-flow"]
+    branches: ["feature/b0-b1-simulated-core", "feature/b2-core-simulation", "feature/b3-education-import-core", "feature/b3-faq-resource-links", "feature/b3-telegram-inbound", "feature/b3-documents-miniapp-auth", "feature/b4-publishing-ledger", "feature/b4-multipart-ledger-wip", "feature/b4-reviewed-multipart-flow", "feature/b4-legacy-campaign-guard"]
   pull_request:
 permissions:
   contents: read
