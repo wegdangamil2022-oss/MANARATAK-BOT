@@ -199,6 +199,14 @@ export class PublicationService {
       const d=s.deliveries.find(x=>x.id===claim.id)!;
       const c=s.campaigns.find(x=>x.id===campaignId)!;
       if(d.status!=='SENDING'||d.attemptId!==claim.attemptId) return {status:'UNKNOWN_OUTCOME' as const};
+      // A historical/duplicate claim imported during network I/O must not be
+      // silently accepted as proof that publishing this version is safe.
+      if(!hasExclusivePublicationReservation(s,d)) {
+        d.status='UNKNOWN_OUTCOME';
+        s.audit.push({updateKey:`b4:delivery:conflict:${d.id}`,decision:'DENY',
+          reason:'RESERVATION_CONFLICT_AFTER_NETWORK',policyVersion:c.destinationPolicyVersion,at:this.clock()});
+        return {status:'UNKNOWN_OUTCOME' as const};
+      }
       if(result.status==='SENT' && validPublicationMessageId(result.messageId) &&
         !s.deliveries.some(x=>x.destination===claim.destination &&
           (x.messageId===result.messageId || x.multipart?.parts.some(y=>y.messageId===result.messageId))) &&
@@ -245,6 +253,7 @@ export class PublicationService {
       if(!this.validate(s,c)||c.status!=='APPROVED')throw new Error('PREVIEW_STALE');
       const d=s.deliveries.find(x=>x.campaignId===c.id&&x.resourceId===resourceId);
       if(d?.status!=='FAILED_CONFIRMED')throw new Error('NOT_CONFIRMED_FAILED');
+      if(!hasExclusivePublicationReservation(s,d))throw new Error('DELIVERY_RESERVATION_CONFLICT');
       d.status='QUEUED'; delete d.attemptId;delete d.startedAt;delete d.leaseUntil;
     });
   }
@@ -253,7 +262,8 @@ export class PublicationService {
     if(!d)throw new Error('DELIVERY_NOT_FOUND');
     const c=pre.campaigns.find(x=>x.id===d.campaignId)!;
     if(!this.allowed(pre,actor,c.sourceScope,c.destination))throw new Error('PUBLISH_DENIED');
-    if(d.status!=='UNKNOWN_OUTCOME'||d.attemptId!==receipt.attemptId||d.destination!==receipt.destination||!validPublicationMessageId(receipt.messageId))
+    if(d.status!=='UNKNOWN_OUTCOME'||d.attemptId!==receipt.attemptId||d.destination!==receipt.destination||
+      !validPublicationMessageId(receipt.messageId)||!hasExclusivePublicationReservation(pre,d))
       throw new Error('UNVERIFIED_EVIDENCE');
     if(!await this.gateway.verifyReceipt(receipt))throw new Error('UNVERIFIED_EVIDENCE');
     return this.store.transaction(s=>{
@@ -261,6 +271,7 @@ export class PublicationService {
       const currentC=s.campaigns.find(x=>x.id===current.campaignId)!;
       if(!this.allowed(s,actor,currentC.sourceScope,currentC.destination))throw new Error('PUBLISH_DENIED');
       if(current.status!=='UNKNOWN_OUTCOME'||current.attemptId!==receipt.attemptId||current.destination!==receipt.destination||
+         !hasExclusivePublicationReservation(s,current)||
          s.deliveries.some(x=>x.destination===receipt.destination&&
            ((x.id!==current.id&&x.messageId===receipt.messageId)||x.multipart?.parts.some(y=>y.messageId===receipt.messageId))) ||
          s.historicalPublications.some(h=>h.destination===receipt.destination&&h.proof?.messageId===receipt.messageId)) throw new Error('UNVERIFIED_EVIDENCE');

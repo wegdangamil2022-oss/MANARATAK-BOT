@@ -169,6 +169,12 @@ export class CampaignMultipartService {
     const {campaign:c,delivery:d}=this.get(s,campaignId,resourceId);
     const part=d.multipart?.parts[claim.index];
     if(!part||part.status!=='SENDING'||part.attemptId!==claim.attemptId)return {status:'BLOCKED' as const};
+    if(!hasExclusivePublicationReservation(s,d)){
+      part.status='UNKNOWN_OUTCOME';
+      s.audit.push({updateKey:`b4:part:conflict:${d.id}:${part.index}`,decision:'DENY',
+        reason:'RESERVATION_CONFLICT_AFTER_NETWORK',policyVersion:c.destinationPolicyVersion,at:this.clock()});
+      return {status:'UNKNOWN_OUTCOME' as const,index:part.index};
+    }
     if(outcome.status==='SENT'&&validPublicationMessageId(outcome.messageId)&&
       !state(s).deliveries.some(x=>x.destination===claim.destination &&
        (x.messageId===outcome.messageId||x.multipart?.parts.some(y=>y!==part&&y.messageId===outcome.messageId))) &&
@@ -188,6 +194,7 @@ export class CampaignMultipartService {
        !this.policy.has(s,actor,'content.publish',c.sourceScope,this.clock()))throw new Error('PUBLISH_DENIED');
     const p=d.multipart?.parts[index];
     if(c.status!=='APPROVED'||d.status!=='MULTIPART'||p?.status!=='FAILED_CONFIRMED')throw new Error('NOT_CONFIRMED_FAILED');
+    if(!hasExclusivePublicationReservation(s,d))throw new Error('DELIVERY_RESERVATION_CONFLICT');
     p.status='QUEUED';delete p.attemptId;
   });
  }
@@ -197,7 +204,8 @@ export class CampaignMultipartService {
   const p=d.multipart?.parts[index];
   if(!this.authorized(before,c)||!this.policy.has(before,actor,'content.publish',c.destination,this.clock())||
      !this.policy.has(before,actor,'content.publish',c.sourceScope,this.clock()))throw new Error('PUBLISH_DENIED');
-  if(p?.status!=='UNKNOWN_OUTCOME'||!validPublicationMessageId(receipt.messageId)||p.attemptId!==receipt.attemptId||d.destination!==receipt.destination)throw new Error('RECEIPT_INVALID');
+  if(p?.status!=='UNKNOWN_OUTCOME'||!validPublicationMessageId(receipt.messageId)||p.attemptId!==receipt.attemptId||
+     d.destination!==receipt.destination||!hasExclusivePublicationReservation(before,d))throw new Error('RECEIPT_INVALID');
   if(!await this.gateway.verifyReceipt(receipt))throw new Error('RECEIPT_INVALID');
   return this.store.transaction(s=>{
     const {campaign:currentC,delivery:currentD}=this.get(s,campaignId,resourceId);
@@ -205,6 +213,7 @@ export class CampaignMultipartService {
     if(!this.authorized(s,currentC)||!this.policy.has(s,actor,'content.publish',currentC.destination,this.clock())||
        !this.policy.has(s,actor,'content.publish',currentC.sourceScope,this.clock()))throw new Error('PUBLISH_DENIED');
     if(!current||current.status!=='UNKNOWN_OUTCOME'||current.attemptId!==receipt.attemptId||currentD.destination!==receipt.destination||
+      !hasExclusivePublicationReservation(s,currentD)||
       (state(s).deliveries.some(x=>x.destination===receipt.destination&&(x.messageId===receipt.messageId||x.multipart?.parts.some(y=>y.messageId===receipt.messageId))) ||
       s.historicalPublications.some(h=>h.destination===receipt.destination&&h.proof?.messageId===receipt.messageId)))throw new Error('RECEIPT_INVALID');
     current.status='SENT';current.messageId=receipt.messageId;this.markComplete(s,currentC,currentD);return clone(current);
