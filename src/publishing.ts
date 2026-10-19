@@ -163,7 +163,7 @@ export class PublicationService {
     });
     if(claim.kind==='MULTIPART') {
       const result=await this.multipart().dispatchNext(campaignId,claim.resourceId);
-      return {status:result.status,messageId:result.messageId};
+      return result.messageId===undefined ? {status:result.status} : {status:result.status,messageId:result.messageId};
     }
     if(claim.kind!=='SEND') return {status:claim.kind};
     if(this.beforeSend) await this.beforeSend();
