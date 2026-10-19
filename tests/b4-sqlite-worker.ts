@@ -13,4 +13,7 @@ if(task==='approve') {
 } else if(task==='dispatch') {
   const result=await publishing.dispatchNext(campaign);
   process.stdout.write(result.status+':'+gateway.calls.length+'\n');
+} else if(task==='recover') {
+  const recovered=await publishing.recoverPending();
+  process.stdout.write('RECOVERED:'+recovered+'\n');
 } else throw new Error('UNKNOWN_WORKER_TASK');

@@ -106,3 +106,10 @@
 - Database state is temporarily stored as a single versioned serialized BotState row for compatibility and regression confidence; normalized tables, constraints and production operational validation remain future work.
 - Import from a legacy JSON state is explicit, refuses missing/corrupt sources and initialized destinations, and preserves earlier publication history. Online backup is non-overwriting and verifies a restorable snapshot.
 - Node 22 built-in sqlite is experimental. The new backend is for offline B4 concurrency and backup contract tests; never interpret this slice as authorization for real Telegram, multi-host distributed leases, or direct production database use.
+
+## B4 v0.4.6 — durable attempt leases and reviewer permission fixes (19 October 2026)
+
+- A recoverPending sweep MUST NOT mark a different worker's **active** SENDING intent as UNKNOWN. All new single or multipart attempts persist a fixed 120-second lease in the same BotStore delivery record before the outbound boundary, including the existing optional SQLite transaction engine.
+- Missing legacy lease or expired lease is treated as UNKNOWN_OUTCOME and never as a confirmed failure or new queued send. Late workers are fenced before network sending if an attempt is already expired. The lease cannot turn an ambiguous HTTP response into a guarantee of non-delivery, nor is it a background renewal mechanism.
+- A human editor acting on a multipart retry or provider-evidence reconciliation must hold **both** source and destination content.publish rights. Reevaluate after async provider verification: an authorized campaign approver's rights never substitute for those of the reviewer invoking the operation.
+- No live gateway, channel operations, platform DB access or auto-merges are permitted in this phase. Production operational heartbeat, schema-normalized outbox and externally verified receipts remain outstanding.

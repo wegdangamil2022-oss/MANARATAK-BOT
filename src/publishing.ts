@@ -3,6 +3,7 @@ import { BotStore, type BotState, type PublicationCampaign, type PublicationPrev
 import { Policy } from './policy.js';
 import { planPublicationPreview } from './publication-preview-plan.js';
 import { CampaignMultipartService } from './campaign-multipart.js';
+import { nextDispatchLease, leaseExpired } from './publication-worker-lease.js';
 
 export interface PublicationReceipt { destination: string; attemptId: string; messageId: string; }
 export type PublicationOutcome = { status: 'SENT'; messageId: string } | { status: 'FAILED_CONFIRMED' } | { status: 'UNKNOWN_OUTCOME' };
@@ -160,7 +161,7 @@ export class PublicationService {
       if(d?.status==='MULTIPART') return {kind:'MULTIPART' as const,resourceId:d.resourceId};
       if(!d || d.status!=='QUEUED') return {kind:'EMPTY' as const};
       if(!this.validate(s,c)) {c.status='PAUSED';return {kind:'BLOCKED' as const};}
-      d.status='SENDING';d.attemptId=randomUUID();d.startedAt=this.clock();
+      d.status='SENDING';d.attemptId=randomUUID();d.startedAt=this.clock();d.leaseUntil=nextDispatchLease(this.clock());
       return {kind:'SEND' as const,id:d.id,attemptId:d.attemptId,text:c.previews.find(x=>x.resourceId===d.resourceId)!.text,destination:c.destination};
     });
     if(claim.kind==='MULTIPART') {
@@ -176,8 +177,13 @@ export class PublicationService {
       const d=s.deliveries.find(x=>x.id===claim.id);
       const c=s.campaigns.find(x=>x.id===campaignId);
       if(!d||!c||d.status!=='SENDING'||d.attemptId!==claim.attemptId) return false;
+      if(leaseExpired(d.leaseUntil,this.clock())) {
+        // An expired, durable attempt must be fenced even when the gateway has not been called.
+        d.status='UNKNOWN_OUTCOME';
+        return false;
+      }
       if(canPost&&c.status==='APPROVED'&&this.validate(s,c)) return true;
-      d.status='QUEUED'; // no remote request was dispatched
+      d.status='QUEUED'; delete d.leaseUntil; delete d.attemptId; delete d.startedAt;
       if(c.status==='APPROVED') c.status='PAUSED';
       return false;
     });
@@ -206,9 +212,9 @@ export class PublicationService {
     return this.store.transaction(s=>{
       let count=0;
       for(const d of s.deliveries) {
-        if(d.status==='SENDING') {d.status='UNKNOWN_OUTCOME';count++;}
+        if(d.status==='SENDING' && leaseExpired(d.leaseUntil,this.clock())) {d.status='UNKNOWN_OUTCOME';count++;}
         if(d.status==='MULTIPART' && d.multipart) for(const part of d.multipart.parts)
-          if(part.status==='SENDING') {part.status='UNKNOWN_OUTCOME';count++;}
+          if(part.status==='SENDING' && leaseExpired(part.leaseUntil,this.clock())) {part.status='UNKNOWN_OUTCOME';count++;}
       }
       return count;
     });
@@ -234,7 +240,7 @@ export class PublicationService {
       if(!this.validate(s,c)||c.status!=='APPROVED')throw new Error('PREVIEW_STALE');
       const d=s.deliveries.find(x=>x.campaignId===c.id&&x.resourceId===resourceId);
       if(d?.status!=='FAILED_CONFIRMED')throw new Error('NOT_CONFIRMED_FAILED');
-      d.status='QUEUED'; delete d.attemptId;delete d.startedAt;
+      d.status='QUEUED'; delete d.attemptId;delete d.startedAt;delete d.leaseUntil;
     });
   }
   async reconcileUnknown(actor:string,deliveryId:string,receipt:PublicationReceipt):Promise<PublicationDelivery>{

@@ -2,10 +2,11 @@ import { createHash, randomUUID } from 'node:crypto';
 import { BotStore, type BotState } from './store.js';
 import { Policy } from './policy.js';
 import { planPublicationPreview, type PublicationRenderPart, type PublicationRenderPlan } from './publication-preview-plan.js';
+import { nextDispatchLease, leaseExpired } from './publication-worker-lease.js';
 
 /** B4 offline contract: the parts live INSIDE the original BotStore delivery, not a second ledger. */
 type PartStatus = 'QUEUED'|'SENDING'|'SENT'|'FAILED_CONFIRMED'|'UNKNOWN_OUTCOME';
-export interface CampaignPart { index:number; payload:PublicationRenderPart; status:PartStatus; attemptId?:string; messageId?:string; }
+export interface CampaignPart { index:number; payload:PublicationRenderPart; status:PartStatus; attemptId?:string; leaseUntil?:number; messageId?:string; }
 export interface AttachedParts { fingerprint:string; parts:CampaignPart[]; }
 type Campaign = {
  id:string; sourceScope:string; destination:string; approvedBy?:string; createdBy:string;
@@ -97,7 +98,7 @@ export class CampaignMultipartService {
   return this.store.transaction(s=>{
    let count=0;
    for(const d of state(s).deliveries??[])if(d.status==='MULTIPART'&&d.multipart)for(const part of d.multipart.parts)
-     if(part.status==='SENDING'){part.status='UNKNOWN_OUTCOME';count++;}
+     if(part.status==='SENDING' && leaseExpired(part.leaseUntil,this.clock())){part.status='UNKNOWN_OUTCOME';count++;}
    return count;
   });
  }
@@ -129,7 +130,7 @@ export class CampaignMultipartService {
     const p=d.multipart.parts.find(x=>x.status!=='SENT');
     if(!p)return {kind:'EMPTY' as const};
     if(p.status!=='QUEUED')return {kind:'BLOCKED' as const};
-    p.status='SENDING';p.attemptId=randomUUID();
+    p.status='SENDING';p.attemptId=randomUUID();p.leaseUntil=nextDispatchLease(this.clock());
     s.audit.push({updateKey:`b4:part:attempt:${d.id}:${p.index}:${p.attemptId}`,decision:'ALLOW',
       reason:'PART_ATTEMPT_RECORDED_BEFORE_SEND',policyVersion:c.destinationPolicyVersion,at:this.clock()});
     return {kind:'SEND' as const,index:p.index,attemptId:p.attemptId,destination:c.destination,payload:clone(p.payload),deliveryId:d.id};
@@ -141,8 +142,12 @@ export class CampaignMultipartService {
     const {campaign:c,delivery:d}=this.get(s,campaignId,resourceId);
     const p=d.multipart?.parts[claim.index];
     if(!p||p.attemptId!==claim.attemptId||p.status!=='SENDING')return false;
+    if(leaseExpired(p.leaseUntil,this.clock())) {
+      p.status='UNKNOWN_OUTCOME';
+      return false; // old worker must never reach the gateway after its lease expires
+    }
     if(allowed&&d.id===claim.deliveryId&&d.status==='MULTIPART'&&c.status==='APPROVED'&&this.authorized(s,c))return true;
-    p.status='QUEUED';return false;
+    p.status='QUEUED';delete p.attemptId;delete p.leaseUntil;delete p.leaseUntil;return false;
   });
   if(!current)return {status:'BLOCKED'};
   let outcome:CampaignPartOutcome;
@@ -167,7 +172,8 @@ export class CampaignMultipartService {
  async retryFailed(actor:string,campaignId:string,resourceId:string,index:number):Promise<void> {
   await this.store.transaction(s=>{
     const {campaign:c,delivery:d}=this.get(s,campaignId,resourceId);
-    if(!this.authorized(s,c)||!this.policy.has(s,actor,'content.publish',c.destination,this.clock()))throw new Error('PUBLISH_DENIED');
+    if(!this.authorized(s,c)||!this.policy.has(s,actor,'content.publish',c.destination,this.clock())||
+       !this.policy.has(s,actor,'content.publish',c.sourceScope,this.clock()))throw new Error('PUBLISH_DENIED');
     const p=d.multipart?.parts[index];
     if(c.status!=='APPROVED'||d.status!=='MULTIPART'||p?.status!=='FAILED_CONFIRMED')throw new Error('NOT_CONFIRMED_FAILED');
     p.status='QUEUED';delete p.attemptId;
@@ -177,13 +183,15 @@ export class CampaignMultipartService {
   const before=await this.store.snapshot();
   const {campaign:c,delivery:d}=this.get(before,campaignId,resourceId);
   const p=d.multipart?.parts[index];
-  if(!this.authorized(before,c)||!this.policy.has(before,actor,'content.publish',c.destination,this.clock()))throw new Error('PUBLISH_DENIED');
+  if(!this.authorized(before,c)||!this.policy.has(before,actor,'content.publish',c.destination,this.clock())||
+     !this.policy.has(before,actor,'content.publish',c.sourceScope,this.clock()))throw new Error('PUBLISH_DENIED');
   if(p?.status!=='UNKNOWN_OUTCOME'||!isSafeId(receipt.messageId)||p.attemptId!==receipt.attemptId||d.destination!==receipt.destination)throw new Error('RECEIPT_INVALID');
   if(!await this.gateway.verifyReceipt(receipt))throw new Error('RECEIPT_INVALID');
   return this.store.transaction(s=>{
     const {campaign:currentC,delivery:currentD}=this.get(s,campaignId,resourceId);
     const current=currentD.multipart?.parts[index];
-    if(!this.authorized(s,currentC)||!this.policy.has(s,actor,'content.publish',currentC.destination,this.clock()))throw new Error('PUBLISH_DENIED');
+    if(!this.authorized(s,currentC)||!this.policy.has(s,actor,'content.publish',currentC.destination,this.clock())||
+       !this.policy.has(s,actor,'content.publish',currentC.sourceScope,this.clock()))throw new Error('PUBLISH_DENIED');
     if(!current||current.status!=='UNKNOWN_OUTCOME'||current.attemptId!==receipt.attemptId||currentD.destination!==receipt.destination||
       (state(s).deliveries.some(x=>x.destination===receipt.destination&&(x.messageId===receipt.messageId||x.multipart?.parts.some(y=>y.messageId===receipt.messageId))) ||
       s.historicalPublications.some(h=>h.destination===receipt.destination&&h.proof?.messageId===receipt.messageId)))throw new Error('RECEIPT_INVALID');

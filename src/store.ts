@@ -37,14 +37,14 @@ export interface PublicationCampaign {
 export type DeliveryStatus = 'QUEUED' | 'MULTIPART' | 'SENDING' | 'SENT' | 'FAILED_CONFIRMED' | 'UNKNOWN_OUTCOME' | 'CANCELLED' | 'SKIPPED';
 export interface PublicationDelivery {
   id: string; campaignId: string; resourceId: string; destination: string; revision: string;
-  status: DeliveryStatus; attemptId?: string; startedAt?: number; messageId?: string;
+  status: DeliveryStatus; attemptId?: string; startedAt?: number; leaseUntil?: number; messageId?: string;
   reviewReason?: string;
   /** B4 offline-only part-level receipts; populated only by CampaignMultipartService. */
   multipart?: {
     fingerprint: string;
     parts: { index: number; payload: import('./publication-preview-plan.js').PublicationRenderPart;
       status: 'QUEUED' | 'SENDING' | 'SENT' | 'FAILED_CONFIRMED' | 'UNKNOWN_OUTCOME';
-      attemptId?: string; messageId?: string; }[];
+      attemptId?: string; leaseUntil?: number; messageId?: string; }[];
   };
 }
 /** Historical evidence is an item-specific publication guard, not an outbound delivery or a second sender. */

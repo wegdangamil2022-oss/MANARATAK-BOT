@@ -106,13 +106,15 @@ test('B4 integrated: two concurrent dispatches claim exactly one part',async()=>
  }finally{await f.close()}
 });
 
-test('B4 integrated: recover in-flight attempt as UNKNOWN and reconcile only a matching unique verified receipt',async()=>{
+test('B4 integrated: recover expired in-flight attempt as UNKNOWN and reconcile only a matching unique verified receipt',async()=>{
  const f=await fixture();try{
   await f.service().stage(owner,'campaign1','r1',f.plan);
   let release!:()=>void;const pending=new Promise<void>(resolve=>release=resolve);
   f.pause(pending);
   const running=f.service().dispatchNext('campaign1','r1');
   for(let i=0;i<100;i++){if((await f.store.snapshot() as Compat).deliveries[0].multipart.parts[0].status==='SENDING')break;await new Promise(x=>setTimeout(x,3));}
+  // Simulate an elapsed lease while the old worker is still awaiting a network reply.
+  await f.store.transaction(s=>{(s as Compat).deliveries[0].multipart.parts[0].leaseUntil=999;});
   assert.equal(await f.service().recoverPending(),1);
   release();await running;f.pause();
   const p=(await f.store.snapshot() as Compat).deliveries[0].multipart.parts[0];
