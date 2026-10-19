@@ -3,6 +3,7 @@ import { BotStore, type BotState } from './store.js';
 import { Policy } from './policy.js';
 import { planPublicationPreview, type PublicationRenderPart, type PublicationRenderPlan } from './publication-preview-plan.js';
 import { validPublicationMessageId } from './publication-receipts.js';
+import { hasExclusivePublicationReservation } from './publication-reservation-integrity.js';
 import { nextDispatchLease, leaseExpired } from './publication-worker-lease.js';
 
 /** B4 offline contract: the parts live INSIDE the original BotStore delivery, not a second ledger. */
@@ -117,7 +118,8 @@ export class CampaignMultipartService {
     const {campaign:c,delivery:d}=this.get(s,campaignId,resourceId);
     if(c.status==='CANCELLED')return {kind:'CANCELLED' as const};
     if(d.status==='SENT')return {kind:'EMPTY' as const};
-    if(c.status!=='APPROVED'||d.status!=='MULTIPART'||!d.multipart||!this.authorized(s,c))return {kind:'BLOCKED' as const};
+    if(c.status!=='APPROVED'||d.status!=='MULTIPART'||!d.multipart||!this.authorized(s,c)||
+       !hasExclusivePublicationReservation(s,d))return {kind:'BLOCKED' as const};
     const preview=c.previews.find(x=>x.resourceId===resourceId);
     let canonical:PublicationRenderPlan;
     try { canonical=planPublicationPreview({text:preview?.text??''}); }
@@ -155,7 +157,8 @@ export class CampaignMultipartService {
       p.status='UNKNOWN_OUTCOME';
       return false; // old worker must never reach the gateway after its lease expires
     }
-    if(allowed&&d.id===claim.deliveryId&&d.status==='MULTIPART'&&c.status==='APPROVED'&&this.authorized(s,c))return true;
+    if(allowed&&d.id===claim.deliveryId&&d.status==='MULTIPART'&&c.status==='APPROVED'&&
+       hasExclusivePublicationReservation(s,d)&&this.authorized(s,c))return true;
     p.status='QUEUED';delete p.attemptId;delete p.leaseUntil;delete p.leaseUntil;return false;
   });
   if(!current)return {status:'BLOCKED'};

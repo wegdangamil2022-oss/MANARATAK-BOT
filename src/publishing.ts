@@ -4,6 +4,7 @@ import { Policy } from './policy.js';
 import { planPublicationPreview } from './publication-preview-plan.js';
 import { CampaignMultipartService } from './campaign-multipart.js';
 import { validPublicationMessageId } from './publication-receipts.js';
+import { hasExclusivePublicationReservation } from './publication-reservation-integrity.js';
 import { nextDispatchLease, leaseExpired } from './publication-worker-lease.js';
 
 export interface PublicationReceipt { destination: string; attemptId: string; messageId: string; }
@@ -159,8 +160,11 @@ export class PublicationService {
       if(c.scheduledAt>this.clock()) return { kind:'NOT_DUE' as const };
       const d=s.deliveries.find(x=>x.campaignId===c.id && !['SENT','SKIPPED','CANCELLED'].includes(x.status));
       // An uncertain/failed/in-flight earlier item blocks later campaign items until human review.
+      if(d?.status==='MULTIPART' && !hasExclusivePublicationReservation(s,d))
+        return {kind:'BLOCKED' as const};
       if(d?.status==='MULTIPART') return {kind:'MULTIPART' as const,resourceId:d.resourceId};
       if(!d || d.status!=='QUEUED') return {kind:'EMPTY' as const};
+      if(!hasExclusivePublicationReservation(s,d)) return {kind:'BLOCKED' as const};
       if(!this.validate(s,c)) {c.status='PAUSED';return {kind:'BLOCKED' as const};}
       d.status='SENDING';d.attemptId=randomUUID();d.startedAt=this.clock();d.leaseUntil=nextDispatchLease(this.clock());
       return {kind:'SEND' as const,id:d.id,attemptId:d.attemptId,text:c.previews.find(x=>x.resourceId===d.resourceId)!.text,destination:c.destination};
@@ -183,7 +187,7 @@ export class PublicationService {
         d.status='UNKNOWN_OUTCOME';
         return false;
       }
-      if(canPost&&c.status==='APPROVED'&&this.validate(s,c)) return true;
+      if(canPost&&c.status==='APPROVED'&&hasExclusivePublicationReservation(s,d)&&this.validate(s,c)) return true;
       d.status='QUEUED'; delete d.leaseUntil; delete d.attemptId; delete d.startedAt;
       if(c.status==='APPROVED') c.status='PAUSED';
       return false;
