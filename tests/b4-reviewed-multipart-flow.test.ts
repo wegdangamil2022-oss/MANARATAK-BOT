@@ -113,3 +113,76 @@ test('B4 reviewed flow: v5 migration preserves historic deliveries and B3 data',
     assert.deepEqual(migrated.educationResources, historic.educationResources);
   } finally { await f.close(); }
 });
+
+test('B4 reviewed flow: uploader cannot approve publication copy; preview plan tampering cannot be approved', async () => {
+  const f = await fixture(); try {
+    await f.policy.grant(OWNER, '300', 'content.upload', SOURCE, 20000);
+    await assert.rejects(f.education.setPublicationText('300', f.resource.id, LONG_TEXT), /PUBLISH_DENIED/);
+    await assert.rejects(f.education.setPublicationText(OWNER, f.resource.id, 'x'.repeat(40961)), /PREVIEW_TOO_LONG/);
+    await f.education.setPublicationText(OWNER, f.resource.id, LONG_TEXT);
+    const c = await f.publication().draft(OWNER, SOURCE, DEST, [f.resource.id]);
+    await f.store.transaction(s => {
+      s.campaigns.find(x => x.id === c.id)!.previews[0]!.renderPlan!.parts[0]!.text = 'forged text';
+    });
+    await assert.rejects(f.publication().approve(OWNER, c.id), /PREVIEW_STALE/);
+    assert.equal((await f.store.snapshot()).deliveries.length, 0);
+    assert.equal(f.gateway.calls.length, 0);
+  } finally { await f.close(); }
+});
+
+test('B4 reviewed flow: persisted attempt precedes async network permission check and approver revocation denies send', async () => {
+  const f = await fixture(); try {
+    const editor = '201';
+    await f.policy.grant(OWNER, editor, 'content.publish', SOURCE, 20000);
+    await f.policy.grant(OWNER, editor, 'content.publish', DEST, 20000);
+    await f.education.setPublicationText(editor, f.resource.id, LONG_TEXT);
+    const c = await f.publication().draft(editor, SOURCE, DEST, [f.resource.id]);
+    await f.publication().approve(editor, c.id);
+    f.gateway.canPost = async () => {
+      const state = await f.store.snapshot();
+      const part = state.deliveries[0]!.multipart!.parts[0]!;
+      assert.equal(part.status, 'SENDING');
+      assert.ok(part.attemptId);
+      assert.ok(state.audit.some(a => a.reason === 'PART_ATTEMPT_RECORDED_BEFORE_SEND'));
+      await f.policy.revokeGrant(OWNER, editor, 'content.publish', DEST);
+      return true;
+    };
+    assert.equal((await f.publication().dispatchNext(c.id)).status, 'BLOCKED');
+    assert.equal(f.gateway.calls.length, 0);
+    assert.equal((await f.store.snapshot()).deliveries[0]!.multipart!.parts[0]!.status, 'QUEUED');
+  } finally { await f.close(); }
+});
+
+test('B4 reviewed flow: process restart turns a durable orphaned part attempt into UNKNOWN without resending', async () => {
+  const f = await fixture(); try {
+    await f.education.setPublicationText(OWNER, f.resource.id, LONG_TEXT);
+    const c = await f.publication().draft(OWNER, SOURCE, DEST, [f.resource.id]);
+    await f.publication().approve(OWNER, c.id);
+    await f.store.transaction(s => {
+      const first = s.deliveries[0]!.multipart!.parts[0]!;
+      first.status = 'SENDING';
+      first.attemptId = 'existing-attempt';
+    });
+    assert.equal(await f.publication().recoverPending(), 1);
+    assert.equal((await f.publication().dispatchNext(c.id)).status, 'BLOCKED');
+    assert.equal(f.gateway.calls.length, 0);
+    const pending = (await f.store.snapshot()).deliveries[0]!.multipart!.parts;
+    assert.equal(pending[0]!.status, 'UNKNOWN_OUTCOME');
+    assert.equal(pending[0]!.attemptId, 'existing-attempt');
+    assert.equal(pending[1]!.status, 'QUEUED');
+  } finally { await f.close(); }
+});
+
+test('B4 reviewed flow: duplicate campaigns share the original resource reservation, never a second multipart ledger', async () => {
+  const f = await fixture(); try {
+    await f.education.setPublicationText(OWNER, f.resource.id, LONG_TEXT);
+    const a = await f.publication().draft(OWNER, SOURCE, DEST, [f.resource.id]);
+    const b = await f.publication().draft(OWNER, SOURCE, DEST, [f.resource.id]);
+    await f.publication().approve(OWNER, a.id);
+    await assert.rejects(f.publication().approve(OWNER, b.id), /DELIVERY_ALREADY_RESERVED/);
+    const snapshot = await f.store.snapshot();
+    assert.equal(snapshot.deliveries.length, 1);
+    assert.equal(snapshot.deliveries[0]!.status, 'MULTIPART');
+    assert.equal(snapshot.deliveries[0]!.multipart!.parts.length, planPublicationPreview({text:LONG_TEXT}).parts.length);
+  } finally { await f.close(); }
+});
