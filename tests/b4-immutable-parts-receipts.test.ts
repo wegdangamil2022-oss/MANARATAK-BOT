@@ -116,3 +116,48 @@ test('B4: legitimate opaque mock message receipts still confirm a single and mul
   }finally{await f.close();}
  }
 });
+
+for(const multipart of [false,true] as const) {
+ test(`B4 ${multipart?'multipart':'single'}: duplicate saved reservation fails closed before fake network delivery`,async()=>{
+  const f=await fixture('sqlite',multipart);try{
+   await f.store.transaction(s=>{
+    s.deliveries.push({...structuredClone(s.deliveries[0]!),id:'duplicate-from-broken-legacy'});
+   });
+   assert.equal((await f.publication.dispatchNext(f.c.id)).status,'BLOCKED');
+   assert.equal(f.gateway.calls.length,0);
+   const state=await f.store.snapshot();
+   assert.equal(state.deliveries.length,2);
+   assert.equal(multipart?state.deliveries[0]!.multipart!.parts[0]!.status:state.deliveries[0]!.status,
+    multipart?'QUEUED':'QUEUED');
+  }finally{await f.close();}
+ });
+
+ test(`B4 ${multipart?'multipart':'single'}: historical register collision imported after approval blocks send`,async()=>{
+  const f=await fixture('json',multipart);try{
+   await f.store.transaction(s=>{
+    const d=s.deliveries[0]!;
+    s.historicalPublications.push({id:'legacy-evidence-replayed',sourceScope:SOURCE,destination:DEST,
+     resourceId:d.resourceId,revision:d.revision,status:'UNVERIFIED',
+     diagnostic:'OLD_UNVERIFIED',reviewedBy:OWNER,reviewedAt:1000});
+   });
+   assert.equal((await f.publication.dispatchNext(f.c.id)).status,'BLOCKED');
+   assert.equal(f.gateway.calls.length,0);
+  }finally{await f.close();}
+ });
+
+ test(`B4 ${multipart?'multipart':'single'}: review reservation arriving DURING async canPost fences old sender`,async()=>{
+  const f=await fixture('sqlite',multipart);try{
+   f.gateway.canPost=async()=>{
+    await f.store.transaction(s=>{
+     const d=s.deliveries[0]!;
+     s.historicalPublications.push({id:'late-history',sourceScope:SOURCE,destination:DEST,
+      resourceId:d.resourceId,revision:d.revision,status:'REVIEW_REQUIRED',
+      diagnostic:'NOT_CERTIFIED',reviewedBy:OWNER,reviewedAt:1000});
+    });
+    return true;
+   };
+   assert.equal((await f.publication.dispatchNext(f.c.id)).status,'BLOCKED');
+   assert.equal(f.gateway.calls.length,0);
+  }finally{await f.close();}
+ });
+}
