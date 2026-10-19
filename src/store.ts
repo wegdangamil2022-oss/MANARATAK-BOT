@@ -1,6 +1,8 @@
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
 import { randomUUID } from 'node:crypto';
+import { DatabaseSync } from 'node:sqlite';
+import { resolve } from 'node:path';
 
 export type Capability = 'ai.ask' | 'ai.settings.manage' | 'content.publish' | 'content.upload' | 'chat.manage' | 'education.navigate' | 'owner.dashboard' | 'subscription.verify' | 'support.use';
 export type GroupAIMode = 'OFF' | 'OWNER_MENTION' | 'STAFF_MENTION' | 'ALL_MENTION';
@@ -89,51 +91,105 @@ const empty = (): BotState => ({
 // Production B2 must replace this with a multi-process transactional store + backups.
 const locks = new Map<string, Promise<void>>();
 export class BotStore {
-  constructor(readonly file: string) {}
-  private async read(): Promise<BotState> {
+  constructor(readonly file: string, readonly options: {engine?: 'json' | 'sqlite'} = {}) {}
+
+  /** One source-of-truth schema decoder for the JSON simulation and SQLite state row. */
+  private decode(state: unknown): BotState {
+    if (!state || typeof state !== 'object') throw new Error('Unsupported state schema');
+    const previous = state as Record<string, unknown>;
+    if (previous.schemaVersion === 1) {
+      previous.schemaVersion = 2;
+      previous.moderationReasons = []; previous.moderationOperations = []; previous.subscriptionRequirements = []; previous.warnings = [];
+    }
+    if (previous.schemaVersion === 2) {
+      previous.schemaVersion = 3;
+      previous.educationCategories = []; previous.educationResources = []; previous.importRuns = [];
+    }
+    if (previous.schemaVersion === 3) {
+      previous.schemaVersion = 4; previous.faqEntries = []; previous.resourceLinks = [];
+    }
+    if (previous.schemaVersion === 4) {
+      previous.schemaVersion = 5; previous.campaigns = []; previous.deliveries = [];
+    }
+    if (previous.schemaVersion === 5) previous.schemaVersion = 6;
+    if (previous.schemaVersion === 6) {
+      previous.schemaVersion = 7;
+      previous.historicalPublications = [];
+    }
+    if (previous.schemaVersion !== 7 ||
+      !Array.isArray(previous.historicalPublications) || !Array.isArray(previous.campaigns) ||
+      !Array.isArray(previous.deliveries) || !Array.isArray(previous.faqEntries) ||
+      !Array.isArray(previous.resourceLinks) || !Array.isArray(previous.moderationReasons) ||
+      !Array.isArray(previous.moderationOperations) || !Array.isArray(previous.subscriptionRequirements) ||
+      !Array.isArray(previous.warnings) || !Array.isArray(previous.educationCategories) ||
+      !Array.isArray(previous.educationResources) || !Array.isArray(previous.importRuns))
+      throw new Error('Unsupported state schema');
+    return previous as unknown as BotState;
+  }
+
+  private async openSqlite(): Promise<DatabaseSync> {
+    await mkdir(dirname(this.file), { recursive: true });
+    const db = new DatabaseSync(this.file);
     try {
-      const state: unknown = JSON.parse(await readFile(this.file, 'utf8'));
-      if (!state || typeof state !== 'object') throw new Error('Unsupported state schema');
-      // B1 -> B2 migration is explicit and additive; never wipe B1 authorizations or ledgers.
-      const previous = state as Record<string, unknown>;
-      if (previous.schemaVersion === 1) {
-        previous.schemaVersion = 2;
-        previous.moderationReasons = []; previous.moderationOperations = []; previous.subscriptionRequirements = []; previous.warnings = [];
-      }
-      if (previous.schemaVersion === 2) {
-        previous.schemaVersion = 3;
-        previous.educationCategories = []; previous.educationResources = []; previous.importRuns = [];
-      }
-      if (previous.schemaVersion === 3) {
-        previous.schemaVersion = 4; previous.faqEntries = []; previous.resourceLinks = [];
-      }
-      if (previous.schemaVersion === 4) {
-        previous.schemaVersion = 5; previous.campaigns = []; previous.deliveries = [];
-      }
-      if (previous.schemaVersion === 5) {
-        // Additive publication-plan migration: retain every historical campaign and receipt verbatim.
-        previous.schemaVersion = 6;
-      }
-      if (previous.schemaVersion === 6) {
-        // Historical review registry is additive: never rebuild old B4 delivery receipts.
-        previous.schemaVersion = 7;
-        previous.historicalPublications = [];
-      }
-      if (previous.schemaVersion !== 7 || !Array.isArray(previous.historicalPublications) || !Array.isArray(previous.campaigns) || !Array.isArray(previous.deliveries) || !Array.isArray(previous.faqEntries) || !Array.isArray(previous.resourceLinks) || !Array.isArray(previous.moderationReasons) || !Array.isArray(previous.moderationOperations) || !Array.isArray(previous.subscriptionRequirements) || !Array.isArray(previous.warnings) || !Array.isArray(previous.educationCategories) || !Array.isArray(previous.educationResources) || !Array.isArray(previous.importRuns)) throw new Error('Unsupported state schema');
-      return previous as unknown as BotState;
+      db.exec('PRAGMA busy_timeout = 10000');
+      db.exec('PRAGMA journal_mode = WAL');
+      db.exec('PRAGMA synchronous = FULL');
+      db.exec('CREATE TABLE IF NOT EXISTS bot_state (id INTEGER PRIMARY KEY CHECK (id = 1), data TEXT NOT NULL)');
+      return db;
     } catch (err) {
-      if ((err as NodeJS.ErrnoException).code === 'ENOENT') return empty();
-      throw err; // NEVER silently reset corrupted production data.
+      db.close();
+      throw err;
     }
   }
+
+  private readSqliteState(db: DatabaseSync): BotState {
+    const row = db.prepare('SELECT data FROM bot_state WHERE id = 1').get() as {data: string} | undefined;
+    if (!row) return empty();
+    if (typeof row.data !== 'string') throw new Error('Unsupported state schema');
+    return this.decode(JSON.parse(row.data) as unknown);
+  }
+
+  private async read(): Promise<BotState> {
+    if (this.options.engine === 'sqlite') {
+      const db = await this.openSqlite();
+      try { return this.readSqliteState(db); }
+      finally { db.close(); }
+    }
+    try { return this.decode(JSON.parse(await readFile(this.file, 'utf8')) as unknown); }
+    catch (err) {
+      if ((err as NodeJS.ErrnoException).code === 'ENOENT') return empty();
+      throw err; // corrupt data is never silently reset
+    }
+  }
+
   async snapshot(): Promise<BotState> { return structuredClone(await this.read()); }
+
   async transaction<T>(work: (state: BotState) => T | Promise<T>): Promise<T> {
-    const previous = locks.get(this.file) ?? Promise.resolve();
+    const key=resolve(this.file); // aliases of one local file share a per-process mutex
+    const previous = locks.get(key) ?? Promise.resolve();
     let release!: () => void;
-    const next = new Promise<void>(resolve => { release = resolve; });
-    locks.set(this.file, previous.then(() => next));
+    const next = new Promise<void>(r => { release = r; });
+    locks.set(key, previous.then(() => next));
     await previous;
     try {
+      if (this.options.engine === 'sqlite') {
+        const db = await this.openSqlite();
+        let active = false;
+        try {
+          // BEGIN IMMEDIATE holds a write reservation across independent Node processes.
+          db.exec('BEGIN IMMEDIATE'); active = true;
+          const state = this.readSqliteState(db);
+          const result = await work(state);
+          this.decode(structuredClone(state)); // reject malformed updates before commit
+          db.prepare('INSERT INTO bot_state (id,data) VALUES (1,?) ON CONFLICT(id) DO UPDATE SET data = excluded.data')
+            .run(JSON.stringify(state));
+          db.exec('COMMIT'); active = false;
+          return result;
+        } catch (err) {
+          if (active) db.exec('ROLLBACK');
+          throw err;
+        } finally { db.close(); }
+      }
       const state = await this.read();
       const result = await work(state);
       await mkdir(dirname(this.file), { recursive: true });
@@ -142,6 +198,28 @@ export class BotStore {
       await rename(tmp, this.file);
       return result;
     } finally { release(); }
+  }
+
+  /**
+   * Deliberate offline JSON -> SQLite import. Never overwrites an initialized database.
+   * An existing invalid source is rejected; an absent JSON source is not an empty state.
+   */
+  static async importJsonToSqlite(jsonFile: string, sqliteFile: string): Promise<void> {
+    if (resolve(jsonFile) === resolve(sqliteFile)) throw new Error('SOURCE_DESTINATION_COLLISION');
+    await readFile(jsonFile, 'utf8'); // ENOENT must propagate; no fabricated empty migration
+    const source = await new BotStore(jsonFile).snapshot();
+    const destination = new BotStore(sqliteFile, {engine:'sqlite'});
+    const db = await destination.openSqlite();
+    let active = false;
+    try {
+      db.exec('BEGIN IMMEDIATE'); active = true;
+      if (db.prepare('SELECT id FROM bot_state WHERE id=1').get()) throw new Error('SQLITE_ALREADY_INITIALIZED');
+      db.prepare('INSERT INTO bot_state (id,data) VALUES (1,?)').run(JSON.stringify(source));
+      db.exec('COMMIT'); active = false;
+    } catch (err) {
+      if (active) db.exec('ROLLBACK');
+      throw err;
+    } finally { db.close(); }
   }
   async claim(key: string, now: number, leaseMs = 30_000): Promise<'CLAIMED' | 'DUPLICATE' | 'UNKNOWN'> {
     return this.transaction(s => {
