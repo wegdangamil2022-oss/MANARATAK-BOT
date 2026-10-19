@@ -98,3 +98,11 @@
 - Existing single and multipart mock senders reject a receipt already verified as historical for the same destination. A colliding receipt remains `UNKNOWN_OUTCOME` until separately resolved; no text-hash-based deduplication is treated as proof.
 - Late historical reconciliation can only settle a previously uncertain/review-required item after independently verified, unique evidence and renewed scoped permissions. Explicit manually skipped items never gain a message ID or count as successful sends.
 - Schema 6→7 appends history metadata without rewriting B4 delivery states or receipts. Single-process JSON is still **not** a production store; add a transactional multi-worker backend, backups and real gateway verification before activation.
+
+## B4 v0.4.5 — SQLite persistence experiment (19 October 2026)
+
+- Opt-in storage engine: the established BotStore API and its canonical campaigns/deliveries/part attempts/historical registry are retained; when specified, SQLite WAL + BEGIN IMMEDIATE provides cross-process atomic state updates. The default JSON store continues for mock fixtures only.
+- A durable intent must commit before an outbound fake gateway call. A database transaction cannot make Telegram network sends exactly once; timeout and process death preserve UNKNOWN_OUTCOME and require external evidence.
+- Database state is temporarily stored as a single versioned serialized BotState row for compatibility and regression confidence; normalized tables, constraints and production operational validation remain future work.
+- Import from a legacy JSON state is explicit, refuses missing/corrupt sources and initialized destinations, and preserves earlier publication history. Online backup is non-overwriting and verifies a restorable snapshot.
+- Node 22 built-in sqlite is experimental. The new backend is for offline B4 concurrency and backup contract tests; never interpret this slice as authorization for real Telegram, multi-host distributed leases, or direct production database use.
