@@ -1,6 +1,8 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {mkdtemp,rm} from 'node:fs/promises';
+import {execFile} from 'node:child_process';
+import {promisify} from 'node:util';
 import {join} from 'node:path';
 import {tmpdir} from 'node:os';
 import {BotStore} from '../src/store.js';
@@ -135,5 +137,67 @@ test('B4 auth: destination-only editor cannot reconcile UNKNOWN part, even with 
   assert.equal((await f.store.snapshot()).deliveries[0]!.multipart!.parts[0]!.status,'UNKNOWN_OUTCOME');
   await f.policy.grant(OWNER,EDITOR,'content.publish',SOURCE,20_000);
   assert.equal((await f.parts().reconcileUnknown(EDITOR,c.id,f.resource.id,0,evidence)).status,'SENT');
+ }finally{await f.close();}
+});
+
+const exec=promisify(execFile);
+async function recoverInWorker(file:string,campaignId:string):Promise<number>{
+ const path=new URL('./b4-sqlite-worker.js',import.meta.url).pathname;
+ const {stdout}=await exec(process.execPath,[path,'recover',file,campaignId]);
+ return Number(stdout.trim().replace(/^RECOVERED:/,''));
+}
+
+test('B4 fenced sqlite: separate process recovery preserves a send held at the gateway',async()=>{
+ const f=await fixture('sqlite');try{
+  const c=await setup(f,false),hold=gate();
+  f.gateway.canPost=async()=>{hold.enter();await hold.blocked;return true;};
+  const sending=f.publishing().dispatchNext(c.id);
+  await hold.entered;
+  try{
+   assert.equal(await recoverInWorker(f.file,c.id),0);
+   const active=(await f.store.snapshot()).deliveries[0]!;
+   assert.equal(active.status,'SENDING');
+   assert.ok(active.leaseUntil && active.leaseUntil>f.now());
+  }finally{hold.release();}
+  assert.equal((await sending).status,'SENT');
+  assert.equal(f.gateway.calls.length,1);
+ }finally{await f.close();}
+});
+
+test('B4 fenced sqlite: expired attempt quarantined by another process fences the delayed sender',async()=>{
+ const f=await fixture('sqlite');try{
+  const c=await setup(f,true),hold=gate();
+  f.gateway.canPost=async()=>{hold.enter();await hold.blocked;return true;};
+  const sending=f.publishing().dispatchNext(c.id);await hold.entered;
+  try{
+   const d=(await f.store.snapshot()).deliveries[0]!;
+   f.setNow(d.multipart!.parts[0]!.leaseUntil!+1);
+   // Child worker has an independent mock clock at 1000: explicitly persist the expired lease.
+   await f.store.transaction(s=>{s.deliveries[0]!.multipart!.parts[0]!.leaseUntil=999;});
+   assert.equal(await recoverInWorker(f.file,c.id),1);
+   assert.equal((await f.store.snapshot()).deliveries[0]!.multipart!.parts[0]!.status,'UNKNOWN_OUTCOME');
+  }finally{hold.release();}
+  assert.equal((await sending).status,'BLOCKED');
+  assert.equal(f.gateway.calls.length,0);
+ }finally{await f.close();}
+});
+
+test('B4 auth: revoking source publication rights DURING multipart receipt verification prevents reconciliation',async()=>{
+ const f=await fixture();try{
+  const c=await setup(f,true);
+  f.gateway.throwAfterSend=true;
+  assert.equal((await f.publishing().dispatchNext(c.id)).status,'UNKNOWN_OUTCOME');
+  const part=(await f.store.snapshot()).deliveries[0]!.multipart!.parts[0]!;
+  const receipt=f.gateway.getReceipt(part.attemptId!)!;
+  await f.policy.grant(OWNER,EDITOR,'content.publish',SOURCE,20_000);
+  await f.policy.grant(OWNER,EDITOR,'content.publish',DEST,20_000);
+  const verify=f.gateway.verifyReceipt.bind(f.gateway);
+  f.gateway.verifyReceipt=async r=>{
+   await f.policy.revokeGrant(OWNER,EDITOR,'content.publish',SOURCE);
+   return verify(r);
+  };
+  await assert.rejects(f.parts().reconcileUnknown(EDITOR,c.id,f.resource.id,0,receipt),/PUBLISH_DENIED/);
+  assert.equal((await f.store.snapshot()).deliveries[0]!.multipart!.parts[0]!.status,'UNKNOWN_OUTCOME');
+  assert.equal(f.gateway.calls.length,1);
  }finally{await f.close();}
 });
