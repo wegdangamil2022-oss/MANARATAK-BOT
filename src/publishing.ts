@@ -3,6 +3,7 @@ import { BotStore, type BotState, type PublicationCampaign, type PublicationPrev
 import { Policy } from './policy.js';
 import { planPublicationPreview } from './publication-preview-plan.js';
 import { CampaignMultipartService } from './campaign-multipart.js';
+import { validPublicationMessageId } from './publication-receipts.js';
 import { nextDispatchLease, leaseExpired } from './publication-worker-lease.js';
 
 export interface PublicationReceipt { destination: string; attemptId: string; messageId: string; }
@@ -194,7 +195,7 @@ export class PublicationService {
       const d=s.deliveries.find(x=>x.id===claim.id)!;
       const c=s.campaigns.find(x=>x.id===campaignId)!;
       if(d.status!=='SENDING'||d.attemptId!==claim.attemptId) return {status:'UNKNOWN_OUTCOME' as const};
-      if(result.status==='SENT' && typeof result.messageId==='string' && result.messageId.length>0 &&
+      if(result.status==='SENT' && validPublicationMessageId(result.messageId) &&
         !s.deliveries.some(x=>x.destination===claim.destination &&
           (x.messageId===result.messageId || x.multipart?.parts.some(y=>y.messageId===result.messageId))) &&
         !s.historicalPublications.some(h=>h.destination===claim.destination&&h.proof?.messageId===result.messageId)) {
@@ -248,7 +249,7 @@ export class PublicationService {
     if(!d)throw new Error('DELIVERY_NOT_FOUND');
     const c=pre.campaigns.find(x=>x.id===d.campaignId)!;
     if(!this.allowed(pre,actor,c.sourceScope,c.destination))throw new Error('PUBLISH_DENIED');
-    if(d.status!=='UNKNOWN_OUTCOME'||d.attemptId!==receipt.attemptId||d.destination!==receipt.destination||!receipt.messageId)
+    if(d.status!=='UNKNOWN_OUTCOME'||d.attemptId!==receipt.attemptId||d.destination!==receipt.destination||!validPublicationMessageId(receipt.messageId))
       throw new Error('UNVERIFIED_EVIDENCE');
     if(!await this.gateway.verifyReceipt(receipt))throw new Error('UNVERIFIED_EVIDENCE');
     return this.store.transaction(s=>{
