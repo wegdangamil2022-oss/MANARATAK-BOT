@@ -183,3 +183,58 @@ test('B4 legacy integration: multipart parts never confirm a Telegram message ID
   assert.equal((await f.publication().dispatchNext(campaign.id)).status,'BLOCKED');
  }finally{await f.close();}
 });
+
+test('B4 legacy reconciliation: UNVERIFIED can be settled later with exact trusted evidence without releasing the reservation',async()=>{
+ const f=await fixture();try{
+  const id=f.resources[0]!.id,draft=await f.publication().draft(OWNER,SOURCE,DEST,[f.resources[0]!.id]);
+  await f.review().review(OWNER,{sourceScope:SOURCE,destination:DEST,resourceIds:[id],evidence:[]});
+  const record=(await f.store.snapshot()).historicalPublications[0]!;
+  await assert.rejects(f.review().reconcileEvidence(OWNER,record.id,
+    receipt(id,draft.previews[0]!.revision,'message-late','forged-proof')),/RECEIPT_NOT_VERIFIED/);
+  assert.equal((await f.store.snapshot()).historicalPublications[0]!.status,'UNVERIFIED');
+  const confirmed=await f.review().reconcileEvidence(OWNER,record.id,
+    receipt(id,draft.previews[0]!.revision,'message-late','verified-late'));
+  assert.equal(confirmed.status,'PUBLISHED_VERIFIED');
+  assert.equal(confirmed.proof?.messageId,'message-late');
+  assert.equal((await new BotStore(f.file).snapshot()).historicalPublications[0]!.status,'PUBLISHED_VERIFIED');
+  await assert.rejects(f.publication().approve(OWNER,draft.id),/HISTORICAL_REVIEW_BLOCKS_REPUBLICATION/);
+ }finally{await f.close()}
+});
+
+test('B4 legacy reconciliation: verified publication cannot be silently converted into a manual skip',async()=>{
+ const f=await fixture();try{
+  const id=f.resources[0]!.id,draft=await f.publication().draft(OWNER,SOURCE,DEST,[f.resources[0]!.id]);
+  await f.review().review(OWNER,{sourceScope:SOURCE,destination:DEST,resourceIds:[id],
+   evidence:[receipt(id,draft.previews[0]!.revision,'message-9','verified-9')]});
+  const record=(await f.store.snapshot()).historicalPublications[0]!;
+  await assert.rejects(f.review().markManuallySkipped(OWNER,record.id,'تجاوز بعد الإثبات'),/REVIEW_ALREADY_SETTLED/);
+  assert.equal((await f.store.snapshot()).historicalPublications[0]!.status,'PUBLISHED_VERIFIED');
+ }finally{await f.close()}
+});
+
+test('B4 legacy reconciliation: explicit late manual skip stays distinct from a verified publication',async()=>{
+ const f=await fixture();try{
+  const id=f.resources[1]!.id;
+  await f.review().review(OWNER,{sourceScope:SOURCE,destination:DEST,resourceIds:[id],evidence:[]});
+  const record=(await f.store.snapshot()).historicalPublications[0]!;
+  await f.review().markManuallySkipped(OWNER,record.id,'المالك قرر عدم الترحيل');
+  const s=await new BotStore(f.file).snapshot();
+  assert.equal(s.historicalPublications[0]!.status,'MANUALLY_SKIPPED');
+  assert.equal(s.historicalPublications[0]!.proof,undefined);
+  assert.equal(s.historicalPublications[0]!.skip?.reason,'المالك قرر عدم الترحيل');
+ }finally{await f.close()}
+});
+
+test('B4 legacy reconciliation: revocation during evidence verification cannot change an earlier UNKNOWN review',async()=>{
+ const f=await fixture();try{
+  await f.policy.grant(OWNER,EDITOR,'content.publish',SOURCE,20_000);
+  await f.policy.grant(OWNER,EDITOR,'content.publish',DEST,20_000);
+  const id=f.resources[0]!.id,draft=await f.publication().draft(EDITOR,SOURCE,DEST,[id]);
+  await f.review().review(EDITOR,{sourceScope:SOURCE,destination:DEST,resourceIds:[id],evidence:[]});
+  const record=(await f.store.snapshot()).historicalPublications[0]!;
+  f.setVerifier(async()=>{await f.policy.revokeGrant(OWNER,EDITOR,'content.publish',SOURCE);return true;});
+  await assert.rejects(f.review().reconcileEvidence(EDITOR,record.id,
+    receipt(id,draft.previews[0]!.revision,'message-revoked','verified-revoked')),/PUBLISH_DENIED/);
+  assert.equal((await f.store.snapshot()).historicalPublications[0]!.status,'UNVERIFIED');
+ }finally{await f.close()}
+});
