@@ -159,3 +159,41 @@ for(const engine of ['json','sqlite'] as const){
     }finally{await f.close()}
   });
 }
+
+test('B4 cancellation: a cancelled delivery cannot be relabelled as manually skipped after cancellation',async()=>{
+  const f=await fixture();try{
+    const c=await f.draft(false);
+    const id=(await f.store.snapshot()).deliveries[0]!.id;
+    await f.pub().cancel(OWNER,c.id);
+    await assert.rejects(f.pub().markManuallySkipped(OWNER,id,'تجاوز لاحق'),/NOT_REVIEWABLE/);
+    const state=await f.store.snapshot();
+    assert.equal(state.deliveries[0]!.status,'CANCELLED');
+    assert.equal(state.deliveries[0]!.reviewReason,undefined);
+    assert.equal(state.audit.filter(x=>x.reason==='CAMPAIGN_CANCELLED').length,1);
+  }finally{await f.close()}
+});
+
+test('B4 cancellation: a reviewed SKIPPED delivery cannot have its reason overwritten',async()=>{
+  const f=await fixture();try{
+    const c=await f.draft(false);
+    const id=(await f.store.snapshot()).deliveries[0]!.id;
+    await f.pub().markManuallySkipped(OWNER,id,'قرار أول موثق');
+    await assert.rejects(f.pub().markManuallySkipped(OWNER,id,'تغيير القرار'),/NOT_REVIEWABLE/);
+    const state=await f.store.snapshot();
+    assert.equal(state.deliveries[0]!.status,'SKIPPED');
+    assert.equal(state.deliveries[0]!.reviewReason,'قرار أول موثق');
+    assert.equal(state.audit.filter(x=>x.reason==='MANUALLY_SKIPPED_UNVERIFIED').length,1);
+    assert.equal(state.campaigns[0]!.status,'COMPLETED');
+  }finally{await f.close()}
+});
+
+test('B4 cancellation: cancelling a campaign twice creates only one auditable decision',async()=>{
+  const f=await fixture('sqlite');try{
+    const c=await f.draft(true);
+    await f.pub().cancel(OWNER,c.id);
+    await f.pub().cancel(OWNER,c.id);
+    const state=await f.store.snapshot();
+    assert.equal(state.audit.filter(x=>x.reason==='CAMPAIGN_CANCELLED').length,1);
+    assert.ok(state.deliveries[0]!.multipart!.parts.every(p=>p.status==='CANCELLED'));
+  }finally{await f.close()}
+});
