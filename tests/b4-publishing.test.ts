@@ -194,7 +194,7 @@ test('B4: migrated v4 state preserves B3 resources and gets empty B4 ledgers',as
   old.schemaVersion=4;delete old.campaigns;delete old.deliveries;
   await writeFile(f.file,JSON.stringify(old));
   const restored=await (new BotStore(f.file)).snapshot();
-  assert.equal(restored.schemaVersion,5);
+  assert.equal(restored.schemaVersion,6);
   assert.equal(restored.educationResources.length,2);
   assert.deepEqual(restored.campaigns,[]);
   assert.deepEqual(restored.deliveries,[]);
