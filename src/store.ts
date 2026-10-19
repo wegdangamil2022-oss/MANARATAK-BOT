@@ -15,7 +15,7 @@ export interface Operation { id: string; updateKey: string; kind: 'CHAT_LEAVE'; 
 export interface AuditRecord { updateKey: string; decision: 'ALLOW' | 'DENY' | 'NOOP'; reason: string; policyVersion: number; at: number; }
 import type { Candidate, ImportFormat, ImportReport } from './ingestion.js';
 export interface EducationCategory { id: string; scope: string; parentId: string | null; title: string; order: number; enabled: boolean; }
-export interface EducationResource { id: string; categoryId: string; scope: string; title: string; university: string; cycle: string; degree: string; seats: number | null; sourceImportId: string; sourceLocator: string; reviewedBy: string; status: 'PUBLISHED' | 'ARCHIVED'; }
+export interface EducationResource { id: string; categoryId: string; scope: string; title: string; university: string; cycle: string; degree: string; seats: number | null; sourceImportId: string; sourceLocator: string; reviewedBy: string; status: 'PUBLISHED' | 'ARCHIVED'; publicationText?: string; publicationTextReviewedBy?: string; }
 export interface ImportRun { id: string; scope: string; uploadedBy: string; origin: 'TELEGRAM_ADMIN' | 'ADMIN_WEB'; format: ImportFormat; filename: string; digest: string; report: ImportReport; candidates: Candidate[]; createdAt: number; }
 export type RestrictionKind = 'NONE' | 'MUTE' | 'BAN';
 export interface ModerationReason { chatId: string; memberId: string; source: 'MANUAL' | 'SUBSCRIPTION'; reference: string; kind: 'MUTE' | 'BAN'; createdBy: string; active: boolean; }
@@ -25,7 +25,7 @@ export interface SubscriptionRequirement { chatId: string; channelIds: string[];
 export interface FAQEntry { id: string; scope: string; question: string; aliases: string[]; answer: string; sourceResourceId: string; createdBy: string; approvedBy?: string; status: 'DRAFT' | 'APPROVED' | 'ARCHIVED'; createdAt: number; }
 export interface ResourceLink { ref: string; scope: string; resourceId: string; resourceRevision: number; policyVersion: number; expiresAt: number; boundUserId?: string; issuedBy: string; revoked: boolean; }
 /** B4 uses snapshots of reviewed content; never treat an item ID as proof of its current revision. */
-export interface PublicationPreview { resourceId: string; revision: string; text: string; }
+export interface PublicationPreview { resourceId: string; revision: string; text: string; renderPlan?: import('./publication-preview-plan.js').PublicationRenderPlan; }
 export type CampaignStatus = 'DRAFT' | 'APPROVED' | 'PAUSED' | 'CANCELLED' | 'COMPLETED';
 export interface PublicationCampaign {
   id: string; sourceScope: string; destination: string; createdBy: string; approvedBy?: string;
@@ -46,7 +46,7 @@ export interface PublicationDelivery {
   };
 }
 export interface BotState {
-  schemaVersion: 5;
+  schemaVersion: 6;
   chats: Chat[];
   grants: Grant[];
   privateAI: PrivateAIMode;
@@ -69,7 +69,7 @@ export interface BotState {
   deliveries: PublicationDelivery[];
 }
 const empty = (): BotState => ({
-  schemaVersion: 5, chats: [], grants: [], privateAI: 'OFF',
+  schemaVersion: 6, chats: [], grants: [], privateAI: 'OFF',
   privateFeatures: { 'owner.dashboard': true, 'education.navigate': true, 'subscription.verify': true, 'support.use': true, 'content.upload': false },
   updates: [], operations: [], callbacks: [], wizards: [], audit: [],
   moderationReasons: [], moderationOperations: [], subscriptionRequirements: [], warnings: [],
@@ -101,7 +101,11 @@ export class BotStore {
       if (previous.schemaVersion === 4) {
         previous.schemaVersion = 5; previous.campaigns = []; previous.deliveries = [];
       }
-      if (previous.schemaVersion !== 5 || !Array.isArray(previous.campaigns) || !Array.isArray(previous.deliveries) || !Array.isArray(previous.faqEntries) || !Array.isArray(previous.resourceLinks) || !Array.isArray(previous.moderationReasons) || !Array.isArray(previous.moderationOperations) || !Array.isArray(previous.subscriptionRequirements) || !Array.isArray(previous.warnings) || !Array.isArray(previous.educationCategories) || !Array.isArray(previous.educationResources) || !Array.isArray(previous.importRuns)) throw new Error('Unsupported state schema');
+      if (previous.schemaVersion === 5) {
+        // Additive publication-plan migration: retain every historical campaign and receipt verbatim.
+        previous.schemaVersion = 6;
+      }
+      if (previous.schemaVersion !== 6 || !Array.isArray(previous.campaigns) || !Array.isArray(previous.deliveries) || !Array.isArray(previous.faqEntries) || !Array.isArray(previous.resourceLinks) || !Array.isArray(previous.moderationReasons) || !Array.isArray(previous.moderationOperations) || !Array.isArray(previous.subscriptionRequirements) || !Array.isArray(previous.warnings) || !Array.isArray(previous.educationCategories) || !Array.isArray(previous.educationResources) || !Array.isArray(previous.importRuns)) throw new Error('Unsupported state schema');
       return previous as unknown as BotState;
     } catch (err) {
       if ((err as NodeJS.ErrnoException).code === 'ENOENT') return empty();

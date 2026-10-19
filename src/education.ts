@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { BotStore, type BotState, type EducationCategory, type EducationResource, type ImportRun } from './store.js';
 import { Policy } from './policy.js';
 import { parseDocument, type ImportFormat } from './ingestion.js';
+import { planPublicationPreview } from './publication-preview-plan.js';
 
 type Origin = 'TELEGRAM_ADMIN' | 'ADMIN_WEB';
 /** Public resource projections must not reveal internal audit identities or import job IDs. */
@@ -112,6 +113,25 @@ export class EducationService {
       s.educationResources.push(resource);
       s.audit.push({updateKey:`b3:publish:${importId}:${index}`,decision:'ALLOW',reason:'RESOURCE_PUBLISHED_LOCALLY',policyVersion:0,at:this.clock()});
       return resource;
+    });
+  }
+  /**
+   * Explicitly reviewed long-form publication copy for an already published education resource.
+   * Never originates from an unreviewed upload; changing it invalidates existing campaign previews.
+   */
+  async setPublicationText(actor:string,id:string,text:string):Promise<void> {
+    const plan=planPublicationPreview({text}); // fail before any storage write
+    if(plan.kind!=='TEXT')throw new Error('INVALID_PUBLICATION_PLAN');
+    await this.store.transaction(s=>{
+      const resource=s.educationResources.find(r=>r.id===id);
+      if(!resource)throw new Error('RESOURCE_NOT_FOUND');
+      if(!this.canPublish(s,actor,resource.scope))throw new Error('PUBLISH_DENIED');
+      const category=s.educationCategories.find(c=>c.id===resource.categoryId&&c.scope===resource.scope);
+      if(resource.status!=='PUBLISHED'||!category||!this.visibleCategory(s,category))throw new Error('RESOURCE_NOT_PUBLISHED_OR_DISABLED');
+      resource.publicationText=text.trim();
+      resource.publicationTextReviewedBy=actor;
+      s.audit.push({updateKey:`b4:review-text:${id}:${this.clock()}`,decision:'ALLOW',
+        reason:'PUBLICATION_COPY_REVIEWED',policyVersion:this.policy.chatRevision(s,resource.scope),at:this.clock()});
     });
   }
   async listResources(viewer:string,scope:string,categoryId:string):Promise<PublicEducationResource[]> {

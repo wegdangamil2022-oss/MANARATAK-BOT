@@ -1,6 +1,8 @@
 import { randomUUID, createHash } from 'node:crypto';
 import { BotStore, type BotState, type PublicationCampaign, type PublicationPreview, type PublicationDelivery } from './store.js';
 import { Policy } from './policy.js';
+import { planPublicationPreview } from './publication-preview-plan.js';
+import { CampaignMultipartService } from './campaign-multipart.js';
 
 export interface PublicationReceipt { destination: string; attemptId: string; messageId: string; }
 export type PublicationOutcome = { status: 'SENT'; messageId: string } | { status: 'FAILED_CONFIRMED' } | { status: 'UNKNOWN_OUTCOME' };
@@ -56,9 +58,10 @@ const validResource = (s: BotState, id: string, sourceScope: string): Publicatio
   // The preview is plain text, not Telegram HTML/Markdown, so imported data cannot inject entities.
   const lines = [r.title, `الجامعة: ${r.university}`, r.cycle ? `الدورة: ${r.cycle}` : '',
     r.degree ? `الدرجة: ${r.degree}` : '', r.seats !== null ? `المقاعد المذكورة في المصدر: ${r.seats}` : ''].filter(Boolean);
-  const text = lines.join('\n');
-  if ([...text].length > 4000) throw new Error('PREVIEW_TOO_LONG');
-  return { resourceId: r.id, revision: sha({id:r.id,title:r.title,university:r.university,cycle:r.cycle,degree:r.degree,seats:r.seats,categoryId:r.categoryId,scope:r.scope,status:r.status}),text };
+  const text = r.publicationText ?? lines.join('\n');
+  const renderPlan = planPublicationPreview({text});
+  return { resourceId: r.id, revision: sha({id:r.id,title:r.title,university:r.university,cycle:r.cycle,degree:r.degree,seats:r.seats,categoryId:r.categoryId,scope:r.scope,status:r.status,
+    ...(r.publicationText === undefined ? {} : {publicationText:r.publicationText,publicationTextReviewedBy:r.publicationTextReviewedBy})}),text,renderPlan };
 };
 
 /** B4 mock-only ledger; a transaction persists SENDING *before* any gateway call. */
@@ -77,8 +80,12 @@ export class PublicationService {
     if (this.policy.chatRevision(s,c.sourceScope)!==c.sourcePolicyVersion ||
       this.policy.chatRevision(s,c.destination)!==c.destinationPolicyVersion) return false;
     return c.previews.every(p=>{
-      const current = validResource(s,p.resourceId,c.sourceScope);
-      return current?.revision===p.revision && current.text===p.text;
+      try {
+        const current = validResource(s,p.resourceId,c.sourceScope);
+        return current?.revision===p.revision && current.text===p.text &&
+          (!p.renderPlan || (current.renderPlan?.fingerprint===p.renderPlan.fingerprint &&
+            JSON.stringify(current.renderPlan?.parts)===JSON.stringify(p.renderPlan.parts)));
+      } catch { return false; }
     });
   }
   async draft(actor: string,sourceScope: string,destination: string,resourceIds: string[],scheduledAt=this.clock()): Promise<PublicationCampaign> {
@@ -110,11 +117,29 @@ export class PublicationService {
           throw new Error('DELIVERY_ALREADY_RESERVED');
       }
       c.approvedBy=actor;c.status='APPROVED';
-      for(const p of c.previews) s.deliveries.push({id:randomUUID(),campaignId:id,resourceId:p.resourceId,
-        destination:c.destination,revision:p.revision,status:'QUEUED'});
+      for(const p of c.previews) {
+        const plan=p.renderPlan ?? planPublicationPreview({text:p.text});
+        // Approval binds the immutable reviewed split to the SAME B4 delivery reservation.
+        // The normal dispatcher can never claim this multipart delivery as a single message.
+        const multipart=plan.parts.length>1 ? {fingerprint:plan.fingerprint,
+          parts:plan.parts.map((payload,index)=>({index,payload:structuredClone(payload),status:'QUEUED' as const}))} : undefined;
+        s.deliveries.push({id:randomUUID(),campaignId:id,resourceId:p.resourceId,
+          destination:c.destination,revision:p.revision,status:multipart?'MULTIPART':'QUEUED',
+          ...(multipart?{multipart}:{})});
+      }
       s.audit.push({updateKey:`b4:approve:${id}`,decision:'ALLOW',reason:'CAMPAIGN_PREVIEW_APPROVED',policyVersion:c.destinationPolicyVersion,at:this.clock()});
       return structuredClone(c);
     });
+  }
+  private multipart():CampaignMultipartService {
+    return new CampaignMultipartService(this.store,this.policy,{
+      canPost: destination=>this.gateway.canPost(destination),
+      sendPart: request=>{
+        if(request.part.kind!=='TEXT')throw new Error('UNAPPROVED_MEDIA');
+        return this.gateway.send(request.destination,request.part.text,request.attemptId);
+      },
+      verifyReceipt: receipt=>this.gateway.verifyReceipt(receipt)
+    },this.clock);
   }
   private finalize(s: BotState,c: PublicationCampaign): void {
     if (c.status!=='APPROVED') return;
@@ -130,12 +155,16 @@ export class PublicationService {
       if(c.scheduledAt>this.clock()) return { kind:'NOT_DUE' as const };
       const d=s.deliveries.find(x=>x.campaignId===c.id && !['SENT','SKIPPED','CANCELLED'].includes(x.status));
       // An uncertain/failed/in-flight earlier item blocks later campaign items until human review.
-      if(d?.status==='MULTIPART') return {kind:'BLOCKED' as const};
+      if(d?.status==='MULTIPART') return {kind:'MULTIPART' as const,resourceId:d.resourceId};
       if(!d || d.status!=='QUEUED') return {kind:'EMPTY' as const};
       if(!this.validate(s,c)) {c.status='PAUSED';return {kind:'BLOCKED' as const};}
       d.status='SENDING';d.attemptId=randomUUID();d.startedAt=this.clock();
       return {kind:'SEND' as const,id:d.id,attemptId:d.attemptId,text:c.previews.find(x=>x.resourceId===d.resourceId)!.text,destination:c.destination};
     });
+    if(claim.kind==='MULTIPART') {
+      const result=await this.multipart().dispatchNext(campaignId,claim.resourceId);
+      return result.messageId===undefined ? {status:result.status} : {status:result.status,messageId:result.messageId};
+    }
     if(claim.kind!=='SEND') return {status:claim.kind};
     if(this.beforeSend) await this.beforeSend();
     let canPost=false;
@@ -157,7 +186,9 @@ export class PublicationService {
       const d=s.deliveries.find(x=>x.id===claim.id)!;
       const c=s.campaigns.find(x=>x.id===campaignId)!;
       if(d.status!=='SENDING'||d.attemptId!==claim.attemptId) return {status:'UNKNOWN_OUTCOME' as const};
-      if(result.status==='SENT' && typeof result.messageId==='string' && result.messageId.length>0) {
+      if(result.status==='SENT' && typeof result.messageId==='string' && result.messageId.length>0 &&
+        !s.deliveries.some(x=>x.destination===claim.destination &&
+          (x.messageId===result.messageId || x.multipart?.parts.some(y=>y.messageId===result.messageId)))) {
         d.status='SENT'; d.messageId=result.messageId;
         s.audit.push({updateKey:`b4:delivery:${d.id}`,decision:'ALLOW',reason:'DELIVERY_CONFIRMED',policyVersion:c.destinationPolicyVersion,at:this.clock()});
         this.finalize(s,c);
@@ -171,7 +202,11 @@ export class PublicationService {
   async recoverPending():Promise<number> {
     return this.store.transaction(s=>{
       let count=0;
-      for(const d of s.deliveries)if(d.status==='SENDING') {d.status='UNKNOWN_OUTCOME';count++;}
+      for(const d of s.deliveries) {
+        if(d.status==='SENDING') {d.status='UNKNOWN_OUTCOME';count++;}
+        if(d.status==='MULTIPART' && d.multipart) for(const part of d.multipart.parts)
+          if(part.status==='SENDING') {part.status='UNKNOWN_OUTCOME';count++;}
+      }
       return count;
     });
   }
@@ -212,7 +247,8 @@ export class PublicationService {
       const currentC=s.campaigns.find(x=>x.id===current.campaignId)!;
       if(!this.allowed(s,actor,currentC.sourceScope,currentC.destination))throw new Error('PUBLISH_DENIED');
       if(current.status!=='UNKNOWN_OUTCOME'||current.attemptId!==receipt.attemptId||current.destination!==receipt.destination||
-         s.deliveries.some(x=>x.id!==current.id&&x.destination===receipt.destination&&x.messageId===receipt.messageId)) throw new Error('UNVERIFIED_EVIDENCE');
+         s.deliveries.some(x=>x.destination===receipt.destination&&
+           ((x.id!==current.id&&x.messageId===receipt.messageId)||x.multipart?.parts.some(y=>y.messageId===receipt.messageId)))) throw new Error('UNVERIFIED_EVIDENCE');
       current.status='SENT';current.messageId=receipt.messageId;
       s.audit.push({updateKey:`b4:reconcile:${current.id}`,decision:'ALLOW',reason:'PROVIDER_RECEIPT_VERIFIED',policyVersion:currentC.destinationPolicyVersion,at:this.clock()});
       this.finalize(s,currentC);

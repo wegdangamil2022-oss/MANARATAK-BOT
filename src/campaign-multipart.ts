@@ -11,7 +11,7 @@ type Campaign = {
  id:string; sourceScope:string; destination:string; approvedBy?:string; createdBy:string;
  status:'DRAFT'|'APPROVED'|'PAUSED'|'CANCELLED'|'COMPLETED'; scheduledAt:number;
  sourcePolicyVersion:number; destinationPolicyVersion:number;
- previews:{resourceId:string;revision:string;text:string}[];
+ previews:{resourceId:string;revision:string;text:string;renderPlan?:PublicationRenderPlan}[];
 };
 type Delivery = {
  id:string; campaignId:string; resourceId:string; revision:string; destination:string;
@@ -42,8 +42,9 @@ function resourceVisible(s:BotState,c:Campaign,p:Campaign['previews'][number]):b
   const parent=s.educationCategories.find(x=>x.id===category!.parentId&&x.scope===c.sourceScope&&x.enabled);
   if(!parent)return false;category=parent;
  }
- const revision=digest({id:r.id,title:r.title,university:r.university,cycle:r.cycle,degree:r.degree,seats:r.seats,categoryId:r.categoryId,scope:r.scope,status:r.status});
- const text=[r.title,`الجامعة: ${r.university}`,r.cycle?`الدورة: ${r.cycle}`:'',r.degree?`الدرجة: ${r.degree}`:'',r.seats!==null?`المقاعد المذكورة في المصدر: ${r.seats}`:''].filter(Boolean).join('\n');
+ const revision=digest({id:r.id,title:r.title,university:r.university,cycle:r.cycle,degree:r.degree,seats:r.seats,categoryId:r.categoryId,scope:r.scope,status:r.status,
+   ...(r.publicationText===undefined?{}:{publicationText:r.publicationText,publicationTextReviewedBy:r.publicationTextReviewedBy})});
+ const text=r.publicationText??[r.title,`الجامعة: ${r.university}`,r.cycle?`الدورة: ${r.cycle}`:'',r.degree?`الدرجة: ${r.degree}`:'',r.seats!==null?`المقاعد المذكورة في المصدر: ${r.seats}`:''].filter(Boolean).join('\n');
  return p.revision===revision&&p.text===text;
 }
 
@@ -116,11 +117,21 @@ export class CampaignMultipartService {
     if(c.status==='CANCELLED')return {kind:'CANCELLED' as const};
     if(d.status==='SENT')return {kind:'EMPTY' as const};
     if(c.status!=='APPROVED'||d.status!=='MULTIPART'||!d.multipart||!this.authorized(s,c))return {kind:'BLOCKED' as const};
+    const reviewed=c.previews.find(x=>x.resourceId===resourceId)?.renderPlan;
+    if(reviewed && (reviewed.fingerprint!==d.multipart.fingerprint ||
+      JSON.stringify(reviewed.parts)!==JSON.stringify(d.multipart.parts.map(x=>x.payload))))return {kind:'BLOCKED' as const};
+    const firstPending=c.previews.find(x=> {
+      const delivery=state(s).deliveries.find(d=>d.campaignId===c.id&&d.resourceId===x.resourceId);
+      return !delivery||!['SENT','CANCELLED','SKIPPED'].includes(delivery.status);
+    });
+    if(firstPending?.resourceId!==resourceId)return {kind:'BLOCKED' as const};
     if(c.scheduledAt>this.clock())return {kind:'NOT_DUE' as const};
     const p=d.multipart.parts.find(x=>x.status!=='SENT');
     if(!p)return {kind:'EMPTY' as const};
     if(p.status!=='QUEUED')return {kind:'BLOCKED' as const};
     p.status='SENDING';p.attemptId=randomUUID();
+    s.audit.push({updateKey:`b4:part:attempt:${d.id}:${p.index}:${p.attemptId}`,decision:'ALLOW',
+      reason:'PART_ATTEMPT_RECORDED_BEFORE_SEND',policyVersion:c.destinationPolicyVersion,at:this.clock()});
     return {kind:'SEND' as const,index:p.index,attemptId:p.attemptId,destination:c.destination,payload:clone(p.payload),deliveryId:d.id};
   });
   if(claim.kind!=='SEND')return {status:claim.kind};
