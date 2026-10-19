@@ -47,3 +47,7 @@
 
 | B4 v0.4.2 multipart WIP | campaign-multipart.ts + b4-campaign-multipart.test.ts | TESTED_MOCK جزئيًا | تحفظ حالات أجزاء الرسالة وإيصالاتها عبر ملف تجريبي؛ تم منع dispatcher التقليدي من استهلاك MULTIPART، ولم يثبت المسار الكامل لمسودة B4 عادية أو إرسال Telegram حي |
 | B4 experimental separate ledger | multipart-publishing.ts + b4-multipart-publishing.test.ts | EXPERIMENTAL_TEST_ONLY | نموذج موازٍ للاختبار فقط وغير مسموح ربطه بحملات الإنتاج |
+
+| B4 v0.4.3 reviewed multipart flow; DOCFLOW-003, S121-07/08, T12-13/15, T121-10/11 (partial) | education.ts + publishing.ts + campaign-multipart.ts + tests/b4-reviewed-multipart-flow.test.ts | TESTED_MOCK (end-to-end local workflow) | B3 reviewed resource → explicit reviewed publication copy → canonical multi-part draft → approval binds immutable part plan in the **single** BotStore delivery → durable intents/receipts/restart/UNKNOWN; no live adapter |
+| B4 storage v5→v6 | store.ts + B4/B3/B2 migration tests | TESTED_MOCK | Older delivery receipts, campaigns and education records preserved, no dropping ledgers |
+| B4 multi-worker SQL transaction, Telegram outbound and deployed reconciliation | — | PLANNED / BLOCKED_LIVE | JSON single-process mutex is not distributed locking; no production execution authorization |

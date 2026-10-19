@@ -1,14 +1,28 @@
 # بوت منارتك — MANARATAK BOT
 
-**B0/B1 + B2-Core + B3 + first B4 campaign/receipt slice (v0.4.0). Offline/test-only — no live Telegram bot.**
+**B0/B1 + B2-Core + B3 + B4 reviewed multipart integration (v0.4.3). Offline/test-only — no live Telegram bot.**
 
 An independent TypeScript/Node.js 22 project based on `docs/MANARATAK_BOT_MASTER_v1.2.1_AR.md` and `docs/START_HERE_MANARATAK_BOT_v1.2.1_AR.md`. B0/B1 supply the secure baseline; B2-Core adds individual moderation and subscription policies; B3 adds the first locally tested education content flow.
+
+
+## B4 v0.4.3 — approved long-form multipart campaign flow (offline only)
+
+The normal B4 flow now accepts **reviewed** publication copy longer than one Telegram message, up to the preflight planner's 10 × 4096 UTF-16-unit upper bound. Importing an unreviewed file never automatically creates this copy:
+
+1. Import a B3 scholarship record, explicitly approve its candidate and publish the source resource in an authorized education scope.
+2. A holder of `content.publish` reviews optional long-form copy with `EducationService.setPublicationText(actor, resourceId, text)`. This does **not** send content or bypass B3 review.
+3. `PublicationService.draft(actor, sourceScope, destination, [resourceId])` creates the exact deterministic text `renderPlan` with part boundaries and SHA-256 fingerprint; inspect the returned preview before approval.
+4. `PublicationService.approve(actor, campaignId)` atomically reserves **one** canonical B4 delivery per resource and destination. Long text becomes `MULTIPART` with an immutable part snapshot inside `BotStore.deliveries`, not a separate store. Short text retains the original single-message path.
+5. `PublicationService.dispatchNext(campaignId)` drives both one-part and multipart offline fake transports. Part intents (`SENDING` and unique `attemptId`) and audit entries persist before gateway calls. It rechecks approver authorization, source visibility and destination policy after async posting-permission checks.
+6. After restart, `recoverPending()` converts orphaned single/part `SENDING` to `UNKNOWN_OUTCOME`. An uncertain part blocks remaining parts until `CampaignMultipartService.reconcileUnknown(..., providerVerifiedReceipt)` verifies exact destination/attempt/message ID. Text similarity and a repeated message ID never prove delivery. Only confirmed failures can be explicitly retried.
+
+The older `MultipartTestStore` in `multipart-publishing.ts` is a **research-only isolated fixture**. Do not wire it into a worker: the campaign delivery ledger is the only operational reservation boundary. The backing JSON file serializes only within one Node.js process, so this release is NOT safe for concurrent workers, production databases, live Telegram sends, or private-group deployment. Production still needs transactional storage, leases, backup/migration rehearsal and a separately reviewed Telegram adapter.
 
 ## Commands
 
 ```sh
 npm install
-npm run check         # typecheck + all node:test cases (110 as of v0.4.0)
+npm run check         # typecheck + all current node:test cases (including B4 long-form integration)
 npm run demo          # previous B1 simulation
 npm run demo:education # example document -> count -> manual approve -> visible resource
 npm run demo:faq       # FAQ approvals, membership-gated resource links and admin facade

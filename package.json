@@ -1,9 +1,9 @@
 {
   "name": "manaratak-bot",
-  "version": "0.4.2",
+  "version": "0.4.3",
   "private": true,
   "type": "module",
-  "description": "MANARATAK BOT B0-B4 mock-only core: Telegram intake, scoped education and reviewed campaign deliveries",
+  "description": "MANARATAK BOT B0-B4 mock-only core: reviewed resources and single-ledger multipart campaign delivery",
   "engines": {
     "node": ">=22"
   },

@@ -82,3 +82,11 @@
 - Multipart staging for existing B4 campaigns uses `PublicationDelivery.multipart` in the main state (no second operational ledger). `MULTIPART` prevents the core single-send worker or manual skip from consuming an in-progress multipart delivery.
 - `MultipartTestStore` and `MultipartPublicationService` are isolated **proof-of-concept only**; they must never run alongside the operational `BotStore` for the same destination. They were preserved to avoid losing local work and to supply behavioral examples.
 - **Do not mark B4 complete**: ordinary B4 resource preview limits currently block >4000-code-point content, so integrated long campaigns require a redesign of preflight approval and part-based scheduling. Verify against live provider only after explicit owner authorization and a real durable multi-worker store; no real messages are sent in these tests.
+
+## B4 v0.4.3 — reviewed multipart (19 October 2026)
+
+- Chosen authority: the existing `BotStore.deliveries` is the **only** campaign reservation/receipt ledger. `MultipartTestStore` is a standalone research fixture and must not be instantiated in operational code.
+- Long-form source text requires published B3 content and explicit `content.publish` editorial review. A draft snapshots deterministic render parts and fingerprint. Approval atomically reserves all parts in the original delivery; no independent post-approval stage can duplicate the delivery.
+- A part attempt is persisted as `SENDING` with an opaque ID and audit entry **before** fake gateway calls. A crash or timeout is `UNKNOWN_OUTCOME`; only verified, unique provider receipt can settle it. A confirmed failure may be requeued by an authorized reviewer.
+- Schema 5→6 does not rewrite or discard legacy publication history. Source text edits alter revision and invalidate earlier approvals.
+- Remaining blocker: JSON transactions are safe only for mock single-process workflows; do not use for production/multiple workers. Neither live Telegram API nor MANARATAK platform production data is connected.

@@ -1,3 +1,12 @@
+## 0.4.3 — 2026-10-19 — Reviewed multipart campaign integration (mock-only)
+
+- Reproduced the gap with a RED GitHub Actions integration test first, then implemented a reviewed long-form copy workflow on published B3 resources.
+- Ordinary B4 draft now attaches the canonical UTF-16-safe multipart render plan; campaign approval stores its exact part fingerprint and reserves each part **inside the original delivery ledger** before any external fake send.
+- Unified ordinary dispatch for short and multipart campaigns; each multipart attempt is durable and audited before gateway calls. Crash recovery, ambiguous outcomes, permission revocation after awaits, archived/stale resources and duplicate reservations are guarded by integration tests.
+- Schema v5→v6 is additive and retains existing B3 resources, historic campaigns, deliveries and receipts; legacy v1→v5 migrations continue to work.
+- Kept MultipartTestStore strictly experimental/test-only; no second operational publishing ledger or live Telegram adapter.
+- Production readiness remains **BLOCKED** by single-process JSON storage and lack of a hardened real delivery adapter. Draft PR only; no main merge.
+
 ## 0.4.2 — 2026-10-19 — B4 multipart WIP handed off for continued review
 
 - Preserved two previously local-only multipart experiments and their focused offline tests.
