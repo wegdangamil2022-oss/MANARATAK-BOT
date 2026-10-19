@@ -161,3 +161,68 @@ for(const multipart of [false,true] as const) {
   }finally{await f.close();}
  });
 }
+
+for(const multipart of [false,true] as const) {
+ test(`B4 ${multipart?'multipart':'single'}: receipt after an in-flight historical collision is quarantined instead of counted SENT`,async()=>{
+  const f=await fixture('sqlite',multipart);try{
+   f.gateway.send=async(dest,text,attemptId)=>{
+    f.gateway.calls.push({destination:dest,text,attemptId});
+    await f.store.transaction(s=>{
+     const d=s.deliveries[0]!;
+     s.historicalPublications.push({id:'collision-mid-network',sourceScope:SOURCE,destination:DEST,
+      resourceId:d.resourceId,revision:d.revision,status:'UNVERIFIED',
+      diagnostic:'MIGRATED_WHILE_ATTEMPT_STARTED',reviewedBy:OWNER,reviewedAt:1000});
+    });
+    return {status:'SENT',messageId:'valid-mock-message-200'};
+   };
+   assert.equal((await f.publication.dispatchNext(f.c.id)).status,'UNKNOWN_OUTCOME');
+   const d=(await f.store.snapshot()).deliveries[0]!;
+   assert.equal(multipart?d.multipart!.parts[0]!.status:d.status,'UNKNOWN_OUTCOME');
+   assert.equal((await f.publication.dispatchNext(f.c.id)).status,multipart?'BLOCKED':'EMPTY');
+   assert.equal(f.gateway.calls.length,1);
+  }finally{await f.close();}
+ });
+
+ test(`B4 ${multipart?'multipart':'single'}: a historical conflict blocks an explicit retry of confirmed failure`,async()=>{
+  const f=await fixture('json',multipart);try{
+   f.gateway.outcome='FAILED_CONFIRMED';
+   assert.equal((await f.publication.dispatchNext(f.c.id)).status,'FAILED_CONFIRMED');
+   await f.store.transaction(s=>{
+    const d=s.deliveries[0]!;
+    s.historicalPublications.push({id:'historical-before-retry',sourceScope:SOURCE,destination:DEST,
+     resourceId:d.resourceId,revision:d.revision,status:'MANUALLY_SKIPPED',
+     diagnostic:'REVIEWED_OMISSION',reviewedBy:OWNER,reviewedAt:1000});
+   });
+   if(multipart)
+    await assert.rejects(f.parts.retryFailed(OWNER,f.c.id,f.resource.id,0),/DELIVERY_RESERVATION_CONFLICT/);
+   else
+    await assert.rejects(f.publication.retryConfirmedFailure(OWNER,f.c.id,f.resource.id),/DELIVERY_RESERVATION_CONFLICT/);
+   const d=(await f.store.snapshot()).deliveries[0]!;
+   assert.equal(multipart?d.multipart!.parts[0]!.status:d.status,'FAILED_CONFIRMED');
+   assert.equal(f.gateway.calls.length,1);
+  }finally{await f.close();}
+ });
+
+ test(`B4 ${multipart?'multipart':'single'}: a newly-imported historical conflict refuses UNKNOWN reconciliation`,async()=>{
+  const f=await fixture('sqlite',multipart);try{
+   f.gateway.outcome='UNKNOWN_OUTCOME';
+   assert.equal((await f.publication.dispatchNext(f.c.id)).status,'UNKNOWN_OUTCOME');
+   const d=(await f.store.snapshot()).deliveries[0]!;
+   const attemptId=multipart?d.multipart!.parts[0]!.attemptId!:d.attemptId!;
+   await f.store.transaction(s=>{
+    const d=s.deliveries[0]!;
+    s.historicalPublications.push({id:'history-before-reconcile',sourceScope:SOURCE,destination:DEST,
+     resourceId:d.resourceId,revision:d.revision,status:'REVIEW_REQUIRED',
+     diagnostic:'CONFLICTING_EVIDENCE',reviewedBy:OWNER,reviewedAt:1000});
+   });
+   f.gateway.verifyReceipt=async()=>true;
+   const proof={destination:DEST,attemptId,messageId:'valid-message-400'};
+   if(multipart)
+    await assert.rejects(f.parts.reconcileUnknown(OWNER,f.c.id,f.resource.id,0,proof),/RECEIPT_INVALID/);
+   else
+    await assert.rejects(f.publication.reconcileUnknown(OWNER,d.id,proof),/UNVERIFIED_EVIDENCE/);
+   const after=(await f.store.snapshot()).deliveries[0]!;
+   assert.equal(multipart?after.multipart!.parts[0]!.status:after.status,'UNKNOWN_OUTCOME');
+  }finally{await f.close();}
+ });
+}
