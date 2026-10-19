@@ -90,3 +90,11 @@
 - A part attempt is persisted as `SENDING` with an opaque ID and audit entry **before** fake gateway calls. A crash or timeout is `UNKNOWN_OUTCOME`; only verified, unique provider receipt can settle it. A confirmed failure may be requeued by an authorized reviewer.
 - Schema 5→6 does not rewrite or discard legacy publication history. Source text edits alter revision and invalidate earlier approvals.
 - Remaining blocker: JSON transactions are safe only for mock single-process workflows; do not use for production/multiple workers. Neither live Telegram API nor MANARATAK platform production data is connected.
+
+## B4 v0.4.4 — historic publication guard (19 October 2026)
+
+- An old forwarded final announcement is never proof of all earlier posts. Review is linked item-by-item to a currently approved B3 resource revision and destination. The only proof path is a trusted external `VerifyLegacyEvidence`, which is a simulation dependency until an operational adapter is explicitly approved.
+- `historicalPublications` is a persistent **review-only registry**, not an outbound sender, queue or competing reservation manager. `PublicationService.approve` consults both this guard and the canonical `deliveries` ledger in the same transaction; a recorded unknown / manual skip does not silently permit republishing.
+- Existing single and multipart mock senders reject a receipt already verified as historical for the same destination. A colliding receipt remains `UNKNOWN_OUTCOME` until separately resolved; no text-hash-based deduplication is treated as proof.
+- Late historical reconciliation can only settle a previously uncertain/review-required item after independently verified, unique evidence and renewed scoped permissions. Explicit manually skipped items never gain a message ID or count as successful sends.
+- Schema 6→7 appends history metadata without rewriting B4 delivery states or receipts. Single-process JSON is still **not** a production store; add a transactional multi-worker backend, backups and real gateway verification before activation.

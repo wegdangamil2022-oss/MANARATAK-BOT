@@ -107,7 +107,7 @@ test('B4 reviewed flow: v5 migration preserves historic deliveries and B3 data',
     const historic = await f.store.snapshot();
     await writeFile(f.file, JSON.stringify({ ...historic, schemaVersion: 5 }));
     const migrated = await new BotStore(f.file).snapshot();
-    assert.equal(migrated.schemaVersion, 6);
+    assert.equal(migrated.schemaVersion, 7);
     assert.deepEqual(migrated.deliveries, historic.deliveries);
     assert.deepEqual(migrated.campaigns, historic.campaigns);
     assert.deepEqual(migrated.educationResources, historic.educationResources);

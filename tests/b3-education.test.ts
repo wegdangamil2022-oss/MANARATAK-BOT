@@ -149,7 +149,7 @@ test('B3 migration from B2 is additive and rejects unsupported state schemas',as
     delete (legacy as Partial<typeof current>).importRuns;
     await writeFile(c.file,JSON.stringify(legacy));
     const recovered=await new BotStore(c.file).snapshot();
-    assert.equal(recovered.schemaVersion,6);
+    assert.equal(recovered.schemaVersion,7);
     assert.deepEqual(recovered.educationResources,[]);
     assert.equal(recovered.chats.length,current.chats.length);
   } finally { await c.close(); }

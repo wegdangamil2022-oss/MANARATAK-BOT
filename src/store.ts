@@ -45,8 +45,16 @@ export interface PublicationDelivery {
       attemptId?: string; messageId?: string; }[];
   };
 }
+/** Historical evidence is an item-specific publication guard, not an outbound delivery or a second sender. */
+export interface HistoricalPublicationRecord {
+  id: string; sourceScope: string; destination: string; resourceId: string; revision: string;
+  status: import('./legacy-publication-migration.js').LegacyReviewStatus;
+  diagnostic: string; reviewedBy: string; reviewedAt: number;
+  proof?: {evidenceId:string;messageId:string;source:'TRUSTED_RECEIPT'|'FORWARDED_POST'};
+  skip?: {actor:string;reason:string};
+}
 export interface BotState {
-  schemaVersion: 6;
+  schemaVersion: 7;
   chats: Chat[];
   grants: Grant[];
   privateAI: PrivateAIMode;
@@ -67,13 +75,14 @@ export interface BotState {
   resourceLinks: ResourceLink[];
   campaigns: PublicationCampaign[];
   deliveries: PublicationDelivery[];
+  historicalPublications: HistoricalPublicationRecord[];
 }
 const empty = (): BotState => ({
-  schemaVersion: 6, chats: [], grants: [], privateAI: 'OFF',
+  schemaVersion: 7, chats: [], grants: [], privateAI: 'OFF',
   privateFeatures: { 'owner.dashboard': true, 'education.navigate': true, 'subscription.verify': true, 'support.use': true, 'content.upload': false },
   updates: [], operations: [], callbacks: [], wizards: [], audit: [],
   moderationReasons: [], moderationOperations: [], subscriptionRequirements: [], warnings: [],
-  educationCategories: [], educationResources: [], importRuns: [], faqEntries: [], resourceLinks: [], campaigns: [], deliveries: []
+  educationCategories: [], educationResources: [], importRuns: [], faqEntries: [], resourceLinks: [], campaigns: [], deliveries: [], historicalPublications: []
 });
 
 // A per-process serialized file transaction; atomic rename prevents torn JSON on a crash.
@@ -105,7 +114,12 @@ export class BotStore {
         // Additive publication-plan migration: retain every historical campaign and receipt verbatim.
         previous.schemaVersion = 6;
       }
-      if (previous.schemaVersion !== 6 || !Array.isArray(previous.campaigns) || !Array.isArray(previous.deliveries) || !Array.isArray(previous.faqEntries) || !Array.isArray(previous.resourceLinks) || !Array.isArray(previous.moderationReasons) || !Array.isArray(previous.moderationOperations) || !Array.isArray(previous.subscriptionRequirements) || !Array.isArray(previous.warnings) || !Array.isArray(previous.educationCategories) || !Array.isArray(previous.educationResources) || !Array.isArray(previous.importRuns)) throw new Error('Unsupported state schema');
+      if (previous.schemaVersion === 6) {
+        // Historical review registry is additive: never rebuild old B4 delivery receipts.
+        previous.schemaVersion = 7;
+        previous.historicalPublications = [];
+      }
+      if (previous.schemaVersion !== 7 || !Array.isArray(previous.historicalPublications) || !Array.isArray(previous.campaigns) || !Array.isArray(previous.deliveries) || !Array.isArray(previous.faqEntries) || !Array.isArray(previous.resourceLinks) || !Array.isArray(previous.moderationReasons) || !Array.isArray(previous.moderationOperations) || !Array.isArray(previous.subscriptionRequirements) || !Array.isArray(previous.warnings) || !Array.isArray(previous.educationCategories) || !Array.isArray(previous.educationResources) || !Array.isArray(previous.importRuns)) throw new Error('Unsupported state schema');
       return previous as unknown as BotState;
     } catch (err) {
       if ((err as NodeJS.ErrnoException).code === 'ENOENT') return empty();

@@ -1,3 +1,13 @@
+## 0.4.4 — 2026-10-19 — Historic publication review guard and late reconciliation (mock-only)
+
+- Added an explicitly authorized, item-specific historical review import that uses the existing B4 reservation boundary, never a second outbound sender. A last forwarded Telegram post/ordinal is not evidence of prior publications.
+- Stored distinct PUBLISHED_VERIFIED, UNVERIFIED, REVIEW_REQUIRED and MANUALLY_SKIPPED historical statuses in additive schema v7. A historical claim for the same resource revision/destination prevents a duplicate B4 campaign approval.
+- Verified receipt uniqueness across historical items and normal/multipart dispatch; conflicting message IDs are quarantined rather than counted as successful sends.
+- Added late provider-verified reconciliation and documented explicit manual skip for unresolved historic records; both recheck scoped authorization, preserve audit history and never auto-resend.
+- Preservation tested across schema v6→v7 and prior version migrations; protected earlier B3 resources, B4 campaigns and receipts.
+- New integration tests for historical review, concurrency, policy revocation during verification, receipt conflicts, restart, and evidence/skip resolution. No Telegram or platform production calls.
+- B4 remains TESTED_MOCK; transactional multi-worker storage and hardened real verification/outbound adapters are pending before live activation.
+
 ## 0.4.3 — 2026-10-19 — Reviewed multipart campaign integration (mock-only)
 
 - Reproduced the gap with a RED GitHub Actions integration test first, then implemented a reviewed long-form copy workflow on published B3 resources.
