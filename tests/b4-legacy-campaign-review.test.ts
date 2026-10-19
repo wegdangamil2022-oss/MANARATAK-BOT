@@ -147,3 +147,39 @@ test('B4 legacy integration: unpublished or archived source cannot enter migrati
   assert.deepEqual((await f.store.snapshot()).historicalPublications,[]);
  }finally{await f.close()}
 });
+
+test('B4 legacy integration: a historical verified receipt cannot be reused by a new single-part dispatch',async()=>{
+ const f=await fixture();try{
+  const a=f.resources[0]!.id,b=f.resources[1]!.id;
+  const source=await f.publication().draft(OWNER,SOURCE,DEST,[a]);
+  await f.review().review(OWNER,{sourceScope:SOURCE,destination:DEST,resourceIds:[a],
+   evidence:[receipt(a,source.previews[0]!.revision,'mock-message-1','verified-a')]});
+  const campaign=await f.publication().draft(OWNER,SOURCE,DEST,[b]);
+  await f.publication().approve(OWNER,campaign.id);
+  assert.equal((await f.publication().dispatchNext(campaign.id)).status,'UNKNOWN_OUTCOME');
+  assert.equal(f.gateway.calls.length,1);
+  const state=await f.store.snapshot();
+  assert.equal(state.deliveries[0]!.status,'UNKNOWN_OUTCOME');
+  assert.equal(state.historicalPublications[0]!.status,'PUBLISHED_VERIFIED');
+  assert.equal((await f.publication().dispatchNext(campaign.id)).status,'EMPTY');
+ }finally{await f.close();}
+});
+
+test('B4 legacy integration: multipart parts never confirm a Telegram message ID already certified as historical',async()=>{
+ const f=await fixture();try{
+  const a=f.resources[0]!.id,b=f.resources[1]!.id;
+  const source=await f.publication().draft(OWNER,SOURCE,DEST,[a]);
+  await f.review().review(OWNER,{sourceScope:SOURCE,destination:DEST,resourceIds:[a],
+   evidence:[receipt(a,source.previews[0]!.revision,'mock-message-1','verified-a')]});
+  await f.education.setPublicationText(OWNER,b,'منحة طويلة معتمدة ومراجعة. '.repeat(300));
+  const campaign=await f.publication().draft(OWNER,SOURCE,DEST,[b]);
+  await f.publication().approve(OWNER,campaign.id);
+  assert.equal((await f.publication().dispatchNext(campaign.id)).status,'UNKNOWN_OUTCOME');
+  const state=await f.store.snapshot();
+  assert.equal(state.deliveries[0]!.status,'MULTIPART');
+  assert.equal(state.deliveries[0]!.multipart!.parts[0]!.status,'UNKNOWN_OUTCOME');
+  assert.equal(state.deliveries[0]!.multipart!.parts[1]!.status,'QUEUED');
+  assert.equal(f.gateway.calls.length,1);
+  assert.equal((await f.publication().dispatchNext(campaign.id)).status,'BLOCKED');
+ }finally{await f.close();}
+});
