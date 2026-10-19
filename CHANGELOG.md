@@ -1,3 +1,12 @@
+## 0.4.5 — 2026-10-19 — B4 transactional SQLite test backend
+
+- Added opt-in `BotStore(file, {engine:'sqlite'})` while keeping existing JSON simulations unchanged. One canonical BotState and B4 reservation/receipt ledger, not a second publishing engine.
+- Added Node 22 SQLite WAL / BEGIN IMMEDIATE / synchronous FULL transaction commits to serialize writes across separate Node.js processes; durable SENDING/UNKNOWN intent semantics unchanged.
+- Added explicit lossless JSON-to-SQLite migration with strict no-overwrite behavior, including schema v5 legacy B3/B4 resources/campaign receipts/historical reviews.
+- Added verified online SQLite backup using node:sqlite backup API; existing backups cannot be silently overwritten. Invalid states and sources fail closed.
+- Added cross-process worker integration tests: competing approvals, distinct reservations, duplicate dispatch exclusion, transaction rollback/read isolation, multipart crash recovery, backup/restore and corrupt-state rejection.
+- This is TESTED_MOCK only: experimental Node 22 sqlite API, one serialized state row, no production load / power-loss tests, no real Telegram or MANARATAK platform access.
+
 ## 0.4.4 — 2026-10-19 — Historic publication review guard and late reconciliation (mock-only)
 
 - Added an explicitly authorized, item-specific historical review import that uses the existing B4 reservation boundary, never a second outbound sender. A last forwarded Telegram post/ordinal is not evidence of prior publications.

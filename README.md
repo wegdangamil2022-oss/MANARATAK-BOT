@@ -1,10 +1,30 @@
 # بوت منارتك — MANARATAK BOT
 
-**B0/B1 + B2-Core + B3 + B4 reviewed multipart and historic-review guard (v0.4.4). Offline/test-only — no live Telegram bot.**
+**B0/B1 + B2-Core + B3 + B4 transactional-storage experiment (v0.4.5). Offline/test-only — no live Telegram bot.**
 
 An independent TypeScript/Node.js 22 project based on `docs/MANARATAK_BOT_MASTER_v1.2.1_AR.md` and `docs/START_HERE_MANARATAK_BOT_v1.2.1_AR.md`. B0/B1 supply the secure baseline; B2-Core adds individual moderation and subscription policies; B3 adds the first locally tested education content flow.
 
 
+
+
+## B4 v0.4.5 — optional transactional SQLite storage (offline)
+
+The original `new BotStore(path)` remains the **per-process JSON simulation**, for backward compatibility. B4 now offers an **opt-in SQLite backing store of the exact same BotState and single campaign delivery ledger**, using Node.js 22's built-in `node:sqlite`:
+
+```ts
+const store = new BotStore('/private/offline-test/state.sqlite', {engine:'sqlite'});
+// Existing PublicationService, CampaignMultipartService and policies use the SAME store.
+// For a reviewed, deliberate migration from the old JSON test fixture:
+await BotStore.importJsonToSqlite('/private/offline-test/state.json', '/private/offline-test/new.sqlite');
+// Once populated, never import onto this same database again.
+await BotStore.backupSqlite('/private/offline-test/new.sqlite','/private/offline-test/backup.sqlite');
+```
+
+SQLite transactions use `BEGIN IMMEDIATE`, WAL journaling and `synchronous=FULL`. Operations are serialized across independent Node processes by the SQLite database write lock and preserve the prior SENDING → UNKNOWN_OUTCOME crash-safety contract. The existing source, destination, historical, single-part and multipart data all remain in ONE BotState record; a new SQLite file **does not create another publishing queue or independent deduplication ledger**.
+
+Safety controls tested with separate child processes: conflicting campaign approvals permit one reservation; approvals for distinct resources retain both reservations; simultaneous dispatch consumes a queued delivery once; a failed transaction rolls back; a reader never sees an uncommitted state; orphaned multipart attempts remain UNKNOWN after restart. The explicit JSON→SQLite import rejects invalid/missing sources and existing destination state; schema v5 records retain earlier B4 receipts and B3 resources. SQLite online backup uses `node:sqlite`'s actual backup operation (not copying a live WAL file), verifies the restorable snapshot and refuses to overwrite an existing backup.
+
+**Deployment warning:** Node's `node:sqlite` API is experimental on Node 22; the implementation serializes the full BotState into one SQLite row, and has not been load-tested, durability-tested under power failure, tested on network filesystems, or independently security reviewed. It is a significant offline concurrency improvement, **NOT a certified production database**. Database atomicity cannot establish exactly-once Telegram delivery following an ambiguous HTTP outcome; the existing UNKNOWN quarantine remains mandatory. Before any live activation require schema-normalized tables/indexes, writer load tests, backup/restore drills, supervision, outbound adapters, verified Telegram receipts, observability and a deployment review. Do not expose either store to real Telegram until explicitly authorized.
 
 ## B4 v0.4.4 — historical publication review guard (offline)
 
