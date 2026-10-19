@@ -285,9 +285,11 @@ export class PublicationService {
       const d=s.deliveries.find(x=>x.id===deliveryId);if(!d)throw new Error('DELIVERY_NOT_FOUND');
       const c=s.campaigns.find(x=>x.id===d.campaignId)!;
       if(!this.allowed(s,actor,c.sourceScope,c.destination))throw new Error('PUBLISH_DENIED');
+      if(d.status==='CANCELLED'||d.status==='SKIPPED')throw new Error('NOT_REVIEWABLE');
       if(d.status==='SENDING'||d.status==='MULTIPART'||d.status==='UNKNOWN_OUTCOME'||d.status==='SENT')throw new Error('REVIEW_REQUIRED');
       d.status='SKIPPED';d.reviewReason=reason.trim();
-      s.audit.push({updateKey:`b4:skip:${d.id}`,decision:'ALLOW',reason:'MANUALLY_SKIPPED_UNVERIFIED',policyVersion:c.destinationPolicyVersion,at:this.clock()});
+      s.audit.push({updateKey:`b4:skip:${d.id}`,actorId:actor,decision:'ALLOW',
+        reason:'MANUALLY_SKIPPED_UNVERIFIED',policyVersion:c.destinationPolicyVersion,at:this.clock()});
       this.finalize(s,c);
     });
   }
