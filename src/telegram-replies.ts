@@ -66,6 +66,17 @@ export type ReplyDispatchResult={status:'NO_REPLY'|'CONFIRMED'|'SENT'|'SENDING'|
 const knownStatus=(x:unknown):x is TelegramReplyJob['status']=>[
  'QUEUED','SENDING','SENT','FAILED_CONFIRMED','UNKNOWN_OUTCOME'
 ].includes(x as string);
+const validManualReview=(v:unknown):boolean=>{
+ if(!v||typeof v!=='object'||Array.isArray(v))return false;
+ const r=v as Record<string,unknown>;
+ return Object.keys(r).length===4 &&
+  Object.keys(r).every(k=>['decision','reviewedBy','reviewedAt','attemptId'].includes(k))&&
+  (r.decision==='ACKNOWLEDGED_UNRESOLVED'||r.decision==='ESCALATED')&&
+  typeof r.reviewedBy==='string'&&/^[1-9]\d{0,19}$/.test(r.reviewedBy)&&
+  typeof r.attemptId==='string'&&/^[a-zA-Z0-9_-]{1,128}$/.test(r.attemptId)&&
+  typeof r.reviewedAt==='number'&&Number.isSafeInteger(r.reviewedAt)&&r.reviewedAt>=0;
+};
+
 export function validTelegramReplyJob(v:unknown):v is TelegramReplyJob{
  if(!v||typeof v!=='object'||Array.isArray(v))return false;
  const j=v as Record<string,unknown>;
@@ -74,7 +85,13 @@ export function validTelegramReplyJob(v:unknown):v is TelegramReplyJob{
   (j.status==='QUEUED'?validPlan(j.plan):(j.plan===undefined||validPlan(j.plan)))&&
   (j.queuedAt===undefined||(typeof j.queuedAt==='number'&&Number.isSafeInteger(j.queuedAt)&&j.queuedAt>=0))&&
   (j.startedAt===undefined||(typeof j.startedAt==='number'&&Number.isSafeInteger(j.startedAt)&&j.startedAt>=0))&&
-  (j.redactedAt===undefined||(typeof j.redactedAt==='number'&&Number.isSafeInteger(j.redactedAt)&&j.redactedAt>=0));
+  (j.redactedAt===undefined||(typeof j.redactedAt==='number'&&Number.isSafeInteger(j.redactedAt)&&j.redactedAt>=0))&&
+  (j.manualReview===undefined||(
+   validManualReview(j.manualReview)&&
+   (j.status==='SENDING'||j.status==='UNKNOWN_OUTCOME')&&
+   typeof j.attemptId==='string'&&
+   (j.manualReview as Record<string,unknown>).attemptId===j.attemptId
+  ));
 }
 /**
  * Durable, one-shot outbound dispatch. Claim is committed before the external
