@@ -258,7 +258,8 @@ function respond(res:ServerResponse,status:number,body:Record<string,unknown>):v
 }
 /** Verifies Telegram's shared webhook secret and HTTP boundaries. Does not send any outbound messages. */
 export function telegramWebhookListener(app:TelegramUpdateApplication,secretToken:string,
- outbound?:TelegramReplyDispatcher,ingressOptions:IngressOptions={}):RequestListener {
+ outbound?:TelegramReplyDispatcher,ingressOptions:IngressOptions={},
+ safetyGate?:()=>Promise<boolean>):RequestListener {
   if(!/^[A-Za-z0-9_-]{32,256}$/.test(secretToken))throw Error('INVALID_WEBHOOK_SECRET');
   const guard=new BoundedIngress(ingressOptions);
   return (req,res)=>{
@@ -269,6 +270,14 @@ export function telegramWebhookListener(app:TelegramUpdateApplication,secretToke
       const release=guard.enter(req);
       if(!release){respond(res,503,{ok:false});return;}
       try{
+      // No new durable update may be claimed while emergency STOP is active.
+      // A missing/corrupt safety flag is also STOP. Never trust a request body
+      // to supply or override this operator-controlled decision.
+      if(safetyGate){
+       let allowed=false;
+       try{allowed=await safetyGate();}catch{/* fail closed */}
+       if(!allowed){respond(res,503,{ok:false});return;}
+      }
       if(req.headers['content-encoding']!==undefined){respond(res,415,{ok:false});return;}
       if(!/^application\/json(?:\s*;\s*charset=utf-8)?$/i.test(req.headers['content-type']??'')){respond(res,415,{ok:false});return;}
       const declared=req.headers['content-length'];
