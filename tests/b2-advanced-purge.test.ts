@@ -1,6 +1,8 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {mkdtemp,rm,writeFile} from 'node:fs/promises';
+import {execFile} from 'node:child_process';
+import {promisify} from 'node:util';
 import {join} from 'node:path';
 import {tmpdir} from 'node:os';
 import {BotStore} from '../src/store.js';
@@ -288,5 +290,46 @@ test('B2-advanced: revoking approved group after preview prevents confirmation a
   await assert.rejects(f.service().confirm(OWNER,job.id),/MANAGE_DENIED/);
   assert.equal((await f.store.snapshot()).purgeJobs[0]!.status,'PREVIEW');
   assert.equal(f.gateway.calls.length,0);
+ }finally{await f.close()}
+});
+
+test('B2-advanced: two independent SQLite workers cannot delete the same observed ID twice',async()=>{
+ const f=await fixture('sqlite');try{
+  await seed(f,1);
+  const job=await f.service().preview(OWNER,GROUP,{limit:1});
+  await f.service().confirm(OWNER,job.id);
+  const exec=promisify(execFile);
+  const file=new URL('./b2-purge-worker.js',import.meta.url).pathname;
+  const out=await Promise.all([
+   exec(process.execPath,[file,f.file,job.id]),
+   exec(process.execPath,[file,f.file,job.id])
+  ]);
+  const calls=out.map(x=>Number(x.stdout.trim().split(':').at(-1)));
+  assert.equal(calls.reduce((a,b)=>a+b,0),1);
+  assert.equal((await f.store.snapshot()).purgeJobs[0]!.items[0]!.status,'ACKNOWLEDGED');
+ }finally{await f.close()}
+});
+
+test('B2-advanced: cancellation while canDelete is waiting precludes a late outbound request',async()=>{
+ const f=await fixture('sqlite');try{
+  await seed(f,2);
+  const job=await f.service().preview(OWNER,GROUP,{limit:2});
+  await f.service().confirm(OWNER,job.id);
+  let entered!:()=>void,release!:()=>void;
+  const waiting=new Promise<void>(r=>entered=r),gate=new Promise<void>(r=>release=r);
+  f.gateway.canDelete=async()=>{entered();await gate;return true;};
+  const sending=f.service().dispatchNext(job.id);
+  await waiting;
+  try {
+   const i=(await f.store.snapshot()).purgeJobs[0]!.items[0]!;
+   assert.equal(i.status,'SENDING');
+   await f.service().cancel(OWNER,job.id);
+  }finally{release();}
+  assert.equal((await sending).status,'BLOCKED');
+  assert.equal(f.gateway.calls.length,0);
+  const jobState=(await f.store.snapshot()).purgeJobs[0]!;
+  assert.equal(jobState.status,'CANCELLED');
+  assert.equal(jobState.items[0]!.status,'CANCELLED');
+  assert.equal(jobState.items[1]!.status,'CANCELLED');
  }finally{await f.close()}
 });
