@@ -157,7 +157,8 @@ test('live server configuration is fail-closed and never enables Telegram by def
   const config={BOT_ENV:'production',TELEGRAM_ENABLED:'true',TELEGRAM_REPLY_DELIVERY_ENABLED:'true',
    BOT_OWNER_ID:OWNER,BOT_ID:'bot-main',BOT_USERNAME:'ManaratakBot',
    BOT_STATE_FILE:f.file,TELEGRAM_BOT_TOKEN:TOKEN,
-   TELEGRAM_WEBHOOK_SECRET:SECRET,TELEGRAM_LISTEN_PORT:'8787'};
+   TELEGRAM_WEBHOOK_SECRET:SECRET,TELEGRAM_LISTEN_PORT:'8787',
+   TELEGRAM_WEBHOOK_PUBLIC_URL:'https://webhook.manaratak-ops.net/telegram/webhook'};
   const c=loadLiveTelegramConfig(config);
   assert.equal(c.ownerId,OWNER);assert.equal(c.stateFile,f.file);assert.equal(c.listenPort,8787);
   for(const patch of [
@@ -176,7 +177,8 @@ test('live server refuses missing, public and uninitialized state files before o
   const env={BOT_ENV:'production',TELEGRAM_ENABLED:'true',TELEGRAM_REPLY_DELIVERY_ENABLED:'true',
    BOT_OWNER_ID:OWNER,BOT_ID:'bot-main',BOT_USERNAME:'ManaratakBot',
    BOT_STATE_FILE:f.file,TELEGRAM_BOT_TOKEN:TOKEN,
-   TELEGRAM_WEBHOOK_SECRET:SECRET,TELEGRAM_LISTEN_PORT:'8787'};
+   TELEGRAM_WEBHOOK_SECRET:SECRET,TELEGRAM_LISTEN_PORT:'8787',
+   TELEGRAM_WEBHOOK_PUBLIC_URL:'https://webhook.manaratak-ops.net/telegram/webhook'};
   await assert.rejects(createLiveTelegramServer(loadLiveTelegramConfig({...env,BOT_STATE_FILE:join(f.dir,'absent.sqlite')})),/LIVE_TELEGRAM_STATE_INVALID/);
   const {chmod}=await import('node:fs/promises');
   await chmod(f.file,0o644);
