@@ -1,3 +1,12 @@
+## 0.7.7 — 2026-10-21 — Owner subscription overview, controlled pause, and revocation cleanup (NOT DEPLOYED)
+
+- Added **owner-only Telegram group subscription inspection** for approved chats: saved ALL/ANY mode, count of mandatory channels and exact pre-approved channel IDs, explicitly labelled as local state, not live Telegram membership verification.
+- Added explicit two-step private owner review and confirmation for **pausing a stored mandatory-channel subscription**. Both chat-policy and subscription-configuration revisions, actor ownership and current verification scope are compared inside one BotStore transaction before clearing required channels. Confirmation is one-shot with stale-action rejection.
+- Hardened revocation: revoking a group/channel or removing the `verification` scope now atomically clears dependent mandatory-channel subscriptions (with incremented configuration revisions). Re-approving an old channel/group cannot silently restore legacy gate obligations. Full owner group revocation still remains a separately reviewed local operation.
+- **Never lift existing member restrictions automatically** when pausing or invalidating subscription requirements; moderation reasons and sent/unknown Telegram operations are independent and require separate review. No Telegram calls or live subscription checks occur inside owner UI.
+- New RED-first JSON/SQLite tests exercise two-channel configuration, local detail and actor isolation, pause CAS, stale concurrent config edits, revoke/reapprove behavior, malformed actions and preservation of independent moderation reasons.
+- Existing FAQ/membership behavior of direct `Policy.revokeChat` is retained while clearing dependent subscription rules. The bot remains OFF for public Telegram users.
+
 ## 0.7.6 — 2026-10-21 — Private owner-only group/channel policy restrictions (NOT DEPLOYED)
 
 - The private owner dashboard's approved-groups section now lists every saved group/channel authorization in bounded Next/Previous pages. Each chat opens a detail panel with **local** approval, stored membership flag, allowed scopes, group-AI mode and policy version; it explicitly disclaims live Telegram membership verification.
