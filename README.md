@@ -1,6 +1,6 @@
 # بوت منارتك — MANARATAK BOT
 
-**B0/B1 + B2-Core + B3 + B3 live Telegram membership verification (v0.6.1). Transport implemented but OFF by default — no live deployment verified.**
+**B0/B1 + B2-Core + B3 + B3 privacy-safe Telegram reply outbox and operational review (v0.6.2). Transport implemented but OFF by default — no live deployment verified.**
 
 An independent TypeScript/Node.js 22 project based on `docs/MANARATAK_BOT_MASTER_v1.2.1_AR.md` and `docs/START_HERE_MANARATAK_BOT_v1.2.1_AR.md`. B0/B1 supply the secure baseline; B2-Core adds individual moderation and subscription policies; B3 adds the first locally tested education content flow.
 
@@ -10,6 +10,28 @@ An independent TypeScript/Node.js 22 project based on `docs/MANARATAK_BOT_MASTER
 
 
 
+
+## B3 v0.6.2 — minimal persisted Telegram replies and unresolved-send audit (OFF BY DEFAULT)
+
+**Aim:** A permitted inbound webhook stores a durable outbound reply plan to prevent duplicate sends across crashes. Storing a full student-facing reply in SQLite forever is unnecessary once a send attempt begins, so this release minimizes *logical* retention without losing immutable attempt evidence. There is **no** automatic retry, auto-redaction cron, deletion of backup files, or production Telegram deployment.
+
+- The `TelegramReplyDispatcher` now takes an in-memory clone of a QUEUED reply inside the same exclusive store transaction that sets `SENDING` and fences its `attemptId`. It removes the durable `job.plan` and writes `redactedAt` **before** calling the external Bot API. A confirmed send still records `SENT` and `messageId`, a definite failure `FAILED_CONFIRMED`, and an ambiguous response `UNKNOWN_OUTCOME`. Redacted terminal/SENDING jobs remain non-replayable. In a group authorization revocation, an unsent QUEUED reply is marked FAILED_CONFIRMED and its text is also cleared.
+- New queued plans get `queuedAt` from the persisted update decision timestamp. Older schemas (including v0.6.1) remain supported with optional `plan`, `queuedAt`, `redactedAt`; no destructive migration.
+- `reviewTelegramReplyOutbox(store,{now,staleAfterMs})` is a read-only aggregate inventory reporting queued, sending, sent, failed, UNKNOWN, number of reply bodies still stored, stale queued, stale SENDING and potential manual-review cases. It **never returns message text, chat IDs, update IDs, attempt IDs, provider token or file paths**, and does not authorize retries.
+- `redactFinishedTelegramReplies(store,{now,maxEntries?,startAt?})` is a **separate, explicit one-shot operator action**, not automatic. It clears legacy full-text `plan` only for SENDING, SENT, FAILED_CONFIRMED and UNKNOWN_OUTCOME rows. QUEUED plans stay untouched because they are the only ones eligible for an initial send. Status, receipt, attempt ID and timestamps remain unchanged; malformed ledgers fail closed, results are counts-only, and transactions are atomic. Supports safe fixed-index paging (`startAt` default 0, up to 500 scanned per call).
+
+```ts
+import {reviewTelegramReplyOutbox,redactFinishedTelegramReplies}
+ from './src/telegram-reply-maintenance.js';
+
+// Use your trusted private BotStore instance, never an unverified remote path.
+const report=await reviewTelegramReplyOutbox(store,{now:Date.now(),staleAfterMs:900_000});
+console.log(report); // aggregate counts, no student identifiers
+// A separately authorized operator may run explicit cleanup, if required:
+const cleanup=await redactFinishedTelegramReplies(store,{now:Date.now(),maxEntries:500,startAt:0});
+```
+
+**Important limitations:** SQL writes and SQLite WAL, free pages and old `backupSqlite` files may still contain historical reply plaintext. Removing a `plan` from current serialized BotState is **not** secure physical erasure; storage/backup lifecycle, disk encryption, database compaction and secure decommissioning require separately designed and tested operator controls. Queue bodies remain until a send is claimed (or explicitly cancelled in a future workflow). Active SENDING after crash and UNKNOWN_OUTCOME **must never be automatically resent**; these require independent trusted evidence/manual reconciliation, which is not implemented in this release. The source implementation has mock-tested security behavior, not a live production deployment.
 
 ## B3 v0.6.1 — trusted read-only Telegram group membership checks (OFF BY DEFAULT)
 

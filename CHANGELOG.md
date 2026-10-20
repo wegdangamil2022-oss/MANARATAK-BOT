@@ -1,3 +1,12 @@
+## 0.6.2 — 2026-10-20 — Durable Telegram reply privacy and operator review (NOT DEPLOYED)
+
+- Removed unnecessary persisted reply body **at the beginning of each exclusive outbound send claim**, not after the HTTP result. Keeps only status, attempt ID, timestamps and optional confirmed Telegram message ID. This blocks blind replay after a crash without retaining user-facing text in current serialized state.
+- Adds creation timestamp to new QUEUED replies, optional body/redaction timestamps to old BotStore v8 snapshots, and zero-content fail-closed validation for already redacted historical statuses.
+- Added read-only, sanitized aggregate `reviewTelegramReplyOutbox` with stale QUEUED/SENDING counts and UNKNOWN/manual-review counts; no identifiers or message text.
+- Added separate, bounded, index-paged `redactFinishedTelegramReplies` for legacy SENDING/SENT/FAILED_CONFIRMED/UNKNOWN_OUTCOME rows. Does not touch QUEUED, update receipts or fire Telegram requests. All changes are transactional; invalid metadata blocks the whole operation.
+- Added 14 RED-first offline tests for JSON and SQLite, crash-safe pre-send redaction, unknown replay prevention, inventory privacy, bounded paging, corrupt input and concurrent workers; **428/428** tests passing including previous B0–B4 tests.
+- No physical secure erase of SQLite WAL/backups, no automatic lifecycle scheduler, no manual outcome reconciliation, no real Telegram deployment.
+
 ## 0.6.1 — 2026-10-20 — Fail-closed live group membership verification (NOT DEPLOYED)
 
 - Implemented `TelegramBotApiMembershipGateway` over the official `getChatMember` HTTP POST, with strict Telegram ID checks, bot-admin `creator`/`administrator` preflight, user ID matching, and explicit `restricted.is_member` semantics.

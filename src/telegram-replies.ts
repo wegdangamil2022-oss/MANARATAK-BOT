@@ -66,11 +66,15 @@ export type ReplyDispatchResult={status:'NO_REPLY'|'CONFIRMED'|'SENT'|'SENDING'|
 const knownStatus=(x:unknown):x is TelegramReplyJob['status']=>[
  'QUEUED','SENDING','SENT','FAILED_CONFIRMED','UNKNOWN_OUTCOME'
 ].includes(x as string);
-function validJob(v:unknown):v is TelegramReplyJob{
+export function validTelegramReplyJob(v:unknown):v is TelegramReplyJob{
  if(!v||typeof v!=='object'||Array.isArray(v))return false;
  const j=v as Record<string,unknown>;
  return typeof j.updateKey==='string'&&/^b3-webhook:[a-zA-Z0-9_-]{1,80}:\d+$/.test(j.updateKey)&&
-  validPlan(j.plan)&&knownStatus(j.status);
+  knownStatus(j.status)&&
+  (j.status==='QUEUED'?validPlan(j.plan):(j.plan===undefined||validPlan(j.plan)))&&
+  (j.queuedAt===undefined||(typeof j.queuedAt==='number'&&Number.isSafeInteger(j.queuedAt)&&j.queuedAt>=0))&&
+  (j.startedAt===undefined||(typeof j.startedAt==='number'&&Number.isSafeInteger(j.startedAt)&&j.startedAt>=0))&&
+  (j.redactedAt===undefined||(typeof j.redactedAt==='number'&&Number.isSafeInteger(j.redactedAt)&&j.redactedAt>=0));
 }
 /**
  * Durable, one-shot outbound dispatch. Claim is committed before the external
@@ -86,16 +90,23 @@ export class TelegramReplyDispatcher {
   const claim=await this.store.transaction(s=>{
    const job=s.telegramReplyJobs?.find(j=>j.updateKey===updateKey);
    if(!job)return {status:'NO_REPLY' as const};
-   if(!validJob(job))throw new Error('INVALID_REPLY_JOB');
+   if(!validTelegramReplyJob(job))throw new Error('INVALID_REPLY_JOB');
    if(job.status==='SENDING')return {status:'UNKNOWN_OUTCOME' as const};
    if(job.status!=='QUEUED')return {status:job.status as 'SENT'|'FAILED_CONFIRMED'|'UNKNOWN_OUTCOME'};
-   if(job.plan.chatId.startsWith('-')&&!this.policy.canUseChat(s,job.plan.chatId,'navigation')){
+   const plan=structuredClone(job.plan!);
+   if(plan.chatId.startsWith('-')&&!this.policy.canUseChat(s,plan.chatId,'navigation')){
     job.status='FAILED_CONFIRMED';
+    // No send will occur. The stored private content no longer serves a purpose.
+    delete job.plan;job.redactedAt=this.clock();
     return {status:'FAILED_CONFIRMED' as const};
    }
    const attemptId=randomUUID();
-   job.status='SENDING';job.attemptId=attemptId;job.startedAt=this.clock();
-   return {status:'SEND' as const,attemptId,plan:structuredClone(job.plan)};
+   const at=this.clock();
+   job.status='SENDING';job.attemptId=attemptId;job.startedAt=at;
+   // Remove the durable body *before* the external call. The immediate local
+   // copy goes to the sender, but a crash leaves no replayable payload.
+   delete job.plan;job.redactedAt=at;
+   return {status:'SEND' as const,attemptId,plan};
   });
   if(claim.status!=='SEND')return {status:claim.status};
   let result:TelegramSendResult;
