@@ -110,9 +110,15 @@ test('B4 integrated: recover expired in-flight attempt as UNKNOWN and reconcile 
  const f=await fixture();try{
   await f.service().stage(owner,'campaign1','r1',f.plan);
   let release!:()=>void;const pending=new Promise<void>(resolve=>release=resolve);
+  // An observable mock gateway entry proves the durable SENDING claim completed.
+  // Timing-dependent polling under a busy CI runner can race the worker.
+  let entered!:()=>void;const atGateway=new Promise<void>(resolve=>entered=resolve);
+  const original=f.gateway.sendPart.bind(f.gateway);
+  f.gateway.sendPart=async request=>{entered();return original(request);};
   f.pause(pending);
   const running=f.service().dispatchNext('campaign1','r1');
-  for(let i=0;i<100;i++){if((await f.store.snapshot() as Compat).deliveries[0].multipart.parts[0].status==='SENDING')break;await new Promise(x=>setTimeout(x,3));}
+  await atGateway;
+  assert.equal((await f.store.snapshot() as Compat).deliveries[0].multipart.parts[0].status,'SENDING');
   // Simulate an elapsed lease while the old worker is still awaiting a network reply.
   await f.store.transaction(s=>{(s as Compat).deliveries[0].multipart.parts[0].leaseUntil=999;});
   assert.equal(await f.service().recoverPending(),1);
