@@ -1,6 +1,6 @@
 # بوت منارتك — MANARATAK BOT
 
-**B0/B1 + B2-Core + B3 + B2-Advanced privacy-first moderation purge preview (v0.5.0). Offline/test-only — no live Telegram bot.**
+**B0/B1 + B2-Core + B3 + B2-Advanced deletion backoff and review safeguards (v0.5.1). Offline/test-only — no live Telegram bot.**
 
 An independent TypeScript/Node.js 22 project based on `docs/MANARATAK_BOT_MASTER_v1.2.1_AR.md` and `docs/START_HERE_MANARATAK_BOT_v1.2.1_AR.md`. B0/B1 supply the secure baseline; B2-Core adds individual moderation and subscription policies; B3 adds the first locally tested education content flow.
 
@@ -9,6 +9,19 @@ An independent TypeScript/Node.js 22 project based on `docs/MANARATAK_BOT_MASTER
 
 
 
+
+
+## B2-Advanced v0.5.1 — durable confirmed 429 cooldown (offline, fake gateway only)
+
+This stage extends **v0.5.0's reviewed metadata-only purge**, it does **not** enable Telegram deletion or automatic background execution. The gateway contract now differentiates a **structured, explicitly rejected** request (`{status:'RATE_LIMITED',retryAfterMs:...}`) from an ambiguous request outcome. A mere thrown HTTP/429-looking exception is **UNKNOWN_OUTCOME**, not a reason to resend.
+
+- Verified mock rate-limit responses must have exactly `status: 'RATE_LIMITED'` and an integer `retryAfterMs` from **1 to 3,600,000 ms**. A malformed value or unexpected gateway status is quarantined as UNKNOWN, never silently treated as confirmed deletion or safe retry.
+- A confirmed 429 leaves the exact reviewed item `QUEUED`, records the attempt and persists a `rateLimitedUntil` barrier inside the original versioned purge ledger. The barrier applies to **every purge job in that chat**, including after SQLite restart or another worker. Calls before expiry return `RATE_LIMITED` **without contacting the gateway**. No automatic timer or retry occurs; an explicitly invoked `dispatchNext` may resume only after expiry with fresh authorization, metadata fingerprint and protection checks.
+- Concurrent jobs **in the same chat** are serialized while any job's fake request is SENDING, preventing a second independent worker from racing another request's permission preflight or a future 429. An orphaned SENDING attempt remains subject to lease recovery and UNKNOWN quarantine, not inferred failure.
+- The hard limit of **50 attempts per UTC day** now counts immutable `PURGE_ATTEMPT_DURABLY_RECORDED` audit events. This includes retries after confirmed 429 and aborted preflights; resetting a mutable item's attempt ID cannot reset the daily quota. The prior preview/confirmation limit still applies.
+- Existing B3/B4 data and B2 purge schema **v8** are retained, with only an additive optional field on `PurgeJob`; no new or parallel deletion ledger. Full suite: **289 local mock tests**, including JSON and cross-process SQLite, fake 429, malformed response/exception quarantine, revocation, protected messages, daily quota and cancellation.
+
+**Production boundaries:** A real Telegram adapter would need to prove that a 429 actually represents *provider rejection before an effect*, including error shapes and rate-limit scope, and must enforce bot rights, API limits, privacy TTL and operational observability. None of this establishes exactly-once remote deletions; no token or real deletion is used.
 
 ## B2-Advanced v0.5.0 — preview-first moderation purge (offline, NO Telegram deletion)
 

@@ -1,3 +1,13 @@
+## 0.5.1 — 2026-10-20 — B2-Advanced fake 429 safety and per-chat purge sequencing
+
+- Added strict structured fake gateway rate-limit outcome with valid retryAfterMs (1–3,600,000), preserving exact item after a confirmed rejected request.
+- Persisted cooldown on the canonical purge job and enforced the maximum chat cooldown across all jobs, including after restart. No automatic retry; next explicit dispatcher call must revalidate rights, approved scope and observed-message fingerprint.
+- Malformed rate-limit payloads, unrecognized gateway statuses and thrown exceptions mentioning 429 become UNKNOWN_OUTCOME and block replay.
+- Count 50 UTC-day request attempts from immutable audit intents, not mutable per-item startedAt; confirmed-429 repeats still count and cannot bypass the daily quota.
+- Serialized same-chat jobs whenever another job has a SENDING request; independent SQLite workers cannot issue overlapping deletes in the same chat during preflight.
+- Added 11 offline tests (289 total) including JSON/SQLite confirmation, malformed responses, reset-safe daily accounting, same-chat contention, revocation, protection edits and cancellation.
+- Mock-only with no Telegram tokens, chat history API, live deletes or production activation. Node 22 SQLite backend remains experimental.
+
 ## 0.5.0 — 2026-10-20 — First B2-Advanced rolling metadata and preview-first purge (mock only)
 
 - Added metadata-only 48-hour rolling message index for explicitly moderation-approved chats, refusing message texts/media payloads and unknown-sender attribution.

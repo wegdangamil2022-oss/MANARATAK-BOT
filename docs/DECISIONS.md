@@ -136,3 +136,11 @@
 - A confirmed job is an intent, **not** permission to delete arbitrarily. Check source metadata, effective staff/owner authorization, scope version and fake gateway privileges before and after awaiting remote preflight. Persist attempt ID before fake delete. An acknowledged API request is not independent proof of physical deletion; ambiguous outcomes remain UNKNOWN and cannot auto-retry.
 - Count attempts by the UTC day they actually begin, not solely the day a plan was confirmed; cross-day plans cannot silently evade a rate cap. Cancellation keeps records of previously attempted or unknown work.
 - The experimental JSON/SQLite stores retain only metadata and audit IDs; production TTL, backup purge, Bot API rank validation, batch429 handling and a real authorized deletion adapter must be separately designed, tested and explicitly activated. This work makes no live Telegram calls.
+
+## B2-Advanced v0.5.1 — confirmed rate-limit rejection versus ambiguous result (20 October 2026)
+
+- A gateway rate-limit response is **confirmed no-effect** only if the adapter returns the documented structured RATE_LIMITED object with strict retryAfterMs bounds. Parsing an exception text containing `429` is not evidence that Telegram rejected the call. Unknown or malformed responses remain UNKNOWN_OUTCOME and prohibit replay.
+- Cooldown is stored in the original purge job and applied to the whole chat, protecting against independent jobs and worker restarts. No automatic scheduled retrier, only a new explicit dispatch after the barrier; validate current authorization and stored message fingerprint again.
+- Even a confirmed rejection consumed a transport attempt. The immutable purge audit records are the source of truth for the 50-attempt UTC-day cap, including 429 retries. Do not rely on mutable `startedAt` after resetting QUEUED.
+- No other job may start a delete request in the same chat while a current SENDING attempt exists. Recovery cannot infer remote failure after a timeout and never auto-replays an unknown request.
+- This slice is TESTED_MOCK, not real Telegram behavior validation; actual API contract, provider rights/rate limits and production retention must be independently verified before any activation.

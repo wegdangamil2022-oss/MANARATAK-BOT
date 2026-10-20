@@ -1,9 +1,9 @@
 {
   "name": "manaratak-bot",
-  "version": "0.5.0",
+  "version": "0.5.1",
   "private": true,
   "type": "module",
-  "description": "MANARATAK BOT MANARATAK BOT B0-B4 mock plus B2-Advanced observed-only purge preview",
+  "description": "MANARATAK BOT B0-B4 mock plus B2-Advanced reviewed purge with confirmed 429 cooldown",
   "engines": {
     "node": ">=22"
   },
