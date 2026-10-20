@@ -1,3 +1,11 @@
+## 0.7.5 — 2026-10-21 — Fully paginated owner category picker during candidate review (NOT DEPLOYED)
+
+- Added nine-item Next/Previous pages for all currently authorized source categories when the owner selects a READY imported candidate; previously the chooser displayed only the first nine categories. Buttons bind the run, candidate index and requested page and are revalidated by the existing owner-only private handler against the live approved scope.
+- Handles a candidate beyond the first ten imported records without resetting its index, never applies approval or local publish merely by moving between pages, and denies stale pages after a candidate becomes APPROVED or NEEDS_REVIEW, group access is revoked or sections are disabled.
+- Canonical, bounded page text rejects forged IDs, out-of-range page requests and navigation in the wrong direction. Optional long-category IDs retain the safe selector introduced in v0.7.4.
+- RED-first JSON and SQLite integration tests cover 21 categories across three pages, last-page approval and separately confirmed library-only publication, late-index candidates and blocked unauthorized navigation.
+- Real Telegram deployment, AI calls and channel publication remain OFF.
+
 ## 0.7.4 — 2026-10-21 — Owner review navigation and long category selectors (NOT DEPLOYED)
 
 - Added actual Next/Previous buttons for **all accessible import batches and individual candidates**, ten per page, rather than only the first ten. Page requests are bounded canonical Telegram texts; they never confer owner authority, and updated owner verification plus current group approval are rechecked on every page.
