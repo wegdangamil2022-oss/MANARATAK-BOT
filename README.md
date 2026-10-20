@@ -11,6 +11,14 @@ An independent TypeScript/Node.js 22 project based on `docs/MANARATAK_BOT_MASTER
 
 
 
+## B3 v0.7.7 — owner review and suspension of group subscription rules (OFFLINE)
+
+In **🔐 لوحة المالك → 👥 المجموعات المعتمدة → محادثة**, a configured, approved group now shows stored mandatory-channel subscription status and a private **تفاصيل الاشتراك** screen with locally saved `ALL` or `ANY` policy and channel IDs. This is not a Telegram `getChatMember` check, an estimate of subscription-compliance or proof that the bot has current channel administrator rights.
+
+An owner may review and then confirm **تعليق الاشتراك**. The atomic transaction compares owner identity, current chat approval/verification scope, chat-policy revision and subscription-rule revision, and clears the requirement. The UI does not configure or activate new mandatory channels, change a global policy or call Telegram. Unknown or replayed actions fail closed.
+
+Revoking a group, revoking a required channel, or removing verification permission clears any related requirements and increments their versions: reapproval is not a hidden restart. **Previously recorded subscription-mute reasons are NOT automatically removed**: after an operator reviews affected members and verifies current permissions, remediation must take the separate authorized moderation path. This prevents accidental mass unmute or a fabricated successful Telegram action. No live bot has been deployed.
+
 ## B3 v0.7.6 — owner-only chat and group policy review (OFFLINE)
 
 Within the private Telegram **🔐 لوحة المالك → 👥 المجموعات المعتمدة** reply keyboard, the owner can browse saved group/channel authorizations across pages and inspect a saved chat's policy, scope names, group AI status and locally stored presence flag. Presence is **not** a live Telegram membership check.
