@@ -37,7 +37,7 @@ export class BoundedIngress {
    left=true;
    socket.removeListener('timeout',onTimeout);
    // Restore the host's original timeout; never disable socket protection.
-   if(!socket.destroyed)socket.setTimeout(originalTimeout);
+   if(!socket.destroyed)socket.setTimeout(originalTimeout??0);
    this.active--;
   };
  }
