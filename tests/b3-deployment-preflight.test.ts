@@ -29,7 +29,7 @@ test('preflight validates private existing SQLite and HTTPS deployment without l
   const cfg=loadLiveTelegramConfig(x.env);
   assert.equal(cfg.publicWebhookUrl,URL);
   const report=await preflightLiveTelegram(x.env);
-  assert.deepEqual(report,{ready:true,httpsWebhook:true,privateSqlite:true,listener:'LOOPBACK_ONLY',telegramNetworkCalls:0});
+  assert.deepEqual(report,{ready:true,httpsWebhook:true,privateSqlite:true,listener:'LOOPBACK_ONLY',telegramNetworkCalls:0,safetySwitch:'RUN'});
   const server=await createLiveTelegramServer(cfg, (async()=>{throw Error('NETWORK_FORBIDDEN');}) as typeof fetch);
   assert.equal(server.listening,false);server.close();
  }finally{await x.close();}
