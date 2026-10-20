@@ -194,7 +194,11 @@ export class OwnerTelegramMenu{
    if(pageRequest.type==='imports')
     return this.pagedImports(state,pageRequest.page,pageRequest.direction);
    const run=pageRequest.runId?this.allowedRun(state,pageRequest.runId):null;
-   return run?this.pagedCandidates(run,pageRequest.page,pageRequest.direction):reject();
+   if(!run)return reject();
+   if(pageRequest.type==='candidates')
+    return this.pagedCandidates(run,pageRequest.page,pageRequest.direction);
+   if(pageRequest.index===undefined)return reject();
+   return this.categoryPage(run,pageRequest.index,ctx.actorId,pageRequest.page,pageRequest.direction);
   }
   if(text===menuLabels.owner){
    const panel=await this.admin.panel(ctx,'private');
@@ -270,12 +274,7 @@ export class OwnerTelegramMenu{
     +'الدورة: '+line(candidate.cycle,40)+'\n'
     +'المرحلة: '+line(candidate.degree,40)+'\n'
     +'الحالة: '+line(candidate.status,30)+'\n';
-   if(candidate.status==='READY'){
-    const choices=categories.slice(0,9).map(c=>
-     '📂 اعتماد في · '+run.id+':'+index+':'+ownerCategoryToken(c.id));
-    return screen(detail+'اختر القسم ثم أكّد الاعتماد بشكل صريح.',
-     choices.length?choices:[button]);
-   }
+   if(candidate.status==='READY')return this.categoryPage(run,index,ctx.actorId,0);
    if(candidate.status==='APPROVED'&&candidate.categoryId){
     const cat=categories.find(x=>x.id===candidate.categoryId);
     if(!cat)return screen(detail+'قسم الاعتماد غير متاح حاليًا.',[button]);
