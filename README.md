@@ -11,6 +11,12 @@ An independent TypeScript/Node.js 22 project based on `docs/MANARATAK_BOT_MASTER
 
 
 
+## B3 v0.7.5 — owner category selection now spans the whole reviewed scope (OFFLINE)
+
+The candidate approval screen in the private owner Telegram dashboard now lists authorized categories in **nine-item pages**, with Next/Previous when needed. The page marker binds the exact imported run and candidate index, is never treated as permission, and is re-checked against current actor ownership, source chat approval, candidate READY status and available categories on every tap.
+
+An owner can select a category at the end of a long list, then still **explicitly confirm approval**, separately preview local publication and confirm that publication. This does not send a Telegram channel post or authorize a new production deployment. Old or forged page markers are refused after revocation, archiving or changed status.
+
 ## B3 v0.7.4 — owner import and candidate review pagination (OFFLINE)
 
 The private owner-only Telegram dashboard now provides **التالي / السابق** for imported document batches and their candidates, including indexes beyond ten. The owner sees the current approved-scope rows only: the server revalidates sender ownership, source-chat approval and the underlying import contents on each button tap. A stale or forged page cannot access data or grant publishing permission.
