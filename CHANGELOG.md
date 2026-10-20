@@ -1,3 +1,13 @@
+## 0.7.0 — 2026-10-21 — Gated isolated SQLite rollback rehearsal (NOT DEPLOYED)
+
+- Extended the existing offline STOP+backup acceptance with a second explicit read-only gate to ensure that backup and primary SQLite database are not *hard links to the same inode*. Distinct path strings alone are not sufficient rollback evidence.
+- Added `rehearseTelegramTrialRollback`: first checks the private STOP file, separate validated matching SQLite backup and absence of unresolved queues/update/operations; only then invokes the pre-existing `runSqliteRestoreDrill` to perform an **actual SQLite point-in-time scratch restore** inside a separate pre-existing, canonical 0700 private sandbox. It compares all restored state and removes its own temporary files.
+- The sandbox cannot be a live database/backup directory, overlap the actual source, backup or safety file, be a symlink or world-accessible. Invalid or missing directories are not created; blocked preflight does not attempt a restore; the original database, backup, and emergency STOP file are not mutated.
+- The tool rechecks acceptance after the scratch drill and rejects a changed live state/safety switch. This reduces false PASS outcomes but cannot replace suspending all writers and host-level isolation against races.
+- Added `npm run telegram:rehearse -- --offline-only --state <absolute> --backup <absolute> --safety <absolute> --sandbox <private-directory> --stale-ms 900000` with static safe JSON, PASS=0, BLOCKED=2 and invalid=1. No Telegram network, token, command, production database overwrite, automatic recovery or send.
+- New local TDD tests prove sandbox restoration cleanup, unchanged live source/backup/safety, private-data-free output, blocked unknown queues, alias rejection and fail-closed CLI args.
+- Passing both gates is not production readiness; DNS/TLS, isolated host backup retention, test-group acceptance, operator approvals and real Telegram evidence remain outstanding.
+
 ## 0.6.9 — 2026-10-21 — Offline trial acceptance and rollback anchor assessment (NOT DEPLOYED)
 
 - Added `inspectTelegramTrialAcceptanceReadOnly` to verify an existing private initialized original SQLite state, a separately protected SQLite backup and the existing STOP/RUN safety file. Source and backup must match at the decoded logical BotState level for the rollback anchor to pass. Both are opened read-only and never created or restored.
