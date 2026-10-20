@@ -37,13 +37,13 @@ export async function runSqliteRestoreDrill(options:RestoreDrillOptions):Promise
   [backupMeta,sandboxMeta]=await Promise.all([lstat(backupFile),lstat(sandboxDir)]);
  }catch{
   // Distinguish a nonexistent or corrupt backup from an untrusted scratch path.
-  try{await lstat(sandboxDir);}catch{invalid('RESTORE_DRILL_UNSAFE_PATH');}
-  invalid('RESTORE_DRILL_INVALID_BACKUP');
+  try{await lstat(sandboxDir);}catch{throw new Error('RESTORE_DRILL_UNSAFE_PATH');}
+  throw new Error('RESTORE_DRILL_INVALID_BACKUP');
  }
  if(!backupMeta.isFile()||backupMeta.isSymbolicLink()||
     !sandboxMeta.isDirectory()||sandboxMeta.isSymbolicLink())
   invalid('RESTORE_DRILL_UNSAFE_PATH');
- if((backupMeta.mode&0o077)!==0||(sandboxMeta.mode&0o077)!==0)
+ if((Number(backupMeta.mode)&0o077)!==0||(Number(sandboxMeta.mode)&0o077)!==0)
   invalid('RESTORE_DRILL_UNSAFE_PERMISSIONS');
  try{
   if(await realpath(backupFile)!==backupFile||await realpath(sandboxDir)!==sandboxDir)
@@ -52,7 +52,7 @@ export async function runSqliteRestoreDrill(options:RestoreDrillOptions):Promise
  if(!(await BotStore.verifySqliteBackupReadOnly(backupFile)))invalid('RESTORE_DRILL_INVALID_BACKUP');
  let source:DatabaseSync;
  try{source=new DatabaseSync(backupFile,{readOnly:true});}
- catch{invalid('RESTORE_DRILL_INVALID_BACKUP');}
+ catch{throw new Error('RESTORE_DRILL_INVALID_BACKUP');}
  try{
   // Verify the actual opened handle before allowing any filesystem write.
   let original:BotState;
@@ -60,9 +60,9 @@ export async function runSqliteRestoreDrill(options:RestoreDrillOptions):Promise
    const qc=source.prepare('PRAGMA quick_check').get() as {quick_check?:unknown}|undefined;
    if(qc?.quick_check!=='ok')invalid('RESTORE_DRILL_INVALID_BACKUP');
    const row=source.prepare('SELECT data FROM bot_state WHERE id=1').get() as {data?:unknown}|undefined;
-   if(typeof row?.data!=='string')invalid('RESTORE_DRILL_INVALID_BACKUP');
+   if(!row||typeof row.data!=='string')throw new Error('RESTORE_DRILL_INVALID_BACKUP');
    original=JSON.parse(row.data) as BotState;
-  }catch{invalid('RESTORE_DRILL_INVALID_BACKUP');}
+  }catch{throw new Error('RESTORE_DRILL_INVALID_BACKUP');}
   // No ability to supply a destination filename. A random, non-overwritable
   // scratch path is generated ONLY under an already-existing private directory.
   const destination=join(sandboxDir,'restore-drill-'+randomUUID()+'.sqlite');
@@ -81,9 +81,9 @@ export async function runSqliteRestoreDrill(options:RestoreDrillOptions):Promise
     const check=restored.prepare('PRAGMA quick_check').get() as {quick_check?:unknown}|undefined;
     if(check?.quick_check!=='ok')invalid('RESTORE_DRILL_MISMATCH');
     const row=restored.prepare('SELECT data FROM bot_state WHERE id=1').get() as {data?:unknown}|undefined;
-    if(typeof row?.data!=='string')invalid('RESTORE_DRILL_MISMATCH');
+    if(!row||typeof row.data!=='string')throw new Error('RESTORE_DRILL_MISMATCH');
     after=JSON.parse(row.data) as BotState;
-   }catch{invalid('RESTORE_DRILL_MISMATCH');}
+   }catch{throw new Error('RESTORE_DRILL_MISMATCH');}
    finally{restored.close();}
    // Compare the actual source snapshot to recovered BotState with no ignored
    // fields. In particular preserve grants, audit, publication receipts and
