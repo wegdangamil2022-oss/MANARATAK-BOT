@@ -11,7 +11,8 @@ import type { TelegramReplyDispatcher } from './telegram-replies.js';
 import {BoundedIngress,decodeStrictJsonBytes,type IngressOptions} from './http-ingress-guard.js';
 import {menuLabels,mainMenuKeyboard,backMenuKeyboard,categoryButton,
  resourceButton,listingKeyboard,categoryButtonId,resourceButtonId,
- matchingCategories,type TelegramReplyKeyboard} from './telegram-menu.js';
+ matchingCategories,menuPageButton,parseMenuPageCommand,type MenuPageCommand,
+ type TelegramReplyKeyboard} from './telegram-menu.js';
 
 /** Inbound-only boundary. A test double may supply bytes; there is intentionally no live HTTP implementation. */
 export interface TelegramDocumentPort {
@@ -192,20 +193,65 @@ export class TelegramUpdateApplication {
         [m.files]:{section:'files',title:'ملفات ونماذج'},
         [m.library]:{section:'all',title:'التعليم والموارد'}
       };
-      if(Object.prototype.hasOwnProperty.call(sections,text)){
-        const selection=sections[text]!;
+      const denyPage=():TelegramResult=>({status:'DENIED',reason:'INVALID_MENU_PAGE'});
+      const sectionPage=async(section:string,title:string,page:number,
+        direction?:MenuPageCommand['direction']):Promise<TelegramResult>=>{
         const categories=matchingCategories(
-          await this.opts.education.listCategories(actorId,'private'),selection.section);
-        if(categories.length===0)return result('<b>'+escapeTelegramHtml(selection.title)+'</b>\n'
+          await this.opts.education.listCategories(actorId,'private'),section);
+        if(categories.length===0&&page===0&&!direction)return result(
+          '<b>'+escapeTelegramHtml(title)+'</b>\n'
           +'لا توجد أقسام معتمدة متاحة في هذا القسم حاليًا.\n'
           +'لن نعرض فرصًا أو خدمات غير منشورة.',backMenuKeyboard());
-        const view=categories.slice(0,10);
-        const list=view.map(c=>'• '+escapeTelegramHtml(c.title)).join('\n');
-        return result('<b>'+escapeTelegramHtml(selection.title)+'</b>\n'
-          +'اختر القسم المناسب:\n'+list+
-          (categories.length>view.length?'\nتوجد أقسام أخرى يمكن تصفحها بأمر /categories private.':''),
-          listingKeyboard(view.map(categoryButton)));
+        const pages=Math.ceil(categories.length/10);
+        if(page<0||page>=pages||
+          (direction==='next'&&page===0)||
+          (direction==='previous'&&page>=pages-1))return denyPage();
+        const view=categories.slice(page*10,page*10+10);
+        return result('<b>'+escapeTelegramHtml(title)+'</b>\n'
+          +'صفحة '+(page+1)+' من '+pages+'\n'
+          +'اختر القسم المناسب:\n'+view.map(c=>'• '+escapeTelegramHtml(c.title)).join('\n'),
+          listingKeyboard(view.map(categoryButton),{
+            previous:page>0?menuPageButton('c',section,page-1,'previous'):undefined,
+            next:page+1<pages?menuPageButton('c',section,page+1,'next'):undefined
+          }));
+      };
+      const resourcesPage=async(catId:string,page:number,
+        direction?:MenuPageCommand['direction']):Promise<TelegramResult>=>{
+        const visible=await this.opts.education.listCategories(actorId,'private');
+        const cat=visible.find(x=>x.id===catId);
+        if(!cat)return {status:'DENIED',reason:'CATEGORY_NOT_ACCESSIBLE'};
+        const resources=await this.opts.education.listResources(actorId,'private',catId);
+        if(resources.length===0&&page===0&&!direction)return result(
+          '<b>'+escapeTelegramHtml(cat.title)+'</b>\n'
+          +'لا توجد موارد معتمدة منشورة في هذا القسم حاليًا.',backMenuKeyboard());
+        const pages=Math.ceil(resources.length/10);
+        if(page<0||page>=pages||
+          (direction==='next'&&page===0)||
+          (direction==='previous'&&page>=pages-1))return denyPage();
+        const view=resources.slice(page*10,page*10+10);
+        return result('<b>'+escapeTelegramHtml(cat.title)+'</b>\n'
+          +'صفحة '+(page+1)+' من '+pages+'\n'
+          +view.map(r=>'• '+escapeTelegramHtml(r.title)).join('\n'),
+          listingKeyboard(view.map(resourceButton),{
+            previous:page>0?menuPageButton('r',cat.id,page-1,'previous'):undefined,
+            next:page+1<pages?menuPageButton('r',cat.id,page+1,'next'):undefined
+          }));
+      };
+      if(Object.prototype.hasOwnProperty.call(sections,text)){
+        const selection=sections[text]!;
+        return sectionPage(selection.section,selection.title,0);
       }
+      const pageRequest=parseMenuPageCommand(text);
+      if(pageRequest){
+        if(pageRequest.kind==='c'){
+          const chosen=Object.values(sections).find(x=>x.section===pageRequest.id);
+          if(!chosen)return denyPage();
+          return sectionPage(chosen.section,chosen.title,pageRequest.page,pageRequest.direction);
+        }
+        return resourcesPage(pageRequest.id,pageRequest.page,pageRequest.direction);
+      }
+      if(text.startsWith('➡️ التالي · ')||text.startsWith('⬅️ السابق · '))
+        return denyPage();
       if(text===m.assistant)return result(
         '<b>المساعد التعليمي 💬</b>\n'
         +'الإجابات المعتمدة من قاعدة الأسئلة متاحة ضمن المجموعات التي تسمح بها الإدارة، باستخدام /ask@'
@@ -229,14 +275,7 @@ export class TelegramUpdateApplication {
         const visible=await this.opts.education.listCategories(actorId,'private');
         const cat=visible.find(x=>x.id===categoryId);
         if(!cat||categoryButton(cat)!==text)return {status:'DENIED',reason:'CATEGORY_NOT_ACCESSIBLE'};
-        const resources=await this.opts.education.listResources(actorId,'private',categoryId);
-        if(resources.length===0)return result('<b>'+escapeTelegramHtml(cat.title)+'</b>\n'
-          +'لا توجد موارد معتمدة منشورة في هذا القسم حاليًا.',backMenuKeyboard());
-        const view=resources.slice(0,10);
-        return result('<b>'+escapeTelegramHtml(cat.title)+'</b>\n'
-          +view.map(r=>'• '+escapeTelegramHtml(r.title)).join('\n')
-          +(resources.length>view.length?'\nتوجد موارد أخرى عبر /resources private '+escapeTelegramHtml(cat.id):''),
-          listingKeyboard(view.map(resourceButton)));
+        return resourcesPage(categoryId,0);
       }
       const resourceId=resourceButtonId(text);
       if(!resourceId&&text.startsWith('🔎 '))
