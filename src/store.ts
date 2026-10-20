@@ -55,8 +55,36 @@ export interface HistoricalPublicationRecord {
   proof?: {evidenceId:string;messageId:string;source:'TRUSTED_RECEIPT'|'FORWARDED_POST'};
   skip?: {actor:string;reason:string};
 }
+/** B2-Advanced privacy-limited metadata from already observed updates only. No text or media payloads. */
+export interface RollingMessageMeta {
+  chatId:string; messageId:number; senderKind:'USER'|'CHANNEL'|'UNKNOWN'; senderId?:string;
+  sentAt:number; observedAt:number; contentType:'TEXT'|'MEDIA'|'COMMAND'|'OTHER'; hasLinks:boolean;
+  pinned:boolean; linkedChannel:boolean; adminLog:boolean; approvedAnnouncement:boolean;
+}
+export interface PurgeFilter {
+  limit:number; beforeMessageId?:number; senderId?:string; linksOnly?:boolean; mediaOnly?:boolean; commandsOnly?:boolean;
+}
+export type PurgeItemStatus='QUEUED'|'SENDING'|'ACKNOWLEDGED'|'FAILED_CONFIRMED'|'UNKNOWN_OUTCOME'|'SKIPPED_UNVERIFIED'|'CANCELLED';
+export interface PurgeItem {
+  messageId:number; metaDigest:string; status:PurgeItemStatus;
+  attemptId?:string; startedAt?:number; leaseUntil?:number;
+  reconciliation?:{evidenceId?:string;evidenceDigest?:string;reviewedBy:string;at:number;reason?:string;
+     verifiedOutcome?:'ACKNOWLEDGED'|'FAILED_CONFIRMED'|'SKIPPED_UNVERIFIED'};
+}
+/** Separate explicit review required before any mock delete request. */
+export interface PurgeJob {
+  id:string; chatId:string; actorId:string; scopeVersion:number; createdAt:number; expiresAt:number;
+  filter:PurgeFilter; excluded:{protected:number;expired:number};
+  status:'PREVIEW'|'READY'|'PAUSED'|'CANCELLED'|'COMPLETED';
+  confirmedBy?:string; confirmedAt?:number; rateLimitedUntil?:number; items:PurgeItem[];
+}
+/** Explicit owner-enabled retention REVIEW cadence. Tick only stores a preview, never redacts or deletes. */
+export interface PurgeRetentionReviewControl {
+ enabled:boolean; cadenceMs:number; version:number; nextCheckAt:number;
+ lastCheckedAt?:number; lastNotice?:import('./moderation-purge.js').PurgeRetentionPreview;
+}
 export interface BotState {
-  schemaVersion: 7;
+  schemaVersion: 8;
   chats: Chat[];
   grants: Grant[];
   privateAI: PrivateAIMode;
@@ -78,13 +106,16 @@ export interface BotState {
   campaigns: PublicationCampaign[];
   deliveries: PublicationDelivery[];
   historicalPublications: HistoricalPublicationRecord[];
+  rollingMessageMeta: RollingMessageMeta[];
+  purgeJobs: PurgeJob[];
+  purgeRetentionReview?: PurgeRetentionReviewControl;
 }
 const empty = (): BotState => ({
-  schemaVersion: 7, chats: [], grants: [], privateAI: 'OFF',
+  schemaVersion: 8, chats: [], grants: [], privateAI: 'OFF',
   privateFeatures: { 'owner.dashboard': true, 'education.navigate': true, 'subscription.verify': true, 'support.use': true, 'content.upload': false },
   updates: [], operations: [], callbacks: [], wizards: [], audit: [],
   moderationReasons: [], moderationOperations: [], subscriptionRequirements: [], warnings: [],
-  educationCategories: [], educationResources: [], importRuns: [], faqEntries: [], resourceLinks: [], campaigns: [], deliveries: [], historicalPublications: []
+  educationCategories: [], educationResources: [], importRuns: [], faqEntries: [], resourceLinks: [], campaigns: [], deliveries: [], historicalPublications: [], rollingMessageMeta: [], purgeJobs: []
 });
 
 // A per-process serialized file transaction; atomic rename prevents torn JSON on a crash.
@@ -116,7 +147,14 @@ export class BotStore {
       previous.schemaVersion = 7;
       previous.historicalPublications = [];
     }
-    if (previous.schemaVersion !== 7 ||
+    if (previous.schemaVersion === 7) {
+      // Additive privacy-limited moderation index. All prior B3/B4 delivery receipts remain unchanged.
+      previous.schemaVersion = 8;
+      previous.rollingMessageMeta = [];
+      previous.purgeJobs = [];
+    }
+    if (previous.schemaVersion !== 8 ||
+      !Array.isArray(previous.rollingMessageMeta) || !Array.isArray(previous.purgeJobs) ||
       !Array.isArray(previous.historicalPublications) || !Array.isArray(previous.campaigns) ||
       !Array.isArray(previous.deliveries) || !Array.isArray(previous.faqEntries) ||
       !Array.isArray(previous.resourceLinks) || !Array.isArray(previous.moderationReasons) ||

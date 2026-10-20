@@ -170,7 +170,7 @@ test('v3 states upgrade additively to v4 without losing approved resources or gr
     old.schemaVersion=3;delete old.faqEntries;delete old.resourceLinks;
     await writeFile(c.file,JSON.stringify(old));
     const migrated=await new BotStore(c.file).snapshot();
-    assert.equal(migrated.schemaVersion,7);
+    assert.equal(migrated.schemaVersion,8);
     assert.equal(migrated.educationResources.length,1);assert.equal(migrated.grants.length,2);
     assert.deepEqual(migrated.faqEntries,[]);assert.deepEqual(migrated.resourceLinks,[]);
   } finally{await c.close();}

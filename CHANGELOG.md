@@ -1,3 +1,59 @@
+## 0.5.5 — 2026-10-20 — Local one-shot retention review command (offline)
+
+- Added `src/retention-review-runner.ts` with strict `--once --state ABSOLUTE_PATH --engine json|sqlite` parser and `runRetentionReviewOnce`; no token or owner parameter is treated as authentication.
+- Added compiled `src/retention-review-cli.ts` and `npm run retention:tick -- --state ... --engine ...`, a working local-only invocation of the owner-enabled review checkpoint, never compaction or Telegram deletion.
+- Refuses missing/nonregular/symlinked/wide-permission state files before opening; validates BotStore schema, disallows accidental state creation, returns only status and aggregate counts; fixed failure codes avoid echoing arguments/secret values.
+- Includes dedicated outbound-disabled gateway, no network or Telegram tokens. No cron, service manager, background run or production DB activation is installed.
+- Added 12 tests (350 total) running the real CLI in Node subprocesses for JSON and SQLite, including read-only disabled run, strict flags, missing-state fail-closed, aggregate-only due notice, replay idempotence, concurrent independent SQLite processes and error-output secrecy.
+- Keeps canonical BotStore v8 and all historical v0.5.4 features/receipts unchanged. Manual owner compaction is still a separate, explicit action.
+
+## 0.5.4 — 2026-10-20 — Owner opt-in review checkpoints (offline, no automatic retention)
+
+- Added backward-compatible optional `PurgeRetentionReviewControl` to existing `BotStore` v8. No schema migration or separate database; legacy saved states default disabled.
+- Owner-only `configureRetentionReview` and `getRetentionReview`: bounded 1–30 day cadence, strict setting keys/types, durable next check and version, clearing old aggregate notice on reconfiguration or disable.
+- Explicit `tickRetentionReview` computes only a privacy-minimized `PurgeRetentionPreview` when due, recording the next check and fixed-code audit without redacting data or reaching Telegram; disabled/not-due/reversed-clock invocations make no semantic state changes.
+- SQLite-independent and concurrent JSON workers atomically claim one due tick; interruptions/long outages do not flood missed checks. A malformed saved control record is rejected rather than causing a background deletion or silent bypass.
+- Review notices carry only counts/digest, expire in 10 minutes, and do not relax the separate owner approval and fingerprint checks of `compactRetention`.
+- Added 18 mock regression tests across JSON and SQLite (338/338 total). No real job scheduler, external notification, production backup deletion, or live Telegram action.
+
+## 0.5.3 — 2026-10-20 — Offline owner-reviewed retention with immutable purge safety tombstones
+
+- Added read-only `previewRetention` and owner-confirmed `compactRetention` with 10-minute, state-digest-bound dry-run and atomic stale-plan rejection across JSON/SQLite.
+- Locally prunes observed metadata older than 48 hours from sentAt. Redacts sender filters, freeform review reasons, evidence IDs and attempt-related fields only for fully terminal jobs at least 30 days beyond their last recorded action; unknown/in-flight/unresolved jobs are never redacted.
+- Preserves each finalized job's chat/message reservation IDs, statuses, reviewer attribution and minimal coded audit history, keeping non-repeatability even after privacy cleanup.
+- Replaces stored evidence IDs with domain-separated SHA-256 tombstones and checks both raw/historical hashed IDs to prevent reuse for another UNKNOWN attempt. Migrates legacy plaintext evidence in old audit keys; new reconciliation audit keys use hashes from the outset.
+- Adds staged CI tests for review immutability, time-window expiration, late human decisions, cancelled UNKNOWN protection, legacy audit scrub, proof replay denial, dry-run information minimization and independent SQLite stale previews. No new schema number; optional v8 field only.
+- This is NOT automated production retention or cleanup of old backups. No real Telegram calls, deletions or production DB access.
+
+## 0.5.2 — 2026-10-20 — Explicit UNKNOWN purge outcome reconciliation (TESTED_MOCK)
+
+- Implemented `PurgeEvidence` exact proof binding (evidence ID, approved chat ID, message ID, immutable attempt ID, ACKNOWLEDGED vs FAILED_CONFIRMED).
+- Fake gateway now provides an independent asynchronous `verifyEvidence` contract, with a test-only evidence registry; no real Telegram verification. Rechecks authorization, proof status, uniqueness and identity after await inside one transaction, including SQLite.
+- Owner-only `skipForReview` explicitly records a bounded reason as `SKIPPED_UNVERIFIED`, without ever converting absence of evidence into deletion success.
+- Added access-restricted aggregate `reviewProgress` (accepted requests are not verified physical deletes; deletedConfirmed remains 0), preserving original receipts and cancellation status.
+- Reconciliation remains permitted for uncertain attempts from already cancelled jobs to settle historical evidence, never permitting further sends; verified FAILED_CONFIRMED is not auto retried.
+- Added 14 TDD tests (303/303 total) for JSON, SQLite, invalid/reused evidence, revoked reviewers, async racing decisions, report privacy and absence of network replay. Existing BotStore schema v8 retained with additive optional per-item reconciliation metadata.
+- No live Telegram or production DB interaction; verified mock receipts must not be presented as actual deletion confirmation.
+
+## 0.5.1 — 2026-10-20 — B2-Advanced fake 429 safety and per-chat purge sequencing
+
+- Added strict structured fake gateway rate-limit outcome with valid retryAfterMs (1–3,600,000), preserving exact item after a confirmed rejected request.
+- Persisted cooldown on the canonical purge job and enforced the maximum chat cooldown across all jobs, including after restart. No automatic retry; next explicit dispatcher call must revalidate rights, approved scope and observed-message fingerprint.
+- Malformed rate-limit payloads, unrecognized gateway statuses and thrown exceptions mentioning 429 become UNKNOWN_OUTCOME and block replay.
+- Count 50 UTC-day request attempts from immutable audit intents, not mutable per-item startedAt; confirmed-429 repeats still count and cannot bypass the daily quota.
+- Serialized same-chat jobs whenever another job has a SENDING request; independent SQLite workers cannot issue overlapping deletes in the same chat during preflight.
+- Added 11 offline tests (289 total) including JSON/SQLite confirmation, malformed responses, reset-safe daily accounting, same-chat contention, revocation, protection edits and cancellation.
+- Mock-only with no Telegram tokens, chat history API, live deletes or production activation. Node 22 SQLite backend remains experimental.
+
+## 0.5.0 — 2026-10-20 — First B2-Advanced rolling metadata and preview-first purge (mock only)
+
+- Added metadata-only 48-hour rolling message index for explicitly moderation-approved chats, refusing message texts/media payloads and unknown-sender attribution.
+- Added immutable, time-scoped purge previews, reviewed IDs and exclusion counts for pinned/linked-channel/admin logs/approved posts. Preview never causes deletion.
+- Added explicitly confirmed, auditable jobs and a fake gateway with durable per-message attempts, permission recheck after awaits, unknown-result quarantine, lease-aware restart recovery, cancellation and duplicate-reservation guards.
+- At most 25 selected IDs per preview; 10+ requires owner co-confirmation (strictly more than 10). Maximum 50 attempts per UTC day, checked at approval and at actual send time to stop cross-midnight overflow.
+- Added additive BotState schema v8 preserving all B3/B4 records. Added JSON and SQLite tests including independent worker competition, revocation, expiry, old-state recovery, cancellation and double-confirmation.
+- No Telegram Bot API mutations, no actual message deletion, no scraping or claim of complete chat history. This is TESTED_MOCK; other B2-Advanced modules remain PLANNED.
+
 ## 0.4.7 — 2026-10-20 — Cancellation-safe campaign parts, evidence and reviewer audit (mock-only)
 
 - Fixed B4 campaign cancellation leaving queued multipart parts in a misleading pending state. Cancel unstarted/confirmed-failed tails while preserving previously SENT parts and real mock receipts.

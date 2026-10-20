@@ -1,9 +1,9 @@
 {
   "name": "manaratak-bot",
-  "version": "0.4.8",
+  "version": "0.5.5",
   "private": true,
   "type": "module",
-  "description": "MANARATAK BOT B0-B4 mock-only: cancellation-safe multipart and immutable receipt/reservation safeguards",
+  "description": "MANARATAK BOT B0-B4 mock plus B2-Advanced reviewed purge, confirmed 429 cooldown and evidence-bound review and owner-approved privacy retention and opt-in review checkpoints and local one-shot runner",
   "engines": {
     "node": ">=22"
   },
@@ -12,6 +12,7 @@
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "test": "npm run build && node --test dist/tests/*.test.js",
     "check": "npm run typecheck && npm test",
+    "retention:tick": "npm run build && node dist/src/retention-review-cli.js --once",
     "demo": "npm run build && node dist/src/demo.js --simulate",
     "demo:education": "npm run build && node dist/src/education-demo.js",
     "demo:faq": "npm run build && node dist/src/faq-demo.js",

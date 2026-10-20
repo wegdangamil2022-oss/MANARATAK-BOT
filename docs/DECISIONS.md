@@ -128,3 +128,50 @@
 - Cancellation during async gateway permission probing must not requeue an item into a cancelled campaign or perform a network call. A result from an already-issued remote request may still arrive and be recorded.
 - Idempotent cancellations have one immutable audit event with `actorId`; manual skip cannot overwrite terminal cancelled/skipped review status. Additive optional actor field requires no schema version change.
 - No automatic retry of unknown external outcomes, no direct Telegram posts or production activation; all examples are simulation behavior, not an assertion of Telegram exactly-once delivery.
+
+## B2-Advanced v0.5.0 — rolling metadata and safe purge consent (20 October 2026)
+
+- Follow `S121-06`: no Telegram `getChatHistory`, no retrospective index, and no claims about messages missed while offline. Only already-observed metadata in explicitly approved moderation chats. No body text, caption, media payload or constructed sender IDs; index entries prune after 48h. Schema v8 is additive over v7.
+- A preview is a separate, durable actor/chat/version/fingerprint-bound decision expiring after ten minutes. It is **never** an outbound action. Up to 25 IDs are selected, at most 50 daily attempts, and >10 selected IDs requires a trusted owner confirmation. Protected pinned/linked-channel/admin-log/approved-announcement messages are not candidates.
+- A confirmed job is an intent, **not** permission to delete arbitrarily. Check source metadata, effective staff/owner authorization, scope version and fake gateway privileges before and after awaiting remote preflight. Persist attempt ID before fake delete. An acknowledged API request is not independent proof of physical deletion; ambiguous outcomes remain UNKNOWN and cannot auto-retry.
+- Count attempts by the UTC day they actually begin, not solely the day a plan was confirmed; cross-day plans cannot silently evade a rate cap. Cancellation keeps records of previously attempted or unknown work.
+- The experimental JSON/SQLite stores retain only metadata and audit IDs; production TTL, backup purge, Bot API rank validation, batch429 handling and a real authorized deletion adapter must be separately designed, tested and explicitly activated. This work makes no live Telegram calls.
+
+## B2-Advanced v0.5.1 — confirmed rate-limit rejection versus ambiguous result (20 October 2026)
+
+- A gateway rate-limit response is **confirmed no-effect** only if the adapter returns the documented structured RATE_LIMITED object with strict retryAfterMs bounds. Parsing an exception text containing `429` is not evidence that Telegram rejected the call. Unknown or malformed responses remain UNKNOWN_OUTCOME and prohibit replay.
+- Cooldown is stored in the original purge job and applied to the whole chat, protecting against independent jobs and worker restarts. No automatic scheduled retrier, only a new explicit dispatch after the barrier; validate current authorization and stored message fingerprint again.
+- Even a confirmed rejection consumed a transport attempt. The immutable purge audit records are the source of truth for the 50-attempt UTC-day cap, including 429 retries. Do not rely on mutable `startedAt` after resetting QUEUED.
+- No other job may start a delete request in the same chat while a current SENDING attempt exists. Recovery cannot infer remote failure after a timeout and never auto-replays an unknown request.
+- This slice is TESTED_MOCK, not real Telegram behavior validation; actual API contract, provider rights/rate limits and production retention must be independently verified before any activation.
+
+## B2-Advanced v0.5.2 — evidence-bound review of ambiguous deletion requests (20 October 2026)
+
+- A purge timeout or expired sending lease always remains `UNKNOWN_OUTCOME` until a trusted independently verified evidence artifact identifies **the exact chat, message, attempt and outcome**. A message ID by itself and a human guess are insufficient. Evidence ID is globally one-use across purge jobs.
+- `ACKNOWLEDGED` from a mocked gateway is a record of request acceptance, not proof of physical Telegram deletion. `FAILED_CONFIRMED` is verified no-effect and remains blocked without a separate human decision; automatic replay of ambiguous effects remains prohibited. A cancelled job may record its outstanding proof without restarting its cancelled queue.
+- `PurgeGateway.verifyEvidence()` is **an injected test-only contract**; the Fake gateway's proof registry is not a production receipt verifier. Recheck all source authorization and immutable attempt/evidence conditions **after await within one durable transaction**.
+- Owner-only `SKIPPED_UNVERIFIED` records an explicit bounded review reason in existing state and a minimal audit reason code. It means stop investigating, **not** delete confirmed or retry authorized. An immutable terminal decision cannot be rewritten with another review.
+- Aggregate `reviewProgress` is limited to authorized moderators in the approved chat and never claims a physical deleted count. No Telegram API client or production retention policy is activated.
+
+## B2-Advanced v0.5.3 — bounded privacy retention without destroying replay evidence (20 October 2026)
+
+- Since the Telegram Bot API cannot enumerate complete chat history, retained `RollingMessageMeta` must be treated as partial, observed-only data with a 48-hour `sentAt` index horizon. Removing old observed metadata does **not** prove Telegram deleted that message. Offline owner-reviewed compaction is only a maintenance primitive, not continuous enforcement.
+- Owner must explicitly preview the requested cleanup. The digest covers full eligible job and expired metadata candidates; the plan expires after 10 minutes, and its contents and latest eligibility are rechecked in the same DB transaction before any field is redacted. This prevents stale previews and simultaneous SQLite editors from processing newer data.
+- Redact freeform manual reviewer notes, sender filters, raw evidence references and status-obsolete attempt metadata only for fully terminal COMPLETED/CANCELLED purge jobs >=30 days after the **last** action. Leave still-unresolved UNKNOWN, FAILED_CONFIRMED, in-flight and paused jobs intact, including their attempt IDs and metadata fingerprints.
+- Retain a safety tombstone of reviewed job/chat/message IDs, status and actor audit instead of deleting all jobs: otherwise an old forgotten reservation or proof ID might inadvertently permit repeated deletion after restore/import. Store a domain-separated SHA-256 of redeemed evidence IDs to preserve one-use verification without indefinite raw proof identifiers; scrub legacy audit references as well.
+- Local canonical-state cleanup cannot expire offsite backups, exports or existing snapshots. Such retention and privacy policy, GDPR/data-subject obligations if applicable, backup deletion, and scheduled maintenance remain separate deployment tasks requiring owner approval and real tests. No live Telegram mutation is authorized by this work.
+
+## B2-Advanced v0.5.4 — optional read-only retention review cadence (20 October 2026)
+
+- An automatic compaction would undermine the explicit owner approval in v0.5.3. Instead allow the owner to opt into **periodic inspection only**. `tickRetentionReview` is an interface for a future trusted task runner, not a currently wired-up timer or an outbound Telegram message.
+- The optional control record is additive to schema v8, persists enablement, cadence, version, due clock and last privacy-minimized summary; disabled by default and only owner configurable/readable. Strict bounds 24h–30d and fail-closed invalid saved configuration.
+- Checkpoint computations and due advancement occur atomically in `BotStore.transaction`, ensuring at-most-one summary per due interval across independent SQLite processes. A late checkpoint catches up only once and a backward clock cannot induce additional notices.
+- A review notice is a ten-minute, digest-bound, aggregate-only dry-run and never permits actual compaction alone. The owner must separately approve a still-current `compactRetention` request; no automatic deletion, Telegram action, offsite backup cleanup or production retention SLA is enabled by this code.
+
+## B2-Advanced v0.5.5 — trusted local entry point for periodic privacy review (20 October 2026)
+
+- Added an actual one-shot Node CLI instead of claiming an internal tick method is a running scheduler. The runner accepts only an explicit absolute path, state engine and `--once`, and requires an existing private regular file. No default state path, owner-ID argument as proof of authority, Telegram token or live API is allowed.
+- The only permitted runtime action is the preexisting `tickRetentionReview()`; the gateway is a deliberately outbound-disabled boundary. Neither local compaction, Telegram message deletion nor owner schedule configuration is accessible from the CLI.
+- Diagnostics contain no user-supplied argument, secret or raw metadata values. Returned output is strictly status and aggregate counts. Node 22's own SQLite ExperimentalWarning may be printed independently.
+- The owner-enabled policy in v0.5.4 remains opt-in and persistent; a local trusted cron/systemd job could later invoke this command, but that job is NOT installed in this release. Existing JSON per-process locking and SQLite transactional claiming govern repeat and parallel operations.
+- OS permissions, process ownership, symlink races, backups/exports, owner notification routing and continuous data-retention SLA need deployment-specific independent review; the file check does not provide full operating-system isolation.
