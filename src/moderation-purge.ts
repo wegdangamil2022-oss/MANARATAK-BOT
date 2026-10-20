@@ -5,23 +5,41 @@ import {nextDispatchLease,leaseExpired} from './publication-worker-lease.js';
 
 const WINDOW_MS=48*60*60*1000, REVIEW_MS=10*60*1000, MAX_PREVIEW=25, DAILY_LIMIT=50;
 type PurgeOutcome='ACKNOWLEDGED'|'FAILED_CONFIRMED'|'UNKNOWN_OUTCOME';
+/** A rate-limit is eligible for later retry only when the gateway explicitly proves
+ * the provider rejected the request BEFORE any delete operation was accepted. */
+export type PurgeRateLimit={status:'RATE_LIMITED';retryAfterMs:number};
+export type PurgeGatewayResult=PurgeOutcome|PurgeRateLimit;
+const MAX_RETRY_AFTER_MS=3_600_000;
+function confirmedRateLimit(value:unknown):value is PurgeRateLimit {
+ if(!value||typeof value!=='object'||Array.isArray(value))return false;
+ const r=value as Record<string,unknown>;
+ return r.status==='RATE_LIMITED'&&Number.isSafeInteger(r.retryAfterMs)&&
+   typeof r.retryAfterMs==='number'&&r.retryAfterMs>=1&&r.retryAfterMs<=MAX_RETRY_AFTER_MS&&
+   Object.keys(r).length===2;
+}
+function normalizedOutcome(value:unknown):PurgeOutcome|'RATE_LIMITED' {
+ if(confirmedRateLimit(value))return 'RATE_LIMITED';
+ if(value==='ACKNOWLEDGED'||value==='FAILED_CONFIRMED'||value==='UNKNOWN_OUTCOME')return value;
+ return 'UNKNOWN_OUTCOME'; // malformed 429 or impossible gateway status is not proof of failure
+}
+
 export interface PurgeGateway {
  canDelete(chatId:string):Promise<boolean>;
- deleteMessage(chatId:string,messageId:number,attemptId:string):Promise<PurgeOutcome>;
+ deleteMessage(chatId:string,messageId:number,attemptId:string):Promise<PurgeGatewayResult>;
 }
 export class FakePurgeGateway implements PurgeGateway {
  rights=true;
  throwAfterDelete=false;
- outcome:PurgeOutcome='ACKNOWLEDGED';
+ outcome:PurgeGatewayResult='ACKNOWLEDGED';
  calls:{chatId:string;messageId:number;attemptId:string}[]=[];
  async canDelete(_chatId:string):Promise<boolean>{return this.rights;}
- async deleteMessage(chatId:string,messageId:number,attemptId:string):Promise<PurgeOutcome>{
+ async deleteMessage(chatId:string,messageId:number,attemptId:string):Promise<PurgeGatewayResult>{
   this.calls.push({chatId,messageId,attemptId});
   if(this.throwAfterDelete)throw new Error('simulated ambiguous timeout');
   return this.outcome;
  }
 }
-export type PurgeDispatchResult={status:PurgeOutcome|'EMPTY'|'BLOCKED'|'BLOCKED_UNKNOWN'|'BLOCKED_DAILY_LIMIT'|'NOT_CONFIRMED'|'PAUSED'|'CANCELLED';messageId?:number};
+export type PurgeDispatchResult={status:PurgeOutcome|'RATE_LIMITED'|'EMPTY'|'BLOCKED'|'BLOCKED_UNKNOWN'|'BLOCKED_DAILY_LIMIT'|'NOT_CONFIRMED'|'PAUSED'|'CANCELLED';messageId?:number};
 const hash=(m:RollingMessageMeta)=>createHash('sha256').update(JSON.stringify([
  m.chatId,m.messageId,m.senderKind,m.senderId??null,m.sentAt,m.contentType,m.hasLinks,
  m.pinned,m.linkedChannel,m.adminLog,m.approvedAnnouncement
@@ -69,8 +87,12 @@ function dailyReserved(s:BotState,now:number):number{
 /** Daily dispatch limit is enforced at the actual attempt time, not merely at approval.
  * Otherwise plans confirmed late yesterday could all run today over the hard cap. */
 function attemptsToday(s:BotState,now:number):number{
- return s.purgeJobs.reduce((count,job)=>count+
-   job.items.filter(item=>item.startedAt!==undefined&&day(item.startedAt)===day(now)).length,0);
+ // Count immutable intent audit events, not the latest mutable item.startedAt.
+ // A confirmed 429 permits another attempt later; EVERY attempt consumes the daily cap.
+ return s.audit.filter(a=>a.reason==='PURGE_ATTEMPT_DURABLY_RECORDED'&&day(a.at)===day(now)).length;
+}
+function chatCooldown(s:BotState,chatId:string):number {
+ return s.purgeJobs.reduce((until,job)=>job.chatId===chatId?Math.max(until,job.rateLimitedUntil??0):until,0);
 }
 /**
  * B2-Advanced S121-06: the input is a trusted transport's already observed metadata,
@@ -163,6 +185,7 @@ export class ModerationPurgeService {
    if(!current){job.status='COMPLETED';return {kind:'EMPTY' as const};}
    if(current.status!=='QUEUED')return {kind:'BLOCKED_UNKNOWN' as const};
    const now=this.clock();
+   if(chatCooldown(s,job.chatId)>now)return {kind:'RATE_LIMITED' as const};
    if(attemptsToday(s,now)>=DAILY_LIMIT)return {kind:'BLOCKED_DAILY_LIMIT' as const};
    prune(s,now);
    if(!allowed(s,this.policy,job.actorId,job.chatId,now)||
@@ -195,22 +218,37 @@ export class ModerationPurgeService {
    return false;
   });
   if(!permit)return {status:'BLOCKED'};
-  let outcome:PurgeOutcome;
-  try{outcome=await this.gateway.deleteMessage(claimed.chatId,claimed.messageId,claimed.attemptId);}
-  catch{outcome='UNKNOWN_OUTCOME';}
+  let response:unknown;
+  try{response=await this.gateway.deleteMessage(claimed.chatId,claimed.messageId,claimed.attemptId);}
+  catch{response='UNKNOWN_OUTCOME';}
+  const outcome=normalizedOutcome(response);
   return this.store.transaction(s=>{
    const job=s.purgeJobs.find(x=>x.id===jobId);
    const item=job?.items.find(x=>x.messageId===claimed.messageId);
    if(!job||!item||item.status!=='SENDING'||item.attemptId!==claimed.attemptId)
      return {status:'BLOCKED' as const};
-   item.status=outcome;
-   s.audit.push({updateKey:`b2:purge:result:${job.id}:${item.messageId}:${item.attemptId}`,
-     actorId:job.actorId,decision:outcome==='ACKNOWLEDGED'?'ALLOW':'NOOP',
-     reason:outcome==='ACKNOWLEDGED'?'PURGE_DELETE_REQUEST_ACCEPTED':`PURGE_${outcome}`,
+   const recordedAttempt=item.attemptId;
+   if(outcome==='RATE_LIMITED'&&confirmedRateLimit(response)){
+     // Explicit 429 is a confirmed rejection, not an ambiguous network outcome.
+     // Never auto-loop; only a future explicit dispatch can retry after cooldown.
+     const next=this.clock()+response.retryAfterMs;
+     if(!Number.isSafeInteger(next)) {
+       item.status='UNKNOWN_OUTCOME';
+     }else{
+       item.status=job.status==='CANCELLED'?'CANCELLED':'QUEUED';
+       job.rateLimitedUntil=Math.max(job.rateLimitedUntil??0,next);
+       delete item.attemptId;delete item.leaseUntil;delete item.startedAt;
+     }
+   }else item.status=outcome==='RATE_LIMITED'?'UNKNOWN_OUTCOME':outcome;
+   const result=item.status==='QUEUED'||(job.status==='CANCELLED'&&item.status==='CANCELLED')
+     ? 'RATE_LIMITED' : item.status;
+   s.audit.push({updateKey:`b2:purge:result:${job.id}:${item.messageId}:${recordedAttempt}`,
+     actorId:job.actorId,decision:result==='ACKNOWLEDGED'?'ALLOW':'NOOP',
+     reason:result==='ACKNOWLEDGED'?'PURGE_DELETE_REQUEST_ACCEPTED':`PURGE_${result}`,
      policyVersion:job.scopeVersion,at:this.clock()});
    if(job.status==='READY'&&job.items.every(x=>x.status==='ACKNOWLEDGED'||x.status==='CANCELLED'))
      job.status='COMPLETED';
-   return {status:outcome,messageId:item.messageId};
+   return {status:result,messageId:item.messageId};
   });
  }
  async recoverPending():Promise<number>{
