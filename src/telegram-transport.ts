@@ -9,6 +9,9 @@ import type { ImportFormat } from './ingestion.js';
 import type { SubscriptionGate } from './subscription.js';
 import type { TelegramReplyDispatcher } from './telegram-replies.js';
 import {BoundedIngress,decodeStrictJsonBytes,type IngressOptions} from './http-ingress-guard.js';
+import {menuLabels,mainMenuKeyboard,backMenuKeyboard,categoryButton,
+ resourceButton,listingKeyboard,categoryButtonId,resourceButtonId,
+ matchingCategories,type TelegramReplyKeyboard} from './telegram-menu.js';
 
 /** Inbound-only boundary. A test double may supply bytes; there is intentionally no live HTTP implementation. */
 export interface TelegramDocumentPort {
@@ -28,7 +31,8 @@ interface IncomingDocument {
   fileId: string; filename: string; size: number; format: ImportFormat; caption: string;
 }
 /** Offline B3 application adapter: creates plans, NEVER sends a message or connects to Telegram. */
-export interface TelegramReplyPlan { chatId: string; parseMode: 'HTML'; text: string; }
+export interface TelegramReplyPlan { chatId: string; parseMode: 'HTML'; text: string;
+ replyMarkup?:TelegramReplyKeyboard; }
 export interface TelegramResult { status: 'APPLIED' | 'DUPLICATE' | 'DENIED' | 'IGNORED' | 'UNKNOWN'; reason: string; plan?: TelegramReplyPlan; deliveryKey?: string; }
 export interface TelegramApplicationOptions {
   store: BotStore; policy: Policy; education: EducationService; admin: EducationAdminFacade;
@@ -88,9 +92,9 @@ export class TelegramUpdateApplication {
     if(!/^[a-zA-Z0-9_-]{1,80}$/.test(opts.botId)||!/^[a-zA-Z][a-zA-Z0-9_]{4,31}$/.test(opts.botUsername))throw Error('INVALID_BOT_CONFIG');
     this.clock=opts.clock??Date.now;
   }
-  private plan(chatId:string,text:string):TelegramReplyPlan {
+  private plan(chatId:string,text:string,replyMarkup?:TelegramReplyKeyboard):TelegramReplyPlan {
     if(Buffer.byteLength(text,'utf8')>4096)throw Error('REPLY_TOO_LONG');
-    return {chatId,parseMode:'HTML',text};
+    return replyMarkup?{chatId,parseMode:'HTML',text,replyMarkup}:{chatId,parseMode:'HTML',text};
   }
   // A private chat is not proof of membership in an approved group. Group-scoped
   // libraries require a fresh trusted membership check even when opened in DM.
@@ -157,15 +161,94 @@ export class TelegramUpdateApplication {
         // below re-read permissions after the async membership lookup.
       }
     }
-    const result=(message:string):TelegramResult=>({status:'APPLIED',reason:'RESPONSE_PLANNED_ONLY',plan:this.plan(chatId,message)});
-    if(kind==='private'&&(cmd==='/start'||cmd==='/help')){
-      return result('<b>أهلًا بك في بوت منارتك 🎓</b>\n'
-       +'يمكنك استكشاف المنح والجامعات والموارد التعليمية المعتمدة.\n'
-       +'<b>الأوامر:</b>\n'
-       +'/categories private — تصفح أقسام المحتوى المتاح\n'
-       +'/resources private grants — تصفح الموارد المعتمدة في قسم المنح\n'
-       +'/help — عرض المساعدة\n'
-       +'بعض الأقسام والمجموعات تتطلب موافقة الإدارة والتحقق من العضوية.');
+    const result=(message:string,replyMarkup?:TelegramReplyKeyboard):TelegramResult=>({
+      status:'APPLIED',reason:'RESPONSE_PLANNED_ONLY',plan:this.plan(chatId,message,replyMarkup)});
+    // The real Telegram reply keyboard uses verified ordinary message texts,
+    // not callback claims. Every selection is re-authorized on every tap.
+    if(kind==='private'){
+      const m=menuLabels;
+      const owner=this.opts.policy.isOwner(actorId);
+      const main=()=>result('<b>أهلًا بك في بوت منارتك 🎓</b>\n'
+        +'اختر أحد الأقسام من الأزرار أسفل المحادثة. تظهر الموارد المعتمدة فقط.\n'
+        +'يمكنك أيضًا استخدام /categories private و /help.\n'
+        +'المساعد الذكي وبعض الخدمات ما زالت قيد التطوير.',
+        mainMenuKeyboard(owner));
+      if(cmd==='/start'||cmd==='/help'||text===m.home||text===m.back)return main();
+      if(text===m.owner){
+        if(!owner)return {status:'DENIED',reason:'OWNER_ONLY'};
+        const panel=await this.opts.admin.panel(adminCtx,'private');
+        return result('<b>لوحة المالك 🔐</b>\n'
+          +'الرفع: '+(panel.canUpload?'مسموح':'مغلق')+'\n'
+          +'الاعتماد والنشر المحلي: '+(panel.canPublish?'مسموح':'مغلق')+'\n'
+          +'أوامر الإدارة الأساسية: /admin private و /import و /approve و /publish.\n'
+          +'النشر إلى القنوات والواجهة المرئية الكاملة لم يُفعّلا بعد.',
+          backMenuKeyboard());
+      }
+      const sections:Readonly<Record<string,{section:string;title:string}>>={
+        [m.scholarships]:{section:'scholarships',title:'المنح الدراسية'},
+        [m.courses]:{section:'courses',title:'الدورات التعليمية'},
+        [m.universities]:{section:'universities',title:'الجامعات والتخصصات'},
+        [m.exams]:{section:'exams',title:'الاختبارات'},
+        [m.files]:{section:'files',title:'ملفات ونماذج'},
+        [m.library]:{section:'all',title:'التعليم والموارد'}
+      };
+      if(Object.prototype.hasOwnProperty.call(sections,text)){
+        const selection=sections[text]!;
+        const categories=matchingCategories(
+          await this.opts.education.listCategories(actorId,'private'),selection.section);
+        if(categories.length===0)return result('<b>'+escapeTelegramHtml(selection.title)+'</b>\n'
+          +'لا توجد أقسام معتمدة متاحة في هذا القسم حاليًا.\n'
+          +'لن نعرض فرصًا أو خدمات غير منشورة.',backMenuKeyboard());
+        const view=categories.slice(0,10);
+        const list=view.map(c=>'• '+escapeTelegramHtml(c.title)).join('\n');
+        return result('<b>'+escapeTelegramHtml(selection.title)+'</b>\n'
+          +'اختر القسم المناسب:\n'+list+
+          (categories.length>view.length?'\nتوجد أقسام أخرى يمكن تصفحها بأمر /categories private.':''),
+          listingKeyboard(view.map(categoryButton)));
+      }
+      if(text===m.assistant)return result(
+        '<b>المساعد التعليمي 💬</b>\n'
+        +'الإجابات المعتمدة من قاعدة الأسئلة متاحة ضمن المجموعات التي تسمح بها الإدارة، باستخدام /ask@'
+        +escapeTelegramHtml(this.opts.botUsername)+' مع السؤال.\n'
+        +'المساعد الذكي التوليدي غير متصل حتى الآن؛ لا توجد إجابات AI مفعّلة للطلاب.',
+        backMenuKeyboard());
+      if(text===m.communities)return result(
+        '<b>المجموعات والقنوات 👥</b>\n'
+        +'تُدار صلاحيات المجموعات والتحقق من العضوية ضمن أنظمة منارتك.\n'
+        +'دليل عام وروابط انضمام موثقة للمجموعات لم تُنشر بعد.',
+        backMenuKeyboard());
+      if(text===m.help)return result(
+        '<b>المساعدة والدعم 🆘</b>\n'
+        +'للتصفح اختر أحد أقسام القائمة أو استخدم /categories private.\n'
+        +'التواصل المباشر مع فريق الدعم ونظام التذاكر لم يُفعّلا بعد.',
+        backMenuKeyboard());
+      const categoryId=categoryButtonId(text);
+      if(categoryId){
+        const visible=await this.opts.education.listCategories(actorId,'private');
+        const cat=visible.find(x=>x.id===categoryId);
+        if(!cat||categoryButton(cat)!==text)return {status:'DENIED',reason:'CATEGORY_NOT_ACCESSIBLE'};
+        const resources=await this.opts.education.listResources(actorId,'private',categoryId);
+        if(resources.length===0)return result('<b>'+escapeTelegramHtml(cat.title)+'</b>\n'
+          +'لا توجد موارد معتمدة منشورة في هذا القسم حاليًا.',backMenuKeyboard());
+        const view=resources.slice(0,10);
+        return result('<b>'+escapeTelegramHtml(cat.title)+'</b>\n'
+          +view.map(r=>'• '+escapeTelegramHtml(r.title)).join('\n')
+          +(resources.length>view.length?'\nتوجد موارد أخرى عبر /resources private '+escapeTelegramHtml(cat.id):''),
+          listingKeyboard(view.map(resourceButton)));
+      }
+      const resourceId=resourceButtonId(text);
+      if(resourceId){
+        const snapshot=await this.opts.store.snapshot();
+        const candidate=snapshot.educationResources.find(x=>x.id===resourceId&&x.scope==='private');
+        if(!candidate)return {status:'DENIED',reason:'RESOURCE_NOT_ACCESSIBLE'};
+        const visible=await this.opts.education.listResources(actorId,'private',candidate.categoryId);
+        const found=visible.find(x=>x.id===resourceId);
+        if(!found||resourceButton(found)!==text)return {status:'DENIED',reason:'RESOURCE_NOT_ACCESSIBLE'};
+        return result('<b>مورد تعليمي معتمد 📄</b>\n'
+          +escapeTelegramHtml(found.title)+'\nالجامعة: '+escapeTelegramHtml(found.university)
+          +'\nالدورة: '+escapeTelegramHtml(found.cycle)+'\nالدرجة: '
+          +escapeTelegramHtml(found.degree),backMenuKeyboard());
+      }
     }
     if(cmd==='/admin'&&kind==='private'){
       const scope=words[1];if(!scope||!isScope(scope))return {status:'DENIED',reason:'INVALID_SCOPE'};
