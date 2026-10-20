@@ -1,3 +1,12 @@
+## 0.7.1 — 2026-10-21 — Telegram reply keyboard interface and private library browsing (NOT DEPLOYED)
+
+- Introduced an actual **Telegram reply keyboard** in private /start and /help with scholarship, courses, universities, exams, educational library, student files, assistant, communities and help menu entries. The separate owner entry is displayed only for the verified owner user ID.
+- Private interactive section buttons list current published/authorized content categories; category buttons drill into filtered and approved resources; resource buttons show current reviewed details. All selection IDs and labels are checked against freshly authorized BotStore/EducationService results before disclosure, rather than trusting an old screenshot or text. Stale/forged buttons and archived resources are denied.
+- Added Home/Back flows, explicit per-section empty-library guidance and honest messages for disconnected AI, unshipped public group directory and unshipped live support/ticket system.
+- Extended durable Telegram reply plans and sender with tightly validated optional `reply_markup.keyboard`. Persist markup through JSON/SQLite, then send it once with the exact existing privacy-preserving HTML `sendMessage` attempt. Reject forged button payloads such as contact/location requests and callback data. No reply keyboard is added in groups.
+- New RED-first tests cover menu visibility and permissions, approved-category/resource navigation, stale and forged actions, content escaping, safe Bot API payload and restart/delivery deduplication in both stores.
+- **Scope:** This is a first functional Telegram reply-keyboard slice, not yet a full Mini App, inline callback router, complete course/quiz platform, deployed live Telegram bot or global data integration. The app remains disabled for students.
+
 ## 0.7.0 — 2026-10-21 — Gated isolated SQLite rollback rehearsal (NOT DEPLOYED)
 
 - Extended the existing offline STOP+backup acceptance with a second explicit read-only gate to ensure that backup and primary SQLite database are not *hard links to the same inode*. Distinct path strings alone are not sufficient rollback evidence.
