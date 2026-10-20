@@ -1,6 +1,6 @@
 # بوت منارتك — MANARATAK BOT
 
-**B0/B1 + B2-Core + B3 + B3 privacy-safe Telegram reply outbox and opt-in authenticated owner review and deployment preflight and ingress hardening (v0.6.6). Transport implemented but OFF by default — no live deployment verified.**
+**B0/B1 + B2-Core + B3 + B3 privacy-safe Telegram reply outbox and opt-in authenticated owner review and deployment preflight and ingress hardening and outbox monitoring (v0.6.7). Transport implemented but OFF by default — no live deployment verified.**
 
 An independent TypeScript/Node.js 22 project based on `docs/MANARATAK_BOT_MASTER_v1.2.1_AR.md` and `docs/START_HERE_MANARATAK_BOT_v1.2.1_AR.md`. B0/B1 supply the secure baseline; B2-Core adds individual moderation and subscription policies; B3 adds the first locally tested education content flow.
 
@@ -10,6 +10,18 @@ An independent TypeScript/Node.js 22 project based on `docs/MANARATAK_BOT_MASTER
 
 
 
+
+## B3 v0.6.7 — private SQLite outbox monitor (OFFLINE; NO TELEGRAM NETWORK)
+
+After creating and protecting a legitimate pre-existing BotStore SQLite state file, an authorized **local OS user** can run:
+
+```sh
+npm run telegram:outbox -- --state /absolute/private/manaratak/state.sqlite --stale-ms 900000
+```
+
+The command checks that the state file is initialized, valid, private and canonical. It then uses **SQLite read-only connections** and emits one aggregate JSON status: `OK` (exit 0), `ATTENTION_REQUIRED` (exit 2), or an application-only invalid-request/invalid-state error (exit 1). Aggregate counters include queued, sent, UNKNOWN, stale QUEUED/SENDING, and unresolved/manual-review counts. Manual acknowledgement alone never suppresses an UNKNOWN alert. No chat/user/update IDs, reviewer, message text, token or path is reported.
+
+It does not create or repair an absent database, update job metadata, send Telegram messages, register a webhook, erase backups or schedule itself. SQLite read-only access is **not a guarantee of zero filesystem sidecar activity** (e.g., WAL/SHM); host directory and backup permissions remain necessary. The server is OFF and no monitoring daemon is installed. Operator automation may evaluate the exit code from a trusted local cron/systemd setup later, but no schedule, alert channel or elevated privilege is configured here.
 
 ## B3 v0.6.6 — incoming request pressure and non-forcing shutdown (STILL OFF)
 

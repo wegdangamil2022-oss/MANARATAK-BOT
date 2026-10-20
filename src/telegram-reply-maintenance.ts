@@ -36,7 +36,7 @@ const safeJobs=(value:TelegramReplyJob[]|undefined):TelegramReplyJob[]=>{
 /** Read-only operational snapshot. Never exposes chat IDs, update IDs, message
  * content, file paths or evidence identifiers, and never authorizes a retry.
  */
-export async function reviewTelegramReplyOutbox(store:BotStore,options:TelegramReplyOutboxReviewOptions)
+export async function reviewTelegramReplyOutbox(store:Pick<BotStore,'snapshot'>,options:TelegramReplyOutboxReviewOptions)
  :Promise<TelegramReplyOutboxReview>{
  if(!validReview(options))throw Error('REPLY_MAINTENANCE_INVALID_OPTIONS');
  const jobs=safeJobs((await store.snapshot()).telegramReplyJobs);

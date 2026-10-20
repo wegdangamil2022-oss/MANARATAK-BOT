@@ -1,9 +1,9 @@
 {
   "name": "manaratak-bot",
-  "version": "0.6.6",
+  "version": "0.6.7",
   "private": true,
   "type": "module",
-  "description": "MANARATAK BOT B0-B4 mock plus B2-Advanced reviewed purge, confirmed 429 cooldown and evidence-bound review and owner-approved privacy retention and opt-in review checkpoints and local one-shot runner and guarded SQLite backups and read-only retention inventory and isolated SQLite restore drill and opt-in live Telegram reply sender and read-only group membership verification and privacy-limited Telegram reply outbox and owner-only unresolved reply review and opt-in HMAC-protected local owner audit HTTP interface and offline HTTPS webhook readiness preflight and authenticated ingress pressure and graceful drain hardening",
+  "description": "MANARATAK BOT B0-B4 mock plus B2-Advanced reviewed purge, confirmed 429 cooldown and evidence-bound review and owner-approved privacy retention and opt-in review checkpoints and local one-shot runner and guarded SQLite backups and read-only retention inventory and isolated SQLite restore drill and opt-in live Telegram reply sender and read-only group membership verification and privacy-limited Telegram reply outbox and owner-only unresolved reply review and opt-in HMAC-protected local owner audit HTTP interface and offline HTTPS webhook readiness preflight and authenticated ingress pressure and graceful drain hardening and offline read-only aggregate outbox monitoring",
   "engines": {
     "node": ">=22"
   },
@@ -15,6 +15,7 @@
     "retention:tick": "npm run build && node dist/src/retention-review-cli.js --once",
     "telegram:serve": "npm run build && node dist/src/telegram-live-server.js",
     "telegram:preflight": "npm run build && node dist/src/telegram-readiness-cli.js",
+    "telegram:outbox": "npm run build && node dist/src/telegram-outbox-monitor-cli.js --once",
     "demo": "npm run build && node dist/src/demo.js --simulate",
     "demo:education": "npm run build && node dist/src/education-demo.js",
     "demo:faq": "npm run build && node dist/src/faq-demo.js",
