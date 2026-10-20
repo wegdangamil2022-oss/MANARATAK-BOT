@@ -108,7 +108,8 @@ test('B3 hard-link alias cannot masquerade as independent backup',async()=>{
  const f=await fixture();try{
   const alias=join(f.dir,'hardlink.sqlite');
   await link(f.stateFile,alias);
-  await assert.rejects(inspectTelegramTrialAcceptanceReadOnly({...opts(f),backupFile:alias}),
+  const {sandboxDir:_sandbox,...acceptance}=opts(f);
+  await assert.rejects(inspectTelegramTrialAcceptanceReadOnly({...acceptance,backupFile:alias}),
    /TRIAL_ACCEPTANCE_INVALID_BACKUP/);
   await assert.rejects(rehearseTelegramTrialRollback({...opts(f),backupFile:alias}),
    /TRIAL_ACCEPTANCE_INVALID_BACKUP/);
