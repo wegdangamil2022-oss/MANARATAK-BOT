@@ -62,7 +62,7 @@ export async function runRetentionReviewOnce(
   try{
    const header=Buffer.alloc(16);
    const {bytesRead}=await fd.read(header,0,16,0).catch(()=>{throw new Error('RETENTION_STATE_FILE_INVALID');});
-   if(bytesRead!==16||!header.equals(Buffer.from('SQLite format 3\\0')))
+   if(bytesRead!==16||!header.equals(Buffer.from('SQLite format 3\0')))
     throw new Error('RETENTION_STATE_FILE_INVALID');
   }finally{await fd.close();}
  }
