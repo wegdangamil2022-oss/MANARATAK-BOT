@@ -21,7 +21,7 @@ export class FakePurgeGateway implements PurgeGateway {
   return this.outcome;
  }
 }
-export type PurgeDispatchResult={status:PurgeOutcome|'EMPTY'|'BLOCKED'|'BLOCKED_UNKNOWN'|'NOT_CONFIRMED'|'PAUSED'|'CANCELLED';messageId?:number};
+export type PurgeDispatchResult={status:PurgeOutcome|'EMPTY'|'BLOCKED'|'BLOCKED_UNKNOWN'|'BLOCKED_DAILY_LIMIT'|'NOT_CONFIRMED'|'PAUSED'|'CANCELLED';messageId?:number};
 const hash=(m:RollingMessageMeta)=>createHash('sha256').update(JSON.stringify([
  m.chatId,m.messageId,m.senderKind,m.senderId??null,m.sentAt,m.contentType,m.hasLinks,
  m.pinned,m.linkedChannel,m.adminLog,m.approvedAnnouncement
@@ -65,6 +65,12 @@ function available(s:BotState,job:PurgeJob,now:number):boolean{
 function dailyReserved(s:BotState,now:number):number{
  return s.purgeJobs.filter(x=>x.status!=='PREVIEW'&&x.confirmedAt!==undefined&&day(x.confirmedAt)===day(now))
   .reduce((n,job)=>n+job.items.filter(i=>i.status!=='CANCELLED').length,0);
+}
+/** Daily dispatch limit is enforced at the actual attempt time, not merely at approval.
+ * Otherwise plans confirmed late yesterday could all run today over the hard cap. */
+function attemptsToday(s:BotState,now:number):number{
+ return s.purgeJobs.reduce((count,job)=>count+
+   job.items.filter(item=>item.startedAt!==undefined&&day(item.startedAt)===day(now)).length,0);
 }
 /**
  * B2-Advanced S121-06: the input is a trusted transport's already observed metadata,
@@ -157,6 +163,7 @@ export class ModerationPurgeService {
    if(!current){job.status='COMPLETED';return {kind:'EMPTY' as const};}
    if(current.status!=='QUEUED')return {kind:'BLOCKED_UNKNOWN' as const};
    const now=this.clock();
+   if(attemptsToday(s,now)>=DAILY_LIMIT)return {kind:'BLOCKED_DAILY_LIMIT' as const};
    prune(s,now);
    if(!allowed(s,this.policy,job.actorId,job.chatId,now)||
       this.policy.chatRevision(s,job.chatId)!==job.scopeVersion||
