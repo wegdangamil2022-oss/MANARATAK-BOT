@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {createServer,type RequestListener,type Server} from 'node:http';
 import {createConnection} from 'node:net';
 import {once} from 'node:events';
-import {mkdtemp,rm,chmod} from 'node:fs/promises';
+import {mkdtemp,rm,chmod,writeFile} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {BotStore} from '../src/store.js';
@@ -23,6 +23,7 @@ const headers={'content-type':'application/json','x-telegram-bot-api-secret-toke
 async function fixture(engine:'json'|'sqlite'='json'){
  const dir=await mkdtemp(join(tmpdir(),'manaratak-ingress-'));
  const stateFile=join(dir,'state.'+(engine==='sqlite'?'sqlite':'json'));
+ const safetyFile=join(dir,'safety.flag');await writeFile(safetyFile,'RUN\n',{mode:0o600});
  const store=new BotStore(stateFile,{engine});
  const policy=new Policy(store,'100',()=>NOW);
  const education=new EducationService(store,policy,()=>NOW);
@@ -35,7 +36,7 @@ async function fixture(engine:'json'|'sqlite'='json'){
   new TelegramUpdateApplication({store,policy,education,admin,faq,links,botId:'bot-main',
    botUsername:'ManaratakBot',membership,clock:()=>NOW});
  const auth=new TelegramMiniAppAuth(TOKEN,()=>NOW);
- return {dir,stateFile,store,policy,education,admin,app,auth,close:()=>rm(dir,{force:true,recursive:true})};
+ return {dir,stateFile,safetyFile,store,policy,education,admin,app,auth,close:()=>rm(dir,{force:true,recursive:true})};
 }
 async function withServer(listener:RequestListener,run:(base:string,server:Server)=>Promise<void>){
  const server=createServer(listener);server.listen(0,'127.0.0.1');await once(server,'listening');
@@ -162,7 +163,8 @@ test('B3 live runtime: strict socket budget is configured before listener activa
    TELEGRAM_REPLY_DELIVERY_ENABLED:'true',BOT_OWNER_ID:'100',BOT_ID:'bot-main',
    BOT_USERNAME:'ManaratakBot',BOT_STATE_FILE:f.stateFile,TELEGRAM_BOT_TOKEN:TOKEN,
    TELEGRAM_WEBHOOK_SECRET:SECRET,TELEGRAM_LISTEN_PORT:'8787',
-   TELEGRAM_WEBHOOK_PUBLIC_URL:'https://webhook.manaratak-ops.net/telegram/webhook'});
+   TELEGRAM_WEBHOOK_PUBLIC_URL:'https://webhook.manaratak-ops.net/telegram/webhook',
+   TELEGRAM_SAFETY_FILE:f.safetyFile});
   const server=await createLiveTelegramServer(cfg,(async()=>{throw Error('NO_NETWORK');}) as typeof fetch);
   assert.equal(server.listening,false);
   assert.equal(server.requestTimeout,15_000);

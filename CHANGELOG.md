@@ -1,3 +1,12 @@
+## 0.6.8 — 2026-10-21 — Persistent fail-closed local Telegram emergency STOP (NOT DEPLOYED)
+
+- Added a privileged operator-controlled durable safety file (RUN or STOP, newline required) to opt-in Telegram production configuration. It must be a private, canonical, regular existing file (mode 0600 or stricter), not a symlink, with a separate path from SQLite. The bot has no command or endpoint to rewrite it.
+- The webhook checks the safety file before accepting any new inbound update; STOP, missing, forged, unreadable, malformed or wrong-permission file blocks admission with sanitized HTTP 503 and no update claim.
+- The reply dispatcher re-checks this switch **inside the exclusive database claim** before starting a QUEUED send. A stopped/invalid switch returns PAUSED, keeps QUEUED intact and causes no outbound Bot API call or receipt. Existing SENT/UNKNOWN outcomes are never automatically replayed.
+- Existing in-flight Telegram calls cannot be unsent or atomically cancelled by filesystem changes. Safe drains, UNKNOWN quarantine and operator review remain in force. Switching back to RUN is not an automatic queue replay; any unsent attempt requires separate explicit operator handling.
+- Offline readiness checks verify the switch and distinguish RUN from STOP in aggregate outputs; no token, student data or operator path is printed. The switch and its directory must be managed by host ACLs and atomic replacement; it is not a protection against a compromised host or filesystem races.
+- New TDD tests of live mocked HTTP, disabled sender claims, restored RUN, invalid/missing/symlinked/mode-unsafe switch and state preservation. No real Telegram connection or public deployment was activated.
+
 ## 0.6.7 — 2026-10-21 — Offline read-only Telegram reply inventory and alert exit code (NOT DEPLOYED)
 
 - Added `BotStore.snapshotSqliteReadOnly` for canonical, privately owned pre-existing SQLite state using native `node:sqlite` read-only handles and an independent integrity/decoding preflight. Never initializes tables, runs production schema migrations or opens a writable BotStore.

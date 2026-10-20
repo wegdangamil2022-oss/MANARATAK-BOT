@@ -12,10 +12,11 @@ import {TelegramReplyDispatcher,TelegramBotApiTextSender} from './telegram-repli
 import {TelegramBotApiMembershipGateway} from './telegram-membership.js';
 import {SubscriptionGate} from './subscription.js';
 import {ModerationService,FakeModerationGateway} from './moderation.js';
+import {readTelegramSafetySwitch,createTelegramSafetyGate} from './telegram-safety-switch.js';
 
 export interface LiveTelegramConfig{
  ownerId:string;botId:string;botUsername:string;stateFile:string;
- token:string;webhookSecret:string;listenPort:number;publicWebhookUrl:string;
+ token:string;webhookSecret:string;listenPort:number;publicWebhookUrl:string;safetySwitchFile:string;
 }
 /** An advisory URL syntax and topology gate, NOT DNS/TLS or proxy verification.
  * Reject deceptive/non-HTTPS local endpoints and alternate routing before the
@@ -55,6 +56,7 @@ export function loadLiveTelegramConfig(env:Readonly<Record<string,string|undefin
  const stateFile=env.BOT_STATE_FILE,token=env.TELEGRAM_BOT_TOKEN;
  const webhookSecret=env.TELEGRAM_WEBHOOK_SECRET,port=Number(env.TELEGRAM_LISTEN_PORT);
  const publicWebhookUrl=env.TELEGRAM_WEBHOOK_PUBLIC_URL;
+ const safetySwitchFile=env.TELEGRAM_SAFETY_FILE;
  if(env.BOT_ENV!=='production'||env.TELEGRAM_ENABLED!=='true'||
     env.TELEGRAM_REPLY_DELIVERY_ENABLED!=='true'||
     !validOwner(ownerId)||
@@ -66,9 +68,13 @@ export function loadLiveTelegramConfig(env:Readonly<Record<string,string|undefin
     !webhookSecret||!/^[A-Za-z0-9_-]{32,256}$/.test(webhookSecret)||
     !env.TELEGRAM_LISTEN_PORT||!/^[0-9]{4,5}$/.test(env.TELEGRAM_LISTEN_PORT)||
     !Number.isSafeInteger(port)||port<1024||port>65535||
-    !validPublicTelegramWebhookUrl(publicWebhookUrl))
+    !validPublicTelegramWebhookUrl(publicWebhookUrl)||
+    !safetySwitchFile||!isAbsolute(safetySwitchFile)||
+    safetySwitchFile!==resolve(safetySwitchFile)||
+    /[\u0000-\u001f\u007f]/u.test(safetySwitchFile)||
+    safetySwitchFile===stateFile)
    throw new Error('LIVE_TELEGRAM_CONFIG_INVALID');
- return {ownerId,botId,botUsername,stateFile,token,webhookSecret,listenPort:port,publicWebhookUrl};
+ return {ownerId,botId,botUsername,stateFile,token,webhookSecret,listenPort:port,publicWebhookUrl,safetySwitchFile};
 }
 /** Independently checks a pre-existing local state; never initializes databases.
  * Common verification for both the read-only preflight command and real runtime.
@@ -89,11 +95,13 @@ export async function preflightLiveTelegram(
  env:Readonly<Record<string,string|undefined>>):Promise<{
  readonly ready:true;readonly httpsWebhook:true;readonly privateSqlite:true;
  readonly listener:'LOOPBACK_ONLY';readonly telegramNetworkCalls:0;
+ readonly safetySwitch:'RUN'|'STOP';
 }>{
  const config=loadLiveTelegramConfig(env);
  await assertPrivateStateReady(config.stateFile);
+ const safetySwitch=await readTelegramSafetySwitch(config.safetySwitchFile);
  return {ready:true,httpsWebhook:true,privateSqlite:true,
-  listener:'LOOPBACK_ONLY',telegramNetworkCalls:0};
+  listener:'LOOPBACK_ONLY',telegramNetworkCalls:0,safetySwitch};
 }
 /** Drain all existing accepted requests before stopping. Timeout is a status,
  * not authorization to abort a possibly committed Telegram send. A DRAINING
@@ -142,9 +150,14 @@ export async function createLiveTelegramServer(config:LiveTelegramConfig,
   BOT_OWNER_ID:config.ownerId,BOT_ID:config.botId,BOT_USERNAME:config.botUsername,
   BOT_STATE_FILE:config.stateFile,TELEGRAM_BOT_TOKEN:config.token,
   TELEGRAM_WEBHOOK_SECRET:config.webhookSecret,TELEGRAM_LISTEN_PORT:String(config.listenPort),
-  TELEGRAM_WEBHOOK_PUBLIC_URL:config.publicWebhookUrl
+  TELEGRAM_WEBHOOK_PUBLIC_URL:config.publicWebhookUrl,
+  TELEGRAM_SAFETY_FILE:config.safetySwitchFile
  });
  await assertPrivateStateReady(check.stateFile);
+ // Both RUN and STOP are valid *protected* states; STOP starts only the local
+ // listener but all authenticated inbound/update and outbound attempts are paused.
+ await readTelegramSafetySwitch(check.safetySwitchFile);
+ const safetyGate=createTelegramSafetyGate(check.safetySwitchFile);
  const store=new BotStore(check.stateFile,{engine:'sqlite'});
  const policy=new Policy(store,check.ownerId),education=new EducationService(store,policy);
  const admin=new EducationAdminFacade(store,policy,education);
@@ -160,8 +173,8 @@ export async function createLiveTelegramServer(config:LiveTelegramConfig,
   botId:check.botId,botUsername:check.botUsername,
   membership:(chatId,actorId)=>membership.verifyMembership(chatId,actorId),subscription});
  const dispatcher=new TelegramReplyDispatcher(store,policy,
-  new TelegramBotApiTextSender(check.token,request));
- const server=createServer(telegramWebhookListener(app,check.webhookSecret,dispatcher));
+  new TelegramBotApiTextSender(check.token,request),Date.now,safetyGate);
+ const server=createServer(telegramWebhookListener(app,check.webhookSecret,dispatcher,{},safetyGate));
  // Local-only listener. These are resource budgets, not a substitute for the
  // trusted HTTPS proxy, ingress anti-abuse controls, TLS or real load testing.
  server.requestTimeout=15_000;

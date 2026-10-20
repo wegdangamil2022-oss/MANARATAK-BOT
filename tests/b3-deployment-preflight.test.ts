@@ -15,11 +15,12 @@ async function setup(){
  const stateFile=join(dir,'store.sqlite'),store=new BotStore(stateFile,{engine:'sqlite'});
  await store.transaction(()=>undefined);
  await chmod(stateFile,0o600);
+ const safetyFile=join(dir,'safety.flag');await writeFile(safetyFile,'RUN\n',{mode:0o600});
  const env={BOT_ENV:'production',TELEGRAM_ENABLED:'true',
   TELEGRAM_REPLY_DELIVERY_ENABLED:'true',BOT_OWNER_ID:'100',BOT_ID:'bot-main',
   BOT_USERNAME:'ManaratakBot',BOT_STATE_FILE:stateFile,TELEGRAM_BOT_TOKEN:TOKEN,
   TELEGRAM_WEBHOOK_SECRET:SECRET,TELEGRAM_LISTEN_PORT:'8787',
-  TELEGRAM_WEBHOOK_PUBLIC_URL:URL};
+  TELEGRAM_WEBHOOK_PUBLIC_URL:URL,TELEGRAM_SAFETY_FILE:safetyFile};
  return {dir,stateFile,env,store,close:()=>rm(dir,{recursive:true,force:true})};
 }
 test('preflight validates private existing SQLite and HTTPS deployment without listening or network',async()=>{
@@ -28,7 +29,7 @@ test('preflight validates private existing SQLite and HTTPS deployment without l
   const cfg=loadLiveTelegramConfig(x.env);
   assert.equal(cfg.publicWebhookUrl,URL);
   const report=await preflightLiveTelegram(x.env);
-  assert.deepEqual(report,{ready:true,httpsWebhook:true,privateSqlite:true,listener:'LOOPBACK_ONLY',telegramNetworkCalls:0});
+  assert.deepEqual(report,{ready:true,httpsWebhook:true,privateSqlite:true,listener:'LOOPBACK_ONLY',telegramNetworkCalls:0,safetySwitch:'RUN'});
   const server=await createLiveTelegramServer(cfg, (async()=>{throw Error('NETWORK_FORBIDDEN');}) as typeof fetch);
   assert.equal(server.listening,false);server.close();
  }finally{await x.close();}
