@@ -11,6 +11,18 @@ An independent TypeScript/Node.js 22 project based on `docs/MANARATAK_BOT_MASTER
 
 
 
+## B3 v0.7.9 — one-shot mandatory-channel rule integrity audit (OFFLINE)
+
+From an authorized host with a preexisting canonical private SQLite state file, operators can use:
+
+```bash
+npm run telegram:subscriptions -- --offline-only --state /absolute/private/state.sqlite
+```
+
+The command opens a **strict read-only SQLite snapshot** and summarizes saved mandatory-channel subscription consistency. It counts active/paused rules and flags unauthorized/revoked group and channel dependencies, malformed rules, duplicate required channels and requirements exceeding the configured ten-channel cap. Output is JSON with only counts and static codes; it intentionally omits student IDs, chat/channel IDs, raw state, path, secrets and Telegram credentials. Exit 0 means locally consistent saved configuration, exit 2 means operator review needed, exit 1 means unsafe input/state. No network, deletion, rule update or moderation action occurs.
+
+This is **not a real Telegram getChatMember check**. PASS does not verify current Telegram bot admin rights, membership verification success, delivery or approved HTTPS deployment. Production operation still requires explicit host, backup, webhook and consented live acceptance in the separate readiness stages.
+
 ## B3 v0.7.8 — review removal of one mandatory subscription channel (OFFLINE)
 
 The private owner now may open a saved group's **📋 تفاصيل الاشتراك** and see a bounded **🧹 مراجعة إزالة قناة** button for each of its configured mandatory channels. The review page shows the selected channel and number of channels remaining. A separate **✅ تأكيد إزالة قناة** button changes the saved rule: only that channel is removed, preserving `ALL`/`ANY` and all other configured channels. Removing the final channel deactivates the rule (the student is not required to join any channel by that rule).
