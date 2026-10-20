@@ -8,6 +8,7 @@ import { ApprovedAnswerService, ResourceLinkService, type MembershipPort } from 
 import type { ImportFormat } from './ingestion.js';
 import type { SubscriptionGate } from './subscription.js';
 import type { TelegramReplyDispatcher } from './telegram-replies.js';
+import {BoundedIngress,decodeStrictJsonBytes,type IngressOptions} from './http-ingress-guard.js';
 
 /** Inbound-only boundary. A test double may supply bytes; there is intentionally no live HTTP implementation. */
 export interface TelegramDocumentPort {
@@ -257,20 +258,25 @@ function respond(res:ServerResponse,status:number,body:Record<string,unknown>):v
 }
 /** Verifies Telegram's shared webhook secret and HTTP boundaries. Does not send any outbound messages. */
 export function telegramWebhookListener(app:TelegramUpdateApplication,secretToken:string,
- outbound?:TelegramReplyDispatcher):RequestListener {
+ outbound?:TelegramReplyDispatcher,ingressOptions:IngressOptions={}):RequestListener {
   if(!/^[A-Za-z0-9_-]{32,256}$/.test(secretToken))throw Error('INVALID_WEBHOOK_SECRET');
+  const guard=new BoundedIngress(ingressOptions);
   return (req,res)=>{
     void (async()=>{
       if(req.method!=='POST'){respond(res,405,{ok:false});return;}
       if(req.url!=='/telegram/webhook'){respond(res,404,{ok:false});return;}
       if(!secretValid(req,secretToken)){respond(res,401,{ok:false});return;}
+      const release=guard.enter(req);
+      if(!release){respond(res,503,{ok:false});return;}
+      try{
+      if(req.headers['content-encoding']!==undefined){respond(res,415,{ok:false});return;}
       if(!/^application\/json(?:\s*;\s*charset=utf-8)?$/i.test(req.headers['content-type']??'')){respond(res,415,{ok:false});return;}
       const declared=req.headers['content-length'];
       if(declared!==undefined&&(!/^\d+$/.test(declared)||Number(declared)>MAX_BODY)){respond(res,413,{ok:false});return;}
       const chunks:Buffer[]=[];let length=0;
       for await(const chunk of req){length+=(chunk as Buffer).length;if(length>MAX_BODY){respond(res,413,{ok:false});return;}chunks.push(chunk as Buffer);}
       let payload:unknown;
-      try{payload=JSON.parse(Buffer.concat(chunks).toString('utf8'));}catch{respond(res,400,{ok:false});return;}
+      try{payload=decodeStrictJsonBytes(chunks);}catch{respond(res,400,{ok:false});return;}
       const result=await app.handle(payload);
       // Live delivery is explicitly opt-in via a separate injected dispatcher.
       // Ambiguous outcomes remain blocked in the durable outbox: never retry
@@ -278,6 +284,7 @@ export function telegramWebhookListener(app:TelegramUpdateApplication,secretToke
       if(outbound&&result.plan&&result.deliveryKey)await outbound.dispatch(result.deliveryKey);
       // Keep the reply body minimal: no user text, provider errors or Bot API secret.
       respond(res,result.status==='DENIED'&&result.reason==='INVALID_UPDATE_ID'?422:200,{ok:true,status:result.status});
+      }finally{release();}
     })().catch(()=>{if(!res.headersSent)respond(res,503,{ok:false});else res.end();});
   };
 }

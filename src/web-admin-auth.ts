@@ -6,6 +6,7 @@ import type { ImportFormat } from './ingestion.js';
 import type { BotStore } from './store.js';
 import type { Policy } from './policy.js';
 import { reviewTelegramReplyOutbox, recordTelegramReplyManualReview } from './telegram-reply-maintenance.js';
+import {BoundedIngress,decodeStrictJsonBytes,type IngressOptions} from './http-ingress-guard.js';
 
 const AUTH_HEADER='x-telegram-init-data';
 const MAX_INIT_LENGTH=8192;
@@ -77,7 +78,8 @@ export interface OwnerReplyReviewWebOptions{
  * these routes automatically.
  */
 export function telegramAdminWebListener(auth:TelegramMiniAppAuth, admin:EducationAdminFacade,
-  replyOps?:OwnerReplyReviewWebOptions):RequestListener {
+  replyOps?:OwnerReplyReviewWebOptions,ingressOptions:IngressOptions={}):RequestListener {
+  const guard=new BoundedIngress(ingressOptions);
   const routes=new Set(['/admin/panel','/admin/import','/admin/approve','/admin/publish']);
   if(replyOps){routes.add('/admin/replies/summary');routes.add('/admin/replies/review');}
   return (req,res)=>{
@@ -93,6 +95,10 @@ export function telegramAdminWebListener(auth:TelegramMiniAppAuth, admin:Educati
       if(opsRoute&&(!replyOps||!replyOps.policy.isOwner(ctx.actorId))){
         reply(res,403,{ok:false});return;
       }
+      const release=guard.enter(req);
+      if(!release){reply(res,503,{ok:false});return;}
+      try{
+      if(req.headers['content-encoding']!==undefined){reply(res,415,{ok:false});return;}
       if(!/^application\/json(?:\s*;\s*charset=utf-8)?$/i.test(req.headers['content-type']??'')){
         reply(res,415,{ok:false});return;
       }
@@ -108,7 +114,7 @@ export function telegramAdminWebListener(auth:TelegramMiniAppAuth, admin:Educati
         chunks.push(chunk as Buffer);
       }
       let payload:unknown;
-      try{payload=JSON.parse(new TextDecoder('utf-8',{fatal:true}).decode(Buffer.concat(chunks)));}
+      try{payload=decodeStrictJsonBytes(chunks);}
       catch{reply(res,400,{ok:false});return;}
       if(!isObject(payload)){reply(res,422,{ok:false});return;}
       try{
@@ -172,6 +178,7 @@ export function telegramAdminWebListener(auth:TelegramMiniAppAuth, admin:Educati
         const resource=await admin.publish(ctx,payload.importId,payload.index,payload.categoryId);
         reply(res,200,{ok:true,status:'PUBLISHED_IN_LOCAL_LIBRARY',resourceId:resource.id});
       }catch(err){reply(res,payloadError(err),{ok:false});}
+      }finally{release();}
     })().catch(()=>{if(!res.headersSent)reply(res,503,{ok:false});else res.end();});
   };
 }
