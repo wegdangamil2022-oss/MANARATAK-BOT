@@ -1,3 +1,11 @@
+## 0.7.6 — 2026-10-21 — Private owner-only group/channel policy restrictions (NOT DEPLOYED)
+
+- The private owner dashboard's approved-groups section now lists every saved group/channel authorization in bounded Next/Previous pages. Each chat opens a detail panel with **local** approval, stored membership flag, allowed scopes, group-AI mode and policy version; it explicitly disclaims live Telegram membership verification.
+- Added owner-only reviewed **restrictive** controls: remove one existing group scope, force stored group AI to OFF, or revoke the local group authorization. Each change has a separate preview/confirmation screen; button text provides no authority, and policy revision/owner/current authorization checks happen atomically in the BotStore transaction. A stale/replayed confirmation cannot silently override newer policy.
+- Revoking local authorization also sets stored AI mode to OFF; removing the assistant scope turns it OFF as well. These controls never add a scope, enable AI, reauthorize a chat, leave/delete Telegram groups, post to channels, retry UNKNOWN replies or call Telegram Bot API.
+- Added RED-first JSON+SQLite tests for group details, pagination, actor isolation, preview-is-read-only, revocation, AI OFF and scope restriction, stale-version denial and malformed button inputs.
+- The bot remains **OFF by default**, not hosted. No public group invite-directory, real webhook acceptance, automatic moderation rollout, provider admin-right verification or live external interaction was added.
+
 ## 0.7.5 — 2026-10-21 — Fully paginated owner category picker during candidate review (NOT DEPLOYED)
 
 - Added nine-item Next/Previous pages for all currently authorized source categories when the owner selects a READY imported candidate; previously the chooser displayed only the first nine categories. Buttons bind the run, candidate index and requested page and are revalidated by the existing owner-only private handler against the live approved scope.

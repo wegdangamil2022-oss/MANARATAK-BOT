@@ -11,6 +11,14 @@ An independent TypeScript/Node.js 22 project based on `docs/MANARATAK_BOT_MASTER
 
 
 
+## B3 v0.7.6 — owner-only chat and group policy review (OFFLINE)
+
+Within the private Telegram **🔐 لوحة المالك → 👥 المجموعات المعتمدة** reply keyboard, the owner can browse saved group/channel authorizations across pages and inspect a saved chat's policy, scope names, group AI status and locally stored presence flag. Presence is **not** a live Telegram membership check.
+
+Only the configured owner in a verified Telegram private chat can use group management buttons. Privileged actions are explicitly restrictive: *review and confirm removal of one previously granted scope*, *review and confirm AI OFF*, or *review and confirm revoking local chat authorization*. Each confirmed change compares the currently saved policy revision **inside the durable BotStore transaction**, rejecting stale and replayed buttons. Revoking a chat or removing the assistant scope also forces its locally stored group-AI mode OFF. Individual restrictions append an owner-only audit event. **No action enables a chat, adds a role, switches AI on, triggers group leave, contacts Telegram or delivers a campaign.**
+
+The buttons are plain texts sent back to the bot, not signed credentials; user identity, authorized group scope and the versioned state always govern. Two-step UI screens are a deliberate confirmation flow, not cryptographic proof the earlier screen was seen. All controls remain local/offline until the separate production deployment, webhook verification, host firewall and real provider tests are explicitly completed.
+
 ## B3 v0.7.5 — owner category selection now spans the whole reviewed scope (OFFLINE)
 
 The candidate approval screen in the private owner Telegram dashboard now lists authorized categories in **nine-item pages**, with Next/Previous when needed. The page marker binds the exact imported run and candidate index, is never treated as permission, and is re-checked against current actor ownership, source chat approval, candidate READY status and available categories on every tap.
