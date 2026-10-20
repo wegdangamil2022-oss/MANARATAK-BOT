@@ -289,7 +289,7 @@ export class BotStore {
       const {bytesRead}=await sourceHandle.read(header,0,16,0).catch(()=>{
         throw new Error('BACKUP_SOURCE_INVALID');
       });
-      if(bytesRead!==16||!header.equals(Buffer.from('SQLite format 3\\0')))
+      if(bytesRead!==16||!header.equals(Buffer.from('SQLite format 3\0')))
         throw new Error('BACKUP_SOURCE_INVALID');
     }finally{await sourceHandle.close();}
     // This readonly connection cannot manufacture a missing bot_state table
