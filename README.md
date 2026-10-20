@@ -1,6 +1,6 @@
 # بوت منارتك — MANARATAK BOT
 
-**B0/B1 + B2-Core + B3 + B2-Advanced safe canonical state checks for retention review runner (v0.5.6). Offline/test-only — no live Telegram bot.**
+**B0/B1 + B2-Core + B3 + B4 SQLite backup source-validation safety (v0.5.7). Offline/test-only — no live Telegram bot.**
 
 An independent TypeScript/Node.js 22 project based on `docs/MANARATAK_BOT_MASTER_v1.2.1_AR.md` and `docs/START_HERE_MANARATAK_BOT_v1.2.1_AR.md`. B0/B1 supply the secure baseline; B2-Core adds individual moderation and subscription policies; B3 adds the first locally tested education content flow.
 
@@ -10,6 +10,17 @@ An independent TypeScript/Node.js 22 project based on `docs/MANARATAK_BOT_MASTER
 
 
 
+
+## B4 v0.5.7 — read-only validation before a SQLite backup is created
+
+A preexisting empty, malformed or uninitialized SQLite source must **never** become a new apparently valid database while making a recovery copy. This release strengthens the **existing** `BotStore.backupSqlite(sourceFile,backupFile)` method, retaining its SQLite online backup implementation. It does not add a second backup API or enable automatic backup jobs or deletion.
+
+- **Canonical paths only:** use absolute, normalized source and target filenames. Reject `.`, `..`, direct file symlinks, symlinked source ancestor paths, and a symlinked destination directory. Reject attempts to copy a database to itself.
+- **Source first:** before creating any destination directory or reserving a file, check that the source already exists as a regular file with a full 16-byte SQLite magic header. Open it **read-only** (not via `BotStore.openSqlite()`) and verify SQLite `PRAGMA quick_check`, the existing `bot_state` row and a supported decoded bot schema. Missing/invalid/empty sources cannot trigger `CREATE TABLE`, substitute a fabricated empty state, or create a backup destination.
+- **Failure and repeat safety:** reserve the new output using exclusive `wx` with private `0600` mode and never overwrite an existing backup. Use SQLite's official backup API against the validated read-only database handle, not a raw `-wal` file copy; re-open the destination and decode state as a recovery check. Remove an incomplete *new* backup if that copy or verification fails.
+- **Keep immutable history:** an approved-chat configuration, observed message metadata, publication receipts and purge safety tombstones survive the snapshot; copying is never a reason to prune or redact the source.
+
+**Operational limits:** Validating a source/target path does not defeat a malicious privileged process that changes filesystem links between checks and use (TOCTOU). The deployment operator must enforce exclusive ownership, private directory ACLs, device isolation and a separately tested restore procedure. This is still an **offline mock** BotStore path; no production retention SLA, encryption, backup expiration, scheduled jobs or Telegram network operations are activated. Existing backups are not deleted by this code. A backup can continue to contain sensitive metadata that was present at its point-in-time snapshot; expiry and data-subject deletion in offsite copies remain separate policy gates.
 
 ## B2-Advanced v0.5.6 — reject empty/redirected SQLite before the offline review runner opens it
 
