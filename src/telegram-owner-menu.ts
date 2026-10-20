@@ -4,6 +4,7 @@ import type {Policy} from './policy.js';
 import type {EducationService} from './education.js';
 import type {EducationAdminFacade,VerifiedAdminContext} from './education-admin.js';
 import {menuLabels,type TelegramReplyKeyboard} from './telegram-menu.js';
+import {OwnerTelegramGroupMenu,isOwnerGroupText} from './telegram-owner-groups.js';
 
 export const ownerMenuLabels={
  imports:'🧾 مراجعة الوارد',
@@ -79,7 +80,7 @@ const sections=new Set<string>(Object.values(ownerMenuLabels));
  * ordinary student message. Never use text alone to authenticate its sender.
  */
 export function isOwnerMenuText(text:string):boolean{
- return text===menuLabels.owner||sections.has(text)||
+ return text===menuLabels.owner||sections.has(text)||isOwnerGroupText(text)||
   text.startsWith('➡️ التالي · o:')||text.startsWith('⬅️ السابق · o:')||
   marks.some(([prefix])=>text.startsWith(prefix));
 }
@@ -188,6 +189,8 @@ export class OwnerTelegramMenu{
  async handle(text:string,ctx:VerifiedAdminContext):Promise<OwnerMenuScreen|null>{
   if(ctx.origin!=='TELEGRAM_PRIVATE'||!ctx.verified||
     ctx.chatId!==ctx.actorId||!this.policy.isOwner(ctx.actorId))return reject();
+  if(isOwnerGroupText(text))
+   return new OwnerTelegramGroupMenu(this.store,this.policy).handle(text,ctx);
   const state=await this.store.snapshot();
   const pageRequest=parseOwnerMenuPageCommand(text);
   if(pageRequest){
@@ -221,16 +224,6 @@ export class OwnerTelegramMenu{
     +'تغيير ترتيب الأقسام وأرشفة الملفات ما زال عبر وظائف الإدارة المعتمدة.\n'
     +'يمكنك مراجعة الوارد قبل نشره في المكتبة المحلية.',
     [ownerMenuLabels.imports]);
-  }
-  if(text===ownerMenuLabels.groups){
-   const approved=state.chats.filter(x=>x.approved);
-   const available=approved.filter(x=>x.present);
-   return screen('<b>المجموعات المعتمدة 👥</b>\n'
-    +'مجموعات معتمدة: '+approved.length+'\n'
-    +'الموجود بها البوت حسب الحالة المحفوظة: '+available.length+'\n'
-    +'المجموعات غير المفعلة: '+(state.chats.length-approved.length)+'\n'
-    +'هذه الحالة محلية، ولا تُثبت عضوية Telegram الحية.'
-    );
   }
   if(text===ownerMenuLabels.delivery){
    const jobs=state.telegramReplyJobs??[];
