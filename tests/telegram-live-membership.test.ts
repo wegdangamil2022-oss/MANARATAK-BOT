@@ -110,7 +110,7 @@ test('live webhook checks actual membership for private group catalog, sends rep
  const env={BOT_ENV:'production',TELEGRAM_ENABLED:'true',TELEGRAM_REPLY_DELIVERY_ENABLED:'true',
   BOT_OWNER_ID:OWNER,BOT_ID:'manaratak-test-bot',BOT_USERNAME:'ManaratakBot',
   BOT_STATE_FILE:path,TELEGRAM_BOT_TOKEN:TOKEN,TELEGRAM_WEBHOOK_SECRET:SECRET,
-  TELEGRAM_LISTEN_PORT:'8787'};
+  TELEGRAM_LISTEN_PORT:'8787',TELEGRAM_WEBHOOK_PUBLIC_URL:'https://webhook.manaratak-ops.net/telegram/webhook'};
  const {request,calls}=fakeRequester((url,body)=>{
   if(url.endsWith('/getChatMember'))return body.user_id===123456789?admin():reply('member',300);
   if(url.endsWith('/sendMessage'))return new Response(JSON.stringify({ok:true,
@@ -147,7 +147,7 @@ test('live denied membership cannot generate private scoped reply and never call
  const env={BOT_ENV:'production',TELEGRAM_ENABLED:'true',TELEGRAM_REPLY_DELIVERY_ENABLED:'true',
   BOT_OWNER_ID:OWNER,BOT_ID:'manaratak-test-bot',BOT_USERNAME:'ManaratakBot',
   BOT_STATE_FILE:path,TELEGRAM_BOT_TOKEN:TOKEN,TELEGRAM_WEBHOOK_SECRET:SECRET,
-  TELEGRAM_LISTEN_PORT:'8787'};
+  TELEGRAM_LISTEN_PORT:'8787',TELEGRAM_WEBHOOK_PUBLIC_URL:'https://webhook.manaratak-ops.net/telegram/webhook'};
  const {request,calls}=fakeRequester((url,body)=>{
   if(!url.endsWith('/getChatMember'))throw Error('unexpected send');
   return body.user_id===123456789?admin():reply('left',300);

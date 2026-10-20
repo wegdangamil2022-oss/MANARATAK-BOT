@@ -1,3 +1,12 @@
+## 0.6.5 — 2026-10-20 — Fail-closed HTTPS webhook startup gate and offline preflight (NOT DEPLOYED)
+
+- Production Telegram runtime now requires `TELEGRAM_WEBHOOK_PUBLIC_URL` to be an exact canonical HTTPS DNS URL on the existing `/telegram/webhook` route. Localhost/private and IP targets, normalization, userinfo, nonstandard ports, query strings and fragments are rejected before runtime creation.
+- Owner Telegram ID is now constrained to a positive safe integer in canonical decimal form.
+- Added read-only `preflightLiveTelegram(env)` that checks the very same config and private, initialized SQLite state validity as the runtime without changing files, opening sockets or contacting Telegram.
+- Added one-shot `npm run telegram:preflight` with deterministic status-only exit markers; does not leak credentials, IDs or file paths.
+- Added RED-first local unit/CLI tests for invalid HTTPS and owner identity, malformed or missing/symlinked/permissive SQLite, nonactivation and sanitization, plus existing runtime regression updates. Existing Telegram sender behavior is unchanged.
+- HTTPS URL syntax is NOT proof of public DNS, actual TLS, reverse proxy readiness, Telegram webhook registration or independent delivery receipts. Live Telegram activation and operational deployment remain blocked.
+
 ## 0.6.4 — 2026-10-20 — Opt-in authenticated local owner reply review interface (NOT DEPLOYED)
 
 - Extends the existing `telegramAdminWebListener` with optional `OwnerReplyReviewWebOptions`; the two reply routes do not exist unless the caller explicitly injects a private BotStore and owner Policy. The live Telegram webhook server does not mount or activate them.

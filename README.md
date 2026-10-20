@@ -1,6 +1,6 @@
 # بوت منارتك — MANARATAK BOT
 
-**B0/B1 + B2-Core + B3 + B3 privacy-safe Telegram reply outbox and opt-in authenticated owner review (v0.6.4). Transport implemented but OFF by default — no live deployment verified.**
+**B0/B1 + B2-Core + B3 + B3 privacy-safe Telegram reply outbox and opt-in authenticated owner review and deployment preflight (v0.6.5). Transport implemented but OFF by default — no live deployment verified.**
 
 An independent TypeScript/Node.js 22 project based on `docs/MANARATAK_BOT_MASTER_v1.2.1_AR.md` and `docs/START_HERE_MANARATAK_BOT_v1.2.1_AR.md`. B0/B1 supply the secure baseline; B2-Core adds individual moderation and subscription policies; B3 adds the first locally tested education content flow.
 
@@ -9,6 +9,23 @@ An independent TypeScript/Node.js 22 project based on `docs/MANARATAK_BOT_MASTER
 
 
 
+
+
+## B3 v0.6.5 — Telegram deployment preflight (STILL OFF)
+
+Production startup now requires `TELEGRAM_WEBHOOK_PUBLIC_URL=https://your-real-domain.tld/telegram/webhook`, in addition to existing `BOT_ENV=production`, `TELEGRAM_ENABLED=true`, `TELEGRAM_REPLY_DELIVERY_ENABLED=true`, bot token, webhook secret, absolute existing private SQLite state, bot/owner IDs and localhost port.
+
+The URL parser accepts only an exact canonical `https://` DNS hostname and exact `/telegram/webhook` path; it rejects IP literals, localhost/private or reserved host suffixes, nonstandard ports, userinfo, queries, fragments, alternate paths and normalization tricks. It does **not** resolve DNS, test certificates, verify reverse proxy reachability, validate trust of forwarding headers, register a Telegram webhook or guarantee that a DNS name will never point to a private address. A trusted infrastructure operator must verify those separately.
+
+**Read-only preflight:** after provisioning a valid environment and an already initialized SQLite BotStore state file owned privately (0600), run:
+
+```sh
+npm run telegram:preflight
+```
+
+On success the application prints only `MANARATAK_TELEGRAM_PREFLIGHT_OK`. On failure it exits nonzero and prints a fixed `...CONFIG_REJECTED` or `...STATE_REJECTED` marker, never any token, webhook URL, owner ID, chat IDs, database path or application text. Node.js 22 may separately print its built-in experimental SQLite warning on stderr; that warning is not an application status. This is strictly an offline local check; it does **not** listen, send messages, create files, update Telegram, start a daemon, or authorize going live. The same existing-state check and same URL gate are used by the opt-in live runtime itself.
+
+**Mandatory external controls before go-live:** real DNS+TLS certificate validation; private reverse proxy with documented webhook route and header preservation; IP allow-list or equally strong controlled ingress where appropriate, anti-abuse limits/timeouts, no public owner-admin routes, bot ID and secret verification, owner-authorized approval, isolated private backup/restore and state-file access, error alerts, Telegram test-group acceptance and safe disable/rollback. None are provisioned by this version. Even successful preflight must never be described as production activation or Telegram delivery evidence.
 
 
 ## B3 v0.6.4 — opt-in, signed owner HTTP review adapter (NOT DEPLOYED)
