@@ -461,3 +461,40 @@ test('B2-advanced: 429 cooldown persists after SQLite service restart and cancel
   assert.equal((await f.store.snapshot()).purgeJobs[0]!.items[0]!.status,'CANCELLED');
  }finally{await f.close()}
 });
+
+test('B2-advanced: same-chat jobs serialize pending requests while first preflight is in flight',async()=>{
+ const f=await fixture('sqlite');try{
+  await seed(f,2);
+  const first=await f.service().preview(OWNER,GROUP,{limit:1});
+  const second=await f.service().preview(OWNER,GROUP,{limit:1,beforeMessageId:2});
+  await f.service().confirm(OWNER,first.id);
+  await f.service().confirm(OWNER,second.id);
+  let entered!:()=>void,release!:()=>void;
+  const ready=new Promise<void>(r=>entered=r),hold=new Promise<void>(r=>release=r);
+  f.gateway.canDelete=async()=>{entered();await hold;return true;};
+  const request=f.service().dispatchNext(first.id);
+  await ready;
+  try{
+    const d=await f.store.snapshot();
+    assert.equal(d.purgeJobs[0]!.items[0]!.status,'SENDING');
+    assert.equal((await f.service().dispatchNext(second.id)).status,'BLOCKED_PENDING');
+    assert.equal(f.gateway.calls.length,0);
+  }finally{release();}
+  assert.equal((await request).status,'ACKNOWLEDGED');
+  assert.equal((await f.service().dispatchNext(second.id)).status,'ACKNOWLEDGED');
+  assert.equal(f.gateway.calls.length,2);
+ }finally{await f.close()}
+});
+
+test('B2-advanced: exception merely containing 429 is ambiguous, not a safe retry-after',async()=>{
+ const f=await fixture();try{
+  await seed(f,1);
+  const job=await f.service().preview(OWNER,GROUP,{limit:1});
+  await f.service().confirm(OWNER,job.id);
+  f.gateway.deleteMessage=async()=>{f.gateway.calls.push({chatId:GROUP,messageId:1,attemptId:'fake'});throw new Error('429: response lost after request');};
+  assert.equal((await f.service().dispatchNext(job.id)).status,'UNKNOWN_OUTCOME');
+  assert.equal((await f.service().dispatchNext(job.id)).status,'BLOCKED_UNKNOWN');
+  assert.equal((await f.store.snapshot()).purgeJobs[0]!.rateLimitedUntil,undefined);
+  assert.equal(f.gateway.calls.length,1);
+ }finally{await f.close()}
+});
