@@ -29,7 +29,7 @@ export const menuLabels={
 } as const;
 export function mainMenuKeyboard(owner:boolean):TelegramReplyKeyboard{
  const m=menuLabels;
- const rows=[
+ const rows:string[][]=[
   [m.scholarships,m.courses],
   [m.universities,m.exams],
   [m.library,m.files],
@@ -52,7 +52,7 @@ const trimTitle=(title:string,max:number):string=>title
 export function categoryButton(category:EducationCategory):string{
  return '📁 '+trimTitle(category.title,Math.max(1,74-category.id.length))+' · '+category.id;
 }
-export function resourceButton(resource:EducationResource):string{
+export function resourceButton(resource:Pick<EducationResource,'id'|'title'>):string{
  return '🔎 '+trimTitle(resource.title,Math.max(1,74-resource.id.length))+' · '+resource.id;
 }
 export function listingKeyboard(buttons:readonly string[]):TelegramReplyKeyboard{
