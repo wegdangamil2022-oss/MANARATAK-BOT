@@ -1,3 +1,12 @@
+## 0.5.5 — 2026-10-20 — Local one-shot retention review command (offline)
+
+- Added `src/retention-review-runner.ts` with strict `--once --state ABSOLUTE_PATH --engine json|sqlite` parser and `runRetentionReviewOnce`; no token or owner parameter is treated as authentication.
+- Added compiled `src/retention-review-cli.ts` and `npm run retention:tick -- --state ... --engine ...`, a working local-only invocation of the owner-enabled review checkpoint, never compaction or Telegram deletion.
+- Refuses missing/nonregular/symlinked/wide-permission state files before opening; validates BotStore schema, disallows accidental state creation, returns only status and aggregate counts; fixed failure codes avoid echoing arguments/secret values.
+- Includes dedicated outbound-disabled gateway, no network or Telegram tokens. No cron, service manager, background run or production DB activation is installed.
+- Added 12 tests (350 total) running the real CLI in Node subprocesses for JSON and SQLite, including read-only disabled run, strict flags, missing-state fail-closed, aggregate-only due notice, replay idempotence, concurrent independent SQLite processes and error-output secrecy.
+- Keeps canonical BotStore v8 and all historical v0.5.4 features/receipts unchanged. Manual owner compaction is still a separate, explicit action.
+
 ## 0.5.4 — 2026-10-20 — Owner opt-in review checkpoints (offline, no automatic retention)
 
 - Added backward-compatible optional `PurgeRetentionReviewControl` to existing `BotStore` v8. No schema migration or separate database; legacy saved states default disabled.

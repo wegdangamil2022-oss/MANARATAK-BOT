@@ -167,3 +167,11 @@
 - The optional control record is additive to schema v8, persists enablement, cadence, version, due clock and last privacy-minimized summary; disabled by default and only owner configurable/readable. Strict bounds 24h–30d and fail-closed invalid saved configuration.
 - Checkpoint computations and due advancement occur atomically in `BotStore.transaction`, ensuring at-most-one summary per due interval across independent SQLite processes. A late checkpoint catches up only once and a backward clock cannot induce additional notices.
 - A review notice is a ten-minute, digest-bound, aggregate-only dry-run and never permits actual compaction alone. The owner must separately approve a still-current `compactRetention` request; no automatic deletion, Telegram action, offsite backup cleanup or production retention SLA is enabled by this code.
+
+## B2-Advanced v0.5.5 — trusted local entry point for periodic privacy review (20 October 2026)
+
+- Added an actual one-shot Node CLI instead of claiming an internal tick method is a running scheduler. The runner accepts only an explicit absolute path, state engine and `--once`, and requires an existing private regular file. No default state path, owner-ID argument as proof of authority, Telegram token or live API is allowed.
+- The only permitted runtime action is the preexisting `tickRetentionReview()`; the gateway is a deliberately outbound-disabled boundary. Neither local compaction, Telegram message deletion nor owner schedule configuration is accessible from the CLI.
+- Diagnostics contain no user-supplied argument, secret or raw metadata values. Returned output is strictly status and aggregate counts. Node 22's own SQLite ExperimentalWarning may be printed independently.
+- The owner-enabled policy in v0.5.4 remains opt-in and persistent; a local trusted cron/systemd job could later invoke this command, but that job is NOT installed in this release. Existing JSON per-process locking and SQLite transactional claiming govern repeat and parallel operations.
+- OS permissions, process ownership, symlink races, backups/exports, owner notification routing and continuous data-retention SLA need deployment-specific independent review; the file check does not provide full operating-system isolation.

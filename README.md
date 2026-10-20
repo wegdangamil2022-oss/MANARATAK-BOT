@@ -1,6 +1,6 @@
 # بوت منارتك — MANARATAK BOT
 
-**B0/B1 + B2-Core + B3 + B2-Advanced opt-in retention review cadence (v0.5.4). Offline/test-only — no live Telegram bot.**
+**B0/B1 + B2-Core + B3 + B2-Advanced local one-shot retention review runner (v0.5.5). Offline/test-only — no live Telegram bot.**
 
 An independent TypeScript/Node.js 22 project based on `docs/MANARATAK_BOT_MASTER_v1.2.1_AR.md` and `docs/START_HERE_MANARATAK_BOT_v1.2.1_AR.md`. B0/B1 supply the secure baseline; B2-Core adds individual moderation and subscription policies; B3 adds the first locally tested education content flow.
 
@@ -10,6 +10,28 @@ An independent TypeScript/Node.js 22 project based on `docs/MANARATAK_BOT_MASTER
 
 
 
+
+## B2-Advanced v0.5.5 — local one-shot retention review CLI (offline, no Telegram deletion)
+
+**Delivery:** A real Node 22 command-line entry point `src/retention-review-cli.ts` plus an independently testable module `src/retention-review-runner.ts`. This executes the **existing v0.5.4 review tick**, not a delete job or automatic compaction.
+
+```bash
+# The bot state must already exist and be private; this command cannot initialize it.
+# A separate approved owner configuration must already have opted into review checkpoints.
+npm run retention:tick -- --state /absolute/private/bot-state.sqlite --engine sqlite
+# Or:
+npm run retention:tick -- --state /absolute/private/bot-state.json --engine json
+```
+
+For direct Node execution after `npm run build`: `node dist/src/retention-review-cli.js --once --state /absolute/private/bot-state.sqlite --engine sqlite`.
+
+The command requires **all** of `--once`, `--state` with an absolute path, and `--engine` `json` or `sqlite`; no defaults, aliases, user ID, owner credentials, tokens, media, Telegram flags or arbitrary arguments. A missing file is an error, never a fabricated empty BotStore. It refuses symbolic links, non-regular paths and files readable or writable by group/other users (**mode 0600 is recommended**). Run it with a trusted local service account and appropriate directory/backup permissions; CLI flags are not authentication and pre-run file checks do not replace OS sandboxing or symlink-race protections.
+
+**Minimal stdout:** one line of JSON with `status` (`DISABLED`, `NOT_DUE`, `CLOCK_ROLLBACK`, or `READY`). A `READY` result includes only aggregate `expiredObserved` and `eligibleJobs` counts; not sender IDs, message IDs, review notes, Telegram tokens, proof identifiers or even the candidate digest. Failures write only a fixed diagnostic code to stderr and return a nonzero exit code. Node 22 may also emit its standard `node:sqlite` experimental warning on stderr.
+
+**Safety:** The runner injects a no-network gateway where all deletion attempts would be rejected; it invokes `tickRetentionReview()` only. It never invokes `compactRetention()` or `dispatchNext()`, never enables the retention policy, never schedules itself, never sends Telegram messages and never deletes snapshots/backups. A `READY` status is a reminder for a separate **owner-approved** review and explicit compaction. Repeated invocation is idempotent per stored checkpoint. Independent SQLite processes are exercised in tests to prove only one gets `READY` for the same due interval.
+
+**Deployment status:** The command can be triggered manually or integrated later into a trusted local cron/systemd service, but **no cron job, worker or production scheduler has been installed or activated**. No live Bot API integration or real deletion is implemented. Backups and exports still require separate retention enforcement and owner authorization. Existing schema v8 state/metadata/receipts are unchanged. **350/350 mock and local subprocess tests passed**.
 
 ## B2-Advanced v0.5.4 — owner opt-in retention review cadence, **without automatic deletion**
 
