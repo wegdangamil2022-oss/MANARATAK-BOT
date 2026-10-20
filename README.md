@@ -1,6 +1,6 @@
 # بوت منارتك — MANARATAK BOT
 
-**B0/B1 + B2-Core + B3 + B2-Advanced local one-shot retention review runner (v0.5.5). Offline/test-only — no live Telegram bot.**
+**B0/B1 + B2-Core + B3 + B2-Advanced safe canonical state checks for retention review runner (v0.5.6). Offline/test-only — no live Telegram bot.**
 
 An independent TypeScript/Node.js 22 project based on `docs/MANARATAK_BOT_MASTER_v1.2.1_AR.md` and `docs/START_HERE_MANARATAK_BOT_v1.2.1_AR.md`. B0/B1 supply the secure baseline; B2-Core adds individual moderation and subscription policies; B3 adds the first locally tested education content flow.
 
@@ -10,6 +10,19 @@ An independent TypeScript/Node.js 22 project based on `docs/MANARATAK_BOT_MASTER
 
 
 
+
+## B2-Advanced v0.5.6 — reject empty/redirected SQLite before the offline review runner opens it
+
+The already merged `v0.5.5` one-shot offline retention-review runner remains the **only** entry point, using `npm run retention:tick -- --state ABSOLUTE_PATH --engine json|sqlite`; this release does **not** add another CLI, mode, background task or Telegram transport.
+
+Four fail-closed improvements to `src/retention-review-runner.ts`:
+
+- Require the caller to give a **canonical absolute path** without `.` or `..` components. The runner no longer silently rewrites alternate paths into a target database name.
+- Check the **real path**, rejecting symbolic links in **ancestor directories** as well as the state filename. A symlinked parent that points to a different private database is not considered a trusted canonical path.
+- Refuse a **zero-length existing SQLite database before BotStore is opened**. The earlier SQLite backend could have auto-created tables in a previously empty file, contrary to the runner's "existing initialized store only" contract.
+- Read the **16-byte SQLite magic signature** in read-only mode before allowing the persistent state backend to open it. Malformed or mislabeled SQLite paths fail with the existing fixed error code `RETENTION_STATE_FILE_INVALID` rather than reaching a CREATE TABLE operation. The original 0600 file permission check remains.
+
+These guards apply to the **local offline review-only runner** and do not promise protection from a hostile privileged host process racing to replace files between validation and use. The runner continues to generate only aggregate due-review status, not delete/compact data or contact Telegram. No installed cron, production activation or backup deletion is included.
 
 ## B2-Advanced v0.5.5 — local one-shot retention review CLI (offline, no Telegram deletion)
 

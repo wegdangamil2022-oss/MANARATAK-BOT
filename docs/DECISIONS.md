@@ -175,3 +175,9 @@
 - Diagnostics contain no user-supplied argument, secret or raw metadata values. Returned output is strictly status and aggregate counts. Node 22's own SQLite ExperimentalWarning may be printed independently.
 - The owner-enabled policy in v0.5.4 remains opt-in and persistent; a local trusted cron/systemd job could later invoke this command, but that job is NOT installed in this release. Existing JSON per-process locking and SQLite transactional claiming govern repeat and parallel operations.
 - OS permissions, process ownership, symlink races, backups/exports, owner notification routing and continuous data-retention SLA need deployment-specific independent review; the file check does not provide full operating-system isolation.
+
+## B2-Advanced v0.5.6 — canonical local file before SQLite open (20 October 2026)
+
+- The version 0.5.5 runner is the sole approved offline review entry point. Its lstat() guard for the filename did not preclude symlinked parent directories; add a full canonical realpath equality check, and reject lexical dot-segment aliases at argument parsing.
+- SQLite's CREATE TABLE can **write into an empty, pre-existing state file**. The runner must reject files smaller than 16 bytes, and verify the exact `SQLite format 3\\0` signature using read-only file operations **before** any BotStore SQLite instance opens it. A mislabeled or corrupted file fails with a fixed error code.
+- This is only a local safety hardening. A highly privileged host adversary can still race replacement after path inspection; use protected service directories, file ACLs and process privilege isolation in any production design. No cron, backup erasure, provider delete or live token is enabled.
