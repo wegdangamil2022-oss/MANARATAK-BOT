@@ -1,3 +1,11 @@
+## 0.7.2 — 2026-10-21 — Authenticated full-library next/previous Telegram browsing (NOT DEPLOYED)
+
+- Extended the real Telegram reply keyboard with next/previous page controls for private scholarship, courses, universities, exams, forms and all-resource category listings, and for published resource lists within a category.
+- Page navigation uses canonical, bounded plain-text tokens (never trusted as permissions); page, current category, current publication visibility and private actor access are revalidated afresh before every reply. Forged, malformed, inaccessible and stale pages are denied with no private data.
+- Dynamic keyboard rows remain limited to ten items per page and a bounded number of navigation buttons, preserving Telegram payload-size and HTML escaping controls, unchanged durable one-shot outbound semantics and no group keyboard.
+- RED-first tests cover 13 categories, 23 resources, next and previous, both JSON and SQLite, revoked categories, nonexistent resources, bad page grammar and invalid section claims.
+- No new AI, Mini App, live courses/exams or production Telegram deployment is activated.
+
 ## 0.7.1 — 2026-10-21 — Telegram reply keyboard interface and private library browsing (NOT DEPLOYED)
 
 - Introduced an actual **Telegram reply keyboard** in private /start and /help with scholarship, courses, universities, exams, educational library, student files, assistant, communities and help menu entries. The separate owner entry is displayed only for the verified owner user ID.

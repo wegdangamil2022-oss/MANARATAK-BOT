@@ -55,11 +55,34 @@ export function categoryButton(category:EducationCategory):string{
 export function resourceButton(resource:Pick<EducationResource,'id'|'title'>):string{
  return '🔎 '+trimTitle(resource.title,Math.max(1,74-resource.id.length))+' · '+resource.id;
 }
-export function listingKeyboard(buttons:readonly string[]):TelegramReplyKeyboard{
+/** A page marker is only an untrusted navigation *request*, never a grant
+ * or a durable cursor. Every selection must rerun the library's auth checks.
+ */
+export type MenuPageCommand={kind:'c'|'r';id:string;page:number;direction:'next'|'previous'};
+const sectionSet=new Set(['all','scholarships','courses','universities','exams','files']);
+export function menuPageButton(kind:'c'|'r',id:string,page:number,direction:'next'|'previous'):string{
+ if(!/^[A-Za-z0-9_-]{1,64}$/.test(id)||
+   (kind==='c'&&!sectionSet.has(id))||
+   !Number.isInteger(page)||page<0||page>999)throw Error('INVALID_MENU_PAGE');
+ return (direction==='next'?'➡️ التالي':'⬅️ السابق')+' · '+kind+':'+id+':'+page;
+}
+export function parseMenuPageCommand(text:string):MenuPageCommand|null{
+ if(typeof text!=='string'||text.length>110)return null;
+ const found=/^(➡️ التالي|⬅️ السابق) · ([cr]):([A-Za-z0-9_-]{1,64}):(0|[1-9][0-9]{0,2})$/u.exec(text);
+ if(!found||found[0]!==text)return null;
+ const kind=found[2]! as 'c'|'r',id=found[3]!,page=Number(found[4]!);
+ if(kind==='c'&&!sectionSet.has(id))return null;
+ const direction=found[1]==='➡️ التالي'?'next':'previous';
+ return {kind,id,page,direction};
+}
+export function listingKeyboard(buttons:readonly string[],pageControls:{
+ previous?:string|undefined;next?:string|undefined
+}={}):TelegramReplyKeyboard{
  const rows:string[][]=[];
- // This view is intentionally capped, not a full paginated category system.
  for(let i=0;i<Math.min(buttons.length,10);i+=2)
   rows.push(buttons.slice(i,i+2));
+ const paging=[pageControls.previous,pageControls.next].filter((x):x is string=>Boolean(x));
+ if(paging.length)rows.push(paging);
  rows.push([menuLabels.back,menuLabels.home]);
  return keyboard(rows);
 }
