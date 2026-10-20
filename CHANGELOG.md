@@ -1,3 +1,11 @@
+## 0.5.9 — 2026-10-20 — Private, isolated SQLite backup restoration drill (TESTED_MOCK)
+
+- Added `runSqliteRestoreDrill`, strictly limited to a verified SQLite backup and an existing private canonical restore sandbox; no arbitrary restore destination, production database overwrite, Telegram/network/compaction or auto-run scheduler.
+- Requires private file/directory ACL, no relative/dot-segment/symlink aliases, source backup validity and read-only `PRAGMA quick_check`.
+- Uses SQLite point-in-time backup API to create a unique, exclusively reserved, private scratch database. Verifies it is valid and deeply compares every serialized BotState field with the backup. Aggregate results reveal no paths, actor IDs, message IDs or sensitive proof data.
+- Preserves immutable publication and purge UNKNOWN_OUTCOME attempts without dispatch; removes only invocation-owned scratch db and `-wal`/`-shm` sidecars, even on failure. Concurrent independent drills and preexisting sandbox files are protected.
+- Added 12 RED-first regression tests; all **389/389** existing B0–B4 and B2-Advanced offline tests passed after cleanup corrections. No new state schema, service or production deployment.
+
 ## 0.5.8 — 2026-10-20 — Read-only backup inventory and expiration review (TESTED_MOCK)
 
 - Added `reviewSqliteBackups({directory,retentionDays,now,maxEntries?})` for a private canonical local backup directory; age threshold 1–365 days, bounded listing, no file deletion, restore, mutation, background runner or Telegram gateway.

@@ -103,3 +103,6 @@
 
 | B4 v0.5.8 S12-31 backup recovery health and S12-32 retention inventory (partial) | backup-retention-review.ts + BotStore.verifySqliteBackupReadOnly + tests/b4-backup-retention-review.test.ts | TESTED_MOCK | 12 regression tests; private path / file rights / symlinks, readonly integrity + schema checks; 1–365 day advisory age, bounded listing, no automatic delete |
 | B4 v0.5.8 actual backup expiry, restore drills, offsite archive & GDPR policy | — | PLANNED / BLOCKED_LIVE | Candidate age is advisory only; no erasure authority, production SLA, offsite inventory or scheduler |
+
+| B4 v0.5.9 S12-31 private restore drill and state round-trip validation | backup-restore-drill.ts / tests/b4-isolated-restore-drill.test.ts | TESTED_MOCK | 12 TDD tests, isolated SQLite scratch, full BotState equality, unknown purge/publication attempt preservation, concurrent files, private path/ACL checks, scratch/WAL/SHM cleanup |
+| B4 v0.5.9 live disaster recovery / S12-32 offsite retention | — | PLANNED / BLOCKED_LIVE | No restoration into production, network Telegram replay, backup lifecycle deletion, offsite RPO/RTO SLA or filesystem-race adversarial proof |
