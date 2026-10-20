@@ -207,3 +207,16 @@ test('owner-only forged command parser does not treat random text or extra field
    '📑 مرشح · 123:0:1:2','📂 اعتماد في · 123:0:scholarships\n'])
    assert.equal(parseOwnerMenuAction(command),null,command);
 });
+
+test('owner text approval uses the same disabled-category guard as the owner keyboard',async()=>{
+ const f=await fixture();try{
+  const run=await f.upload();
+  await f.education.setCategoryEnabled(OWNER,'scholarships',false);
+  const direct=await f.app().handle(msg(120,100,'/approve '+run.id+' 0 scholarships'));
+  assert.equal(direct.status,'DENIED');
+  assert.equal((await f.store.snapshot()).importRuns[0]!.candidates[0]!.status,'READY');
+  await f.education.setCategoryEnabled(OWNER,'scholarships',true);
+  const enabled=await f.app().handle(msg(121,100,'/approve '+run.id+' 0 scholarships'));
+  assert.equal(enabled.status,'APPLIED');
+ }finally{await f.close();}
+});
