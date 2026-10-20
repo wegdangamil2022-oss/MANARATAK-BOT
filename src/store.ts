@@ -64,10 +64,12 @@ export interface RollingMessageMeta {
 export interface PurgeFilter {
   limit:number; beforeMessageId?:number; senderId?:string; linksOnly?:boolean; mediaOnly?:boolean; commandsOnly?:boolean;
 }
-export type PurgeItemStatus='QUEUED'|'SENDING'|'ACKNOWLEDGED'|'FAILED_CONFIRMED'|'UNKNOWN_OUTCOME'|'CANCELLED';
+export type PurgeItemStatus='QUEUED'|'SENDING'|'ACKNOWLEDGED'|'FAILED_CONFIRMED'|'UNKNOWN_OUTCOME'|'SKIPPED_UNVERIFIED'|'CANCELLED';
 export interface PurgeItem {
   messageId:number; metaDigest:string; status:PurgeItemStatus;
   attemptId?:string; startedAt?:number; leaseUntil?:number;
+  reconciliation?:{evidenceId?:string;reviewedBy:string;at:number;reason?:string;
+     verifiedOutcome?:'ACKNOWLEDGED'|'FAILED_CONFIRMED'|'SKIPPED_UNVERIFIED'};
 }
 /** Separate explicit review required before any mock delete request. */
 export interface PurgeJob {

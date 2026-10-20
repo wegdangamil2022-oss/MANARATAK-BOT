@@ -9,6 +9,22 @@ type PurgeOutcome='ACKNOWLEDGED'|'FAILED_CONFIRMED'|'UNKNOWN_OUTCOME';
  * the provider rejected the request BEFORE any delete operation was accepted. */
 export type PurgeRateLimit={status:'RATE_LIMITED';retryAfterMs:number};
 export type PurgeGatewayResult=PurgeOutcome|PurgeRateLimit;
+/** Provider-independent *mock* proof binding to one outbound deletion attempt.
+ * ACKNOWLEDGED is proof of request acceptance only, never physical deletion. */
+export interface PurgeEvidence {
+ evidenceId:string;chatId:string;messageId:number;attemptId:string;
+ outcome:'ACKNOWLEDGED'|'FAILED_CONFIRMED';
+}
+function validEvidence(v:unknown):v is PurgeEvidence {
+ if(!v||typeof v!=='object'||Array.isArray(v))return false;
+ const e=v as Record<string,unknown>;
+ return Object.keys(e).length===5&&
+  typeof e.evidenceId==='string'&&/^[a-zA-Z0-9][a-zA-Z0-9:_-]{0,127}$/.test(e.evidenceId)&&
+  typeof e.chatId==='string'&&/^-[0-9]+$/.test(e.chatId)&&
+  typeof e.messageId==='number'&&Number.isSafeInteger(e.messageId)&&e.messageId>0&&
+  typeof e.attemptId==='string'&&/^[a-zA-Z0-9][a-zA-Z0-9:_-]{0,127}$/.test(e.attemptId)&&
+  (e.outcome==='ACKNOWLEDGED'||e.outcome==='FAILED_CONFIRMED');
+}
 const MAX_RETRY_AFTER_MS=3_600_000;
 function confirmedRateLimit(value:unknown):value is PurgeRateLimit {
  if(!value||typeof value!=='object'||Array.isArray(value))return false;
@@ -26,12 +42,20 @@ function normalizedOutcome(value:unknown):PurgeOutcome|'RATE_LIMITED' {
 export interface PurgeGateway {
  canDelete(chatId:string):Promise<boolean>;
  deleteMessage(chatId:string,messageId:number,attemptId:string):Promise<PurgeGatewayResult>;
+ /** Must independently verify issuer, scope, attempt and statement of provider result. */
+ verifyEvidence(evidence:PurgeEvidence):Promise<boolean>;
 }
 export class FakePurgeGateway implements PurgeGateway {
  rights=true;
  throwAfterDelete=false;
  outcome:PurgeGatewayResult='ACKNOWLEDGED';
  calls:{chatId:string;messageId:number;attemptId:string}[]=[];
+ private evidenceRegistry=new Map<string,PurgeEvidence>();
+ /** Test-only provenance simulation, not external proof. */
+ acceptEvidence(evidence:PurgeEvidence):void {this.evidenceRegistry.set(evidence.evidenceId,structuredClone(evidence));}
+ async verifyEvidence(evidence:PurgeEvidence):Promise<boolean>{
+  return JSON.stringify(this.evidenceRegistry.get(evidence.evidenceId))===JSON.stringify(evidence);
+ }
  async canDelete(_chatId:string):Promise<boolean>{return this.rights;}
  async deleteMessage(chatId:string,messageId:number,attemptId:string):Promise<PurgeGatewayResult>{
   this.calls.push({chatId,messageId,attemptId});
@@ -44,6 +68,7 @@ const hash=(m:RollingMessageMeta)=>createHash('sha256').update(JSON.stringify([
  m.chatId,m.messageId,m.senderKind,m.senderId??null,m.sentAt,m.contentType,m.hasLinks,
  m.pinned,m.linkedChannel,m.adminLog,m.approvedAnnouncement
 ])).digest('hex');
+const terminalItem=(s:PurgeItem['status'])=>s==='ACKNOWLEDGED'||s==='CANCELLED'||s==='SKIPPED_UNVERIFIED';
 const protectedMessage=(m:RollingMessageMeta)=>m.pinned||m.linkedChannel||m.adminLog||m.approvedAnnouncement;
 const validId=(v:unknown)=>typeof v==='number'&&Number.isSafeInteger(v)&&v>0;
 const validTime=(v:unknown)=>typeof v==='number'&&Number.isSafeInteger(v)&&v>=0;
@@ -181,7 +206,7 @@ export class ModerationPurgeService {
    if(job.status==='CANCELLED')return {kind:'CANCELLED' as const};
    if(job.status==='PAUSED')return {kind:'PAUSED' as const};
    if(job.status==='COMPLETED')return {kind:'EMPTY' as const};
-   const current=job.items.find(x=>x.status!=='ACKNOWLEDGED'&&x.status!=='CANCELLED');
+   const current=job.items.find(x=>!terminalItem(x.status));
    if(!current){job.status='COMPLETED';return {kind:'EMPTY' as const};}
    if(current.status!=='QUEUED')return {kind:'BLOCKED_UNKNOWN' as const};
    // Serialize all outbound mock delete attempts per destination chat. A separate
@@ -250,10 +275,91 @@ export class ModerationPurgeService {
      actorId:job.actorId,decision:result==='ACKNOWLEDGED'?'ALLOW':'NOOP',
      reason:result==='ACKNOWLEDGED'?'PURGE_DELETE_REQUEST_ACCEPTED':`PURGE_${result}`,
      policyVersion:job.scopeVersion,at:this.clock()});
-   if(job.status==='READY'&&job.items.every(x=>x.status==='ACKNOWLEDGED'||x.status==='CANCELLED'))
+   if(job.status==='READY'&&job.items.every(x=>terminalItem(x.status)))
      job.status='COMPLETED';
    return {status:result,messageId:item.messageId};
   });
+ }
+ /**
+  * Explicit human reconciliation of ONE quarantined attempt. A gateway callback,
+  * timestamp or message text alone cannot prove whether an external delete occurred.
+  * Verify asynchronously then recheck all rights, attempt ID and proof uniqueness in
+  * the same durable transaction (SQLite independent-process safe).
+  */
+ async reconcileUnknown(actor:string,jobId:string,messageId:number,evidence:PurgeEvidence):Promise<PurgeItem>{
+  if(!validEvidence(evidence)||!validId(messageId)||evidence.messageId!==messageId)
+   throw new Error('EVIDENCE_INVALID');
+  const before=await this.store.snapshot();
+  const job=before.purgeJobs.find(j=>j.id===jobId),item=job?.items.find(i=>i.messageId===messageId);
+  if(!job||!item)throw new Error('PURGE_NOT_FOUND');
+  if(!allowed(before,this.policy,actor,job.chatId,this.clock())||
+     (actor!==job.actorId&&!this.policy.isOwner(actor)))throw new Error('REVIEW_DENIED');
+  if(item.status!=='UNKNOWN_OUTCOME'||item.attemptId!==evidence.attemptId||
+     evidence.chatId!==job.chatId||this.evidenceReused(before,evidence.evidenceId))
+   throw new Error('EVIDENCE_INVALID');
+  let verified=false;
+  try { verified=(await this.gateway.verifyEvidence(evidence))===true; }
+  catch {/* external failure is not evidence */}
+  if(!verified)throw new Error('EVIDENCE_UNVERIFIED');
+  return this.store.transaction(s=>{
+   const currentJob=s.purgeJobs.find(j=>j.id===jobId);
+   const current=currentJob?.items.find(i=>i.messageId===messageId);
+   if(!currentJob||!current)throw new Error('PURGE_NOT_FOUND');
+   if(!allowed(s,this.policy,actor,currentJob.chatId,this.clock())||
+      (actor!==currentJob.actorId&&!this.policy.isOwner(actor)))throw new Error('REVIEW_DENIED');
+   if(current.status!=='UNKNOWN_OUTCOME'||current.attemptId!==evidence.attemptId||
+      currentJob.chatId!==evidence.chatId||this.evidenceReused(s,evidence.evidenceId))
+     throw new Error('EVIDENCE_INVALID');
+   current.status=evidence.outcome;
+   current.reconciliation={evidenceId:evidence.evidenceId,reviewedBy:actor,at:this.clock(),
+     verifiedOutcome:evidence.outcome};
+   s.audit.push({updateKey:`b2:purge:reconcile:${jobId}:${messageId}:${evidence.evidenceId}`,
+     actorId:actor,decision:'ALLOW',reason:'PURGE_EVIDENCE_RECONCILED',
+     policyVersion:currentJob.scopeVersion,at:this.clock()});
+   if(currentJob.status==='READY'&&currentJob.items.every(x=>terminalItem(x.status)))
+      currentJob.status='COMPLETED';
+   return structuredClone(current);
+  });
+ }
+ private evidenceReused(s:BotState,evidenceId:string):boolean {
+  return s.purgeJobs.some(job=>job.items.some(i=>i.reconciliation?.evidenceId===evidenceId));
+ }
+ /** Owner's irrevocable choice to stop investigating—not a finding that the
+  * message was deleted, nor approval to replay an UNKNOWN attempt. */
+ async skipForReview(actor:string,jobId:string,messageId:number,reason:string):Promise<PurgeItem>{
+  if(!this.policy.isOwner(actor))throw new Error('OWNER_ONLY');
+  if(typeof reason!=='string'||reason.trim().length<5||reason.trim().length>200||
+     /[\\u0000-\\u001F\\u007F]/u.test(reason))
+    throw new Error('INVALID_REVIEW_REASON');
+  return this.store.transaction(s=>{
+   const job=s.purgeJobs.find(j=>j.id===jobId);
+   const item=job?.items.find(i=>i.messageId===messageId);
+   if(!job||!item)throw new Error('PURGE_NOT_FOUND');
+   if(!allowed(s,this.policy,actor,job.chatId,this.clock()))throw new Error('REVIEW_DENIED');
+   if(item.status!=='UNKNOWN_OUTCOME'&&item.status!=='FAILED_CONFIRMED')
+     throw new Error('NOT_REVIEWABLE');
+   item.status='SKIPPED_UNVERIFIED';
+   item.reconciliation={reviewedBy:actor,at:this.clock(),reason:reason.trim(),verifiedOutcome:'SKIPPED_UNVERIFIED'};
+   s.audit.push({updateKey:`b2:purge:skip:${jobId}:${messageId}`,
+     actorId:actor,decision:'ALLOW',reason:'PURGE_MANUAL_SKIP_UNVERIFIED',
+     policyVersion:job.scopeVersion,at:this.clock()});
+   if(job.status==='READY'&&job.items.every(x=>terminalItem(x.status)))job.status='COMPLETED';
+   return structuredClone(item);
+  });
+ }
+ /** Access-controlled counts, not an assertion of physical Telegram deletion. */
+ async reviewProgress(actor:string,jobId:string):Promise<{
+  total:number;remaining:number;requestAccepted:number;deletedConfirmed:0;skippedUnverified:number;
+  confirmedFailed:number;unknown:number;cancelled:number;
+ }>{
+  const s=await this.store.snapshot();
+  const job=s.purgeJobs.find(j=>j.id===jobId);
+  if(!job)throw new Error('PURGE_NOT_FOUND');
+  if(!allowed(s,this.policy,actor,job.chatId,this.clock()))throw new Error('REVIEW_DENIED');
+  const count=(status:PurgeItem['status'])=>job.items.filter(i=>i.status===status).length;
+  return {total:job.items.length,remaining:job.items.filter(i=>!terminalItem(i.status)).length,
+    requestAccepted:count('ACKNOWLEDGED'),deletedConfirmed:0,skippedUnverified:count('SKIPPED_UNVERIFIED'),
+    confirmedFailed:count('FAILED_CONFIRMED'),unknown:count('UNKNOWN_OUTCOME'),cancelled:count('CANCELLED')};
  }
  async recoverPending():Promise<number>{
   return this.store.transaction(s=>{
