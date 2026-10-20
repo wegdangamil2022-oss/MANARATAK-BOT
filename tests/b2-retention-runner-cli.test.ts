@@ -103,7 +103,7 @@ test('B2 retention CLI: actual Node subprocess uses JSON stdout only and exits n
   await f.service().configureRetentionReview(OWNER,{enabled:true,cadenceMs:DAY});
   await f.store.transaction(s=>{s.purgeRetentionReview!.nextCheckAt=0;});
   const exec=promisify(execFile),script=fileURLToPath(new URL('../src/retention-review-cli.js',import.meta.url));
-  const opts={env:{...process.env,MANARATAK_OWNER_ID:OWNER},timeout:20_000};
+  const opts={env:{...process.env,MANARATAK_OWNER_ID:OWNER,NODE_NO_WARNINGS:'1'},timeout:20_000};
   const ok=await exec(process.execPath,[script,...f.args],opts);
   assert.equal(JSON.parse(ok.stdout).status,'READY');
   assert.equal(ok.stderr,'');
@@ -124,7 +124,7 @@ test('B2 retention CLI: two independent SQLite subprocesses share one due claim'
   await f.service().configureRetentionReview(OWNER,{enabled:true,cadenceMs:DAY});
   await f.store.transaction(s=>{s.purgeRetentionReview!.nextCheckAt=0;});
   const exec=promisify(execFile),script=fileURLToPath(new URL('../src/retention-review-cli.js',import.meta.url));
-  const opts={env:{...process.env,MANARATAK_OWNER_ID:OWNER},timeout:20_000};
+  const opts={env:{...process.env,MANARATAK_OWNER_ID:OWNER,NODE_NO_WARNINGS:'1'},timeout:20_000};
   const both=await Promise.all([
    exec(process.execPath,[script,...f.args],opts),
    exec(process.execPath,[script,...f.args],opts),
