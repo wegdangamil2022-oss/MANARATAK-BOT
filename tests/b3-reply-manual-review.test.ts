@@ -97,7 +97,7 @@ for(const engine of ['json','sqlite'] as const){
    await recordTelegramReplyManualReview(f.store,f.owner,
     {...args(key(3),'attempt-3'),decision:'ESCALATED'});
    const before=await f.other().snapshot();
-   const report=await reviewTelegramReplyOutbox(f.other(),{now:200_000,staleAfterMs:60_000});
+   const report=await reviewTelegramReplyOutbox(f.other(),{now:220_000,staleAfterMs:60_000});
    assert.equal(report.manualReviewRequired,3);
    assert.equal(report.reviewedUnresolved,2);
    assert.equal(report.awaitingFirstReview,1);
