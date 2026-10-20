@@ -49,24 +49,30 @@ export function ownerCategoryToken(id:string):string{
  return id.length<=24?id:'~'+createHash('sha256').update(id,'utf8').digest('hex').slice(0,16);
 }
 export interface OwnerMenuPage{
- type:'imports'|'candidates';runId?:string;page:number;direction:'next'|'previous';
+ type:'imports'|'candidates'|'categories';runId?:string;index?:number;page:number;direction:'next'|'previous';
 }
-const pageRe=new RegExp('^(➡️ التالي|⬅️ السابق) · o:(i|c)(?::('+uuid+'))?:(0|[1-9][0-9]{0,2})$','u');
+const pageRe=new RegExp('^(➡️ التالي|⬅️ السابق) · o:(i|c|k)(?::('+uuid+'))?(?::(0|[1-9][0-9]{0,4}))?:(0|[1-9][0-9]{0,2})$','u');
 export function parseOwnerMenuPageCommand(input:string):OwnerMenuPage|null{
  if(typeof input!=='string'||input.length>96)return null;
  const m=pageRe.exec(input);
  if(!m||m[0]!==input)return null;
- const type=m[2]==='i'?'imports':'candidates';
- if((type==='imports'&&m[3]!==undefined)||(type==='candidates'&&!m[3]))return null;
+ const type=m[2]==='i'?'imports':m[2]==='c'?'candidates':'categories';
+ const runId=m[3],index=m[4],page=Number(m[5]);
+ if((type==='imports'&&(runId!==undefined||index!==undefined))||
+  (type==='candidates'&&(!runId||index!==undefined))||
+  (type==='categories'&&(!runId||index===undefined)))return null;
  const direction=m[1]==='➡️ التالي'?'next':'previous';
- return m[3]?{type,runId:m[3],page:Number(m[4]),direction}:
-  {type,page:Number(m[4]),direction};
+ if(type==='categories')return {type,runId:runId!,index:Number(index),page,direction};
+ if(type==='candidates')return {type,runId:runId!,page,direction};
+ return {type,page,direction};
 }
-function ownerPageButton(type:OwnerMenuPage['type'],page:number,direction:OwnerMenuPage['direction'],runId?:string):string{
+function ownerPageButton(type:OwnerMenuPage['type'],page:number,direction:OwnerMenuPage['direction'],runId?:string,index?:number):string{
  if(!Number.isSafeInteger(page)||page<0||page>999)throw Error('INVALID_OWNER_PAGE');
- if(type==='candidates'&&(!runId||!refRe.test(runId)))throw Error('INVALID_OWNER_RUN');
- return (direction==='next'?'➡️ التالي':'⬅️ السابق')+
-  ' · o:'+(type==='imports'?'i':'c:'+runId)+':'+page;
+ if(type!=='imports'&&(!runId||!refRe.test(runId)))throw Error('INVALID_OWNER_RUN');
+ if(type==='categories'&&(index===undefined||!Number.isSafeInteger(index)||index<0||index>99999))
+  throw Error('INVALID_OWNER_ROW');
+ return (direction==='next'?'➡️ التالي':'⬅️ السابق')+' · o:'+
+  (type==='imports'?'i':type==='candidates'?'c:'+runId:'k:'+runId+':'+index)+':'+page;
 }
 const sections=new Set<string>(Object.values(ownerMenuLabels));
 /** Distinguish an owner-only choice (even malformed) from an unrelated
