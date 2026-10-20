@@ -95,6 +95,32 @@ export async function preflightLiveTelegram(
  return {ready:true,httpsWebhook:true,privateSqlite:true,
   listener:'LOOPBACK_ONLY',telegramNetworkCalls:0};
 }
+/** Drain all existing accepted requests before stopping. Timeout is a status,
+ * not authorization to abort a possibly committed Telegram send. A DRAINING
+ * return means the server is still closing in the same process.
+ */
+const drainPromises=new WeakMap<Server,Promise<void>>();
+export async function stopLiveTelegramServer(server:Server,graceMs=15_000):
+ Promise<'STOPPED'|'DRAINING'>{
+ if(!Number.isSafeInteger(graceMs)||graceMs<100||graceMs>60_000)
+  throw Error('INVALID_DRAIN_TIMEOUT');
+ let drained=drainPromises.get(server);
+ if(!drained){
+  if(!server.listening)return 'STOPPED';
+  drained=new Promise<void>((resolve,reject)=>{
+   server.close(error=>error?reject(Error('LIVE_TELEGRAM_DRAIN_FAILED')):resolve());
+   server.closeIdleConnections();
+  });
+  drainPromises.set(server,drained);
+ }
+ let timeout:ReturnType<typeof setTimeout>|undefined;
+ try{
+  const done=await Promise.race([drained.then(()=>true),
+   new Promise<false>(resolve=>{timeout=setTimeout(()=>resolve(false),graceMs);})]);
+  return done?'STOPPED':'DRAINING';
+ }finally{if(timeout!==undefined)clearTimeout(timeout);}
+}
+
 /** Builds (does not start) a real local HTTP listener, suitable for a trusted
  * HTTPS reverse proxy that preserves Telegram's webhook secret header.
  * No runtime is created if the persistent SQLite state is missing/untrusted.
@@ -126,7 +152,17 @@ export async function createLiveTelegramServer(config:LiveTelegramConfig,
   membership:(chatId,actorId)=>membership.verifyMembership(chatId,actorId),subscription});
  const dispatcher=new TelegramReplyDispatcher(store,policy,
   new TelegramBotApiTextSender(check.token,request));
- return createServer(telegramWebhookListener(app,check.webhookSecret,dispatcher));
+ const server=createServer(telegramWebhookListener(app,check.webhookSecret,dispatcher));
+ // Local-only listener. These are resource budgets, not a substitute for the
+ // trusted HTTPS proxy, ingress anti-abuse controls, TLS or real load testing.
+ server.requestTimeout=15_000;
+ server.headersTimeout=10_000;
+ server.timeout=15_000;
+ server.keepAliveTimeout=2_000;
+ server.maxHeadersCount=32;
+ server.maxRequestsPerSocket=50;
+ server.maxConnections=128;
+ return server;
 }
 const direct=process.argv[1]!==undefined&&fileURLToPath(import.meta.url)===resolve(process.argv[1]);
 if(direct){
@@ -138,5 +174,21 @@ if(direct){
    process.stdout.write('MANARATAK_TELEGRAM_LOCAL_LISTENER_READY\n');
   });
   server.on('error',()=>{process.stderr.write('LIVE_TELEGRAM_LISTENER_FAILED\n');process.exitCode=1;});
+  let stopping=false;
+  const beginDrain=()=>{
+   if(stopping)return;
+   stopping=true;
+   process.stdout.write('MANARATAK_TELEGRAM_DRAINING\n');
+   void stopLiveTelegramServer(server).then(status=>{
+    if(status==='STOPPED')process.stdout.write('MANARATAK_TELEGRAM_STOPPED\n');
+    else{
+     // Do not force-close an in-flight Telegram send or claim a safe stop.
+     process.stderr.write('LIVE_TELEGRAM_DRAIN_PENDING\n');
+     process.exitCode=1;
+    }
+   }).catch(()=>{process.stderr.write('LIVE_TELEGRAM_DRAIN_FAILED\n');process.exitCode=1;});
+  };
+  process.once('SIGTERM',beginDrain);
+  process.once('SIGINT',beginDrain);
  })().catch(()=>{process.stderr.write('LIVE_TELEGRAM_START_FAILED\n');process.exitCode=1;});
 }
