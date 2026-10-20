@@ -11,6 +11,12 @@ An independent TypeScript/Node.js 22 project based on `docs/MANARATAK_BOT_MASTER
 
 
 
+## B3 v0.7.4 — owner import and candidate review pagination (OFFLINE)
+
+The private owner-only Telegram dashboard now provides **التالي / السابق** for imported document batches and their candidates, including indexes beyond ten. The owner sees the current approved-scope rows only: the server revalidates sender ownership, source-chat approval and the underlying import contents on each button tap. A stale or forged page cannot access data or grant publishing permission.
+
+Category IDs can be as long as 64 characters. Where the raw ID would exceed Telegram reply button limits, the menu derives a small **display-only fingerprint** and resolves it against exactly one currently authorized category. It never trusts the fingerprint as an access credential and refuses invalid or ambiguous matches. Approval and library-only publication continue to require explicit owner actions, reviewed records, current category authorization and separate confirmation. The bot **does not automatically publish to channels** or start live Telegram.
+
 ## B3 v0.7.3 — Telegram owner dashboard with review and local publication (NOT DEPLOYED)
 
 The configured verified owner, and **only** that user ID in a private Telegram chat, now has functional keyboard screens beneath **🔐 لوحة المالك**: **🧾 مراجعة الوارد**, **📚 إدارة المكتبة**, **👥 المجموعات المعتمدة**, **📊 حالة الرسائل**, and **⚙️ إعدادات التشغيل**. Delegated administrators and students cannot execute those owner-only buttons by typing the same text; button labels are not a credential. No owner menu is accepted in a group.
