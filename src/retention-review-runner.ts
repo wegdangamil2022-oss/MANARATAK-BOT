@@ -1,4 +1,4 @@
-import {lstat} from 'node:fs/promises';
+import {lstat,realpath,open} from 'node:fs/promises';
 import {isAbsolute,resolve} from 'node:path';
 import {BotStore} from './store.js';
 import {Policy} from './policy.js';
@@ -27,6 +27,7 @@ export function parseRetentionRunnerArgs(args:readonly string[]):RetentionRunner
  }
  const statePath=fields.get('--state'), engine=fields.get('--engine');
  if(!once||fields.size!==2||!statePath||!isAbsolute(statePath)||
+    statePath!==resolve(statePath)||/[\u0000-\u001f\u007f]/u.test(statePath)||
     (engine!=='json'&&engine!=='sqlite'))throw new Error('INVALID_RETENTION_RUNNER_ARGS');
  return {statePath:resolve(statePath),engine};
 }
@@ -36,7 +37,8 @@ export function parseRetentionRunnerArgs(args:readonly string[]):RetentionRunner
 export async function runRetentionReviewOnce(
  opts:RetentionRunnerArgs,clock:()=>number=Date.now
 ):Promise<RetentionRunnerResult>{
- if(!opts||!isAbsolute(opts.statePath)||(opts.engine!=='json'&&opts.engine!=='sqlite'))
+ if(!opts||!isAbsolute(opts.statePath)||opts.statePath!==resolve(opts.statePath)||
+    (opts.engine!=='json'&&opts.engine!=='sqlite'))
   throw new Error('INVALID_RETENTION_RUNNER_ARGS');
  let meta:Awaited<ReturnType<typeof lstat>>;
  try { meta=await lstat(opts.statePath); }
@@ -46,6 +48,24 @@ export async function runRetentionReviewOnce(
  }
  if(!meta.isFile()||meta.isSymbolicLink())throw new Error('RETENTION_STATE_FILE_NOT_REGULAR');
  if((meta.mode&0o077)!==0)throw new Error('RETENTION_STATE_FILE_INSECURE_PERMISSIONS');
+ // A zero-byte SQLite file is a valid CREATE DATABASE target, but it is NOT
+ // an existing bot state. Refuse it before BotStore opens/initializes SQLite.
+ if(meta.size<16)throw new Error('RETENTION_STATE_FILE_INVALID');
+ let physicalPath:string;
+ try{physicalPath=await realpath(opts.statePath);}
+ catch{throw new Error('RETENTION_STATE_FILE_INVALID');}
+ if(physicalPath!==opts.statePath)throw new Error('RETENTION_STATE_FILE_NOT_REGULAR');
+ if(opts.engine==='sqlite'){
+  // A mislabeled text file or an empty .sqlite would otherwise reach the
+  // mutating CREATE TABLE path. Verify the immutable SQLite file signature.
+  const fd=await open(opts.statePath,'r').catch(()=>{throw new Error('RETENTION_STATE_FILE_INVALID');});
+  try{
+   const header=Buffer.alloc(16);
+   const {bytesRead}=await fd.read(header,0,16,0).catch(()=>{throw new Error('RETENTION_STATE_FILE_INVALID');});
+   if(bytesRead!==16||!header.equals(Buffer.from('SQLite format 3\\0')))
+    throw new Error('RETENTION_STATE_FILE_INVALID');
+  }finally{await fd.close();}
+ }
  const store=new BotStore(opts.statePath,{engine:opts.engine});
  await store.snapshot(); // fails closed on invalid schema; never creates a missing JSON file
  const noOutbound:PurgeGateway={
