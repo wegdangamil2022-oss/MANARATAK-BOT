@@ -333,3 +333,131 @@ test('B2-advanced: cancellation while canDelete is waiting precludes a late outb
   assert.equal(jobState.items[1]!.status,'CANCELLED');
  }finally{await f.close()}
 });
+
+for(const engine of ['json','sqlite'] as const){
+ test(`B2-advanced ${engine}: confirmed 429 queues exact item with durable cooldown, requires explicit later dispatch`,async()=>{
+  const f=await fixture(engine);try{
+   await seed(f,2);
+   const job=await f.service().preview(OWNER,GROUP,{limit:2});
+   await f.service().confirm(OWNER,job.id);
+   f.gateway.outcome={status:'RATE_LIMITED',retryAfterMs:2000};
+   assert.equal((await f.service().dispatchNext(job.id)).status,'RATE_LIMITED');
+   let current=(await f.store.snapshot()).purgeJobs[0]!;
+   assert.equal(current.items[0]!.status,'QUEUED');
+   assert.equal(current.items[0]!.attemptId,undefined);
+   assert.equal(current.rateLimitedUntil,f.now()+2000);
+   assert.equal(f.gateway.calls.length,1);
+   assert.equal((await f.service().dispatchNext(job.id)).status,'RATE_LIMITED');
+   assert.equal(f.gateway.calls.length,1);
+   f.setNow(f.now()+2000);
+   f.gateway.outcome='ACKNOWLEDGED';
+   assert.equal((await f.service().dispatchNext(job.id)).status,'ACKNOWLEDGED');
+   current=(await f.store.snapshot()).purgeJobs[0]!;
+   assert.equal(current.items[0]!.status,'ACKNOWLEDGED');
+   assert.equal(current.items[1]!.status,'QUEUED');
+   assert.equal((await f.store.snapshot()).audit.filter(a=>a.reason==='PURGE_ATTEMPT_DURABLY_RECORDED').length,2);
+   assert.equal(f.gateway.calls.length,2);
+  }finally{await f.close()}
+ });
+
+ test(`B2-advanced ${engine}: 429 cooldown on one job fences other jobs in the same chat`,async()=>{
+  const f=await fixture(engine);try{
+   await seed(f,2);
+   const a=await f.service().preview(OWNER,GROUP,{limit:1});
+   const b=await f.service().preview(OWNER,GROUP,{limit:1,beforeMessageId:2});
+   await f.service().confirm(OWNER,a.id);
+   await f.service().confirm(OWNER,b.id);
+   f.gateway.outcome={status:'RATE_LIMITED',retryAfterMs:3000};
+   assert.equal((await f.service().dispatchNext(a.id)).status,'RATE_LIMITED');
+   f.gateway.outcome='ACKNOWLEDGED';
+   assert.equal((await f.service().dispatchNext(b.id)).status,'RATE_LIMITED');
+   assert.equal(f.gateway.calls.length,1);
+   f.setNow(f.now()+3000);
+   assert.equal((await f.service().dispatchNext(b.id)).status,'ACKNOWLEDGED');
+   assert.equal((await f.service().dispatchNext(a.id)).status,'ACKNOWLEDGED');
+   assert.equal(f.gateway.calls.length,3);
+  }finally{await f.close()}
+ });
+}
+
+test('B2-advanced: malformed or untrusted 429 payload is quarantined UNKNOWN, never auto-replayed',async()=>{
+ const f=await fixture();try{
+  await seed(f,2);
+  const job=await f.service().preview(OWNER,GROUP,{limit:2});
+  await f.service().confirm(OWNER,job.id);
+  f.gateway.outcome={status:'RATE_LIMITED',retryAfterMs:-100} as never;
+  assert.equal((await f.service().dispatchNext(job.id)).status,'UNKNOWN_OUTCOME');
+  assert.equal((await f.service().dispatchNext(job.id)).status,'BLOCKED_UNKNOWN');
+  assert.equal((await f.store.snapshot()).purgeJobs[0]!.items[0]!.status,'UNKNOWN_OUTCOME');
+  assert.equal(f.gateway.calls.length,1);
+ }finally{await f.close()}
+});
+
+test('B2-advanced: invalid gateway status must not become an accepted deletion receipt',async()=>{
+ const f=await fixture();try{
+  await seed(f,1);
+  const job=await f.service().preview(OWNER,GROUP,{limit:1});
+  await f.service().confirm(OWNER,job.id);
+  f.gateway.outcome='SENT_BUT_UNTRUSTED' as never;
+  assert.equal((await f.service().dispatchNext(job.id)).status,'UNKNOWN_OUTCOME');
+  assert.equal((await f.store.snapshot()).purgeJobs[0]!.items[0]!.status,'UNKNOWN_OUTCOME');
+  assert.equal(f.gateway.calls.length,1);
+ }finally{await f.close()}
+});
+
+test('B2-advanced: repeated explicit 429 requests count every attempt toward immutable UTC daily quota',async()=>{
+ const f=await fixture('sqlite');try{
+  await seed(f,1);
+  const job=await f.service().preview(OWNER,GROUP,{limit:1});
+  await f.service().confirm(OWNER,job.id);
+  f.gateway.outcome={status:'RATE_LIMITED',retryAfterMs:1};
+  for(let i=0;i<50;i++){
+   assert.equal((await f.service().dispatchNext(job.id)).status,'RATE_LIMITED');
+   f.setNow(f.now()+1);
+  }
+  f.gateway.outcome='ACKNOWLEDGED';
+  assert.equal((await f.service().dispatchNext(job.id)).status,'BLOCKED_DAILY_LIMIT');
+  assert.equal(f.gateway.calls.length,50);
+  const s=await f.store.snapshot();
+  assert.equal(s.audit.filter(a=>a.reason==='PURGE_ATTEMPT_DURABLY_RECORDED').length,50);
+  assert.equal(s.purgeJobs[0]!.items[0]!.status,'QUEUED');
+ }finally{await f.close()}
+});
+
+test('B2-advanced: paused staff rights and source changes are revalidated after 429 delay',async()=>{
+ const f=await fixture('sqlite');try{
+  await f.policy.grant(OWNER,STAFF,'chat.manage',GROUP,f.now()+DAY);
+  await seed(f,2);
+  const a=await f.service().preview(STAFF,GROUP,{limit:1});
+  await f.service().confirm(STAFF,a.id);
+  f.gateway.outcome={status:'RATE_LIMITED',retryAfterMs:1000};
+  await f.service().dispatchNext(a.id);
+  await f.policy.revokeGrant(OWNER,STAFF,'chat.manage',GROUP);
+  f.setNow(f.now()+1000);
+  f.gateway.outcome='ACKNOWLEDGED';
+  assert.equal((await f.service().dispatchNext(a.id)).status,'BLOCKED');
+  assert.equal(f.gateway.calls.length,1);
+  const b=await f.service().preview(OWNER,GROUP,{limit:1,beforeMessageId:2});
+  await f.service().confirm(OWNER,b.id);
+  await f.observe(1,{pinned:true});
+  assert.equal((await f.service().dispatchNext(b.id)).status,'BLOCKED');
+  assert.equal(f.gateway.calls.length,1);
+ }finally{await f.close()}
+});
+
+test('B2-advanced: 429 cooldown persists after SQLite service restart and canceled plan cannot dispatch',async()=>{
+ const f=await fixture('sqlite');try{
+  await seed(f,1);
+  const job=await f.service().preview(OWNER,GROUP,{limit:1});
+  await f.service().confirm(OWNER,job.id);
+  f.gateway.outcome={status:'RATE_LIMITED',retryAfterMs:1800};
+  assert.equal((await f.service().dispatchNext(job.id)).status,'RATE_LIMITED');
+  assert.equal((await f.service().dispatchNext(job.id)).status,'RATE_LIMITED');
+  await f.service().cancel(OWNER,job.id);
+  f.setNow(f.now()+1800);
+  f.gateway.outcome='ACKNOWLEDGED';
+  assert.equal((await f.service().dispatchNext(job.id)).status,'CANCELLED');
+  assert.equal(f.gateway.calls.length,1);
+  assert.equal((await f.store.snapshot()).purgeJobs[0]!.items[0]!.status,'CANCELLED');
+ }finally{await f.close()}
+});
