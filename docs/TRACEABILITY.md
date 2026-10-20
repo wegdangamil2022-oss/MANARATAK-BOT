@@ -112,3 +112,6 @@
 
 | B3 v0.6.1 live Telegram getChatMember / guarded private group browse | telegram-membership.ts / telegram-live-server.ts / tests/telegram-live-membership.test.ts | IMPLEMENTED_OFF_BY_DEFAULT | 8 mock HTTP/localhost E2E tests, bot-admin preflight, identity and restricted-status checks, Telegram membership and subscription read-only adapter |
 | B3 v0.6.1 real membership provisioning and live acceptance | — | BLOCKED_LIVE | No real bot token, granted admin rights, public HTTPS service or live Telegram E2E proof; no live automatic subscription bans |
+
+| B3 v0.6.2 Telegram reply outbox privacy and safe backlog review | telegram-reply-maintenance.ts / telegram-replies.ts / store.ts / tests/b3-reply-outbox-maintenance.test.ts | TESTED_MOCK (OFF_BY_DEFAULT) | 14 TDD tests, irreversible body removal at SENDING claim, persisted attempt receipt, sanitized stale/UNKNOWN review, explicit capped/paged legacy cleanup, concurrent JSON/SQLite |
+| B3 v0.6.2 physical secure erasure, lifecycle, evidence reconciliation | — | BLOCKED_LIVE | WAL/old SQLite backups may still retain plain text, pending QUEUED messages still store bodies; no auto-retry, maintenance scheduler, verified backup erasure or production approval |
