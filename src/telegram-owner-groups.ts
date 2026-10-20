@@ -7,8 +7,9 @@ export const groupMenuLabel='👥 المجموعات المعتمدة';
 type GroupScope='navigation'|'assistant'|'moderation'|'verification'|'publishing';
 const groupScopes:readonly GroupScope[]=['navigation','assistant','moderation','verification','publishing'];
 type Action={kind:'details'|'subscriptionDetails'|'subscriptionReview'|'subscriptionConfirm'|
- 'revokeReview'|'revokeConfirm'|'scopeReview'|'scopeConfirm'|'aiReview'|'aiConfirm';
- chatId:string;version?:number;scope?:GroupScope;requirementVersion?:number};
+ 'channelReview'|'channelConfirm'|'revokeReview'|'revokeConfirm'|'scopeReview'|'scopeConfirm'|
+ 'aiReview'|'aiConfirm';
+ chatId:string;channelId?:string;version?:number;scope?:GroupScope;requirementVersion?:number};
 const id='(-[1-9][0-9]{0,18})';
 const ver='([1-9][0-9]{0,9})';
 const scope='(navigation|assistant|moderation|verification|publishing)';
@@ -16,6 +17,8 @@ const detailRe=new RegExp('^🏷️ محادثة · '+id+'$','u');
 const subDetailRe=new RegExp('^📋 تفاصيل الاشتراك · '+id+'$','u');
 const subReviewRe=new RegExp('^🧊 مراجعة تعليق الاشتراك · '+id+':'+ver+':'+ver+'$','u');
 const subConfirmRe=new RegExp('^✅ تأكيد تعليق الاشتراك · '+id+':'+ver+':'+ver+'$','u');
+const removeReviewRe=new RegExp('^🧹 مراجعة إزالة قناة · '+id+':'+id+':'+ver+':'+ver+'$','u');
+const removeConfirmRe=new RegExp('^✅ تأكيد إزالة قناة · '+id+':'+id+':'+ver+':'+ver+'$','u');
 const revPreviewRe=new RegExp('^🚫 مراجعة الإلغاء · '+id+':'+ver+'$','u');
 const revConfirmRe=new RegExp('^⛔ تأكيد الإلغاء · '+id+':'+ver+'$','u');
 const aiPreviewRe=new RegExp('^🛑 مراجعة إيقاف AI · '+id+':'+ver+'$','u');
@@ -29,6 +32,11 @@ export function parseOwnerGroupAction(value:string):Action|null{
  if(m)return {kind:'details',chatId:m[1]!};
  m=subDetailRe.exec(value);
  if(m)return {kind:'subscriptionDetails',chatId:m[1]!};
+ for(const [regex,kind] of [[removeReviewRe,'channelReview'],[removeConfirmRe,'channelConfirm']] as const){
+  m=regex.exec(value);
+  if(m)return {kind,chatId:m[1]!,channelId:m[2]!,
+    version:Number(m[3]!),requirementVersion:Number(m[4]!)};
+ }
  for(const [regex,kind] of [[subReviewRe,'subscriptionReview'],[subConfirmRe,'subscriptionConfirm']] as const){
   m=regex.exec(value);
   if(m)return {kind,chatId:m[1]!,version:Number(m[2]!),requirementVersion:Number(m[3]!)};
@@ -48,6 +56,7 @@ export function isOwnerGroupText(value:string):boolean{
  return value===groupMenuLabel||value.startsWith('🏷️ محادثة · ')||
   value.startsWith('📋 تفاصيل الاشتراك · ')||value.startsWith('🧊 مراجعة تعليق الاشتراك · ')||
   value.startsWith('✅ تأكيد تعليق الاشتراك · ')||
+  value.startsWith('🧹 مراجعة إزالة قناة · ')||value.startsWith('✅ تأكيد إزالة قناة · ')||
   value.startsWith('🚫 مراجعة الإلغاء · ')||value.startsWith('⛔ تأكيد الإلغاء · ')||
   value.startsWith('🔐 تقييد ')||value.startsWith('✅ تأكيد تقييد ')||
   value.startsWith('🛑 مراجعة إيقاف AI · ')||value.startsWith('🔒 تأكيد إيقاف AI · ')||
@@ -137,10 +146,31 @@ export class OwnerTelegramGroupMenu{
     +(channels.length?'القنوات المحلية: '+channels.join(', ')+'\n':'')
     +'لا يوجد تحقق حي من Telegram في هذه الشاشة.\n'
     +'التعليق لا يزيل قيود كتم سابقة ولا يعيد إرسال قرارات إشراف.',
-    channels.length?['🧊 مراجعة تعليق الاشتراك · '+chat.id+':'+chat.version+':'+subscription!.version,
-      '🏷️ محادثة · '+chat.id]:['🏷️ محادثة · '+chat.id]);
+    channels.length?channels.map(channel=>
+      '🧹 مراجعة إزالة قناة · '+chat.id+':'+channel+':'+chat.version+':'+subscription!.version
+     ):['🏷️ محادثة · '+chat.id]);
   }
   if(!revisionCurrent(chat,action.version))return null;
+  if(action.kind==='channelReview'||action.kind==='channelConfirm'){
+   if(!chat.scopes.includes('verification')||!subscription?.channelIds.length||
+      subscription.version!==action.requirementVersion||
+      !action.channelId||!subscription.channelIds.includes(action.channelId))return null;
+   const suffix=' · '+chat.id+':'+action.channelId+':'+chat.version+':'+subscription.version;
+   if(action.kind==='channelReview')
+    return screen('<b>مراجعة إزالة قناة مشترطة 🧹</b>\n'
+     +'المجموعة: <code>'+chat.id+'</code>\n'
+     +'القناة المراد إزالتها: <code>'+action.channelId+'</code>\n'
+     +'القنوات المتبقية بعد التأكيد: '+(subscription.channelIds.length-1)+'\n'
+     +'تُعدّل القاعدة المحلية فقط، ولا يُزال كتم سابق أو تُرسل أوامر Telegram.',
+     ['✅ تأكيد إزالة قناة'+suffix,'📋 تفاصيل الاشتراك · '+chat.id]);
+   try{
+    await this.policy.removeSubscriptionChannelAtRevision(ctx.actorId,chat.id,action.channelId,
+      chat.version,subscription.version);
+   }catch{return null;}
+   return screen('تمت إزالة القناة من شرط الاشتراك محليًا ✅\n'
+    +'لن تُرفع عقوبات اشتراك محفوظة تلقائيًا ولن يُتصل بـTelegram.',
+    ['📋 تفاصيل الاشتراك · '+chat.id]);
+  }
   if(action.kind==='subscriptionReview'||action.kind==='subscriptionConfirm'){
    if(!chat.scopes.includes('verification')||!subscription?.channelIds.length||
       subscription.version!==action.requirementVersion)return null;

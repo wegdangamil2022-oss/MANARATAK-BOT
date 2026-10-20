@@ -33,6 +33,14 @@ export class SubscriptionGate {
       else s.subscriptionRequirements.push({ chatId, channelIds, mode, version: 1 });
     });
   }
+  /** A thin existing gate facade over the same owner-only atomic policy
+   * operation used by Telegram's verified private owner buttons.
+   */
+  async removeRequiredChannelAtRevision(actorId:string,chatId:string,channelId:string,
+    expectedChatRevision:number,expectedRequirementRevision:number):Promise<void>{
+    return this.policy.removeSubscriptionChannelAtRevision(actorId,chatId,channelId,
+     expectedChatRevision,expectedRequirementRevision);
+  }
   async verify(chatId: string, userId: string): Promise<SubscriptionDecision> {
     const s = await this.store.snapshot();
     if (!userId || !this.policy.canUseChat(s, chatId, 'verification')) return { status: 'DENIED', channels: [] };

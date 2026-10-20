@@ -11,6 +11,12 @@ An independent TypeScript/Node.js 22 project based on `docs/MANARATAK_BOT_MASTER
 
 
 
+## B3 v0.7.8 — review removal of one mandatory subscription channel (OFFLINE)
+
+The private owner now may open a saved group's **📋 تفاصيل الاشتراك** and see a bounded **🧹 مراجعة إزالة قناة** button for each of its configured mandatory channels. The review page shows the selected channel and number of channels remaining. A separate **✅ تأكيد إزالة قناة** button changes the saved rule: only that channel is removed, preserving `ALL`/`ANY` and all other configured channels. Removing the final channel deactivates the rule (the student is not required to join any channel by that rule).
+
+Buttons never grant authority; the policy requires the configured owner plus current approved verification scope and compares both the group's policy version and subscription rule version in a durable transaction. An old confirmation after a concurrent edit or chat revoke fails closed. The subscription verifier consults the updated remaining list. This UI **never adds or verifies a mandatory channel**, raises existing privileges, or releases already recorded subscription moderation reasons: those require separate authorized review. There are **no live Telegram calls** from this operation.
+
 ## B3 v0.7.7 — owner review and suspension of group subscription rules (OFFLINE)
 
 In **🔐 لوحة المالك → 👥 المجموعات المعتمدة → محادثة**, a configured, approved group now shows stored mandatory-channel subscription status and a private **تفاصيل الاشتراك** screen with locally saved `ALL` or `ANY` policy and channel IDs. This is not a Telegram `getChatMember` check, an estimate of subscription-compliance or proof that the bot has current channel administrator rights.
