@@ -128,7 +128,9 @@ export async function recordTelegramReplyManualReview(
  if(!validManualOptions(options))throw Error('REPLY_REVIEW_INVALID_OPTIONS');
  if(!policy.isOwner(options.actorId))throw Error('OWNER_ONLY');
  return store.transaction(state=>{
-  const jobs=safeJobs(state.telegramReplyJobs);
+  let jobs:TelegramReplyJob[];
+  try{jobs=safeJobs(state.telegramReplyJobs);}
+  catch{throw Error('REPLY_REVIEW_INVALID_JOB');}
   // Duplicate update keys are corrupt/ambiguous; never choose the first one.
   const matches=jobs.filter(j=>j.updateKey===options.updateKey);
   if(matches.length>1)throw Error('REPLY_REVIEW_INVALID_JOB');
