@@ -63,7 +63,7 @@ for(const engine of ['json','sqlite'] as const){
    await assert.rejects(recordTelegramReplyManualReview(f.store,f.owner,{...args(),actorId:'900'}),
     /OWNER_ONLY/);
    await assert.rejects(recordTelegramReplyManualReview(f.store,f.owner,{...args(),actorId:''}),
-    /OWNER_ONLY/);
+    /REPLY_REVIEW_INVALID_OPTIONS/);
    assert.deepEqual(await f.store.snapshot(),before);
   }finally{await f.close();}
  });
