@@ -63,7 +63,7 @@ for(const engine of ['json','sqlite'] as const){
    assert.equal((await f.store.snapshot()).importRuns[0]?.candidates[0]?.categoryId,'section-20');
    assert.equal((await f.store.snapshot()).educationResources.length,0);
    const preview=await f.app().handle(input(7,keys(approved).find(x=>x.startsWith('📝 معاينة النشر'))!));
-   assert.match(preview.plan?.text??'',/المكتبة/);
+   assert.match(preview.plan?.text??'',/مكتبة البوت المحلية/);
    const published=await f.app().handle(input(8,keys(preview).find(x=>x.startsWith('📤 تأكيد النشر المحلي'))!));
    assert.equal(published.status,'APPLIED');
    assert.equal((await f.store.snapshot()).educationResources.length,1);
