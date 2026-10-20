@@ -49,7 +49,7 @@ function sign(user:number){
  const key=createHmac('sha256','WebAppData').update(TOKEN).digest();
  v.append('hash',createHmac('sha256',key).update(text).digest('hex'));return v.toString();
 }
-async function post(base:string,id:number,h:Record<string,string>={},body:BodyInit=JSON.stringify(webhook(id))){
+async function post(base:string,id:number,h:Record<string,string>={},body:string|Buffer=JSON.stringify(webhook(id))){
  return fetch(base+'/telegram/webhook',{method:'POST',headers:{...headers,...h},body});
 }
 test('B3 ingress: reject malformed UTF-8 *before* storing an update',async()=>{
