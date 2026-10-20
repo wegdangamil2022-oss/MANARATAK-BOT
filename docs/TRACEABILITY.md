@@ -97,3 +97,6 @@
 
 | B2-Advanced v0.5.6 retention runner state identity hardening | retention-review-runner.ts + tests/b2-retention-runner.test.ts | TESTED_MOCK | Empty SQLite/forged SQLite header cannot initialize tables; parent symlinks and lexical path aliases fail closed before creating review checkpoint |
 | B2-Advanced production host ACLs and atomic trusted-file opening | — | PLANNED / BLOCKED_LIVE | Canonical path checks are not a complete defense against privileged host TOCTOU; secure production service file ownership and isolation remain out of scope |
+
+| B4 v0.5.7 S12-31 SQLite backup validity and restore safety | BotStore.backupSqlite / tests/b4-backup-guard.test.ts | TESTED_MOCK | Read-only source preflight, no accidental SQLite initialization, canonical/symlink checks, WAL-safe backup, private output and existing-destination preservation |
+| B4 v0.5.7 S12-32 personal data in backups | README + docs/DECISIONS.md | PARTIAL / BLOCKED_LIVE | Backup retains original snapshot history; no automatic encryption, deletion, backup TTL, or offsite GDPR/data-subject erasure |

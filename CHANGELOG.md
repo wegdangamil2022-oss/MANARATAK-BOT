@@ -1,3 +1,11 @@
+## 0.5.7 — 2026-10-20 — Fail-closed validation before SQLite backups (TESTED_MOCK)
+
+- Hardened the existing `BotStore.backupSqlite`: refuses noncanonical/aliased paths, symlinked file/ancestor/target-parent paths, zero-byte/forged/non-SQLite source and SQLite lacking a populated `bot_state` row before it reserves any backup.
+- Validates source without writing: checks full 16-byte SQLite header, readonly `PRAGMA quick_check`, and decoded BotStore state. Does not initialize a missing `bot_state` during backup.
+- Source validation happens before any backup directory creation. An existing destination cannot be overwritten. Output reserved privately (0600), point-in-time copied through SQLite online backup API, and verified as a usable BotStore snapshot; incomplete new backups are cleaned up.
+- Added 11 TDD regression tests for corruption, symlink redirects, destination ACLs, canonical paths, preserving unmodified invalid sources and original WAL/current data. 365/365 tests passing with existing B0–B4 and B2-Advanced suites.
+- Not automatic backup/restore, filesystem sandboxing, offsite retention enforcement, data erasure, or production Telegram integration.
+
 ## 0.5.6 — 2026-10-20 — Guard canonical state identity before local review tick
 
 - Strengthened the existing **v0.5.5** offline `retention:tick` runner; no second runner and no new Telegram/compaction capability.
