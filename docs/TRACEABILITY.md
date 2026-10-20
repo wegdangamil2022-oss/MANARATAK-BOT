@@ -153,3 +153,5 @@
 
 | B3 v0.7.4 full owner import/candidate navigation | telegram-owner-menu.ts / tests/b3-owner-pages.test.ts | TESTED_OFFLINE / NOT_DEPLOYED | Owner-only next/previous through all visible imported batches and candidates, fresh approval/actor validation per tap, malformed/stale pages denied, JSON/SQLite test coverage |
 | B3 v0.7.4 long category identifiers in owner review | telegram-owner-menu.ts / tests/b3-owner-pages.test.ts | TESTED_OFFLINE / NOT_DEPLOYED | Bounded menu selector fingerprint for >24 character category IDs, exact current category-resolution check before owner approval and local publish; no authority carried in button text |
+
+| B3 v0.7.5 all-category approval selection via Telegram | telegram-owner-menu.ts / tests/b3-owner-category-pages.test.ts | TESTED_OFFLINE / NOT_DEPLOYED | Nine-category Next/Previous pages bound to owner+run+candidate, enabled authorized categories only, fresh candidate READY/group policy checks, separately confirmed local-only approval/publish, stale and forged page rejection |
