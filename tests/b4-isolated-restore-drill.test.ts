@@ -81,7 +81,7 @@ test('restore drill: preexisting sandbox files are never overwritten or removed'
 test('restore drill: reject corrupted, truncated or unsupported schema before scratch file creation',async()=>{
  const f=await fixture();try{
   for(const bytes of [Buffer.alloc(0),Buffer.from('not an sqlite file at all')]){
-   const file=join(f.root,'corrupt.sqlite');await writeFile(file,bytes);
+   const file=join(f.root,'corrupt.sqlite');await writeFile(file,bytes,{mode:0o600});
    await assert.rejects(runSqliteRestoreDrill({backupFile:file,sandboxDir:f.sandboxDir}),
     /RESTORE_DRILL_INVALID_BACKUP/);
    assert.deepEqual(await readdir(f.sandboxDir),[]);
@@ -90,6 +90,7 @@ test('restore drill: reject corrupted, truncated or unsupported schema before sc
   try{db.exec('CREATE TABLE bot_state (id INTEGER PRIMARY KEY, data TEXT NOT NULL)');
    db.prepare('INSERT INTO bot_state (id,data) VALUES (1,?)').run(JSON.stringify({schemaVersion:999}));}
   finally{db.close();}
+  await chmod(foreign,0o600);
   await assert.rejects(runSqliteRestoreDrill({backupFile:foreign,sandboxDir:f.sandboxDir}),
    /RESTORE_DRILL_INVALID_BACKUP/);
   assert.deepEqual(await readdir(f.sandboxDir),[]);

@@ -98,7 +98,13 @@ export async function runSqliteRestoreDrill(options:RestoreDrillOptions):Promise
   }finally{
    // Cleanup only the randomly created entry which this invocation reserved.
    // NEVER delete the backup source, primary DB, or preexisting sandbox files.
-   if(reserved)await rm(destination,{force:true});
+   if(reserved){
+    // SQLite may leave WAL/SHM sidecars even after read-only verification.
+    // All three paths share this invocation's unpredictable reserved basename.
+    await rm(destination,{force:true});
+    await rm(destination+'-wal',{force:true});
+    await rm(destination+'-shm',{force:true});
+   }
   }
  }finally{source.close();}
 }
