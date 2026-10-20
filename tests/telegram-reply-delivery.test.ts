@@ -91,7 +91,7 @@ for(const engine of ['json','sqlite'] as const){
 }
 test('Bot API sendMessage uses POST, fixed host, HTML-safe plan and never emits token in result',async()=>{
  const calls:{url:string;method:string;payload:Record<string,unknown>}[]=[];
- const fake=(async(url:RequestInfo|URL,init?:RequestInit)=>{
+ const fake=(async(url:string|URL,init?:RequestInit)=>{
   calls.push({url:String(url),method:init?.method??'',payload:JSON.parse(String(init?.body)) as Record<string,unknown>});
   return new Response(JSON.stringify({ok:true,result:{message_id:66,chat:{id:300}}}),{status:200});
  }) as typeof fetch;
