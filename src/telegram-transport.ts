@@ -13,6 +13,7 @@ import {menuLabels,mainMenuKeyboard,backMenuKeyboard,categoryButton,
  resourceButton,listingKeyboard,categoryButtonId,resourceButtonId,
  matchingCategories,menuPageButton,parseMenuPageCommand,type MenuPageCommand,
  type TelegramReplyKeyboard} from './telegram-menu.js';
+import {OwnerTelegramMenu,isOwnerMenuText} from './telegram-owner-menu.js';
 
 /** Inbound-only boundary. A test double may supply bytes; there is intentionally no live HTTP implementation. */
 export interface TelegramDocumentPort {
@@ -175,15 +176,13 @@ export class TelegramUpdateApplication {
         +'المساعد الذكي وبعض الخدمات ما زالت قيد التطوير.',
         mainMenuKeyboard(owner));
       if(cmd==='/start'||cmd==='/help'||text===m.home||text===m.back)return main();
-      if(text===m.owner){
+      if(isOwnerMenuText(text)){
         if(!owner)return {status:'DENIED',reason:'OWNER_ONLY'};
-        const panel=await this.opts.admin.panel(adminCtx,'private');
-        return result('<b>لوحة المالك 🔐</b>\n'
-          +'الرفع: '+(panel.canUpload?'مسموح':'مغلق')+'\n'
-          +'الاعتماد والنشر المحلي: '+(panel.canPublish?'مسموح':'مغلق')+'\n'
-          +'أوامر الإدارة الأساسية: /admin private و /import و /approve و /publish.\n'
-          +'النشر إلى القنوات والواجهة المرئية الكاملة لم يُفعّلا بعد.',
-          backMenuKeyboard());
+        const screen=await new OwnerTelegramMenu(
+          this.opts.store,this.opts.policy,this.opts.education,this.opts.admin
+        ).handle(text,adminCtx);
+        if(!screen)return {status:'DENIED',reason:'OWNER_MENU_UNAVAILABLE'};
+        return result(screen.text,screen.keyboard);
       }
       const sections:Readonly<Record<string,{section:string;title:string}>>={
         [m.scholarships]:{section:'scholarships',title:'المنح الدراسية'},
