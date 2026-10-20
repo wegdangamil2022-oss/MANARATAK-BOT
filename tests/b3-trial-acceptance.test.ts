@@ -150,7 +150,7 @@ test('B3 acceptance: unexpected input fields and forged thresholds are rejected'
   await f.snapshot();
   for(const bad of [{now:-1},{staleAfterMs:5},{now:NOW,actorId:'100'},
    {now:NOW,activate:true},{now:NOW,rollback:true},{now:NOW,safetyFile:undefined}]){
-   await assert.rejects(inspectTelegramTrialAcceptanceReadOnly({...args(f),...bad}),
+   await assert.rejects(inspectTelegramTrialAcceptanceReadOnly(({...args(f),...bad}) as Parameters<typeof inspectTelegramTrialAcceptanceReadOnly>[0]),
     /TRIAL_ACCEPTANCE_INVALID_INPUT/);
   }
  }finally{await f.close();}
