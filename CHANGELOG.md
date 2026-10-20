@@ -1,3 +1,12 @@
+## 0.6.6 — 2026-10-21 — Shared authenticated HTTP ingress limits and safe shutdown (NOT DEPLOYED)
+
+- Added shared `BoundedIngress` for the Telegram webhook and HMAC-signed local admin HTTP adapter. Accepted post-auth requests use a bounded in-flight budget (16 per listener, override for tests), with 503 **before** reading body or claiming an update when saturated. Admission lasts until processing and any external sender call have settled, not only until JSON parsing finishes.
+- Configurable, bounded 250ms–30s inactivity cutoff destroys a stalled request; rejected and accepted requests never authorize Telegram replay. Ingress counters release on exceptions as well as successful completion, with original socket timeout restored.
+- Strict byte-level UTF-8 JSON decoding rejects invalid UTF-8 and BOM, rather than silently interpreting replacement characters. Both HTTP boundaries reject unexpected Content-Encoding and keep existing authentication, content-type and body size restrictions.
+- Production loopback Telegram server has explicit headers/request/idle/keepalive timeouts, maximum headers, requests per socket and concurrent TCP connections. This is process-level backpressure, not public ingress throttling or an IP rate limiter.
+- Added `stopLiveTelegramServer`: idempotent close/drain with a bounded waiting status; DRAINING is not reported as STOPPED. SIGTERM/SIGINT initiates graceful drain, never force-closes an in-flight Telegram send on timeout, and does not automatically replay UNKNOWN outcomes.
+- Added RED-first simulated HTTP, malformed byte, SQLite/JSON concurrency, pressure, socket timeout, signed admin and drain tests. No live Telegram setup, live receipt verifier, hosted HTTPS proxy, production monitoring or student activation.
+
 ## 0.6.5 — 2026-10-20 — Fail-closed HTTPS webhook startup gate and offline preflight (NOT DEPLOYED)
 
 - Production Telegram runtime now requires `TELEGRAM_WEBHOOK_PUBLIC_URL` to be an exact canonical HTTPS DNS URL on the existing `/telegram/webhook` route. Localhost/private and IP targets, normalization, userinfo, nonstandard ports, query strings and fragments are rejected before runtime creation.
