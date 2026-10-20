@@ -1,3 +1,12 @@
+## 0.5.5 — 2026-10-20 — Offline external retention-review CLI runner
+
+- New `src/retention-review-cli.ts` with strict `--review-only --store <absolute-existing-private-state> --engine json|sqlite` contract and trusted `MANARATAK_OWNER_ID` service environment.
+- Rejects unexpected/destructive/duplicate/relative arguments, absent and symlinked paths, group/world-readable state files, non-SQLite headers and invalid/corrupted bot state before executing a review checkpoint. File paths and owner IDs are never printed to stdout/stderr.
+- Invokes ONLY the already permission-controlled, atomically persisted **read-only retention due checkpoint**; no compaction, purge, Telegram requests, auto scheduler or notification. Successful stdout is one concise aggregate-only JSON status; failures return nonzero with fixed sanitized error codes.
+- Added `npm run retention:review` for explicitly invoked operators; no scheduled workflow configured.
+- Added 10 tests (348/348 passing) including real independent Node SQLite subprocesses, concurrency idempotence, path permission hardening and malicious flag refusals, while preserving preexisting B0–B4 and B2 tests. Node 22 experimental SQLite warnings are isolated in the test harness.
+- No production DB changes, provider credentials, actual Telegram deletion, deployed cron, or backup-retention automation.
+
 ## 0.5.4 — 2026-10-20 — Owner opt-in review checkpoints (offline, no automatic retention)
 
 - Added backward-compatible optional `PurgeRetentionReviewControl` to existing `BotStore` v8. No schema migration or separate database; legacy saved states default disabled.

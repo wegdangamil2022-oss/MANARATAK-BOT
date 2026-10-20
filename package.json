@@ -1,6 +1,6 @@
 {
   "name": "manaratak-bot",
-  "version": "0.5.4",
+  "version": "0.5.5",
   "private": true,
   "type": "module",
   "description": "MANARATAK BOT B0-B4 mock plus B2-Advanced reviewed purge, confirmed 429 cooldown and evidence-bound review and owner-approved privacy retention and opt-in review checkpoints",
@@ -12,6 +12,7 @@
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "test": "npm run build && node --test dist/tests/*.test.js",
     "check": "npm run typecheck && npm test",
+    "retention:review": "node dist/src/retention-review-cli.js --review-only",
     "demo": "npm run build && node dist/src/demo.js --simulate",
     "demo:education": "npm run build && node dist/src/education-demo.js",
     "demo:faq": "npm run build && node dist/src/faq-demo.js",

@@ -1,6 +1,6 @@
 # بوت منارتك — MANARATAK BOT
 
-**B0/B1 + B2-Core + B3 + B2-Advanced opt-in retention review cadence (v0.5.4). Offline/test-only — no live Telegram bot.**
+**B0/B1 + B2-Core + B3 + B2-Advanced safe external review runner (v0.5.5). Offline/test-only — no live Telegram bot.**
 
 An independent TypeScript/Node.js 22 project based on `docs/MANARATAK_BOT_MASTER_v1.2.1_AR.md` and `docs/START_HERE_MANARATAK_BOT_v1.2.1_AR.md`. B0/B1 supply the secure baseline; B2-Core adds individual moderation and subscription policies; B3 adds the first locally tested education content flow.
 
@@ -10,6 +10,32 @@ An independent TypeScript/Node.js 22 project based on `docs/MANARATAK_BOT_MASTER
 
 
 
+
+## B2-Advanced v0.5.5 — standalone privacy-safe retention review runner (offline-only)
+
+A minimal Node.js **command-line runner** now makes the earlier `tickRetentionReview()` contract usable by a **future, separately managed** systemd timer, cron or maintenance operator. The binary **only evaluates an explicitly configured retention review**; it NEVER calls `compactRetention`, invokes a Telegram API, sends a message, or changes the owner's privacy policy. There is NO installed cron, timer, notification integration, bot token or live deployment.
+
+**Prerequisites:**
+- Node 22, built repository (`npm run build`), and an existing real **JSON/SQLite bot state file** initialized by the bot's mock storage. No file is created for a nonexistent/mistyped path.
+- File must be a **regular local file**, a canonical absolute path (no parent path aliases or symlinks), nonempty, and **private to its owner** (Unix mode `0600`; directory ACLs must be managed independently). SQLite header must be valid. The CLI intentionally refuses world/group-readable state files instead of silently accessing student data.
+- `MANARATAK_OWNER_ID` must be supplied in the **trusted service environment**, as a numeric Telegram owner ID. It is **not accepted as a command argument** and is never printed. This is a trusted-operator process, not an owner-login or a production authentication server.
+- Owner must have previously enabled `configureRetentionReview(ownerId,{enabled:true,cadenceMs:...})` using the same mock store. It stays disabled by default.
+
+**Manual, review-only example** (replace the path and configured owner environment securely):
+
+```sh
+npm run build
+MANARATAK_OWNER_ID="YOUR_NUMERIC_OWNER_ID" npm run retention:review -- --store /srv/manaratak/bot.sqlite --engine sqlite
+```
+
+Equivalent direct invocation: `node dist/src/retention-review-cli.js --review-only --store /absolute/canonical/path --engine json|sqlite`.
+
+- A strict CLI parser allows **only** `--review-only`, one `--store`, and one `--engine` (`json` or `sqlite`). Flags such as `--delete`, `--compact`, owner ID arguments, duplicate flags and relative paths fail with a nonzero exit code. The sample `retention:review` npm script prepends `--review-only`.
+- On success, stdout contains **exactly one machine-readable JSON object**, `{"status":"DISABLED"}`, `NOT_DUE`, `CLOCK_ROLLBACK`, or `READY` with only aggregate counts (`expiredObserved`, `eligibleJobs`, `reasonsToRedact`, `evidenceIdsToRedact`, `senderFiltersToRedact`). No sender ID, message ID, owner ID, path, reviewer note, digest or raw proof ID is logged. On failure stdout is empty and stderr contains only a fixed error code; errors never print state payloads.
+- The runner uses the original transactional SQLite/JSON checkpoint. Two independently spawned SQLite processes racing a due check produce **one READY** and **one NOT_DUE**, not duplicate notices. It works after process restart. The review payload is still valid for **10 minutes** only; compaction is a separate explicit owner action protected by the earlier digest-verified approval.
+- Tested with real Node subprocesses and simulated JSON/SQLite stores: rejected missing files, symlinks, unsafe permissions, malformed arguments and owner configuration, plus concurrent due ticks. The code's `FakePurgeGateway` deliberately cannot make a network request.
+
+**Operational/privacy boundaries:** This is a trusted offline runner for an explicitly invoked schedule, **not a scheduler or notification delivery system**. The runner does not automatically delete 48h-old indexed data; the existing owner-approved compaction still controls field redaction. It also does not erase old backups, exports or WAL/snapshot copies, enforce a production privacy SLA, or solve exactly-once Telegram deletion. If Node 22 prints an experimental SQLite warning to stderr, that warning is emitted by Node itself, not a logged state record.
 
 ## B2-Advanced v0.5.4 — owner opt-in retention review cadence, **without automatic deletion**
 
