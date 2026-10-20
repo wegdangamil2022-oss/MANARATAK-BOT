@@ -1,6 +1,6 @@
 # بوت منارتك — MANARATAK BOT
 
-**B0/B1 + B2-Core + B3 + B3 privacy-safe Telegram reply outbox and opt-in authenticated owner review and deployment preflight (v0.6.5). Transport implemented but OFF by default — no live deployment verified.**
+**B0/B1 + B2-Core + B3 + B3 privacy-safe Telegram reply outbox and opt-in authenticated owner review and deployment preflight and ingress hardening (v0.6.6). Transport implemented but OFF by default — no live deployment verified.**
 
 An independent TypeScript/Node.js 22 project based on `docs/MANARATAK_BOT_MASTER_v1.2.1_AR.md` and `docs/START_HERE_MANARATAK_BOT_v1.2.1_AR.md`. B0/B1 supply the secure baseline; B2-Core adds individual moderation and subscription policies; B3 adds the first locally tested education content flow.
 
@@ -10,6 +10,14 @@ An independent TypeScript/Node.js 22 project based on `docs/MANARATAK_BOT_MASTER
 
 
 
+
+## B3 v0.6.6 — incoming request pressure and non-forcing shutdown (STILL OFF)
+
+- The authenticated Telegram webhook and optional signed Mini App owner listener now share a small local ingress guard. At most **16 authenticated in-flight requests per listener** are admitted by default (test overrides may be 1–64); further valid requests return a content-free HTTP 503 **before** any durable Telegram update claim or content handling. Unauthorized requests do not reserve slots.
+- Request body processing is bounded by a 15-second inactivity window, with strict UTF-8 JSON and no UTF-8 BOM, as well as the existing 64KiB webhook and 260KiB local-admin limits (2KiB on optional owner-reply routes). Compressed Content-Encoding is not accepted. Socket timeouts are restored on release.
+- In the opt-in local Telegram server, timeouts/limits are set to: 10-second headers, 15-second request and socket idle, 2-second keep-alive, 32 HTTP headers, 50 requests per socket and 128 connections. **These are local process limits, not IP reputation, distributed rate limiting, DoS-proof ingress or TLS controls.** A trusted HTTPS proxy still needs its own request body/header and per-source limits.
+- `stopLiveTelegramServer(server,graceMs)` stops accepting new connections while waiting for already accepted operations. A timeout reports **DRAINING**, not STOPPED, and the service does not force-close unresolved Telegram sender HTTP requests. Signals SIGTERM/SIGINT use graceful drain; the process stays alive if necessary until pending work ends. This protects against automatic resend but cannot guarantee Telegram exactly-once semantics or cancel external sends.
+- This milestone was locally tested using mock Telegram and JSON/SQLite state. No public routes, live Telegram credentials, production scheduler or Telegram webhook registration are activated.
 
 ## B3 v0.6.5 — Telegram deployment preflight (STILL OFF)
 
