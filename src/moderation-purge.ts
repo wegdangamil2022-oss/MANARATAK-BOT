@@ -329,7 +329,7 @@ export class ModerationPurgeService {
  async skipForReview(actor:string,jobId:string,messageId:number,reason:string):Promise<PurgeItem>{
   if(!this.policy.isOwner(actor))throw new Error('OWNER_ONLY');
   if(typeof reason!=='string'||reason.trim().length<5||reason.trim().length>200||
-     /[\\u0000-\\u001F\\u007F]/u.test(reason))
+     /[\u0000-\u001F\u007F]/u.test(reason))
     throw new Error('INVALID_REVIEW_REASON');
   return this.store.transaction(s=>{
    const job=s.purgeJobs.find(j=>j.id===jobId);
