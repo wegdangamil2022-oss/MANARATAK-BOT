@@ -15,11 +15,15 @@ async function fixture(engine:'json'|'sqlite'='json'){
  const clock=()=>time,store=new BotStore(file,{engine}),policy=new Policy(store,OWNER,clock),gateway=new FakePurgeGateway();
  const service=()=>new ModerationPurgeService(new BotStore(file,{engine}),new Policy(new BotStore(file,{engine}),OWNER,clock),gateway,clock);
  await policy.approveChat(OWNER,GROUP,['moderation']);
- const observe=async(messageId:number,extra:Partial<Parameters<ReturnType<typeof service>['observe']>[0]>={})=>service().observe({
-  chatId:GROUP,messageId,sentAt:time-HOUR,observedAt:time,senderKind:'USER',senderId:'300',
-  contentType:'TEXT',hasLinks:false,pinned:false,linkedChannel:false,adminLog:false,approvedAnnouncement:false,
-  ...extra
- });
+ const observe=async(messageId:number,extra:Partial<Parameters<ReturnType<typeof service>['observe']>[0]>={})=>{
+  const m:Parameters<ReturnType<typeof service>['observe']>[0]={
+    chatId:GROUP,messageId,sentAt:time-HOUR,observedAt:time,senderKind:'USER',senderId:'300',
+    contentType:'TEXT',hasLinks:false,pinned:false,linkedChannel:false,adminLog:false,approvedAnnouncement:false,
+    ...extra
+  };
+  if(m.senderKind==='UNKNOWN')delete m.senderId;
+  return service().observe(m);
+ };
  return {dir,file,store,policy,gateway,service,observe,now:()=>time,setNow:(x:number)=>{time=x},close:()=>rm(dir,{force:true,recursive:true})};
 }
 async function seed(f:Awaited<ReturnType<typeof fixture>>,count:number){
@@ -46,7 +50,7 @@ for(const engine of ['json','sqlite'] as const){
    await f.observe(3,{approvedAnnouncement:true});
    await f.observe(4,{adminLog:true});
    await f.observe(5,{sentAt:f.now()-49*HOUR});
-   await f.observe(6,{senderKind:'UNKNOWN',senderId:undefined});
+   await f.observe(6,{senderKind:'UNKNOWN'});
    await f.observe(7,{senderId:'300',hasLinks:true});
    const result=await f.service().preview(OWNER,GROUP,{limit:20});
    assert.deepEqual(result.items.map(x=>x.messageId),[7,6]);
@@ -165,7 +169,7 @@ test('B2-advanced: bulk always requires approval, pinned targets never enter pla
  const f=await fixture();try{
   await seed(f,60);
   for(let segment=0;segment<2;segment++){
-   const job=await f.service().preview(OWNER,GROUP,{limit:25,beforeMessageId:segment?36:undefined});
+   const job=await f.service().preview(OWNER,GROUP,{limit:25,...(segment?{beforeMessageId:36}:{})});
    await f.service().confirm(OWNER,job.id);
    for(let i=0;i<25;i++)assert.equal((await f.service().dispatchNext(job.id)).status,'ACKNOWLEDGED');
   }
