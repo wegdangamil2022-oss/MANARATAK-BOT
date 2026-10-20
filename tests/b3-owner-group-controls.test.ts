@@ -9,7 +9,8 @@ import {EducationService} from '../src/education.js';
 import {EducationAdminFacade} from '../src/education-admin.js';
 import {ApprovedAnswerService,ResourceLinkService} from '../src/education-interactions.js';
 import {TelegramUpdateApplication} from '../src/telegram-transport.js';
-import {ownerMenuLabels,parseOwnerGroupAction} from '../src/telegram-owner-menu.js';
+import {ownerMenuLabels} from '../src/telegram-owner-menu.js';
+import {parseOwnerGroupAction} from '../src/telegram-owner-groups.js';
 import {isValidTelegramReplyKeyboard} from '../src/telegram-menu.js';
 
 const OWNER='100',STUDENT=300,CHAT='-100123';
