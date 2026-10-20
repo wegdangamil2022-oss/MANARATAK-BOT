@@ -223,6 +223,8 @@ export class TelegramUpdateApplication {
         +'التواصل المباشر مع فريق الدعم ونظام التذاكر لم يُفعّلا بعد.',
         backMenuKeyboard());
       const categoryId=categoryButtonId(text);
+      if(!categoryId&&text.startsWith('📁 '))
+        return {status:'DENIED',reason:'INVALID_MENU_SELECTION'};
       if(categoryId){
         const visible=await this.opts.education.listCategories(actorId,'private');
         const cat=visible.find(x=>x.id===categoryId);
@@ -237,6 +239,8 @@ export class TelegramUpdateApplication {
           listingKeyboard(view.map(resourceButton)));
       }
       const resourceId=resourceButtonId(text);
+      if(!resourceId&&text.startsWith('🔎 '))
+        return {status:'DENIED',reason:'INVALID_MENU_SELECTION'};
       if(resourceId){
         const snapshot=await this.opts.store.snapshot();
         const candidate=snapshot.educationResources.find(x=>x.id===resourceId&&x.scope==='private');
