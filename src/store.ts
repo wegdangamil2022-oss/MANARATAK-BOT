@@ -80,9 +80,10 @@ export interface PurgeJob {
 }
 /** Durable Telegram text reply intent; no automatic retry after unknown sends. */
 export interface TelegramReplyJob {
- updateKey:string;plan:{chatId:string;parseMode:'HTML';text:string};
+ updateKey:string;plan?:{chatId:string;parseMode:'HTML';text:string};
  status:'QUEUED'|'SENDING'|'SENT'|'FAILED_CONFIRMED'|'UNKNOWN_OUTCOME';
  attemptId?:string;startedAt?:number;messageId?:number;
+ queuedAt?:number;redactedAt?:number;
 }
 /** Explicit owner-enabled retention REVIEW cadence. Tick only stores a preview, never redacts or deletes. */
 export interface PurgeRetentionReviewControl {
@@ -426,7 +427,7 @@ export class BotStore {
       if(reply && update.status==='DONE') {
         s.telegramReplyJobs??=[];
         if(!s.telegramReplyJobs.some(j=>j.updateKey===key))
-         s.telegramReplyJobs.push({updateKey:key,plan:structuredClone(reply),status:'QUEUED'});
+         s.telegramReplyJobs.push({updateKey:key,plan:structuredClone(reply),status:'QUEUED',queuedAt:decision.at});
       }
     });
   }
