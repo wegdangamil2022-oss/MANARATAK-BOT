@@ -1,6 +1,6 @@
 # بوت منارتك — MANARATAK BOT
 
-**B0/B1 + B2-Core + B3 + B3 privacy-safe Telegram reply outbox and opt-in authenticated owner review and deployment preflight and ingress hardening and outbox monitoring and emergency STOP and offline acceptance (v0.6.9). Transport implemented but OFF by default — no live deployment verified.**
+**B0/B1 + B2-Core + B3 + B3 privacy-safe Telegram reply outbox and opt-in authenticated owner review and deployment preflight and ingress hardening and outbox monitoring and emergency STOP and offline acceptance and restore rehearsal (v0.7.0). Transport implemented but OFF by default — no live deployment verified.**
 
 An independent TypeScript/Node.js 22 project based on `docs/MANARATAK_BOT_MASTER_v1.2.1_AR.md` and `docs/START_HERE_MANARATAK_BOT_v1.2.1_AR.md`. B0/B1 supply the secure baseline; B2-Core adds individual moderation and subscription policies; B3 adds the first locally tested education content flow.
 
@@ -10,6 +10,20 @@ An independent TypeScript/Node.js 22 project based on `docs/MANARATAK_BOT_MASTER
 
 
 
+
+## B3 v0.7.0 — sandbox-only rollback rehearsal (OFFLINE, NEVER THE LIVE DB)
+
+The previous `telegram:acceptance` command is read-only and checks whether a stopped backup is a credible rollback anchor. An additional command now performs an **isolated full-state restore rehearsal** on an automatically named scratch SQLite file inside an existing, protected directory that is distinct from every primary and backup path:
+
+```sh
+npm run telegram:rehearse -- --offline-only --state /private/manaratak/state.sqlite --backup /private/manaratak/backup.sqlite --safety /private/manaratak/emergency.flag --sandbox /private/restore-sandbox --stale-ms 900000
+```
+
+The sandbox must already exist with private permissions (0700 or stricter), must be canonical and not a symlink or the directory containing the source/backup. The command requires `STOP\n`, a valid independently stored (not hard-linked) SQLite backup matching the stopped source, and no pending/unknown operations. It invokes the already-tested SQLite restore-drill helper, checks field-for-field equality of scratch and backup state, and removes only its own scratch artifacts. The source, original backup and STOP file are untouched.
+
+It returns sanitized JSON with `ISOLATED_RESTORE_REHEARSAL`: `PASS` (exit 0), `BLOCKED` (exit 2) or a static invalid error (exit 1). **No live Telegram traffic, webhook setup, production restore, automatic queue processing or host-level recovery is performed.** The additional hard-link check also protects the earlier `telegram:acceptance` command.
+
+Operator constraints remain: first stop every live writer, preserve the STOP file, protect backups and private directory, separately test a new-host recovery plan, inspect actual TLS/HTTPS and proxy, and obtain authorization before any real Telegram test group is used. An isolated PASS is not certification of backup redundancy or exactly-once delivery.
 
 ## B3 v0.6.9 — offline trial acceptance, backup matching and rollback drill gate (OFF)
 
