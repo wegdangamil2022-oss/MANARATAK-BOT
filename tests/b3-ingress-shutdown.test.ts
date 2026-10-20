@@ -35,7 +35,7 @@ async function fixture(engine:'json'|'sqlite'='json'){
   new TelegramUpdateApplication({store,policy,education,admin,faq,links,botId:'bot-main',
    botUsername:'ManaratakBot',membership,clock:()=>NOW});
  const auth=new TelegramMiniAppAuth(TOKEN,()=>NOW);
- return {dir,stateFile,store,policy,admin,app,auth,close:()=>rm(dir,{force:true,recursive:true})};
+ return {dir,stateFile,store,policy,education,admin,app,auth,close:()=>rm(dir,{force:true,recursive:true})};
 }
 async function withServer(listener:RequestListener,run:(base:string,server:Server)=>Promise<void>){
  const server=createServer(listener);server.listen(0,'127.0.0.1');await once(server,'listening');
@@ -78,17 +78,17 @@ for(const engine of ['json','sqlite'] as const){
    // Group-scoped command invokes the asynchronous membership port.
    await f.policy.approveChat('100','-100123',['navigation']);
    await f.education.createCategory('100',{id:'scholarships',scope:'-100123',title:'Offers',order:1});
-   const group=(id:number)=>({update_id:id,message:{chat:{id:-100123,type:'supergroup'},from:{id:300,is_bot:false},text:'/categories'}});
-   const first=post(base,10,{},JSON.stringify(group(10)));
+   const browse=(id:number)=>({update_id:id,message:{chat:{id:300,type:'private'},from:{id:300,is_bot:false},text:'/categories -100123'}});
+   const first=post(base,10,{},JSON.stringify(browse(10)));
    await startedPromise;
-   const second=await post(base,11,{},JSON.stringify(group(11)));
+   const second=await post(base,11,{},JSON.stringify(browse(11)));
    assert.equal(second.status,503);
    assert.deepEqual(await second.json(),{ok:false});
    assert.equal(calls,1);
    assert.equal((await f.store.snapshot()).updates.length,1);
    unblock();
    assert.equal((await first).status,200);
-   assert.equal((await post(base,12,{},JSON.stringify(group(12)))).status,200);
+   assert.equal((await post(base,12,{},JSON.stringify(browse(12)))).status,200);
    assert.equal(calls,2);
    assert.equal((await f.store.snapshot()).updates.length,2);
   });}finally{unblock?.();await f.close();}
