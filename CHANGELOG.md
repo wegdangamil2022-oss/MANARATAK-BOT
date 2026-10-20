@@ -1,3 +1,11 @@
+## 0.5.6 — 2026-10-20 — Guard canonical state identity before local review tick
+
+- Strengthened the existing **v0.5.5** offline `retention:tick` runner; no second runner and no new Telegram/compaction capability.
+- Strict canonical absolute state path; reject `/../` or alias paths rather than silently normalizing to another database.
+- Refuse symlinked ancestor directories via full `realpath` check, not only file symlinks.
+- Validate nonempty state and 16-byte SQLite file signature before `BotStore.snapshot()`, preventing previously empty SQLite files from being initialized by Node sqlite CREATE TABLE.
+- Added 4 focused RED/green regression tests for empty SQLite, forged signature, symlinked parent and noncanonical argument; previous B0–B4 and B2-Advanced suites unchanged. `TESTED_MOCK`, no live Telegram or production writes.
+
 ## 0.5.5 — 2026-10-20 — Local one-shot retention review command (offline)
 
 - Added `src/retention-review-runner.ts` with strict `--once --state ABSOLUTE_PATH --engine json|sqlite` parser and `runRetentionReviewOnce`; no token or owner parameter is treated as authentication.

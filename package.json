@@ -1,6 +1,6 @@
 {
   "name": "manaratak-bot",
-  "version": "0.5.5",
+  "version": "0.5.6",
   "private": true,
   "type": "module",
   "description": "MANARATAK BOT B0-B4 mock plus B2-Advanced reviewed purge, confirmed 429 cooldown and evidence-bound review and owner-approved privacy retention and opt-in review checkpoints and local one-shot runner",

@@ -94,3 +94,6 @@
 
 | B2-Advanced v0.5.5 S121-06 / PURGE-008 local review driver (partial) | retention-review-runner.ts / retention-review-cli.ts / tests/b2-retention-runner.test.ts | TESTED_MOCK + LOCAL_CLI | Explicit one-shot command with no live token or deletion path, private existing state, strict args, aggregate-only output and independent SQLite process idempotence |
 | B2-Advanced scheduling and secure operator integration | retention:tick script + README | PARTIAL / NOT_ACTIVATED | Working local command only; no cron/systemd setup, owner alerting, remote Telegram actions, backups erasure or autonomous compaction |
+
+| B2-Advanced v0.5.6 retention runner state identity hardening | retention-review-runner.ts + tests/b2-retention-runner.test.ts | TESTED_MOCK | Empty SQLite/forged SQLite header cannot initialize tables; parent symlinks and lexical path aliases fail closed before creating review checkpoint |
+| B2-Advanced production host ACLs and atomic trusted-file opening | — | PLANNED / BLOCKED_LIVE | Canonical path checks are not a complete defense against privileged host TOCTOU; secure production service file ownership and isolation remain out of scope |
