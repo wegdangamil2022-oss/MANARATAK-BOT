@@ -1,3 +1,11 @@
+## 0.7.4 — 2026-10-21 — Owner review navigation and long category selectors (NOT DEPLOYED)
+
+- Added actual Next/Previous buttons for **all accessible import batches and individual candidates**, ten per page, rather than only the first ten. Page requests are bounded canonical Telegram texts; they never confer owner authority, and updated owner verification plus current group approval are rechecked on every page.
+- Fixed oversized review/approve/publish buttons when an approved category has a long (up to 64-character) ID. The UI now uses a fixed-length SHA-256-derived category selector only for long IDs and re-resolves it against currently visible categories, refusing unknown or ambiguous aliases. The selected full original category ID is passed to the existing transactional authorization/review service; no hash is used as proof of permission.
+- Eliminated shared mutable owner-ID state from the owner dashboard handler; actor identity is supplied directly to the scope-checked education service.
+- Added RED-first JSON+SQLite tests covering 14 batches, 23 candidates, exact pagination, stale group denial, malformed and forged page markers, 64-character categories, published resource preservation and disabled-category failure.
+- Only the already-reviewed local library is affected. No auto-approve, channel send, AI call or real Telegram operation. Actual Telegram deployment remains OFF.
+
 ## 0.7.3 — 2026-10-21 — Interactive owner-only Telegram dashboard and reviewed local publication (NOT DEPLOYED)
 
 - The existing **🔐 لوحة المالك** now opens a real multi-button private Telegram dashboard for authorized import review, library statistics, approved-group summaries, delivery/outbox aggregate status, and configuration boundaries. It never presents owner controls to students or delegates.
