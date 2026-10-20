@@ -11,6 +11,14 @@ An independent TypeScript/Node.js 22 project based on `docs/MANARATAK_BOT_MASTER
 
 
 
+## B3 v0.7.1 — real Telegram private reply keyboard (NOT DEPLOYED)
+
+The offline-tested Telegram application now builds a **Telegram ReplyKeyboardMarkup** for `/start` and `/help` in a private chat. The nine student menu sections are scholarships, courses, universities/majors, exams, education/resources, files/forms, educational assistant, communities and help. The current verified bot owner alone sees an extra **لوحة المالك** button. The keyboard is transported with the same one-shot durable outbound reply plan using `sendMessage.reply_markup`; this is not an inline callback or a publicly deployed Mini App.
+
+A student may tap a section to see accessible, approved private library categories, tap a category to see currently published resources, tap a resource to see its reviewed details, or use the Back/Home buttons. Category/resource selections are text sent by Telegram, not security grants: server logic re-verifies the exact current label, category visibility, resource status and user permissions. Group messages do not receive the private keyboard. Ten-category/ten-resource list windows are shown at a time in the UI; existing text commands continue to provide broader library access pending full paginated UI.
+
+Sections not yet supported by real external services explicitly say so: AI model calls are not wired, a public group/channel directory is not published, and a live ticket/helpdesk is unavailable. A menu button does **not** mean a paid course, scholarship, exam registration or Telegram bot subscription is available. Owner commands retain their existing independent authentication and review restrictions; no action may be performed solely by naming the owner button. Live Telegram credentials, webhook HTTPS deployment and production acceptance remain OFF.
+
 ## B3 v0.7.0 — sandbox-only rollback rehearsal (OFFLINE, NEVER THE LIVE DB)
 
 The previous `telegram:acceptance` command is read-only and checks whether a stopped backup is a credible rollback anchor. An additional command now performs an **isolated full-state restore rehearsal** on an automatically named scratch SQLite file inside an existing, protected directory that is distinct from every primary and backup path:
