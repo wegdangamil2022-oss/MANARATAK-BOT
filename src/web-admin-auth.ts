@@ -3,6 +3,9 @@ import type { RequestListener, IncomingMessage, ServerResponse } from 'node:http
 import { URLSearchParams } from 'node:url';
 import { EducationAdminFacade, type VerifiedAdminContext } from './education-admin.js';
 import type { ImportFormat } from './ingestion.js';
+import type { BotStore } from './store.js';
+import type { Policy } from './policy.js';
+import { reviewTelegramReplyOutbox, recordTelegramReplyManualReview } from './telegram-reply-maintenance.js';
 
 const AUTH_HEADER='x-telegram-init-data';
 const MAX_INIT_LENGTH=8192;
@@ -64,27 +67,44 @@ function payloadError(err:unknown):number {
   return 503;
 }
 /** Local-only endpoint; no deployment, public CORS, cookies or Telegram output. */
-export function telegramAdminWebListener(auth:TelegramMiniAppAuth, admin:EducationAdminFacade):RequestListener {
+export interface OwnerReplyReviewWebOptions{
+ readonly store:BotStore;
+ readonly policy:Policy;
+ readonly clock?:()=>number;
+}
+/** Optional owner-only route extension. Existing admin routes remain unchanged,
+ * and neither Telegram's live webhook server nor any external listener installs
+ * these routes automatically.
+ */
+export function telegramAdminWebListener(auth:TelegramMiniAppAuth, admin:EducationAdminFacade,
+  replyOps?:OwnerReplyReviewWebOptions):RequestListener {
   const routes=new Set(['/admin/panel','/admin/import','/admin/approve','/admin/publish']);
+  if(replyOps){routes.add('/admin/replies/summary');routes.add('/admin/replies/review');}
   return (req,res)=>{
     void (async()=>{
       if(req.method!=='POST'){reply(res,405,{ok:false});return;}
       if(!routes.has(req.url??'')){reply(res,404,{ok:false});return;}
+      const opsRoute=req.url==='/admin/replies/summary'||req.url==='/admin/replies/review';
       const initData=requestInitData(req);
       if(!initData){reply(res,401,{ok:false});return;}
       let ctx:VerifiedAdminContext;
       try{ctx=auth.verify(initData);}catch{reply(res,401,{ok:false});return;}
+      // Auth derives actor from signed initData, never from submitted JSON.
+      if(opsRoute&&(!replyOps||!replyOps.policy.isOwner(ctx.actorId))){
+        reply(res,403,{ok:false});return;
+      }
       if(!/^application\/json(?:\s*;\s*charset=utf-8)?$/i.test(req.headers['content-type']??'')){
         reply(res,415,{ok:false});return;
       }
+      const maxBytes=opsRoute?2048:MAX_JSON_BYTES;
       const declared=req.headers['content-length'];
-      if(declared!==undefined&&(!/^\d+$/.test(declared)||Number(declared)>MAX_JSON_BYTES)){
+      if(declared!==undefined&&(!/^\d+$/.test(declared)||Number(declared)>maxBytes)){
         reply(res,413,{ok:false});return;
       }
       const chunks:Buffer[]=[];let total=0;
       for await(const chunk of req){
         total+=(chunk as Buffer).length;
-        if(total>MAX_JSON_BYTES){reply(res,413,{ok:false});return;}
+        if(total>maxBytes){reply(res,413,{ok:false});return;}
         chunks.push(chunk as Buffer);
       }
       let payload:unknown;
@@ -92,6 +112,43 @@ export function telegramAdminWebListener(auth:TelegramMiniAppAuth, admin:Educati
       catch{reply(res,400,{ok:false});return;}
       if(!isObject(payload)){reply(res,422,{ok:false});return;}
       try{
+        if(opsRoute){
+          // Both paths are reachable only when explicitly injected at creation.
+          if(!replyOps){reply(res,404,{ok:false});return;}
+          const now=(replyOps.clock??Date.now)();
+          const staleAfterMs=15*60_000; // owner cannot weaken staleness from JSON
+          if(req.url==='/admin/replies/summary'){
+            if(Object.keys(payload).length!==0){reply(res,422,{ok:false});return;}
+            const summary=await reviewTelegramReplyOutbox(replyOps.store,{now,staleAfterMs});
+            reply(res,200,{ok:true,summary});return;
+          }
+          // Reject free-text notes, forged actor IDs, client clocks, evidence URLs,
+          // and all unknown properties before mutating any durable state.
+          if(Object.keys(payload).length!==3||
+             !Object.keys(payload).every(k=>['updateKey','attemptId','decision'].includes(k))||
+             typeof payload.updateKey!=='string'||
+             !/^b3-webhook:[a-zA-Z0-9_-]{1,80}:\d+$/.test(payload.updateKey)||
+             typeof payload.attemptId!=='string'||
+             !/^[a-zA-Z0-9_-]{1,128}$/.test(payload.attemptId)||
+             (payload.decision!=='ACKNOWLEDGED_UNRESOLVED'&&payload.decision!=='ESCALATED')){
+            reply(res,422,{ok:false});return;
+          }
+          try {
+            const result=await recordTelegramReplyManualReview(replyOps.store,replyOps.policy,{
+              actorId:ctx.actorId,updateKey:payload.updateKey,attemptId:payload.attemptId,
+              decision:payload.decision,now,staleAfterMs
+            });
+            reply(res,200,{ok:true,result:result.result});return;
+          }catch(err){
+            // No raw exceptions, paths, receipt IDs, or provider/student payloads.
+            const conflict=err instanceof Error&&[
+              'REPLY_REVIEW_NOT_FOUND','REPLY_REVIEW_NOT_STALE',
+              'REPLY_REVIEW_NOT_REVIEWABLE','REPLY_REVIEW_ATTEMPT_MISMATCH',
+              'REPLY_REVIEW_ALREADY_RECORDED'
+            ].includes(err.message);
+            reply(res,conflict?409:503,{ok:false});return;
+          }
+        }
         if(req.url==='/admin/panel'){
           if(!safeScope(payload.scope)){reply(res,422,{ok:false});return;}
           const panel=await admin.panel(ctx,payload.scope);
