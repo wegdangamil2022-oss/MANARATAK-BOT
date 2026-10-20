@@ -138,7 +138,8 @@ test('long canonical category id can be selected and approved via bounded Telegr
   assert.equal(s.importRuns[0]?.candidates[0]?.categoryId,long);
   const preview=await f.app().handle(msg(73,'📝 معاينة النشر · '+run.id+':0:'+token));
   assert.equal(preview.status,'APPLIED');assert.equal(isValidTelegramReplyKeyboard(preview.plan?.replyMarkup),true);
-  assert.equal((await f.app().handle(msg(74,buttons(preview).find(x=>x.startsWith('📤 تأكيد النشر المحلي'))!)).status,'APPLIED');
+  const publish=buttons(preview).find(x=>x.startsWith('📤 تأكيد النشر المحلي'))!;
+  assert.equal((await f.app().handle(msg(74,publish))).status,'APPLIED');
   assert.equal((await f.store.snapshot()).educationResources.length,1);
  }finally{await f.close();}
 });
