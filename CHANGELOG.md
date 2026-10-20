@@ -1,3 +1,12 @@
+## 0.5.3 — 2026-10-20 — Offline owner-reviewed retention with immutable purge safety tombstones
+
+- Added read-only `previewRetention` and owner-confirmed `compactRetention` with 10-minute, state-digest-bound dry-run and atomic stale-plan rejection across JSON/SQLite.
+- Locally prunes observed metadata older than 48 hours from sentAt. Redacts sender filters, freeform review reasons, evidence IDs and attempt-related fields only for fully terminal jobs at least 30 days beyond their last recorded action; unknown/in-flight/unresolved jobs are never redacted.
+- Preserves each finalized job's chat/message reservation IDs, statuses, reviewer attribution and minimal coded audit history, keeping non-repeatability even after privacy cleanup.
+- Replaces stored evidence IDs with domain-separated SHA-256 tombstones and checks both raw/historical hashed IDs to prevent reuse for another UNKNOWN attempt. Migrates legacy plaintext evidence in old audit keys; new reconciliation audit keys use hashes from the outset.
+- Adds staged CI tests for review immutability, time-window expiration, late human decisions, cancelled UNKNOWN protection, legacy audit scrub, proof replay denial, dry-run information minimization and independent SQLite stale previews. No new schema number; optional v8 field only.
+- This is NOT automated production retention or cleanup of old backups. No real Telegram calls, deletions or production DB access.
+
 ## 0.5.2 — 2026-10-20 — Explicit UNKNOWN purge outcome reconciliation (TESTED_MOCK)
 
 - Implemented `PurgeEvidence` exact proof binding (evidence ID, approved chat ID, message ID, immutable attempt ID, ACKNOWLEDGED vs FAILED_CONFIRMED).

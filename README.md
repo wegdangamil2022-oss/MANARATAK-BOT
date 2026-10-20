@@ -1,6 +1,6 @@
 # بوت منارتك — MANARATAK BOT
 
-**B0/B1 + B2-Core + B3 + B2-Advanced evidence-based purge review (v0.5.2). Offline/test-only — no live Telegram bot.**
+**B0/B1 + B2-Core + B3 + B2-Advanced privacy retention safeguards (v0.5.3). Offline/test-only — no live Telegram bot.**
 
 An independent TypeScript/Node.js 22 project based on `docs/MANARATAK_BOT_MASTER_v1.2.1_AR.md` and `docs/START_HERE_MANARATAK_BOT_v1.2.1_AR.md`. B0/B1 supply the secure baseline; B2-Core adds individual moderation and subscription policies; B3 adds the first locally tested education content flow.
 
@@ -10,6 +10,27 @@ An independent TypeScript/Node.js 22 project based on `docs/MANARATAK_BOT_MASTER
 
 
 
+
+## B2-Advanced v0.5.3 — owner-reviewed privacy retention and evidence tombstones (offline)
+
+**Scope:** `S121-06` and `PURGE-008` / `S12-32` (partial). The approved group index must not claim history coverage and may hold rolling message metadata only for **48 hours from the actual send date**, not 48 hours from last observation. The new, explicit maintenance service lets an authorized **owner** preview and execute local privacy minimization; there is **no background timer or live Telegram request**.
+
+Two-step maintenance:
+
+```ts
+const preview = await moderationPurge.previewRetention(ownerId); // no writes
+console.log(preview.expiredObserved, preview.eligibleJobs, preview.reasonsToRedact);
+const result = await moderationPurge.compactRetention(ownerId, preview); // explicit owner approval
+```
+
+- The owner-only **dry-run** reports counts and a SHA-256 plan digest. It excludes raw message text, sender IDs, proof IDs, freeform reviewer comments, and message-ID lists. The plan expires after **10 minutes** and is checked again inside the single atomic JSON/SQLite state transaction against the entire raw candidate set. A stale plan fails closed rather than wiping more recently changed records; two SQLite workers cannot reuse one plan after the first commits.
+- Apply first prunes expired `rollingMessageMeta` entries (48-hour sentAt window), including metadata belonging to unfinished jobs. **Unfinished attempts retain their durable status, attempt identity, and review proof requirements**, even if the temporary observed-message index has expired. No re-send or auto replay is authorized.
+- Only `COMPLETED` and `CANCELLED` purge jobs whose **every item is terminal**, and whose **most recent job activity is at least 30 days old**, are eligible for field-level redaction. Latest activity includes audit and reviewer decisions; a recent review cannot be wiped based on an old preview date. `UNKNOWN_OUTCOME` and unresolved confirmed failures remain untouched.
+- The compactor removes the job's sender filter, freeform manual-review reasons, old attempt IDs/timestamps and review evidence IDs, and overwrites historical `metaDigest` fingerprints with a non-personal sentinel. The job, chat and targeted message IDs, item statuses, reviewed-by IDs and coded audit history remain as immutable **safety and accountability tombstones**; they do not become candidates for a second purge.
+- Verified review evidence is replaced by a **domain-separated SHA-256 digest** (`evidenceDigest`) rather than forgetting its global one-use constraint. `reconcileUnknown` checks both current raw IDs and older stored hashes, so an ID cannot be reused with another unknown attempt after retention. Existing v0.5.2 plaintext evidence references in relevant audit keys are also scrubbed and replaced with digests. New receipts use hashed evidence IDs in audit keys immediately.
+- The existing **BotStore v8** structure is extended by one optional, backwards-compatible reconciliation digest field. No new database, no automatic deletion, no production retention promises. The maintenance audit stores only actor ID, a generated operation key, timestamp and a fixed reason code—not body text.
+
+**Critical operational limitations:** The compactor only changes the **currently opened** canonical JSON/SQLite state. It does **not** delete old SQLite snapshots/backups, GitHub logs, exported copies, or any other external retention system, and does not automatically enforce a 48-hour data-retention guarantee during periods of bot inactivity. Production must separately enforce scheduled maintenance, backup expiry, ACLs, legal deletion requirements, data-subject workflows and independent end-to-end private Telegram verification. All evidence here is `TESTED_MOCK`, not `ACTIVATED`.
 
 ## B2-Advanced v0.5.2 — UNKNOWN deletion reviews with trusted evidence (offline)
 
