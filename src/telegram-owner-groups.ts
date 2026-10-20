@@ -1,4 +1,4 @@
-import type {BotStore,BotState,Chat} from './store.js';
+import type {BotStore,BotState,Chat,SubscriptionRequirement} from './store.js';
 import type {Policy} from './policy.js';
 import type {VerifiedAdminContext} from './education-admin.js';
 import {menuLabels,type TelegramReplyKeyboard} from './telegram-menu.js';
@@ -6,12 +6,16 @@ import {menuLabels,type TelegramReplyKeyboard} from './telegram-menu.js';
 export const groupMenuLabel='👥 المجموعات المعتمدة';
 type GroupScope='navigation'|'assistant'|'moderation'|'verification'|'publishing';
 const groupScopes:readonly GroupScope[]=['navigation','assistant','moderation','verification','publishing'];
-type Action={kind:'details'|'revokeReview'|'revokeConfirm'|'scopeReview'|'scopeConfirm'|'aiReview'|'aiConfirm';
- chatId:string;version?:number;scope?:GroupScope};
+type Action={kind:'details'|'subscriptionDetails'|'subscriptionReview'|'subscriptionConfirm'|
+ 'revokeReview'|'revokeConfirm'|'scopeReview'|'scopeConfirm'|'aiReview'|'aiConfirm';
+ chatId:string;version?:number;scope?:GroupScope;requirementVersion?:number};
 const id='(-[1-9][0-9]{0,18})';
 const ver='([1-9][0-9]{0,9})';
 const scope='(navigation|assistant|moderation|verification|publishing)';
 const detailRe=new RegExp('^🏷️ محادثة · '+id+'$','u');
+const subDetailRe=new RegExp('^📋 تفاصيل الاشتراك · '+id+'$','u');
+const subReviewRe=new RegExp('^🧊 مراجعة تعليق الاشتراك · '+id+':'+ver+':'+ver+'$','u');
+const subConfirmRe=new RegExp('^✅ تأكيد تعليق الاشتراك · '+id+':'+ver+':'+ver+'$','u');
 const revPreviewRe=new RegExp('^🚫 مراجعة الإلغاء · '+id+':'+ver+'$','u');
 const revConfirmRe=new RegExp('^⛔ تأكيد الإلغاء · '+id+':'+ver+'$','u');
 const aiPreviewRe=new RegExp('^🛑 مراجعة إيقاف AI · '+id+':'+ver+'$','u');
@@ -23,6 +27,12 @@ export function parseOwnerGroupAction(value:string):Action|null{
  if(typeof value!=='string'||value.length>118)return null;
  let m=detailRe.exec(value);
  if(m)return {kind:'details',chatId:m[1]!};
+ m=subDetailRe.exec(value);
+ if(m)return {kind:'subscriptionDetails',chatId:m[1]!};
+ for(const [regex,kind] of [[subReviewRe,'subscriptionReview'],[subConfirmRe,'subscriptionConfirm']] as const){
+  m=regex.exec(value);
+  if(m)return {kind,chatId:m[1]!,version:Number(m[2]!),requirementVersion:Number(m[3]!)};
+ }
  for(const [re,kind] of [[revPreviewRe,'revokeReview'],[revConfirmRe,'revokeConfirm'],
   [aiPreviewRe,'aiReview'],[aiConfirmRe,'aiConfirm']] as const){
   m=re.exec(value);
@@ -36,6 +46,8 @@ export function parseOwnerGroupAction(value:string):Action|null{
 }
 export function isOwnerGroupText(value:string):boolean{
  return value===groupMenuLabel||value.startsWith('🏷️ محادثة · ')||
+  value.startsWith('📋 تفاصيل الاشتراك · ')||value.startsWith('🧊 مراجعة تعليق الاشتراك · ')||
+  value.startsWith('✅ تأكيد تعليق الاشتراك · ')||
   value.startsWith('🚫 مراجعة الإلغاء · ')||value.startsWith('⛔ تأكيد الإلغاء · ')||
   value.startsWith('🔐 تقييد ')||value.startsWith('✅ تأكيد تقييد ')||
   value.startsWith('🛑 مراجعة إيقاف AI · ')||value.startsWith('🔒 تأكيد إيقاف AI · ')||
@@ -57,7 +69,7 @@ function pageLabel(page:number,direction:'next'|'previous'):string{
 function revisionCurrent(chat:Chat,revision:unknown):boolean{
  return chat.approved&&Number.isSafeInteger(revision)&&revision===chat.version;
 }
-function details(chat:Chat):OwnerGroupScreen{
+function details(chat:Chat,subscription?:SubscriptionRequirement):OwnerGroupScreen{
  const scopes=chat.scopes.join(', ')||'بدون نطاقات';
  const body='<b>المحادثة المعتمدة 👥</b>\n'
   +'المعرّف المحلي: <code>'+chat.id+'</code>\n'
@@ -66,11 +78,17 @@ function details(chat:Chat):OwnerGroupScreen{
   +'النطاقات: '+scopes+'\n'
   +'وضع AI المحفوظ: '+chat.groupAI+'\n'
   +'إصدار السياسة: '+chat.version+'\n'
+  +'الاشتراك المحفوظ: '+(subscription?.channelIds.length?
+    subscription.mode+' / '+subscription.channelIds.length+' قناة':'غير مفعّل أو معلّق')+'\n'
   +'هذه معلومات من قاعدة البيانات فقط، وليست تحققًا حيًا من Telegram.';
  if(!chat.approved)return screen(body+'\nلا يمكن إعادة اعتماد محادثة عبر هذا الزر.',
   [groupMenuLabel]);
  const actions=chat.scopes.filter((s):s is GroupScope=>groupScopes.includes(s as GroupScope))
   .map(s=>'🔐 تقييد '+s+' · '+chat.id+':'+chat.version);
+ if(chat.scopes.includes('verification')&&subscription?.channelIds.length){
+  actions.push('📋 تفاصيل الاشتراك · '+chat.id);
+  actions.push('🧊 مراجعة تعليق الاشتراك · '+chat.id+':'+chat.version+':'+subscription.version);
+ }
  actions.push('🛑 مراجعة إيقاف AI · '+chat.id+':'+chat.version);
  actions.push('🚫 مراجعة الإلغاء · '+chat.id+':'+chat.version);
  actions.push(groupMenuLabel);
@@ -107,8 +125,39 @@ export class OwnerTelegramGroupMenu{
   if(!action)return null;
   const chat=snapshot.chats.find(c=>c.id===action.chatId);
   if(!chat)return null;
-  if(action.kind==='details')return details(chat);
+  const subscription=snapshot.subscriptionRequirements.find(c=>c.chatId===chat.id);
+  if(action.kind==='details')return details(chat,subscription);
+  if(action.kind==='subscriptionDetails'){
+   if(!chat.approved || !chat.scopes.includes('verification'))return null;
+   const channels=subscription?.channelIds??[];
+   return screen('<b>تفاصيل الاشتراك المحفوظة 📋</b>\n'
+    +'المحادثة: <code>'+chat.id+'</code>\n'
+    +'الوضع: '+(channels.length?subscription!.mode:'غير مفعل')+'\n'
+    +'عدد القنوات: '+channels.length+'\n'
+    +(channels.length?'القنوات المحلية: '+channels.join(', ')+'\n':'')
+    +'لا يوجد تحقق حي من Telegram في هذه الشاشة.\n'
+    +'التعليق لا يزيل قيود كتم سابقة ولا يعيد إرسال قرارات إشراف.',
+    channels.length?['🧊 مراجعة تعليق الاشتراك · '+chat.id+':'+chat.version+':'+subscription!.version,
+      '🏷️ محادثة · '+chat.id]:['🏷️ محادثة · '+chat.id]);
+  }
   if(!revisionCurrent(chat,action.version))return null;
+  if(action.kind==='subscriptionReview'||action.kind==='subscriptionConfirm'){
+   if(!chat.scopes.includes('verification')||!subscription?.channelIds.length||
+      subscription.version!==action.requirementVersion)return null;
+   const suffix=' · '+chat.id+':'+chat.version+':'+subscription.version;
+   if(action.kind==='subscriptionReview')
+    return screen('<b>مراجعة تعليق شرط الاشتراك 🧊</b>\n'
+     +'سيصبح شرط الاشتراك غير مفعّل لهذه المجموعة محليًا.\n'
+     +'القنوات الحالية: '+subscription.channelIds.length+' ('+subscription.mode+').\n'
+     +'لا يتم فك أي عقوبات أو تقييدات قائمة تلقائيًا، ولا توجد مكالمات Telegram.',
+     ['✅ تأكيد تعليق الاشتراك'+suffix,'🏷️ محادثة · '+chat.id]);
+   try{await this.policy.pauseSubscriptionAtRevision(ctx.actorId,chat.id,chat.version,subscription.version);}
+   catch{return null;}
+   return screen('تم تعليق الاشتراك محليًا ✅\n'
+    +'يتطلب استئناف الاشتراك إعدادًا جديدًا مع تحقق مستقل من كل قناة.\n'
+    +'لا يتم رفع قيود الاشتراك القديمة تلقائيًا.',
+    ['🏷️ محادثة · '+chat.id]);
+  }
   const rev=chat.version;
   const suffix=' · '+chat.id+':'+rev;
   if(action.kind==='revokeReview')
