@@ -1,3 +1,11 @@
+## 0.5.8 — 2026-10-20 — Read-only backup inventory and expiration review (TESTED_MOCK)
+
+- Added `reviewSqliteBackups({directory,retentionDays,now,maxEntries?})` for a private canonical local backup directory; age threshold 1–365 days, bounded listing, no file deletion, restore, mutation, background runner or Telegram gateway.
+- Added `BotStore.verifySqliteBackupReadOnly` that checks SQLite signature, read-only integrity, initialized `bot_state` row and supported schema without creating tables or writing to the source.
+- Classifies backups as VALID_RECENT, EXPIRED_CANDIDATE, INVALID, UNSAFE_LINK, UNSAFE_PERMISSIONS, or FUTURE_TIMESTAMP; rejects symlinked/insecure/noncanonical directories, skips other file types without traversing.
+- Returns aggregate counts plus deterministic SHA-256 local references and status, not raw names, paths, sender information or full content. Filesystem mtime is only advisory and cannot authorize a deletion.
+- Added 12 TDD regression tests. All 377 tests passed in Actions, including JSON/SQLite/B0–B4 historical mock suite. No new state schema, no offsite backup expiration, no actual cron or production configuration.
+
 ## 0.5.7 — 2026-10-20 — Fail-closed validation before SQLite backups (TESTED_MOCK)
 
 - Hardened the existing `BotStore.backupSqlite`: refuses noncanonical/aliased paths, symlinked file/ancestor/target-parent paths, zero-byte/forged/non-SQLite source and SQLite lacking a populated `bot_state` row before it reserves any backup.
