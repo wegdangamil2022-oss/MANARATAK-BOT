@@ -270,6 +270,38 @@ export class BotStore {
    * effect. Checks are advisory in the face of a hostile filesystem actor;
    * the host must enforce exclusive ownership / directory ACLs.
    */
+  /**
+   * Offline backup health-check: never calls openSqlite (which enables WAL and
+   * creates a table). Returns false on invalid, corrupt or uninitialized data.
+   * It does not grant deletion/restore permission, or attempt to repair files.
+   */
+  static async verifySqliteBackupReadOnly(filePath:string):Promise<boolean>{
+    let handle:Awaited<ReturnType<typeof open>>|undefined;
+    try{
+      const meta=await lstat(filePath);
+      if(!meta.isFile()||meta.isSymbolicLink()||meta.size<16)return false;
+      if(await realpath(filePath)!==filePath)return false;
+      handle=await open(filePath,'r');
+      const header=Buffer.alloc(16);
+      const {bytesRead}=await handle.read(header,0,16,0);
+      if(bytesRead!==16||
+         !header.equals(Buffer.concat([Buffer.from('SQLite format 3'),Buffer.from([0])])))return false;
+    }catch{return false;}
+    finally{await handle?.close();}
+    let db:DatabaseSync;
+    try{db=new DatabaseSync(filePath,{readOnly:true});}
+    catch{return false;}
+    try{
+      const check=db.prepare('PRAGMA quick_check').get() as {quick_check?:unknown}|undefined;
+      if(check?.quick_check!=='ok')return false;
+      const row=db.prepare('SELECT data FROM bot_state WHERE id=1').get() as {data?:unknown}|undefined;
+      if(typeof row?.data!=='string')return false;
+      new BotStore(filePath,{engine:'sqlite'}).decode(JSON.parse(row.data));
+      return true;
+    }catch{return false;}
+    finally{db.close();}
+  }
+
   static async backupSqlite(sourceFile: string, backupFile: string): Promise<void> {
     if(!isAbsolute(sourceFile)||!isAbsolute(backupFile)||
        sourceFile!==resolve(sourceFile)||backupFile!==resolve(backupFile))
