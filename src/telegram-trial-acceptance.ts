@@ -1,4 +1,5 @@
 import {isAbsolute,resolve} from 'node:path';
+import {lstat} from 'node:fs/promises';
 import {BotStore,type BotState} from './store.js';
 import {readTelegramSafetySwitch} from './telegram-safety-switch.js';
 
@@ -53,6 +54,15 @@ export async function inspectTelegramTrialAcceptanceReadOnly(
  let backup:BotState;
  try{backup=await BotStore.snapshotSqliteReadOnly(options.backupFile);}
  catch{throw Error('TRIAL_ACCEPTANCE_INVALID_BACKUP');}
+ // A filesystem hard link to the primary database is NOT an independent
+ // backup. Compare device/inode after read-only validation; never trust a
+ // distinct pathname alone as evidence of rollback protection.
+ try{
+  const [sourceMeta,backupMeta]=await Promise.all([
+   lstat(options.stateFile),lstat(options.backupFile)]);
+  if(sourceMeta.dev===backupMeta.dev&&sourceMeta.ino===backupMeta.ino)
+   throw Error('TRIAL_ACCEPTANCE_INVALID_BACKUP');
+ }catch{throw Error('TRIAL_ACCEPTANCE_INVALID_BACKUP');}
  let safety:'RUN'|'STOP';
  try{safety=await readTelegramSafetySwitch(options.safetyFile);}
  catch{throw Error('TRIAL_ACCEPTANCE_INVALID_SAFETY');}
