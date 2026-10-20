@@ -1,3 +1,12 @@
+## 0.5.0 — 2026-10-20 — First B2-Advanced rolling metadata and preview-first purge (mock only)
+
+- Added metadata-only 48-hour rolling message index for explicitly moderation-approved chats, refusing message texts/media payloads and unknown-sender attribution.
+- Added immutable, time-scoped purge previews, reviewed IDs and exclusion counts for pinned/linked-channel/admin logs/approved posts. Preview never causes deletion.
+- Added explicitly confirmed, auditable jobs and a fake gateway with durable per-message attempts, permission recheck after awaits, unknown-result quarantine, lease-aware restart recovery, cancellation and duplicate-reservation guards.
+- At most 25 selected IDs per preview; 10+ requires owner co-confirmation (strictly more than 10). Maximum 50 attempts per UTC day, checked at approval and at actual send time to stop cross-midnight overflow.
+- Added additive BotState schema v8 preserving all B3/B4 records. Added JSON and SQLite tests including independent worker competition, revocation, expiry, old-state recovery, cancellation and double-confirmation.
+- No Telegram Bot API mutations, no actual message deletion, no scraping or claim of complete chat history. This is TESTED_MOCK; other B2-Advanced modules remain PLANNED.
+
 ## 0.4.7 — 2026-10-20 — Cancellation-safe campaign parts, evidence and reviewer audit (mock-only)
 
 - Fixed B4 campaign cancellation leaving queued multipart parts in a misleading pending state. Cancel unstarted/confirmed-failed tails while preserving previously SENT parts and real mock receipts.

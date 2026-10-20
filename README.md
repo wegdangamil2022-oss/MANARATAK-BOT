@@ -1,6 +1,6 @@
 # بوت منارتك — MANARATAK BOT
 
-**B0/B1 + B2-Core + B3 + B4 integrated cancellation and receipt integrity (v0.4.8). Offline/test-only — no live Telegram bot.**
+**B0/B1 + B2-Core + B3 + B2-Advanced privacy-first moderation purge preview (v0.5.0). Offline/test-only — no live Telegram bot.**
 
 An independent TypeScript/Node.js 22 project based on `docs/MANARATAK_BOT_MASTER_v1.2.1_AR.md` and `docs/START_HERE_MANARATAK_BOT_v1.2.1_AR.md`. B0/B1 supply the secure baseline; B2-Core adds individual moderation and subscription policies; B3 adds the first locally tested education content flow.
 
@@ -8,6 +8,36 @@ An independent TypeScript/Node.js 22 project based on `docs/MANARATAK_BOT_MASTER
 
 
 
+
+
+## B2-Advanced v0.5.0 — preview-first moderation purge (offline, NO Telegram deletion)
+
+`src/moderation-purge.ts` introduces the **first bounded, tested B2-Advanced slice** for `S121-06`, `MOD-002` and `PURGE-001/002/003/004/005/006/008/009/010`. No call to Telegram API is implemented.
+
+**What is actually indexed:** `ModerationPurgeService.observe(meta)` accepts *trusted adapter-supplied* metadata for **messages already observed by the bot in an explicitly moderation-approved group**. It stores an opaque positive message ID, chat ID, sender kind/ID where known, content type, links flag, sent time, observation time, and protection flags. It **refuses** any raw text, caption, media content or extra fields; unknown senders are never fabricated. Messages older than 48 hours are pruned automatically when ingesting or creating a preview. An edited observation can update type/links, but it cannot silently clear pinned, linked-channel, admin-log or approved-announcement protection. There is **no** Telegram `getChatHistory` API, and the index never claims to cover messages sent before bot presence or while it was offline.
+
+**Workflow (mock only):**
+
+```ts
+const service = new ModerationPurgeService(store,policy,fakePurgeGateway,clock);
+await service.observe(trustedMetadataWithoutMessageBody);
+const review = await service.preview(editorId,approvedModerationChatId,{
+  senderId: '300', linksOnly: true, limit: 10
+});
+console.log(review.items.map(({messageId})=>messageId),review.excluded);
+// No deletion has happened. The item IDs and metadata digests are immutable once previewed.
+await service.confirm(editorId,review.id); // second explicit step, preview expires in 10 minutes
+await service.dispatchNext(review.id); // only a FAKE deletion gateway; one item per call
+```
+
+- `preview` selects **at most 25** recently observed, eligible IDs; excludes pinned/linked-channel/admin-log/approved announcement messages. It never stores the message body, executes a deletion or promises to know how many historical messages exist.
+- `confirm` binds the plan to exact message IDs, their metadata fingerprints, the actor, approved-chat policy version and a 10-minute expiry. A plan of more than **10** items requires owner confirmation; any editor's effective `chat.manage` authorization must still be valid at execution. Conflicting reservations for the same message/chat are rejected even across simultaneous confirmations.
+- Up to **50** item attempts per UTC day can be reserved; an additional hard daily cap is checked at each attempt start, so a plan approved yesterday cannot overflow today's delete limit.
+- Each attempt is recorded in the existing versioned `BotStore` **before** contacting a fake gateway, and is reauthorized after `canDelete()` awaits. `ACKNOWLEDGED` means only that the **mock API accepted the request**, not independent proof that the message existed or was removed. `UNKNOWN_OUTCOME` is quarantined and never automatically retried; the next item stays blocked. Expired worker leases remain UNKNOWN after recovery while active leases are left alone.
+- `cancel` closes queued items and retains accepted, in-flight and unknown attempts. Group or staff permission revocation blocks further mock deletion. JSON and the optional SQLite engine share the same model; SQLite tests include truly independent worker processes.
+- Schema **v7→v8** adds `rollingMessageMeta` and `purgeJobs` without altering B3/B4 campaign or receipt histories. No real Telegram deletions, no live monitoring/scheduler, no database production migration, and no text-bearing audit logs.
+
+**Still pending:** actual trusted Telegram update intake, identity/rank checks from the real API, API-specific deletion restrictions and rate limits, post-request evidence reconciliation, data-retention/backups policy, optional large-activity second-person co-sign, and production-grade normalized persistence. Status: **TESTED_MOCK**, not `TESTED_LIVE_PRIVATE` or `ACTIVATED`.
 
 ## B4 v0.4.8 — immutable multipart plans and receipt-boundary integrity (offline)
 

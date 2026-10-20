@@ -128,3 +128,11 @@
 - Cancellation during async gateway permission probing must not requeue an item into a cancelled campaign or perform a network call. A result from an already-issued remote request may still arrive and be recorded.
 - Idempotent cancellations have one immutable audit event with `actorId`; manual skip cannot overwrite terminal cancelled/skipped review status. Additive optional actor field requires no schema version change.
 - No automatic retry of unknown external outcomes, no direct Telegram posts or production activation; all examples are simulation behavior, not an assertion of Telegram exactly-once delivery.
+
+## B2-Advanced v0.5.0 — rolling metadata and safe purge consent (20 October 2026)
+
+- Follow `S121-06`: no Telegram `getChatHistory`, no retrospective index, and no claims about messages missed while offline. Only already-observed metadata in explicitly approved moderation chats. No body text, caption, media payload or constructed sender IDs; index entries prune after 48h. Schema v8 is additive over v7.
+- A preview is a separate, durable actor/chat/version/fingerprint-bound decision expiring after ten minutes. It is **never** an outbound action. Up to 25 IDs are selected, at most 50 daily attempts, and >10 selected IDs requires a trusted owner confirmation. Protected pinned/linked-channel/admin-log/approved-announcement messages are not candidates.
+- A confirmed job is an intent, **not** permission to delete arbitrarily. Check source metadata, effective staff/owner authorization, scope version and fake gateway privileges before and after awaiting remote preflight. Persist attempt ID before fake delete. An acknowledged API request is not independent proof of physical deletion; ambiguous outcomes remain UNKNOWN and cannot auto-retry.
+- Count attempts by the UTC day they actually begin, not solely the day a plan was confirmed; cross-day plans cannot silently evade a rate cap. Cancellation keeps records of previously attempted or unknown work.
+- The experimental JSON/SQLite stores retain only metadata and audit IDs; production TTL, backup purge, Bot API rank validation, batch429 handling and a real authorized deletion adapter must be separately designed, tested and explicitly activated. This work makes no live Telegram calls.
