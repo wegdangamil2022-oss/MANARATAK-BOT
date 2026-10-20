@@ -1,3 +1,12 @@
+## 0.6.7 — 2026-10-21 — Offline read-only Telegram reply inventory and alert exit code (NOT DEPLOYED)
+
+- Added `BotStore.snapshotSqliteReadOnly` for canonical, privately owned pre-existing SQLite state using native `node:sqlite` read-only handles and an independent integrity/decoding preflight. Never initializes tables, runs production schema migrations or opens a writable BotStore.
+- Added `inspectTelegramOutboxReadOnly`, a sanitized aggregate that considers both UNKNOWN_OUTCOME and stale SENDING unresolved, stale QUEUED needs attention, and acknowledges manual review without marking delivery resolved. It never exposes per-student message text, actor/chat IDs, update keys, attempt IDs, tokens or filenames.
+- Added one-shot `npm run telegram:outbox -- --state /absolute/private/state.sqlite --stale-ms 900000`: stdout is aggregate JSON only. Exit 0 for no alerts, 2 for attention required, 1 for invalid configuration/state. No Telegram token is required, no network traffic, no mutations, no automatic retry, no scheduler installed.
+- State inspection rejects missing, symlinked, forged/corrupt, non-canonical and world-accessible files; object inputs and stale thresholds are bounded. Local operator privileges and directory safety still must be managed by the host.
+- New RED-first integration tests cover read-only output, unknown and reviewed outcomes, stale QUEUED/SENDING, invalid paths, no database creation, aggregate CLI results and privacy across processes.
+- This offline tool does NOT prove public webhook reachability, successful Telegram delivery, host backup security, independent evidence, rate limits or live readiness. No production deployment/activation occurred.
+
 ## 0.6.6 — 2026-10-21 — Shared authenticated HTTP ingress limits and safe shutdown (NOT DEPLOYED)
 
 - Added shared `BoundedIngress` for the Telegram webhook and HMAC-signed local admin HTTP adapter. Accepted post-auth requests use a bounded in-flight budget (16 per listener, override for tests), with 503 **before** reading body or claiming an update when saturated. Admission lasts until processing and any external sender call have settled, not only until JSON parsing finishes.
