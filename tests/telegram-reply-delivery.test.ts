@@ -23,6 +23,7 @@ async function fixture(engine:'json'|'sqlite'='json'){
  const faq=new ApprovedAnswerService(store,policy),links=new ResourceLinkService(store,policy);
  await policy.approveChat(OWNER,GROUP,['navigation','assistant']);
  await education.createCategory(OWNER,{id:'grants',scope:'private',title:'Scholarships & <more>',order:1});
+ await education.createCategory(OWNER,{id:'group-grants',scope:GROUP,title:'Group grants',order:1});
  const app=()=>new TelegramUpdateApplication({store:new BotStore(file,{engine}),policy,education,admin,faq,links,botId:'bot-main',botUsername:'ManaratakBot',membership:async()=> 'UNKNOWN'});
  const sent:{chatId:string;text:string}[]=[];
  let response:'CONFIRMED'|'FAILED_CONFIRMED'|'UNKNOWN_OUTCOME'='CONFIRMED';
