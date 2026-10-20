@@ -33,33 +33,13 @@ export class SubscriptionGate {
       else s.subscriptionRequirements.push({ chatId, channelIds, mode, version: 1 });
     });
   }
-  /**
-   * Strictly reductive owner operation: remove one existing mandatory channel.
-   * No external provider check can be needed to *remove* a requirement.
-   * Both the group policy version and subscription rule version must match in
-   * the same transaction, rejecting stale view or one-click resurrection.
-   * This never automatically lifts an existing moderation restriction.
+  /** A thin existing gate facade over the same owner-only atomic policy
+   * operation used by Telegram's verified private owner buttons.
    */
   async removeRequiredChannelAtRevision(actorId:string,chatId:string,channelId:string,
     expectedChatRevision:number,expectedRequirementRevision:number):Promise<void>{
-    if(!this.policy.isOwner(actorId))throw Error('OWNER_ONLY');
-    if(!/^-[1-9][0-9]{0,18}$/.test(chatId)||!/^-[1-9][0-9]{0,18}$/.test(channelId))
-      throw Error('INVALID_CHANNEL_ID');
-    await this.store.transaction(s=>{
-      const chat=s.chats.find(c=>c.id===chatId);
-      if(!chat?.approved||!chat.scopes.includes('verification'))throw Error('GROUP_NOT_APPROVED');
-      const config=s.subscriptionRequirements.find(c=>c.chatId===chatId);
-      if(!config?.channelIds.includes(channelId))throw Error('CHANNEL_NOT_REQUIRED');
-      if(!Number.isSafeInteger(expectedChatRevision)||!Number.isSafeInteger(expectedRequirementRevision)||
-         expectedChatRevision<=0||expectedRequirementRevision<=0||
-         chat.version!==expectedChatRevision||config.version!==expectedRequirementRevision)
-        throw Error('SUBSCRIPTION_POLICY_STALE');
-      config.channelIds=config.channelIds.filter(id=>id!==channelId);
-      config.version++;chat.version++;
-      s.audit.push({updateKey:'owner:subscription:remove-channel:'+chatId+':'+config.version,
-        decision:'ALLOW',reason:'SUBSCRIPTION_REQUIRED_CHANNEL_REMOVED_LOCALLY',
-        policyVersion:chat.version,at:this.clock()});
-    });
+    return this.policy.removeSubscriptionChannelAtRevision(actorId,chatId,channelId,
+     expectedChatRevision,expectedRequirementRevision);
   }
   async verify(chatId: string, userId: string): Promise<SubscriptionDecision> {
     const s = await this.store.snapshot();
