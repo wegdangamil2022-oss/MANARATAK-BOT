@@ -188,3 +188,10 @@
 - A symlinked source or source-parent directory, noncanonical filename, and symlinked output directory are rejected. Output uses exclusive reservation with 0600 mode; existing backup is immutable. SQLite's point-in-time backup API still ensures WAL-safe snapshots and recovery checks still decode schema.
 - Valid source backups preserve the existing publication and moderation records exactly. The backup itself may contain personal metadata and must be governed by private ACLs and an expiration/recovery policy. Deleting or pruning the current state does NOT erase its previous snapshots.
 - Host-controlled filesystem races, backed-up keys/encryption, alternate devices, scheduled backup rotation and production activation are outside this mock-stage unit and remain blocked pending a trusted operator and live acceptance testing.
+
+## B4 v0.5.8 — backup inventory is advisory, never a delete command (20 October 2026)
+
+- S12-31/S12-32 call for verified recovery and explicit retention. Initial step: a **read-only** private directory inventory, NOT a data-erasure API. Classify only verified SQLite bot snapshots as expired review candidates using an operator-supplied threshold; unsafe, corrupt, unsupported or future-dated files can never be treated as valid deletion targets.
+- The existing `BotStore` decoder remains the authority on compatible schemas; the new `BotStore.verifySqliteBackupReadOnly` opens SQLite in readonly mode and validates a proper initialized bot state without creating tables. It does not repair or modify backups.
+- A backup report must not disclose potentially user-identifying file names, local absolute paths, messages or raw reviewer notes. It returns local SHA-256 name references and aggregate status counters to aid a trusted operator. Even hashed names might be guessable; keep audit output private.
+- No automatic deletion, backup rotation, scheduler, new Telegram gateway, restore guarantee, or offsite data-subject erasure is activated. mtime is not a legally sufficient retention clock, and all filesystem checks remain vulnerable to host-level replacement races without external OS controls.

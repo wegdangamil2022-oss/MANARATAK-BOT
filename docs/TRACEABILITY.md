@@ -100,3 +100,6 @@
 
 | B4 v0.5.7 S12-31 SQLite backup validity and restore safety | BotStore.backupSqlite / tests/b4-backup-guard.test.ts | TESTED_MOCK | Read-only source preflight, no accidental SQLite initialization, canonical/symlink checks, WAL-safe backup, private output and existing-destination preservation |
 | B4 v0.5.7 S12-32 personal data in backups | README + docs/DECISIONS.md | PARTIAL / BLOCKED_LIVE | Backup retains original snapshot history; no automatic encryption, deletion, backup TTL, or offsite GDPR/data-subject erasure |
+
+| B4 v0.5.8 S12-31 backup recovery health and S12-32 retention inventory (partial) | backup-retention-review.ts + BotStore.verifySqliteBackupReadOnly + tests/b4-backup-retention-review.test.ts | TESTED_MOCK | 12 regression tests; private path / file rights / symlinks, readonly integrity + schema checks; 1–365 day advisory age, bounded listing, no automatic delete |
+| B4 v0.5.8 actual backup expiry, restore drills, offsite archive & GDPR policy | — | PLANNED / BLOCKED_LIVE | Candidate age is advisory only; no erasure authority, production SLA, offsite inventory or scheduler |

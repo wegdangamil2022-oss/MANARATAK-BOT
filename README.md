@@ -1,6 +1,6 @@
 # بوت منارتك — MANARATAK BOT
 
-**B0/B1 + B2-Core + B3 + B4 SQLite backup source-validation safety (v0.5.7). Offline/test-only — no live Telegram bot.**
+**B0/B1 + B2-Core + B3 + B4 read-only backup retention review (v0.5.8). Offline/test-only — no live Telegram bot.**
 
 An independent TypeScript/Node.js 22 project based on `docs/MANARATAK_BOT_MASTER_v1.2.1_AR.md` and `docs/START_HERE_MANARATAK_BOT_v1.2.1_AR.md`. B0/B1 supply the secure baseline; B2-Core adds individual moderation and subscription policies; B3 adds the first locally tested education content flow.
 
@@ -10,6 +10,26 @@ An independent TypeScript/Node.js 22 project based on `docs/MANARATAK_BOT_MASTER
 
 
 
+
+## B4 v0.5.8 — read-only SQLite backup inventory and expiration review
+
+`reviewSqliteBackups({directory,retentionDays,now})` is an explicit, **offline, local-only advisory review** for backup directories. It does **not** expire, delete, move, compact or restore any backup. It does not send Telegram messages, schedule jobs or open an administrative API. A trusted operator supplies an **absolute, canonical, private existing directory**, an age threshold of **1–365 days**, and an integer timestamp. Invalid options are rejected; unknown contents are not silently treated as valid backups.
+
+```ts
+import {reviewSqliteBackups} from './src/backup-retention-review.js';
+const report=await reviewSqliteBackups({
+  directory:'/absolute/private/backup-directory',retentionDays:30,now:Date.now()
+});
+console.log(report.expiredCandidates, report.invalid, report.unsafe);
+```
+
+The function lists regular `.sqlite` files only, with a maximum of 500 directory entries by default and configurable lower limit. Symlinks, unsafe permissions (files readable/writable by other users), invalid SQLite databases, missing `bot_state` records, unsupported schemas and future file timestamps never qualify as expirable validated backups.
+
+**Read-only verification:** `BotStore.verifySqliteBackupReadOnly` checks a 16-byte SQLite signature, readonly `PRAGMA quick_check` and current/recognized historic BotStore state decoding. It **never** calls `openSqlite()` (which can create tables), attempts repair or invokes backup/deletion APIs. Unrelated files, WAL sidecars and nested directories are skipped, not traversed. The inventory reports aggregate counts and per-file **opaque SHA-256 local references plus status**, never raw names, full paths, sender IDs, credentials or message payloads.
+
+A verified `EXPIRED_CANDIDATE` is only an **operator review candidate**, based on the filesystem modification date. File timestamps are not proof of creation date, validity of recovery policy, retention compliance, legal authority to erase, uniqueness or whether another copy exists elsewhere. A valid, old backup may still be the **only restorable recovery point** or contain unresolved audit/deletion records. No automatic expiration, backup pruning, offsite inventory, encryption, immutable archive, trusted cross-device storage or tested production restore is claimed.
+
+**Filesystem boundary:** Canonical directory and symlink/permission checks fail closed for ordinary local use; a privileged hostile process may still replace files between lstat and readonly open (TOCTOU). OS isolation/private directory ACLs and independent production backup lifecycle review are required before activation. This component remains **TESTED_MOCK**, not `ACTIVATED` and not live Telegram.
 
 ## B4 v0.5.7 — read-only validation before a SQLite backup is created
 
