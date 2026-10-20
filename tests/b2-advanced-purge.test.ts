@@ -195,10 +195,10 @@ test('B2-advanced: explicit schema 7 to 8 migration preserves all B4 receipts/ed
 
 test('B2-advanced: cannot delete metadata that expires while awaiting bot rights, even if gateway says yes',async()=>{
  const f=await fixture();try{
-  await f.observe(1,{sentAt:f.now()-47*HOUR});
+  await f.observe(1,{sentAt:f.now()-48*HOUR+1000});
   const job=await f.service().preview(OWNER,GROUP,{limit:1});
   await f.service().confirm(OWNER,job.id);
-  f.gateway.canDelete=async()=>{f.setNow(f.now()+2*HOUR);return true;};
+  f.gateway.canDelete=async()=>{f.setNow(f.now()+2000);return true;};
   assert.equal((await f.service().dispatchNext(job.id)).status,'BLOCKED');
   assert.equal(f.gateway.calls.length,0);
   const state=await f.store.snapshot();
