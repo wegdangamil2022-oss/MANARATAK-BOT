@@ -40,7 +40,7 @@ test('B3 owner groups: real listing, per-chat details, explicit restrictive acti
   assert.equal(isValidTelegramReplyKeyboard(list.plan?.replyMarkup),true);
   const detail=await f.app().handle(msg(2,'🏷️ محادثة · '+CHAT));
   assert.equal(detail.status,'APPLIED');assert.match(detail.plan?.text??'',/navigation/);
-  assert.match(detail.plan?.text??'',/محلية|محفوظة/);
+  assert.match(detail.plan?.text??'',/المحلي|المحفوظ/);
   assert.equal(isValidTelegramReplyKeyboard(detail.plan?.replyMarkup),true);
   const choices=buttons(detail);
   assert.ok(choices.some(x=>x.startsWith('🚫 مراجعة الإلغاء · '+CHAT+':')));
@@ -142,9 +142,9 @@ test('B3 group list paginates 13 saved groups without duplicate, and invalid pag
   assert.equal(buttons(b).filter(x=>x.startsWith('🏷️ محادثة · ')).length,3);
   assert.equal(isValidTelegramReplyKeyboard(b.plan?.replyMarkup),true);
   assert.equal((await f.app().handle(msg(62,'⬅️ السابق · o:g:0'))).status,'APPLIED');
-  for(const text of ['➡️ التالي · o:g:999','➡️ التالي · o:g:0',
-   '⬅️ السابق · o:g:1','➡️ التالي · o:g:01','➡️ التالي · o:g:-1']){
-   const r=await f.app().handle(msg(70+text.length,text));
+  for(const [i,text] of ['➡️ التالي · o:g:999','➡️ التالي · o:g:0',
+   '⬅️ السابق · o:g:1','➡️ التالي · o:g:01','➡️ التالي · o:g:-1'].entries()){
+   const r=await f.app().handle(msg(70+i,text));
    assert.equal(r.status,'DENIED');assert.equal(r.plan,undefined);
   }
  }finally{await f.close();}
