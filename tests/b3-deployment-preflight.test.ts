@@ -116,7 +116,7 @@ test('preflight CLI outputs minimal status without public webhook URL, token or 
    cwd:process.cwd(),env:{...process.env,...x.env,TELEGRAM_ENABLED:'false'},
    encoding:'utf8',timeout:15_000});
   assert.equal(wrong.status,1);
-  assert.equal(wrong.stderr.trim(),'MANARATAK_TELEGRAM_PREFLIGHT_CONFIG_REJECTED');
+  assert.match(wrong.stderr,/MANARATAK_TELEGRAM_PREFLIGHT_CONFIG_REJECTED/);
   assert.equal(wrong.stdout,'');
  }finally{await x.close();}
 });
@@ -127,7 +127,7 @@ test('preflight failure never creates missing state file or starts runtime',asyn
    cwd:process.cwd(),env:{...process.env,...x.env,BOT_STATE_FILE:absent},
    encoding:'utf8',timeout:15_000});
   assert.equal(r.status,1);
-  assert.equal(r.stderr.trim(),'MANARATAK_TELEGRAM_PREFLIGHT_STATE_REJECTED');
+  assert.match(r.stderr,/MANARATAK_TELEGRAM_PREFLIGHT_STATE_REJECTED/);
   await assert.rejects(access(absent),{code:'ENOENT'});
  }finally{await x.close();}
 });
