@@ -108,7 +108,16 @@ export async function stopLiveTelegramServer(server:Server,graceMs=15_000):
  if(!drained){
   if(!server.listening)return 'STOPPED';
   drained=new Promise<void>((resolve,reject)=>{
-   server.close(error=>error?reject(Error('LIVE_TELEGRAM_DRAIN_FAILED')):resolve());
+   // Closing idle connections once is insufficient when a pending request
+   // completes later and its keep-alive socket becomes idle after that call.
+   // Repeat idle-only closing during the drain, never close active requests.
+   const reapIdle=setInterval(()=>server.closeIdleConnections(),250);
+   reapIdle.unref();
+   server.close(error=>{
+    clearInterval(reapIdle);
+    if(error)reject(Error('LIVE_TELEGRAM_DRAIN_FAILED'));
+    else resolve();
+   });
    server.closeIdleConnections();
   });
   drainPromises.set(server,drained);
