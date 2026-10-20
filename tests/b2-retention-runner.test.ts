@@ -1,8 +1,8 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
-import {mkdtemp,rm,writeFile,readFile,symlink,chmod} from 'node:fs/promises';
+import {mkdtemp,rm,writeFile,readFile,symlink,chmod,lstat} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
-import {join,resolve} from 'node:path';
+import {join,resolve,basename} from 'node:path';
 import {execFile} from 'node:child_process';
 import {promisify} from 'node:util';
 import {BotStore} from '../src/store.js';
@@ -113,4 +113,39 @@ test('retention local runner: malicious unknown option never prints or stores th
   assert.equal(String(proc.stdout).includes(secret),false);
   assert.equal(JSON.stringify(await f.store.snapshot()).includes(secret),false);
  }finally{await f.close()}
+});
+
+test('retention runner v0.5.6: pre-existing empty SQLite file must never be silently initialized',async()=>{
+ const f=await fixture('sqlite');try{
+  await writeFile(f.file,Buffer.alloc(0));
+  await chmod(f.file,0o600);
+  assert.equal((await lstat(f.file)).size,0);
+  await assert.rejects(runRetentionReviewOnce({statePath:f.file,engine:'sqlite'}),/RETENTION_STATE_FILE_INVALID/);
+  assert.equal((await lstat(f.file)).size,0);
+ }finally{await f.close()}
+});
+test('retention runner v0.5.6: fake SQLite signature fails closed before BotStore can mutate it',async()=>{
+ const f=await fixture('sqlite');try{
+  await writeFile(f.file,'not-a-real-sqlite-database');
+  await chmod(f.file,0o600);
+  const before=await readFile(f.file);
+  await assert.rejects(runRetentionReviewOnce({statePath:f.file,engine:'sqlite'}),/RETENTION_STATE_FILE_INVALID/);
+  assert.deepEqual(await readFile(f.file),before);
+ }finally{await f.close()}
+});
+test('retention runner v0.5.6: symlinks in ancestor directories are refused, not just the filename',async()=>{
+ const f=await fixture('json');try{
+  const alias=join(f.dir,'another-directory');
+  await symlink(f.dir,alias,'dir');
+  const path=join(alias,basename(f.file));
+  await assert.rejects(runRetentionReviewOnce({statePath:path,engine:'json'}),/RETENTION_STATE_FILE_NOT_REGULAR/);
+  assert.equal((await f.store.snapshot()).chats.length,1);
+ }finally{await f.close()}
+});
+test('retention runner v0.5.6: caller must provide canonical path, not alias with dot segments',()=>{
+ const path=resolve('/tmp','manaratak-safe.state');
+ const nonCanonical='/tmp/../tmp/manaratak-safe.state';
+ assert.equal(resolve(nonCanonical),path);
+ assert.throws(()=>parseRetentionRunnerArgs(['--once','--state',nonCanonical,'--engine','sqlite']),
+   /INVALID_RETENTION_RUNNER_ARGS/);
 });
