@@ -62,7 +62,7 @@ export class TelegramBotApiTextSender implements TelegramReplySender {
  }
 }
 
-export type ReplyDispatchResult={status:'NO_REPLY'|'CONFIRMED'|'SENT'|'SENDING'|'FAILED_CONFIRMED'|'UNKNOWN_OUTCOME'};
+export type ReplyDispatchResult={status:'NO_REPLY'|'CONFIRMED'|'SENT'|'SENDING'|'FAILED_CONFIRMED'|'UNKNOWN_OUTCOME'|'PAUSED'};
 const knownStatus=(x:unknown):x is TelegramReplyJob['status']=>[
  'QUEUED','SENDING','SENT','FAILED_CONFIRMED','UNKNOWN_OUTCOME'
 ].includes(x as string);
@@ -100,16 +100,25 @@ export function validTelegramReplyJob(v:unknown):v is TelegramReplyJob{
  */
 export class TelegramReplyDispatcher {
  constructor(private readonly store:BotStore,private readonly policy:Policy,
-  private readonly sender:TelegramReplySender,private readonly clock:()=>number=Date.now){}
+  private readonly sender:TelegramReplySender,private readonly clock:()=>number=Date.now,
+  private readonly safetyGate?:()=>Promise<boolean>){}
  async dispatch(updateKey:string):Promise<ReplyDispatchResult>{
   if(!/^b3-webhook:[a-zA-Z0-9_-]{1,80}:\d+$/.test(updateKey))
    throw new Error('INVALID_REPLY_KEY');
-  const claim=await this.store.transaction(s=>{
+  const claim=await this.store.transaction(async s=>{
    const job=s.telegramReplyJobs?.find(j=>j.updateKey===updateKey);
    if(!job)return {status:'NO_REPLY' as const};
    if(!validTelegramReplyJob(job))throw new Error('INVALID_REPLY_JOB');
    if(job.status==='SENDING')return {status:'UNKNOWN_OUTCOME' as const};
    if(job.status!=='QUEUED')return {status:job.status as 'SENT'|'FAILED_CONFIRMED'|'UNKNOWN_OUTCOME'};
+   // Fail-closed emergency switch is checked INSIDE the exclusive queue
+   // claim, before any started-attempt receipt is persisted or Bot API call.
+   // A fresh RUN check is necessary even after the webhook admitted a request.
+   if(this.safetyGate){
+    let allowed=false;
+    try{allowed=await this.safetyGate();}catch{/* fail closed */}
+    if(!allowed)return {status:'PAUSED' as const};
+   }
    const plan=structuredClone(job.plan!);
    if(plan.chatId.startsWith('-')&&!this.policy.canUseChat(s,plan.chatId,'navigation')){
     job.status='FAILED_CONFIRMED';
