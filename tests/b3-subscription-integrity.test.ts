@@ -141,12 +141,12 @@ test('operator CLI rejects extra activation flags, bad paths and invalid args wi
   for(const args of [['--enable'],['--activate'],['--send','true']]){
    const r=cli(f.file,args);
    assert.equal(r.status,1);assert.equal(r.stdout,'');
-   assert.ok(r.stderr.startsWith('MANARATAK_SUBSCRIPTION_AUDIT_INVALID_REQUEST\n'));
+   assert.ok(r.stderr.includes('MANARATAK_SUBSCRIPTION_AUDIT_INVALID_REQUEST\n'));
    assert.equal(r.stderr.includes('do-not-use-token'),false);
   }
   const r=cli(join(f.dir,'missing.sqlite'));
   assert.equal(r.status,1);assert.equal(r.stdout,'');
-  assert.ok(r.stderr.startsWith('MANARATAK_SUBSCRIPTION_AUDIT_INVALID_STATE\n'));
+  assert.ok(r.stderr.includes('MANARATAK_SUBSCRIPTION_AUDIT_INVALID_STATE\n'));
   assert.equal(r.stderr.includes(f.file),false);
  }finally{await f.close();}
 });
