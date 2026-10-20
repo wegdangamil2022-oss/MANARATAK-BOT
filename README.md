@@ -1,6 +1,6 @@
 # بوت منارتك — MANARATAK BOT
 
-**B0/B1 + B2-Core + B3 + B3 privacy-safe Telegram reply outbox and opt-in authenticated owner review and deployment preflight and ingress hardening and outbox monitoring (v0.6.7). Transport implemented but OFF by default — no live deployment verified.**
+**B0/B1 + B2-Core + B3 + B3 privacy-safe Telegram reply outbox and opt-in authenticated owner review and deployment preflight and ingress hardening and outbox monitoring and emergency STOP (v0.6.8). Transport implemented but OFF by default — no live deployment verified.**
 
 An independent TypeScript/Node.js 22 project based on `docs/MANARATAK_BOT_MASTER_v1.2.1_AR.md` and `docs/START_HERE_MANARATAK_BOT_v1.2.1_AR.md`. B0/B1 supply the secure baseline; B2-Core adds individual moderation and subscription policies; B3 adds the first locally tested education content flow.
 
@@ -10,6 +10,18 @@ An independent TypeScript/Node.js 22 project based on `docs/MANARATAK_BOT_MASTER
 
 
 
+
+## B3 v0.6.8 — durable operator emergency STOP for Telegram (STILL OFF)
+
+A manually enabled live server now requires an **additional independently provisioned local safety file**:
+
+- `TELEGRAM_SAFETY_FILE=/absolute/private/manaratak/emergency.flag` must name an existing canonical private regular file, with permissions 0600 or stricter, owned/protected by the trusted host operator and not the same path as the BotStore SQLite database.
+- Valid file bytes are **exactly** `STOP\n` or `RUN\n` (ASCII, trailing newline). Provision `STOP\n` first, then carefully validate monitoring and deployment outside this repository before considering `RUN\n`. Use an atomic same-directory rename and retain strict permissions to change the switch, not a user-facing HTTP/TG command.
+- The local webhook verifies this file **after Telegram secret validation but before parsing or claiming a new update**, returning HTTP 503 if paused or untrusted. The dispatcher separately verifies it inside the exclusive QUEUED-to-SENDING claim so changing the file during a request can stop a *not-yet-claimed* attempt.
+- When STOP is active, new updates are **not recorded**. Already-QUEUED replies remain unsent and must not be automatically replayed when RUN resumes. A send already submitted to Telegram cannot be atomically cancelled by the switch; unknown delivery remains quarantined and may require reviewed evidence.
+- When the file is absent, world-accessible, a symlink, corrupt or unreadable, the server **fails closed**. Startup and `telegram:preflight` require a valid file. The preflight returns `MANARATAK_TELEGRAM_PREFLIGHT_PAUSED` for STOP and `...PREFLIGHT_OK` for RUN; both mean only that local prerequisites passed, **not** successful public TLS, Telegram webhook registration, live delivery or production launch.
+
+This project does **not** install the safety file, a service account, rate-limited HTTPS reverse proxy, live Telegram credentials, or a cron/systemd worker. Filesystem checks do not solve privileged-host compromise, race conditions between checks and writes, or in-flight Bot API delivery uncertainty.
 
 ## B3 v0.6.7 — private SQLite outbox monitor (OFFLINE; NO TELEGRAM NETWORK)
 
