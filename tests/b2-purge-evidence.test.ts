@@ -45,7 +45,7 @@ for(const engine of ['json','sqlite'] as const){
    assert.equal(result.reconciliation?.evidenceId,p.evidenceId);
    assert.equal(result.reconciliation?.reviewedBy,OWNER);
    assert.equal((await f.service().dispatchNext(j.id)).status,'ACKNOWLEDGED');
-   assert.deepEqual(f.gateway.calls.map(x=>x.messageId),[i.messageId,1]);
+   assert.deepEqual(f.gateway.calls.map(x=>x.messageId),[i.messageId,2]);
    const report=await f.service().reviewProgress(OWNER,j.id);
    assert.equal(report.requestAccepted,2);
    assert.equal(report.deletedConfirmed,0); // mocked API acknowledgement never proves physical deletion
