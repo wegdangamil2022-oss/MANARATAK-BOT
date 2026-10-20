@@ -78,6 +78,12 @@ export interface PurgeJob {
   status:'PREVIEW'|'READY'|'PAUSED'|'CANCELLED'|'COMPLETED';
   confirmedBy?:string; confirmedAt?:number; rateLimitedUntil?:number; items:PurgeItem[];
 }
+/** Durable Telegram text reply intent; no automatic retry after unknown sends. */
+export interface TelegramReplyJob {
+ updateKey:string;plan:{chatId:string;parseMode:'HTML';text:string};
+ status:'QUEUED'|'SENDING'|'SENT'|'FAILED_CONFIRMED'|'UNKNOWN_OUTCOME';
+ attemptId?:string;startedAt?:number;messageId?:number;
+}
 /** Explicit owner-enabled retention REVIEW cadence. Tick only stores a preview, never redacts or deletes. */
 export interface PurgeRetentionReviewControl {
  enabled:boolean; cadenceMs:number; version:number; nextCheckAt:number;
@@ -109,6 +115,7 @@ export interface BotState {
   rollingMessageMeta: RollingMessageMeta[];
   purgeJobs: PurgeJob[];
   purgeRetentionReview?: PurgeRetentionReviewControl;
+  telegramReplyJobs?: TelegramReplyJob[];
 }
 const empty = (): BotState => ({
   schemaVersion: 8, chats: [], grants: [], privateAI: 'OFF',
@@ -155,6 +162,7 @@ export class BotStore {
     }
     if (previous.schemaVersion !== 8 ||
       !Array.isArray(previous.rollingMessageMeta) || !Array.isArray(previous.purgeJobs) ||
+      (previous.telegramReplyJobs!==undefined&&!Array.isArray(previous.telegramReplyJobs)) ||
       !Array.isArray(previous.historicalPublications) || !Array.isArray(previous.campaigns) ||
       !Array.isArray(previous.deliveries) || !Array.isArray(previous.faqEntries) ||
       !Array.isArray(previous.resourceLinks) || !Array.isArray(previous.moderationReasons) ||
@@ -408,13 +416,18 @@ export class BotStore {
   async cancelIntent(id: string): Promise<void> {
     await this.transaction(s => { const op = s.operations.find(x => x.id === id); if (!op || op.status !== 'INTENT') throw new Error('Cannot cancel started operation'); op.status = 'CANCELLED'; });
   }
-  async finish(key: string, decision: AuditRecord): Promise<void> {
+  async finish(key: string, decision: AuditRecord, reply?: TelegramReplyJob['plan']): Promise<void> {
     await this.transaction(s => {
       const update = s.updates.find(x => x.key === key);
       if (!update || update.status !== 'CLAIMED') throw new Error('Update not claimed');
       const statuses = s.operations.filter(o => o.updateKey === key).map(o => o.status);
       update.status = statuses.includes('UNKNOWN_OUTCOME') ? 'UNKNOWN' : 'DONE';
-      if (!s.audit.some(a => a.updateKey === key)) s.audit.push(decision); // no message bodies, tokens or URLs
+      if (!s.audit.some(a => a.updateKey === key)) s.audit.push(decision); // no tokens or raw inbound messages
+      if(reply && update.status==='DONE') {
+        s.telegramReplyJobs??=[];
+        if(!s.telegramReplyJobs.some(j=>j.updateKey===key))
+         s.telegramReplyJobs.push({updateKey:key,plan:structuredClone(reply),status:'QUEUED'});
+      }
     });
   }
 }

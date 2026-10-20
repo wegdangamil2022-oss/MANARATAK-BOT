@@ -7,6 +7,7 @@ import { EducationAdminFacade, type VerifiedAdminContext } from './education-adm
 import { ApprovedAnswerService, ResourceLinkService, type MembershipPort } from './education-interactions.js';
 import type { ImportFormat } from './ingestion.js';
 import type { SubscriptionGate } from './subscription.js';
+import type { TelegramReplyDispatcher } from './telegram-replies.js';
 
 /** Inbound-only boundary. A test double may supply bytes; there is intentionally no live HTTP implementation. */
 export interface TelegramDocumentPort {
@@ -27,7 +28,7 @@ interface IncomingDocument {
 }
 /** Offline B3 application adapter: creates plans, NEVER sends a message or connects to Telegram. */
 export interface TelegramReplyPlan { chatId: string; parseMode: 'HTML'; text: string; }
-export interface TelegramResult { status: 'APPLIED' | 'DUPLICATE' | 'DENIED' | 'IGNORED' | 'UNKNOWN'; reason: string; plan?: TelegramReplyPlan; }
+export interface TelegramResult { status: 'APPLIED' | 'DUPLICATE' | 'DENIED' | 'IGNORED' | 'UNKNOWN'; reason: string; plan?: TelegramReplyPlan; deliveryKey?: string; }
 export interface TelegramApplicationOptions {
   store: BotStore; policy: Policy; education: EducationService; admin: EducationAdminFacade;
   faq: ApprovedAnswerService; links: ResourceLinkService; membership: MembershipPort;
@@ -156,6 +157,15 @@ export class TelegramUpdateApplication {
       }
     }
     const result=(message:string):TelegramResult=>({status:'APPLIED',reason:'RESPONSE_PLANNED_ONLY',plan:this.plan(chatId,message)});
+    if(kind==='private'&&(cmd==='/start'||cmd==='/help')){
+      return result('<b>أهلًا بك في بوت منارتك 🎓</b>\n'
+       +'يمكنك استكشاف المنح والجامعات والموارد التعليمية المعتمدة.\n'
+       +'<b>الأوامر:</b>\n'
+       +'/categories private — تصفح أقسام المحتوى المتاح\n'
+       +'/resources private grants — تصفح الموارد المعتمدة في قسم المنح\n'
+       +'/help — عرض المساعدة\n'
+       +'بعض الأقسام والمجموعات تتطلب موافقة الإدارة والتحقق من العضوية.');
+    }
     if(cmd==='/admin'&&kind==='private'){
       const scope=words[1];if(!scope||!isScope(scope))return {status:'DENIED',reason:'INVALID_SCOPE'};
       const p=await this.opts.admin.panel(adminCtx,scope);
@@ -225,8 +235,10 @@ export class TelegramUpdateApplication {
     let handled:{status:TelegramResult['status'];reason:string;plan?:TelegramReplyPlan};
     try{handled=await this.process(event);}catch(err){handled={status:'DENIED',reason:safeError(err)};}
     const audit:AuditRecord={updateKey:key,decision:handled.status==='APPLIED'?'ALLOW':handled.status==='DENIED'?'DENY':'NOOP',reason:handled.reason,policyVersion:0,at:this.clock()};
-    await this.opts.store.finish(key,audit);
-    return handled;
+    // Commit the decision and outbound reply intent in one durable transaction.
+    // No external call occurs before the outbox row exists.
+    await this.opts.store.finish(key,audit,handled.plan);
+    return handled.plan?{...handled,deliveryKey:key}:handled;
   }
 }
 
@@ -244,7 +256,8 @@ function respond(res:ServerResponse,status:number,body:Record<string,unknown>):v
   res.end(JSON.stringify(body));
 }
 /** Verifies Telegram's shared webhook secret and HTTP boundaries. Does not send any outbound messages. */
-export function telegramWebhookListener(app:TelegramUpdateApplication,secretToken:string):RequestListener {
+export function telegramWebhookListener(app:TelegramUpdateApplication,secretToken:string,
+ outbound?:TelegramReplyDispatcher):RequestListener {
   if(!/^[A-Za-z0-9_-]{32,256}$/.test(secretToken))throw Error('INVALID_WEBHOOK_SECRET');
   return (req,res)=>{
     void (async()=>{
@@ -259,7 +272,11 @@ export function telegramWebhookListener(app:TelegramUpdateApplication,secretToke
       let payload:unknown;
       try{payload=JSON.parse(Buffer.concat(chunks).toString('utf8'));}catch{respond(res,400,{ok:false});return;}
       const result=await app.handle(payload);
-      // Plans stay in the local application layer: no Telegram API calls and no webhook-method responses.
+      // Live delivery is explicitly opt-in via a separate injected dispatcher.
+      // Ambiguous outcomes remain blocked in the durable outbox: never retry
+      // automatically, even if Telegram repeats the inbound webhook request.
+      if(outbound&&result.plan&&result.deliveryKey)await outbound.dispatch(result.deliveryKey);
+      // Keep the reply body minimal: no user text, provider errors or Bot API secret.
       respond(res,result.status==='DENIED'&&result.reason==='INVALID_UPDATE_ID'?422:200,{ok:true,status:result.status});
     })().catch(()=>{if(!res.headersSent)respond(res,503,{ok:false});else res.end();});
   };

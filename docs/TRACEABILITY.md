@@ -106,3 +106,6 @@
 
 | B4 v0.5.9 S12-31 private restore drill and state round-trip validation | backup-restore-drill.ts / tests/b4-isolated-restore-drill.test.ts | TESTED_MOCK | 12 TDD tests, isolated SQLite scratch, full BotState equality, unknown purge/publication attempt preservation, concurrent files, private path/ACL checks, scratch/WAL/SHM cleanup |
 | B4 v0.5.9 live disaster recovery / S12-32 offsite retention | — | PLANNED / BLOCKED_LIVE | No restoration into production, network Telegram replay, backup lifecycle deletion, offsite RPO/RTO SLA or filesystem-race adversarial proof |
+
+| B3 v0.6.0 first live Telegram reply boundary | telegram-replies.ts / telegram-transport.ts / telegram-live-server.ts / tests/telegram-reply-delivery.test.ts | IMPLEMENTED_OFF_BY_DEFAULT | 17 mocked end-to-end tests, durable intent and fencing, real POST shape and webhook adapter with explicit enable gates |
+| B3 v0.6.0 production Telegram webhook and secure state operations | — | BLOCKED_LIVE | No public deployment or real Bot API acceptance; group membership check, runtime secret provisioning, reply content retention and sent-attempt reconciliation remain pending |
