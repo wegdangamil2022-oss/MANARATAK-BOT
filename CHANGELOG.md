@@ -1,3 +1,12 @@
+## 0.6.4 — 2026-10-20 — Opt-in authenticated local owner reply review interface (NOT DEPLOYED)
+
+- Extends the existing `telegramAdminWebListener` with optional `OwnerReplyReviewWebOptions`; the two reply routes do not exist unless the caller explicitly injects a private BotStore and owner Policy. The live Telegram webhook server does not mount or activate them.
+- Signed Telegram Mini App HMAC identity is verified before any owner-only action, with auth_date freshness, duplicate-init-header detection, fixed POST paths, no CORS/session cookies, no-store JSON responses and fail-closed error codes. Caller-supplied actorId, timestamp, stale threshold, notes, links and extra fields are rejected.
+- `/admin/replies/summary` returns only aggregate counts from the preexisting audited outbox; `/admin/replies/review` records only one immutable owner acknowledgement for an exact attempt. The server supplies the clock and the fixed 15-minute SENDING staleness threshold.
+- Explicit 2 KiB maximum body, strict UTF-8 JSON, fixed content type, 401/403/409/422 for specific classes without exposing private message content, identifiers or errors. Contradictory concurrent owner reviews cannot both commit.
+- New JSON and SQLite local HTTP integration tests with fake HMAC signatures, role forgery, expired credentials, concurrency, unchanged payloads/status and replay protection. No Telegram network requests, production host, HTTPS proxy, UI publishing, actual external receipt verifier, or student activation.
+- Note: HMAC verification authenticates the Telegram Mini App user but is not proof of any Telegram message delivery. This interface is still a localhost test adapter and remains OFF by default.
+
 ## 0.6.3 — 2026-10-20 — Owner-only immutable Telegram send review (NOT DEPLOYED)
 
 - Added internal recordTelegramReplyManualReview for trusted, authenticated owners. Stores only bounded decisions (ACKNOWLEDGED_UNRESOLVED or ESCALATED), reviewer ID, review time and the exact attempt ID.
