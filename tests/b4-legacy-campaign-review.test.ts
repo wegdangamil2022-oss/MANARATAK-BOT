@@ -124,7 +124,7 @@ test('B4 legacy integration: v6 to v7 retains existing B4 delivery and B3 record
   const historic=await f.store.snapshot();
   await writeFile(f.file,JSON.stringify({...historic,schemaVersion:6}));
   const migrated=await new BotStore(f.file).snapshot();
-  assert.equal(migrated.schemaVersion,7);
+  assert.equal(migrated.schemaVersion,8);
   assert.deepEqual(migrated.campaigns,historic.campaigns);
   assert.deepEqual(migrated.deliveries,historic.deliveries);
   assert.deepEqual(migrated.educationResources,historic.educationResources);

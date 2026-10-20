@@ -34,7 +34,7 @@ test('B4 sqlite: initializes a single canonical state with SQLite header and sha
   const raw=await readFile(f.file);
   assert.equal(raw.subarray(0,15).toString(),'SQLite format 3');
   const snapshot=await new BotStore(f.file,{engine:'sqlite'}).snapshot();
-  assert.equal(snapshot.schemaVersion,7);
+  assert.equal(snapshot.schemaVersion,8);
   assert.equal(snapshot.educationResources.length,2);
   assert.deepEqual(snapshot.deliveries,[]);
  }finally{await f.close()}
@@ -180,7 +180,7 @@ test('B4 sqlite: older B4 schema v5 is upgraded during explicit import without e
   await writeFile(legacy,JSON.stringify(data));
   await BotStore.importJsonToSqlite(legacy,target);
   const after=await new BotStore(target,{engine:'sqlite'}).snapshot();
-  assert.equal(after.schemaVersion,7);
+  assert.equal(after.schemaVersion,8);
   assert.deepEqual(after.deliveries,before.deliveries);
   assert.deepEqual(after.campaigns,before.campaigns);
   assert.deepEqual(after.educationResources,before.educationResources);
