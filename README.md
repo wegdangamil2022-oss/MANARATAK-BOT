@@ -1,6 +1,6 @@
 # بوت منارتك — MANARATAK BOT
 
-**B0/B1 + B2-Core + B3 + B4 read-only backup retention review (v0.5.8). Offline/test-only — no live Telegram bot.**
+**B0/B1 + B2-Core + B3 + B4 isolated SQLite restore-drill validation (v0.5.9). Offline/test-only — no live Telegram bot.**
 
 An independent TypeScript/Node.js 22 project based on `docs/MANARATAK_BOT_MASTER_v1.2.1_AR.md` and `docs/START_HERE_MANARATAK_BOT_v1.2.1_AR.md`. B0/B1 supply the secure baseline; B2-Core adds individual moderation and subscription policies; B3 adds the first locally tested education content flow.
 
@@ -10,6 +10,27 @@ An independent TypeScript/Node.js 22 project based on `docs/MANARATAK_BOT_MASTER
 
 
 
+
+## B4 v0.5.9 — isolated backup restore rehearsal (OFFLINE, TESTED_MOCK)
+
+The new `runSqliteRestoreDrill({backupFile,sandboxDir})` explicitly tests whether an existing verified SQLite backup can be restored into a **new, private temporary database in a pre-existing isolated directory**. It does not replace an application database, restore permissions to a live Telegram bot, modify published messages, or replay queued, UNKNOWN or failed moderation/publication attempts. No timer or production API is provided.
+
+```ts
+import {runSqliteRestoreDrill} from './src/backup-restore-drill.js';
+const report=await runSqliteRestoreDrill({
+ backupFile:'/absolute/private/backups/verified.sqlite',
+ sandboxDir:'/absolute/private/restore-sandbox'
+});
+console.log(report.status, report.counts); // VERIFIED and aggregate receipt counts
+```
+
+- The backup and sandbox must be canonical absolute paths without symlinks or redirected ancestor directories. Both must already exist with private `0600` file / `0700` directory permissions or tighter. The sandbox cannot be the backup file's own directory. The method does not create missing directories.
+- Calls `BotStore.verifySqliteBackupReadOnly`, opens the backup with `DatabaseSync(...,{readOnly:true})`, checks SQLite integrity, and reads the initialized bot state. No missing or invalid backup is silently treated as an empty new database.
+- Generates a unique and exclusive `0600` scratch path **only inside the designated sandbox**, copies with SQLite's point-in-time `backup` API, verifies the restored SQLite schema and integrity, and compares **all fields in the original vs recovered JSON state**, not just table counts. This includes owner chat grants, publication receipts/history, metadata, retention controls and purge jobs and their immutable `UNKNOWN_OUTCOME` attempt IDs.
+- Scratch SQLite database and its possible `-wal` / `-shm` sidecars are removed in a `finally` path **only for the freshly reserved random basename**. Existing sandbox files and the backup source are untouched. Two concurrent drills receive separate filenames.
+- Returns only `VERIFIED` and aggregate counts of chats, grants, delivery/history rows, purge jobs and UNKNOWN publication/deletion items. No owner IDs, message IDs, local paths, reviewer notes, evidence IDs, or hidden private content leave the function. This is a technical recovery test, not a proof that the full production Telegram system or offsite data are recoverable.
+
+**Explicit boundary:** This is not an interactive production restore, and does not install scheduling, backup erasure, retention enforcement or network access. A trusted host operator must ensure actual sandbox isolation, exclusive filesystem ownership and path-safe deployment; symlink race (TOCTOU), disk errors, external WAL processes, ransomware and disaster recovery exercises on live infrastructure require separate independent controls. The tests operate on a local mock SQLite state only.
 
 ## B4 v0.5.8 — read-only SQLite backup inventory and expiration review
 

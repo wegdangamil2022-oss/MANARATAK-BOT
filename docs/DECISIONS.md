@@ -195,3 +195,10 @@
 - The existing `BotStore` decoder remains the authority on compatible schemas; the new `BotStore.verifySqliteBackupReadOnly` opens SQLite in readonly mode and validates a proper initialized bot state without creating tables. It does not repair or modify backups.
 - A backup report must not disclose potentially user-identifying file names, local absolute paths, messages or raw reviewer notes. It returns local SHA-256 name references and aggregate status counters to aid a trusted operator. Even hashed names might be guessable; keep audit output private.
 - No automatic deletion, backup rotation, scheduler, new Telegram gateway, restore guarantee, or offsite data-subject erasure is activated. mtime is not a legally sufficient retention clock, and all filesystem checks remain vulnerable to host-level replacement races without external OS controls.
+
+## B4 v0.5.9 — isolated restore must not become a production replay (20 October 2026)
+
+- Introduce a narrow `runSqliteRestoreDrill` interface that takes only a verified private SQLite backup path and a separate, pre-existing private sandbox directory. Never expose a general-purpose `restoreTo` pathname because it could overwrite the bot's production state. No Telegram adapter or outbound action belongs in this workflow.
+- Use SQLite online point-in-time backup to an exclusive random temporary scratch file, validate readonly backup/scratch integrity and schema, then compare **all** persisted state fields (not just counts). Preserve owner approvals/grants, publication/historical receipts, UNKNOWN purge/publication attempts and review metadata exactly; failure should not silently repair them.
+- On verification completion or failure remove the newly reserved scratch file AND its SQLite WAL/SHM sidecars, never delete any preexisting backup, live state or sandbox marker. Source and target must have canonical private paths and be under trusted filesystem ACLs; TOCTOU races remain outside mock-stage guarantees.
+- This drill is a local code-level recovery rehearsal, not an external disaster-recovery RTO/RPO test, legal retention validation, offsite restores or a proof of Telegram production readiness.
