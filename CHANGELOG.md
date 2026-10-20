@@ -1,3 +1,12 @@
+## 0.5.4 — 2026-10-20 — Owner opt-in review checkpoints (offline, no automatic retention)
+
+- Added backward-compatible optional `PurgeRetentionReviewControl` to existing `BotStore` v8. No schema migration or separate database; legacy saved states default disabled.
+- Owner-only `configureRetentionReview` and `getRetentionReview`: bounded 1–30 day cadence, strict setting keys/types, durable next check and version, clearing old aggregate notice on reconfiguration or disable.
+- Explicit `tickRetentionReview` computes only a privacy-minimized `PurgeRetentionPreview` when due, recording the next check and fixed-code audit without redacting data or reaching Telegram; disabled/not-due/reversed-clock invocations make no semantic state changes.
+- SQLite-independent and concurrent JSON workers atomically claim one due tick; interruptions/long outages do not flood missed checks. A malformed saved control record is rejected rather than causing a background deletion or silent bypass.
+- Review notices carry only counts/digest, expire in 10 minutes, and do not relax the separate owner approval and fingerprint checks of `compactRetention`.
+- Added 18 mock regression tests across JSON and SQLite (338/338 total). No real job scheduler, external notification, production backup deletion, or live Telegram action.
+
 ## 0.5.3 — 2026-10-20 — Offline owner-reviewed retention with immutable purge safety tombstones
 
 - Added read-only `previewRetention` and owner-confirmed `compactRetention` with 10-minute, state-digest-bound dry-run and atomic stale-plan rejection across JSON/SQLite.

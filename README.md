@@ -1,6 +1,6 @@
 # بوت منارتك — MANARATAK BOT
 
-**B0/B1 + B2-Core + B3 + B2-Advanced privacy retention safeguards (v0.5.3). Offline/test-only — no live Telegram bot.**
+**B0/B1 + B2-Core + B3 + B2-Advanced opt-in retention review cadence (v0.5.4). Offline/test-only — no live Telegram bot.**
 
 An independent TypeScript/Node.js 22 project based on `docs/MANARATAK_BOT_MASTER_v1.2.1_AR.md` and `docs/START_HERE_MANARATAK_BOT_v1.2.1_AR.md`. B0/B1 supply the secure baseline; B2-Core adds individual moderation and subscription policies; B3 adds the first locally tested education content flow.
 
@@ -10,6 +10,28 @@ An independent TypeScript/Node.js 22 project based on `docs/MANARATAK_BOT_MASTER
 
 
 
+
+## B2-Advanced v0.5.4 — owner opt-in retention review cadence, **without automatic deletion**
+
+The reviewed purge data-retention workflow now has a durable **review reminder/checkpoint** stored in the same mock `BotStore` state; no Telegram API action and **no external cron/scheduler is wired up**. An external trusted operator must explicitly call `tickRetentionReview()` to perform a check. This tick NEVER performs a purge, compaction, file deletion, database backup deletion, or Telegram outbound action.
+
+- `configureRetentionReview(ownerId,{enabled:true,cadenceMs:86_400_000})` opts in to a cadence from **1 day to 30 days**. Disabled by default. Only the configured owner can enable/disable or call `getRetentionReview(ownerId)`. Invalid, unexpected, or corrupt schedule fields cause fail-closed errors. Disabling clears the old notice.
+- `tickRetentionReview()` returns `DISABLED`, `NOT_DUE`, `CLOCK_ROLLBACK`, or `READY`. Only a `READY` tick writes an aggregate `PurgeRetentionPreview` and advances its durable `nextCheckAt`. It uses the existing privacy-limited `retentionCandidates` evaluator, so messages still use the **48h from sentAt** window and fully terminal jobs use their **30d since last action** retention policy.
+- The summary includes only counts, a SHA-256 candidate digest, and ten-minute expiration. No message text, sender ID, user notes or proof identifiers are returned or stored in the notice. The database's existing raw content, active UNKNOWN attempt, irreversible safety tombstone and approval boundaries stay unchanged.
+- Ticks run in one JSON or SQLite transaction: two instances cannot both produce the same due notice. Late external invocation catches up once (does not flood accumulated notices); a backward-moving clock is rejected for an already checked schedule; optional stored configuration is backward-compatible with existing **schema v8**.
+- **Separate approval is still mandatory**: an authorized owner must explicitly call `compactRetention(ownerId, freshPreview)`. If a stored notice is more than ten minutes old or its state changed, the existing validation rejects it; the scheduler can never bypass this rule.
+
+```ts
+await purge.configureRetentionReview(ownerId, { enabled: true, cadenceMs: 86_400_000 });
+// A future trusted caller may invoke this; the bot itself does not schedule it:
+const {status,notice} = await purge.tickRetentionReview();
+if (status === 'READY') {
+  // Present the counts to the owner; do not compact or delete automatically.
+  console.log(notice?.expiredObserved, notice?.eligibleJobs);
+}
+```
+
+**Deployment boundaries:** This is **TESTED_MOCK** only. A real external timer, secure owner notification delivery, production ACLs and backup TTL/erasure policies remain to be designed and explicitly enabled. No proof of end-to-end retention or any live Telegram integration is implied. Tests cover JSON and SQLite restarts, owner-only config, due/idempotent cross-worker ticks, long outages, cooldown, clock reversal, malformed configs and expiration of review notices.
 
 ## B2-Advanced v0.5.3 — owner-reviewed privacy retention and evidence tombstones (offline)
 
