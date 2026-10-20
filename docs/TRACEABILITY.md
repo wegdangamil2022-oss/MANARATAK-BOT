@@ -109,3 +109,6 @@
 
 | B3 v0.6.0 first live Telegram reply boundary | telegram-replies.ts / telegram-transport.ts / telegram-live-server.ts / tests/telegram-reply-delivery.test.ts | IMPLEMENTED_OFF_BY_DEFAULT | 17 mocked end-to-end tests, durable intent and fencing, real POST shape and webhook adapter with explicit enable gates |
 | B3 v0.6.0 production Telegram webhook and secure state operations | — | BLOCKED_LIVE | No public deployment or real Bot API acceptance; group membership check, runtime secret provisioning, reply content retention and sent-attempt reconciliation remain pending |
+
+| B3 v0.6.1 live Telegram getChatMember / guarded private group browse | telegram-membership.ts / telegram-live-server.ts / tests/telegram-live-membership.test.ts | IMPLEMENTED_OFF_BY_DEFAULT | 8 mock HTTP/localhost E2E tests, bot-admin preflight, identity and restricted-status checks, Telegram membership and subscription read-only adapter |
+| B3 v0.6.1 real membership provisioning and live acceptance | — | BLOCKED_LIVE | No real bot token, granted admin rights, public HTTPS service or live Telegram E2E proof; no live automatic subscription bans |
