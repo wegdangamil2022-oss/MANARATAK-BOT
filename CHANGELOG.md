@@ -1,3 +1,11 @@
+## 0.7.9 — 2026-10-21 — Offline subscription configuration integrity audit (NOT DEPLOYED)
+
+- Added a production-file **read-only local operator audit** for mandatory channel subscription rules. Checks the canonical private SQLite snapshot for configuration shape, valid ALL/ANY policy and versions, group and channel authorization for verification, duplicate required channels and the ten-channel maximum. Active and paused rules are reported separately.
+- Added `npm run telegram:subscriptions -- --offline-only --state /absolute/private/state.sqlite` for a one-shot, **privacy-limited** `OFFLINE_ONLY` status report. Exit 0 = PASS; 2 = BLOCKED; 1 = invalid invocation/state. Only counts and constant reason codes are returned: never IDs, usernames, student content, paths, token or individual moderation decisions. Input cannot express Telegram activation or policy changes.
+- Reused `BotStore.snapshotSqliteReadOnly` to reject absent, relative, malformed, symlinked, permissively owned or otherwise unsafe state sources without opening them read/write. No mutation, webhook, API call, rate-limit bypass, automatic punishment or auto-unmute.
+- RED-first integration tests use a local canonical SQLite file and child-process CLI, including injected legacy orphaned group/channel approvals, duplicates, malformed policy, permissive filesystem paths, bad flags, redaction, bytes-preserving reads and explicit PASS/BLOCKED semantics.
+- A passing local report is **not** evidence of Telegram's current channel membership/admin rights, real live policy safety, TLS or a deployment approval. Live acceptance remains separately blocked.
+
 ## 0.7.8 — 2026-10-21 — Owner-safe per-channel removal from mandatory subscription rules (NOT DEPLOYED)
 
 - Each group subscription details panel now offers an owner-only **review removal** button for each currently required channel. The owner sees the exact channel to be removed, the remaining required-channel count and a separate **confirm removal** action.
