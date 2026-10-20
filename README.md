@@ -1,6 +1,6 @@
 # بوت منارتك — MANARATAK BOT
 
-**B0/B1 + B2-Core + B3 + B3 gated Telegram outbound sender and live webhook entrypoint (v0.6.0). Transport implemented but OFF by default — no live deployment verified.**
+**B0/B1 + B2-Core + B3 + B3 live Telegram membership verification (v0.6.1). Transport implemented but OFF by default — no live deployment verified.**
 
 An independent TypeScript/Node.js 22 project based on `docs/MANARATAK_BOT_MASTER_v1.2.1_AR.md` and `docs/START_HERE_MANARATAK_BOT_v1.2.1_AR.md`. B0/B1 supply the secure baseline; B2-Core adds individual moderation and subscription policies; B3 adds the first locally tested education content flow.
 
@@ -10,6 +10,20 @@ An independent TypeScript/Node.js 22 project based on `docs/MANARATAK_BOT_MASTER
 
 
 
+
+## B3 v0.6.1 — trusted read-only Telegram group membership checks (OFF BY DEFAULT)
+
+**What changed:** `TelegramBotApiMembershipGateway` implements the existing `MembershipGateway` / `MembershipPort` interfaces using the **official Telegram Bot API `getChatMember`** HTTPS endpoint. The manually gated localhost webhook runtime now calls this adapter instead of always returning UNKNOWN for private-chat requests to browse approved group-scoped catalogs. `SubscriptionGate.verify` is also wired to the same real, read-only membership gateway for approved subscription channels. The other moderation/ban/mute flows are not connected to live Telegram, and the runtime does **not** approve any group or membership automatically.
+
+- **Bot must be administrator:** `verifyMembership(chatId,userId)` makes a fresh `getChatMember` request for the bot's own ID (taken from its validated token ID prefix). Only `administrator` or `creator` permits a second student lookup. This is required because Telegram guarantees getChatMember for other users only if the bot is an administrator.
+- **Status mapping:** `creator`, `administrator`, `member` and `restricted` with `is_member:true` count as members; `left`, `kicked`, and `restricted` with `is_member:false` mean not a member. Absent or malformed fields, unknown status, mismatched `user.id`, bot users, bad tokens/IDs, 403/429/5xx, timeouts or network errors are `UNKNOWN` and fail closed.
+- **Request limits:** Only canonical negative Telegram chat IDs and positive safe-integer user IDs; fixed HTTPS host, HTTP POST with bounded JSON, eight-second timeout, no redirects, no retries and no Telegram response details or token logged/returned. Membership proofs are **not cached**. Local group approvals and grants continue to be checked before AND after Telegram's asynchronous calls.
+- **Runtime:** `createLiveTelegramServer(config,request?)` accepts an optional HTTP transport dependency for mock testing and creates the same local-only listener. Without an injected dependency it uses Node's `fetch` for actual Bot API queries, but performs **no network activity until authorized inbound messages arrive**. The `telegram:serve` command and production configuration flags remain unchanged, and the server stays OFF until the owner provisions a private SQLite state, secret token, and trusted public HTTPS reverse proxy.
+- **Subscription checking:** A group with approved channel subscriptions must pass each configured channel's bot-admin preflight and the student's membership lookup; unknown results never become a positive membership or a live automatic ban. The moderation dependency is a **fake/no-network gateway** and must not be confused with activated moderation enforcement.
+
+**Validation:** 8 new offline TDD tests include administrative preflight, 9 Telegram member statuses, forged users, malformed/oversized responses, explicit 403/429/API unavailability, private catalog's real webhook path and no duplicate sending, unauthorized student, and policy revocation while asynchronous membership verification is in progress. **414 tests passing** in GitHub Actions.
+
+**Production blockers retained:** No live Telegram account/token has been installed or tested; no HTTPS deployment/webhook registration, bot-admin configuration or external group permissions have been verified. Outbound reply text retention/compaction, ambiguous-send reconciliation, Telegram rate-limit handling, host hardening, live alerting and end-to-end operator acceptance remain uncompleted. This is transport integration **implemented but not deployed**.
 
 ## B3 v0.6.0 — Telegram Bot API reply delivery, durable outbox, gated local webhook server
 

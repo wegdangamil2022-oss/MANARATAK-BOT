@@ -9,6 +9,9 @@ import {EducationAdminFacade} from './education-admin.js';
 import {ApprovedAnswerService,ResourceLinkService} from './education-interactions.js';
 import {TelegramUpdateApplication,telegramWebhookListener} from './telegram-transport.js';
 import {TelegramReplyDispatcher,TelegramBotApiTextSender} from './telegram-replies.js';
+import {TelegramBotApiMembershipGateway} from './telegram-membership.js';
+import {SubscriptionGate} from './subscription.js';
+import {ModerationService,FakeModerationGateway} from './moderation.js';
 
 export interface LiveTelegramConfig{
  ownerId:string;botId:string;botUsername:string;stateFile:string;
@@ -39,7 +42,8 @@ export function loadLiveTelegramConfig(env:Readonly<Record<string,string|undefin
  * HTTPS reverse proxy that preserves Telegram's webhook secret header.
  * No runtime is created if the persistent SQLite state is missing/untrusted.
  */
-export async function createLiveTelegramServer(config:LiveTelegramConfig):Promise<Server>{
+export async function createLiveTelegramServer(config:LiveTelegramConfig,
+ request:typeof fetch=fetch):Promise<Server>{
  // Reject stale/malformed or manually constructed configuration as well.
  const check=loadLiveTelegramConfig({
   BOT_ENV:'production',TELEGRAM_ENABLED:'true',TELEGRAM_REPLY_DELIVERY_ENABLED:'true',
@@ -58,11 +62,18 @@ export async function createLiveTelegramServer(config:LiveTelegramConfig):Promis
  const policy=new Policy(store,check.ownerId),education=new EducationService(store,policy);
  const admin=new EducationAdminFacade(store,policy,education);
  const faq=new ApprovedAnswerService(store,policy),links=new ResourceLinkService(store,policy);
- // Fail closed: private access to *group-scoped* material is disabled until
- // a trusted live Telegram getChatMember provider is wired in and tested.
+ // Telegram membership is an external privileged read: require the bot to be
+ // admin in the requested approved group before consulting a student's status.
+ const membership=new TelegramBotApiMembershipGateway(check.token,request);
+ // SubscriptionGate.verify uses only read-only membership checks. The existing
+ // moderation gateway stays mock-only: no live ban/mute is activated here.
+ const subscription=new SubscriptionGate(store,policy,membership,
+  new ModerationService(store,policy,new FakeModerationGateway()));
  const app=new TelegramUpdateApplication({store,policy,education,admin,faq,links,
-  botId:check.botId,botUsername:check.botUsername,membership:async()=> 'UNKNOWN' as const});
- const dispatcher=new TelegramReplyDispatcher(store,policy,new TelegramBotApiTextSender(check.token));
+  botId:check.botId,botUsername:check.botUsername,
+  membership:(chatId,actorId)=>membership.verifyMembership(chatId,actorId),subscription});
+ const dispatcher=new TelegramReplyDispatcher(store,policy,
+  new TelegramBotApiTextSender(check.token,request));
  return createServer(telegramWebhookListener(app,check.webhookSecret,dispatcher));
 }
 const direct=process.argv[1]!==undefined&&fileURLToPath(import.meta.url)===resolve(process.argv[1]);

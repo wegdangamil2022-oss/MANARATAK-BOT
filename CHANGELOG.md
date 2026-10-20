@@ -1,3 +1,11 @@
+## 0.6.1 — 2026-10-20 — Fail-closed live group membership verification (NOT DEPLOYED)
+
+- Implemented `TelegramBotApiMembershipGateway` over the official `getChatMember` HTTP POST, with strict Telegram ID checks, bot-admin `creator`/`administrator` preflight, user ID matching, and explicit `restricted.is_member` semantics.
+- The opt-in local webhook runtime now wires fresh admin-checked membership for private browsing of approved groups and the existing `SubscriptionGate.verify` for approved channel requirements. No cached proof, inferred membership, automated approval, bans or outbound enforcement.
+- Fail-closed on 403/429, untrusted bot/user identity, malformed statuses/body, server/network timeouts; fixed HTTPS Bot API endpoint, no redirects/retries or token/error logging. Runtime remains disabled by default.
+- Added 8 TDD tests, including mock HTTP/live webhook end-to-end and policy changes during asynchronous verification. All 414 historical + new tests pass.
+- Not tested with real Telegram account, public HTTPS webhook, group admin privileges or production data; outbound retention and reconciliation work remains.
+
 ## 0.6.0 — 2026-10-20 — Telegram reply outbox and first gated live HTTP sender (NOT DEPLOYED)
 
 - Added optional durable `telegramReplyJobs` to BotStore v8 and committed reply intents with inbound dedup decisions in a single state transaction.

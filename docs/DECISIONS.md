@@ -210,3 +210,10 @@
 - Runtime must require owner and bot identifiers, explicit `production` and `TELEGRAM_ENABLED=true` and separate `TELEGRAM_REPLY_DELIVERY_ENABLED=true`, no token defaults, local-only HTTP listener, verified initialized private SQLite store and HTTPS termination at an independently configured reverse proxy.
 - No impersonated chat membership check: group-scoped catalogs in private chats remain unavailable until a trusted real `getChatMember` adapter exists. No automatic permissions approval, group joins, AI calls or moderation gateway activation.
 - Remaining production blockers: mandatory outbound reply retention/redaction, rate limits and explicit unknown reconciliation, trusted membership, real Bot API end-to-end smoke, webhook HTTPS deployment controls, monitoring, secure secret rotation and timeouts/host OS audit.
+
+## B3 v0.6.1 — membership requires Telegram administrator proof (20 October 2026)
+
+- Group IDs or asserted membership from the inbound user payload do not prove the sender belongs to an approved group, especially for private requests. Use Telegram's documented `getChatMember` HTTP API and require a **fresh** bot administrator/creator preflight before checking any user; that API is not guaranteed to work for others unless the bot is admin.
+- Implement conservative `restricted.is_member` semantics: only explicit `true` counts; known left/kicked/nonmember are negative; missing/unknown/ambiguous/HTTP failures are UNKNOWN. Reject mismatched provider-returned user IDs, malformed identifiers and bot users.
+- Keep authorized-chat policy rechecks before and after HTTP requests. Reuse the same gateway for read-only `SubscriptionGate.verify` when the configured channel itself is locally approved. The existing FakeModerationGateway remains mock-only: **this is not live subscription restriction enforcement**.
+- Live deployment, bot admin rights, private SQLite provisioning, HTTPS termination, message retention/unknown-send reconciliation and external acceptance remain outstanding. No secrets are installed by this source-only change.
