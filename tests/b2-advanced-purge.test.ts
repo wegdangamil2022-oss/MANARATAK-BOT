@@ -192,3 +192,101 @@ test('B2-advanced: explicit schema 7 to 8 migration preserves all B4 receipts/ed
   assert.deepEqual(upgraded.purgeJobs,[]);
  }finally{await f.close()}
 });
+
+test('B2-advanced: cannot delete metadata that expires while awaiting bot rights, even if gateway says yes',async()=>{
+ const f=await fixture();try{
+  await f.observe(1,{sentAt:f.now()-47*HOUR});
+  const job=await f.service().preview(OWNER,GROUP,{limit:1});
+  await f.service().confirm(OWNER,job.id);
+  f.gateway.canDelete=async()=>{f.setNow(f.now()+2*HOUR);return true;};
+  assert.equal((await f.service().dispatchNext(job.id)).status,'BLOCKED');
+  assert.equal(f.gateway.calls.length,0);
+  const state=await f.store.snapshot();
+  assert.equal(state.purgeJobs[0]!.items[0]!.status,'QUEUED');
+  assert.equal(state.purgeJobs[0]!.status,'PAUSED');
+  assert.equal(state.rollingMessageMeta.length,0);
+ }finally{await f.close()}
+});
+
+test('B2-advanced: pinned flags remain protected after a later update tries to unpin',async()=>{
+ const f=await fixture();try{
+  await f.observe(1,{pinned:true});
+  await f.observe(1,{pinned:false});
+  assert.equal((await f.store.snapshot()).rollingMessageMeta[0]!.pinned,true);
+  await assert.rejects(f.service().preview(OWNER,GROUP,{limit:1}),/NO_ELIGIBLE_OBSERVED_MESSAGES/);
+  assert.equal(f.gateway.calls.length,0);
+ }finally{await f.close()}
+});
+
+test('B2-advanced: legacy orphaned SENDING job becomes UNKNOWN, cannot be automatically replayed',async()=>{
+ const f=await fixture();try{
+  await seed(f,2);
+  const job=await f.service().preview(OWNER,GROUP,{limit:2});
+  await f.service().confirm(OWNER,job.id);
+  await f.store.transaction(s=>{const i=s.purgeJobs[0]!.items[0]!;
+    i.status='SENDING';i.attemptId='legacy-attempt';delete i.leaseUntil;});
+  assert.equal(await f.service().recoverPending(),1);
+  assert.equal((await f.service().dispatchNext(job.id)).status,'BLOCKED_UNKNOWN');
+  assert.equal((await f.store.snapshot()).purgeJobs[0]!.items[0]!.attemptId,'legacy-attempt');
+  assert.equal(f.gateway.calls.length,0);
+ }finally{await f.close()}
+});
+
+test('B2-advanced: active leased attempt must not be quarantined by another recovery instance',async()=>{
+ const f=await fixture('sqlite');try{
+  await seed(f,1);
+  const job=await f.service().preview(OWNER,GROUP,{limit:1});
+  await f.service().confirm(OWNER,job.id);
+  let start!:()=>void,release!:()=>void;
+  const ready=new Promise<void>(r=>start=r),gate=new Promise<void>(r=>release=r);
+  f.gateway.canDelete=async()=>{start();await gate;return true;};
+  const pending=f.service().dispatchNext(job.id);
+  await ready;
+  try{
+   assert.equal((await f.store.snapshot()).purgeJobs[0]!.items[0]!.status,'SENDING');
+   assert.equal(await f.service().recoverPending(),0);
+  }finally{release();}
+  assert.equal((await pending).status,'ACKNOWLEDGED');
+  assert.equal(f.gateway.calls.length,1);
+ }finally{await f.close()}
+});
+
+test('B2-advanced: bulk confirmed yesterday cannot break today daily cap on later dispatch',async()=>{
+ const f=await fixture();try{
+  await seed(f,51);
+  const yesterday=await f.service().preview(OWNER,GROUP,{limit:1});
+  await f.service().confirm(OWNER,yesterday.id);
+  f.setNow(f.now()+DAY);
+  const a=await f.service().preview(OWNER,GROUP,{limit:25,beforeMessageId:51});
+  await f.service().confirm(OWNER,a.id);
+  const b=await f.service().preview(OWNER,GROUP,{limit:25,beforeMessageId:26});
+  await f.service().confirm(OWNER,b.id);
+  for(let i=0;i<25;i++)assert.equal((await f.service().dispatchNext(a.id)).status,'ACKNOWLEDGED');
+  for(let i=0;i<25;i++)assert.equal((await f.service().dispatchNext(b.id)).status,'ACKNOWLEDGED');
+  assert.equal((await f.service().dispatchNext(yesterday.id)).status,'BLOCKED_DAILY_LIMIT');
+  assert.equal(f.gateway.calls.length,50);
+ }finally{await f.close()}
+});
+
+test('B2-advanced: a second confirm after cancelling never recreates the same deletion reservation',async()=>{
+ const f=await fixture();try{
+  await seed(f,3);
+  const first=await f.service().preview(OWNER,GROUP,{limit:3});
+  await f.service().confirm(OWNER,first.id);
+  await f.service().cancel(OWNER,first.id);
+  const second=await f.service().preview(OWNER,GROUP,{limit:3});
+  await assert.rejects(f.service().confirm(OWNER,second.id),/PURGE_ID_ALREADY_RESERVED/);
+  assert.equal(f.gateway.calls.length,0);
+ }finally{await f.close()}
+});
+
+test('B2-advanced: revoking approved group after preview prevents confirmation and future deletion',async()=>{
+ const f=await fixture();try{
+  await seed(f,1);
+  const job=await f.service().preview(OWNER,GROUP,{limit:1});
+  await f.policy.revokeChat(OWNER,GROUP);
+  await assert.rejects(f.service().confirm(OWNER,job.id),/MANAGE_DENIED/);
+  assert.equal((await f.store.snapshot()).purgeJobs[0]!.status,'PREVIEW');
+  assert.equal(f.gateway.calls.length,0);
+ }finally{await f.close()}
+});
