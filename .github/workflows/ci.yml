@@ -1,0 +1,26 @@
+name: Bot typecheck and mock tests
+on:
+  push:
+    branches: ["feature/b0-b1-simulated-core", "feature/b2-core-simulation", "feature/b3-education-import-core", "feature/b3-faq-resource-links", "feature/b3-telegram-inbound", "feature/b3-documents-miniapp-auth", "feature/b4-publishing-ledger", "feature/b4-multipart-ledger-wip", "feature/b4-reviewed-multipart-flow", "feature/b4-legacy-campaign-guard", "feature/b4-sqlite-transaction-store", "feature/b4-fenced-worker-recovery", "feature/b4-cancel-partial-parts", "feature/b4-immutable-parts-receipts", "integration/merge-all-b4-to-main-2026-10-20", "main"]
+  pull_request:
+# Keep only the newest push or PR run for the same development branch.
+concurrency:
+  group: manaratak-bot-ci-${{ github.head_ref || github.ref_name }}
+  cancel-in-progress: true
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: npm install --no-audit --no-fund
+      - run: npm run check
+      - run: npm run demo
+      - run: npm run demo:education
+      - run: npm run demo:faq
+      - run: npm run demo:publishing
+      - run: npm run demo:preview-migration

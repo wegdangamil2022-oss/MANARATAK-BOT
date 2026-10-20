@@ -1,0 +1,137 @@
+## 0.4.7 — 2026-10-20 — Cancellation-safe campaign parts, evidence and reviewer audit (mock-only)
+
+- Fixed B4 campaign cancellation leaving queued multipart parts in a misleading pending state. Cancel unstarted/confirmed-failed tails while preserving previously SENT parts and real mock receipts.
+- Keep active SENDING or unresolved UNKNOWN parts in the canonical delivery ledger until send returns or independent evidence arrives. Do not allow a late worker to requeue or send a part after cancellation while preflight was awaiting canPost.
+- Settlement after verified receipt of a formerly UNKNOWN part closes the aggregate cancelled delivery without claiming that unsent parts were published.
+- Terminal CANCELLED and SKIPPED deliveries cannot be relabelled or have their manual-review reason overwritten.
+- Add an actor-specific, exactly-once cancellation audit record in BotState; individual manual-skip audit now includes the reviewer.
+- Added JSON + SQLite test coverage for cancelled multi-part flows, preflight and in-flight races, timeouts, part-history retention and idempotence, retaining the same single B4 publishing ledger.
+- **No real Telegram adapter, live platform interaction or production activation.** SQLite and offline gateways are still simulations requiring operational and security review.
+
+## 0.4.8 — 2026-10-20 — Canonical message-part checks and receipt integrity (mock-only)
+
+- Reconstruct canonical multipart text/parts from the current approved resource copy at every dispatch, including legacy campaigns without a retained render-plan object. Tampering the stored approved fingerprint or staged text cannot bypass review.
+- Verify provider `messageId` input shape for single and multipart fake results and receipt reconciliation: malformed, control/BiDi, blank, whitespace-padded and oversized identifiers never become confirmed sends.
+- Fail closed when a malformed or migrated state contains duplicate reservations or a matching historical review claim for the same resource revision and destination. Recheck after await, after simulated network completion, during explicit confirmed-failure retries and during UNKNOWN proof reconciliation.
+- In-flight historical conflicts quarantine ambiguous replies as UNKNOWN_OUTCOME rather than claiming SENT, preserving attempts for independent review; no network resend is triggered.
+- Added adversarial integration tests across JSON/SQLite and legacy/multipart/single senders. This remains TESTED_MOCK only; all real Telegram/outbound verification and normalized production DB work is still blocked.
+
+## 0.4.6 — 2026-10-19 — Fenced dispatch recovery and tightened multipart permissions (mock-only)
+
+- Added a per-attempt durable 120-second recovery lease to both single publication deliveries and multipart parts, stored in the original canonical BotStore ledger. SENDING intents are persisted before the mock gateway request.
+- Recovery from a restarted or competing worker leaves active attempts alone. Expired leases and legacy unleased orphan attempts are quarantined UNKNOWN_OUTCOME, with no automatic resend. A delayed worker also checks expiry after asynchronous gateway-permission checks before initiating a send.
+- Closed a scoped authorization gap in multipart retry and receipt reconciliation: the acting reviewer requires content.publish on BOTH source and destination, before and after provider verification.
+- Kept existing no-automatic-retry, unique verified receipts and immutable B3 content approval. Confirmed retries clear old attempt and lease metadata.
+- Added 15 tests spanning JSON and SQLite storage, independent SQLite recovery processes, forced expiry, crash-compatibility, and revocation during evidence verification. 214 total passing tests after build/typecheck and mock demos.
+- TESTED_MOCK only; leases are conservative quarantine fences, not distributed worker heartbeats or authorization for real Telegram.
+
+## 0.4.5 — 2026-10-19 — B4 transactional SQLite test backend
+
+- Added opt-in `BotStore(file, {engine:'sqlite'})` while keeping existing JSON simulations unchanged. One canonical BotState and B4 reservation/receipt ledger, not a second publishing engine.
+- Added Node 22 SQLite WAL / BEGIN IMMEDIATE / synchronous FULL transaction commits to serialize writes across separate Node.js processes; durable SENDING/UNKNOWN intent semantics unchanged.
+- Added explicit lossless JSON-to-SQLite migration with strict no-overwrite behavior, including schema v5 legacy B3/B4 resources/campaign receipts/historical reviews.
+- Added verified online SQLite backup using node:sqlite backup API; existing backups cannot be silently overwritten. Invalid states and sources fail closed.
+- Added cross-process worker integration tests: competing approvals, distinct reservations, duplicate dispatch exclusion, transaction rollback/read isolation, multipart crash recovery, backup/restore and corrupt-state rejection.
+- This is TESTED_MOCK only: experimental Node 22 sqlite API, one serialized state row, no production load / power-loss tests, no real Telegram or MANARATAK platform access.
+
+## 0.4.4 — 2026-10-19 — Historic publication review guard and late reconciliation (mock-only)
+
+- Added an explicitly authorized, item-specific historical review import that uses the existing B4 reservation boundary, never a second outbound sender. A last forwarded Telegram post/ordinal is not evidence of prior publications.
+- Stored distinct PUBLISHED_VERIFIED, UNVERIFIED, REVIEW_REQUIRED and MANUALLY_SKIPPED historical statuses in additive schema v7. A historical claim for the same resource revision/destination prevents a duplicate B4 campaign approval.
+- Verified receipt uniqueness across historical items and normal/multipart dispatch; conflicting message IDs are quarantined rather than counted as successful sends.
+- Added late provider-verified reconciliation and documented explicit manual skip for unresolved historic records; both recheck scoped authorization, preserve audit history and never auto-resend.
+- Preservation tested across schema v6→v7 and prior version migrations; protected earlier B3 resources, B4 campaigns and receipts.
+- New integration tests for historical review, concurrency, policy revocation during verification, receipt conflicts, restart, and evidence/skip resolution. No Telegram or platform production calls.
+- B4 remains TESTED_MOCK; transactional multi-worker storage and hardened real verification/outbound adapters are pending before live activation.
+
+## 0.4.3 — 2026-10-19 — Reviewed multipart campaign integration (mock-only)
+
+- Reproduced the gap with a RED GitHub Actions integration test first, then implemented a reviewed long-form copy workflow on published B3 resources.
+- Ordinary B4 draft now attaches the canonical UTF-16-safe multipart render plan; campaign approval stores its exact part fingerprint and reserves each part **inside the original delivery ledger** before any external fake send.
+- Unified ordinary dispatch for short and multipart campaigns; each multipart attempt is durable and audited before gateway calls. Crash recovery, ambiguous outcomes, permission revocation after awaits, archived/stale resources and duplicate reservations are guarded by integration tests.
+- Schema v5→v6 is additive and retains existing B3 resources, historic campaigns, deliveries and receipts; legacy v1→v5 migrations continue to work.
+- Kept MultipartTestStore strictly experimental/test-only; no second operational publishing ledger or live Telegram adapter.
+- Production readiness remains **BLOCKED** by single-process JSON storage and lack of a hardened real delivery adapter. Draft PR only; no main merge.
+
+## 0.4.2 — 2026-10-19 — B4 multipart WIP handed off for continued review
+
+- Preserved two previously local-only multipart experiments and their focused offline tests.
+- Added CampaignMultipartService staging into the existing approved B4 campaign delivery ledger; part-level receipts and UNKNOWN_OUTCOME per attempt.
+- Extended B4 local store types with MULTIPART and immutable part snapshot. Core dispatcher blocks a staged multipart item; manual skip cannot silently erase its partial history.
+- The stand-alone MultipartTestStore module is **experimental** and MUST NOT be wired into operational publishing: its duplicate ledger is not integrated with existing reservations.
+- **Not yet complete**: no live Telegram sending; historical content preview length caps, real campaign creation with long content, single-worker DB migration/receipts and production safety still need an explicit end-to-end review.
+- CI will run merged cumulative tests on GitHub; earlier 144 local-only tests were run on older B3-era workspace and cannot prove compatibility with B4.
+
+## 0.4.1 — 2026-10-19 — B4 offline review-only preview and migration planning
+
+- Deterministic Telegram text/photo/link-preview planning; conservative UTF-16 length boundaries, explicit text fallback, no URL splitting or rendering guarantee.
+- Historical publication review preview: item-specific trustworthy evidence required, duplicate receipt conflicts require review, last-forwarded/ordinal cutoff never verifies earlier items, manual skip is a separate non-published state.
+- 25 new offline tests plus sample preview/migration report; no Telegram sends and no production migration.
+
+## 0.4.0 — 2026-10-19 — B4 campaign/receipt ledger (mock-only, initial slice)
+
+- Versioned plain-text publication previews based on locally approved education resources, destination `publishing` authorizations and explicit campaign approval.
+- Durable local test campaign + per-item delivery state, cross-campaign duplicate reservation and restart-safe `UNKNOWN_OUTCOME` on orphaned `SENDING`.
+- Pre-send validation of approver grant, source/destination policy revisions, category status, approved text, and fake bot posting rights.
+- Confirmation vs confirmed failure vs ambiguous delivery, trusted receipt reconciliation, explicit retry of confirmed failure, manual skip recorded distinctly.
+- Scheduled/paused/cancelled flows and ordered delivery (a pending uncertainty blocks later items); no real Telegram API, worker queue or production multi-process storage.
+- 19 new tests (110/110 total), local publishing demo, `schemaVersion 4→5` migration; B0–B3 tests retained.
+- All B4 functions are `TESTED_MOCK`, **not real sends, real campaign publication, B4 completion or production readiness**.
+
+# Changelog
+
+## 0.3.3 — 2026-10-19 — B3 file intake and Mini App authorization (offline)
+
+- Simulated Telegram document intake with pre-download authorization, file ID/type/size checks, strict UTF-8 and reauthorization after asynchronous fake download.
+- Telegram Mini App server-side HMAC verification, signed identity and freshness; bounded localhost-only JSON admin actions.
+- End-to-end cross-transport test: fake Telegram document → web approval and local publication → safe group browsing and revocation.
+- 21 additional tests since v0.3.2, **91/91 successful locally**; GitHub CI checked on the new branch.
+- Fixed a Node.js `node:events` test import incompatibility found by the clean GitHub Actions typechecker (static named `once` import).
+- No real Bot API download, live group messages, browser UI, campaigns or AI; no production connection.
+
+
+## 0.3.2 — 2026-10-19 — B3 inbound Telegram transport, test-only
+
+- Inbound localhost-only webhook listener with Telegram shared-secret validation, JSON/size/type/route checks and no outbound delivery.
+- Offline Telegram message parser and safe reply-plan renderer for admin, import, review, catalog and curated FAQ commands.
+- Fixed private-chat enumeration of group resources: require fresh trusted group membership before listing; recheck chat permission after async lookup.
+- Regression tests for subscription-gated FAQ (including denied/unavailable), private group membership and revocation during verification.
+- 13 new tests over v0.3.1, 70 total tests; all mock/local only; GitHub CI pending until uploaded.
+- No live Telegram token, real document download, web admin auth, outbound send, AI or channel publication.
+
+## 0.3.1 — 2026-10-19 — B3 approved FAQ, links and admin facade (mock only)
+
+- Curated FAQ drafts, publisher approval, bounded aliases, explicit ambiguity and source visibility gates.
+- Short server-side share references with TTL, group membership verification port and post-check revocation enforcement.
+- Minimal transport-independent admin facade with guarded Telegram-private and web admin contexts.
+- Privacy-safe resource projections for student views; v3→v4 additive migration.
+- 16 focused new security and flow tests, 57 total; typecheck and offline demos.
+- No Telegram/Web connectivity, webhook, AI provider, paid service, live publication or production migration.
+
+## 0.3.0 — 2026-10-19 — B3 education/import simulation
+
+- Education category tree scoped by approved chats/private feature, sort order, visibility and archive.
+- Deterministic importer for MD, TXT, CSV, JSON with input bounds and source evidence.
+- Separate university, potential scholarship, duplicate, ambiguity and explicit-seat counts.
+- Independent upload/approve/publish actions; no AI or Telegram publishing.
+- Content-hash replay protection, state schema v3 additive migration, B3 offline demo.
+- 11 new B3 tests, 41 total tests, documented remaining gaps.
+
+## 0.2.0 — 2026-10-18 — B2-Core mock moderation and subscription
+
+- Simulated member warning ledger, manual/subscription restrictions, ban vs mute precedence, safe reconciliation.
+- Approved-channel subscription checks ALL/ANY, unknown verification is not a confirmed violation.
+- Migration from B1 to B2 storage. No real Telegram actions.
+
+## 0.1.0 — 2026-10-18 — B0/B1 simulated core
+
+- تأسيس مشروع TypeScript مستقل بدون token أو اتصال Telegram.
+- نواة التحقق والمالك/القائمة البيضاء/التفويض ومنع التصعيد.
+- UpdatePipeline وتسجيل نية الأثر والنتائج مع lease/restart وUNKNOWN.
+- CallbackActionCodec بمرجع خادمي قصير محمي بالفاعل/النطاق/النسخة/TTL.
+- OutboundPriorityPolicy مع fairness وretry_after والتحقق عند dequeue.
+- WizardSessionStore مع عزل الموضوع/CAS وانتهاء وإلغاء واستعادة.
+- سياسات AI للمجموعات/الخاص مستقلة؛ تظل AI غير مهيأة.
+- 15 اختبارًا بمحاكاة ومثال تجربة وقرار B0 ومصفوفة تتبع.
+
+**غير متاح:** تشغيل Telegram والذكاء الاصطناعي وحظر/نشر أو استيراد ملفات أو الربط المباشر بمنارتك. لا انتشار تلقائي.
