@@ -76,7 +76,7 @@ test('live config and preflight require protected existing safety switch even fo
   const cfg=loadLiveTelegramConfig(f.env);
   assert.equal(cfg.safetySwitchFile,f.safetyFile);
   assert.deepEqual(await preflightLiveTelegram(f.env),{
-   ready:true,httpsWebhook:true,privateSqlite:true,listener:'LOOPBACK_ONLY',telegramNetworkCalls:0});
+   ready:true,httpsWebhook:true,privateSqlite:true,listener:'LOOPBACK_ONLY',telegramNetworkCalls:0,safetySwitch:'STOP'});
   assert.throws(()=>loadLiveTelegramConfig({...f.env,TELEGRAM_SAFETY_FILE:undefined}),
    /LIVE_TELEGRAM_CONFIG_INVALID/);
   assert.throws(()=>loadLiveTelegramConfig({...f.env,TELEGRAM_SAFETY_FILE:'relative.flag'}),
