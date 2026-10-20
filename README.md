@@ -1,6 +1,6 @@
 # بوت منارتك — MANARATAK BOT
 
-**B0/B1 + B2-Core + B3 + B4 isolated SQLite restore-drill validation (v0.5.9). Offline/test-only — no live Telegram bot.**
+**B0/B1 + B2-Core + B3 + B3 gated Telegram outbound sender and live webhook entrypoint (v0.6.0). Transport implemented but OFF by default — no live deployment verified.**
 
 An independent TypeScript/Node.js 22 project based on `docs/MANARATAK_BOT_MASTER_v1.2.1_AR.md` and `docs/START_HERE_MANARATAK_BOT_v1.2.1_AR.md`. B0/B1 supply the secure baseline; B2-Core adds individual moderation and subscription policies; B3 adds the first locally tested education content flow.
 
@@ -10,6 +10,36 @@ An independent TypeScript/Node.js 22 project based on `docs/MANARATAK_BOT_MASTER
 
 
 
+
+## B3 v0.6.0 — Telegram Bot API reply delivery, durable outbox, gated local webhook server
+
+**This is the first explicitly configurable live Telegram transport boundary, NOT a production deployment.** Real `sendMessage` HTTP support and a runnable local webhook server have been implemented and tested with a fake HTTP provider; NO real token, Telegram account, public HTTPS endpoint, webhook registration or customer data has been provisioned. The new runtime is **OFF by default**. Prior mock-mode commands and tests remain available.
+
+- `TelegramUpdateApplication.handle` now saves a **one-shot Telegram reply intent and its inbound update acknowledgement atomically** in the same existing `BotStore.transaction`. This is optional `telegramReplyJobs` state compatible with prior schema v8: old stores have no jobs. Denied/ignored updates create no replies.
+- `TelegramReplyDispatcher` atomically claims queued replies (across separate SQLite connections and cooperating local JSON instances), rechecks group navigation approval before sending and fences outbound attempts. It marks confirmed sends `SENT` with a message ID, explicit Bot API denials as `FAILED_CONFIRMED`, and ambiguous/timeout/5xx/malformed responses as `UNKNOWN_OUTCOME`. It **never blindly retries ambiguous attempts**; interrupted `SENDING` remains blocked pending explicit operator reconciliation. Telegram's sendMessage API does not provide a general idempotency key.
+- `TelegramBotApiTextSender` performs POST to the fixed official HTTPS Bot API endpoint `sendMessage`, with mandatory validated chat ID and bounded HTML reply, disabled link previews, protected content, no automatic redirects, finite timeout and no retry. It checks the returned chat/message receipt and does not log token or provider error descriptions. Token is loaded from private environment, never committed.
+- `telegramWebhookListener(app,secret,dispatcher?)` retains its strict secret-token, payload-size and trusted chat checks. Omitting the dispatcher still produces plans only (tests/mocks). The **optional** third argument dispatches saved plans; replay of the same inbound update does not send again.
+- `src/telegram-live-server.ts` exposes a gated, runnable local HTTP listener bound **only to 127.0.0.1**. Requires explicit production environment, Telegram enable flags, owner/bot ID, bot username, bot token, webhook secret, port, existing canonical private initialized SQLite store. Refuses missing or permissive state before opening a listener. Connect a trusted HTTPS reverse proxy and register its `/telegram/webhook` URL through Telegram `setWebhook` with the same `secret_token`.
+- Private `/start` and `/help` now provide Arabic onboarding. Private `/categories private` and approved public catalog read paths may generate delivered replies; *private access to group-scoped resources continues fail-closed* because no trusted live membership provider is configured yet. Group chat authorization is never automatic.
+
+**Example operator configuration (do not commit real secrets):**
+
+```dotenv
+BOT_ENV=production
+BOT_OWNER_ID=123456789
+BOT_ID=manaratak-bot-live
+BOT_USERNAME=ManaratakBot
+BOT_STATE_FILE=/absolute/private/manaratak/state.sqlite
+TELEGRAM_ENABLED=true
+TELEGRAM_REPLY_DELIVERY_ENABLED=true
+TELEGRAM_BOT_TOKEN=<set-in-private-deployment-secret-store>
+TELEGRAM_WEBHOOK_SECRET=<random-32-plus-alphanumeric-secret>
+TELEGRAM_LISTEN_PORT=8787
+```
+
+After a separate trusted operator has provisioned a **private initialized SQLite state**, set the variables securely and run `npm run telegram:serve`. No `.env` loader is bundled: export the environment through your process manager or protected secrets configuration. A reverse proxy must terminate HTTPS, forward the Telegram secret header unchanged and route only to localhost `/telegram/webhook`. The bot token must never be shared in chat, committed to GitHub or logged. The initial state must be provisioned separately; this service deliberately cannot initialize a missing database or approve groups implicitly.
+
+**Remaining blockers to production:** No actual Bot API acceptance test, no trusted live group membership checks, no automatic reconciliation of ambiguous/started sends, no delivery queue cleanup/retention (reply texts are retained in the private state), no finished deployment/firewall/HTTPS service guide, no external security audit, no production monitoring/recovery or rate-limit scheduler. Other B0–B4 features remain mock-only where documented. Before enabling for real students, complete these gates, provision a trusted private host and run a limited operator-owned Telegram smoke test.
 
 ## B4 v0.5.9 — isolated backup restore rehearsal (OFFLINE, TESTED_MOCK)
 

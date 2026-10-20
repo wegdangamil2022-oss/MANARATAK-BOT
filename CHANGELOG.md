@@ -1,3 +1,13 @@
+## 0.6.0 — 2026-10-20 — Telegram reply outbox and first gated live HTTP sender (NOT DEPLOYED)
+
+- Added optional durable `telegramReplyJobs` to BotStore v8 and committed reply intents with inbound dedup decisions in a single state transaction.
+- Added `TelegramReplyDispatcher` one-shot fenced send attempts with multi-instance JSON/SQLite coordination, group-revocation recheck, confirmed/failed/unknown outcomes and no blind retries after uncertain external sends.
+- Added `TelegramBotApiTextSender` with strict token/chat/plan validation, fixed HTTPS sendMessage POST, bounded responses, protected HTML content, no redirects or retries, and provider receipt verification.
+- Existing authenticated webhook optionally accepts a live dispatcher; no dispatcher means old mock plan-only behavior. Private `/start` and `/help` are supported.
+- Added `telegram-live-server.ts` local-only opt-in HTTP entry point, requiring explicit production flags, private initialized SQLite and out-of-repo secrets. Added `npm run telegram:serve` and environment examples, but no public deployment or real Telegram token.
+- Added 17 new tests (406 total) checking persisted replies, dedup after restart, two concurrent worker claims, group revocation, simulated Telegram success/403/429/5xx/timeouts, sanitized HTTP responses, local server config fail-closed and no implicit group access. All mock transport tests remain green.
+- **Privacy/safety limitations:** persisted reply body retention not yet bounded, no actual Bot API / HTTPS webhook production E2E, no safe recovery of stuck SENDING yet; not Production Ready.
+
 ## 0.5.9 — 2026-10-20 — Private, isolated SQLite backup restoration drill (TESTED_MOCK)
 
 - Added `runSqliteRestoreDrill`, strictly limited to a verified SQLite backup and an existing private canonical restore sandbox; no arbitrary restore destination, production database overwrite, Telegram/network/compaction or auto-run scheduler.
