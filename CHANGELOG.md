@@ -1,3 +1,12 @@
+## 0.6.9 — 2026-10-21 — Offline trial acceptance and rollback anchor assessment (NOT DEPLOYED)
+
+- Added `inspectTelegramTrialAcceptanceReadOnly` to verify an existing private initialized original SQLite state, a separately protected SQLite backup and the existing STOP/RUN safety file. Source and backup must match at the decoded logical BotState level for the rollback anchor to pass. Both are opened read-only and never created or restored.
+- A clean offline result requires the emergency switch to remain STOP; mismatched backups or any QUEUED/SENDING/UNKNOWN Telegram reply, unresolved inbound update, unresolved moderation/leave operation, pending/unknown B4 delivery part or ready/in-flight purge block the rehearsal. Manual review cannot establish Telegram delivery success or suppress a blocker.
+- The checker double-reads the source and safety file and fails closed if it observes a change during verification. This is advisory, not a concurrency barrier or replacement for shutting down every real writer.
+- Added `npm run telegram:acceptance -- --offline-only --state <absolute> --backup <absolute> --safety <absolute> --stale-ms 900000`. It prints only `OFFLINE_ONLY` and static PASS/BLOCKED reasons, with exit 0/2/1. No chats, student texts, tokens, paths, update keys, attempts or other identifiers appear.
+- RED-first local SQLite and CLI tests enforce private file permissions, symlink and missing-path denial, backup-mismatch rejection, STOP requirement, blocked unresolved delivery and no-database-creation behavior.
+- PASS is **not** an instruction to switch to RUN and does not validate actual Telegram webhook registration, DNS, TLS, provider delivery, host firewall, live recovery or actual restore capacity. No live enablement or network access.
+
 ## 0.6.8 — 2026-10-21 — Persistent fail-closed local Telegram emergency STOP (NOT DEPLOYED)
 
 - Added a privileged operator-controlled durable safety file (RUN or STOP, newline required) to opt-in Telegram production configuration. It must be a private, canonical, regular existing file (mode 0600 or stricter), not a symlink, with a separate path from SQLite. The bot has no command or endpoint to rewrite it.
