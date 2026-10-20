@@ -25,6 +25,31 @@ export class Policy {
   /** Local pause only, not a Telegram unmute/leave. Both independent revisions
    * are verified atomically to reject stale, copied or replayed confirmations.
    */
+  /** Owner-only reduction of one mandatory subscription channel, without a
+   * live external check, privilege grant, or automatic moderation release.
+   * Current chat and rule revisions are checked atomically against the store.
+   */
+  async removeSubscriptionChannelAtRevision(owner:string,chatId:string,channelId:string,
+    expectedChatRevision:number,expectedRequirementRevision:number):Promise<void>{
+    this.requireOwner(owner);
+    if(!/^-[1-9][0-9]{0,18}$/.test(chatId)||!/^-[1-9][0-9]{0,18}$/.test(channelId))
+      throw Error('INVALID_CHANNEL_ID');
+    await this.store.transaction(s=>{
+      const chat=s.chats.find(c=>c.id===chatId);
+      if(!chat?.approved||!chat.scopes.includes('verification'))throw Error('GROUP_NOT_APPROVED');
+      const config=s.subscriptionRequirements.find(c=>c.chatId===chatId);
+      if(!config?.channelIds.includes(channelId))throw Error('CHANNEL_NOT_REQUIRED');
+      if(!Number.isSafeInteger(expectedChatRevision)||!Number.isSafeInteger(expectedRequirementRevision)||
+         expectedChatRevision<=0||expectedRequirementRevision<=0||
+         chat.version!==expectedChatRevision||config.version!==expectedRequirementRevision)
+        throw Error('SUBSCRIPTION_POLICY_STALE');
+      config.channelIds=config.channelIds.filter(id=>id!==channelId);
+      config.version++;chat.version++;
+      s.audit.push({updateKey:'owner:subscription:remove-channel:'+chatId+':'+config.version,
+        decision:'ALLOW',reason:'SUBSCRIPTION_REQUIRED_CHANNEL_REMOVED_LOCALLY',
+        policyVersion:chat.version,at:this.clock()});
+    });
+  }
   async pauseSubscriptionAtRevision(owner:string,chatId:string,
     expectedChatVersion:number,expectedRequirementVersion:number):Promise<void>{
     this.requireOwner(owner);
