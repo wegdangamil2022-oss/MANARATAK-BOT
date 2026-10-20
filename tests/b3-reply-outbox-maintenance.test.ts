@@ -105,6 +105,9 @@ for(const engine of ['json','sqlite'] as const){
    assert.ok(all[3]?.plan);
    assert.ok(all[4]?.plan);
    assert.ok(all[0]?.plan);
+   const next=await redactFinishedTelegramReplies(f.same(),{now:210_000,maxEntries:3,startAt:3});
+   assert.deepEqual(next,{scanned:3,redacted:2,skippedQueued:0,alreadyRedacted:1,remaining:0});
+   assert.equal((await f.same().snapshot()).telegramReplyJobs?.filter(j=>j.plan).length,1);
   }finally{await f.close()}
  });
 }
@@ -114,7 +117,7 @@ test('B3 reply privacy: reject invalid options before any data mutation and keep
   const before=await f.store.snapshot();
   for(const opts of [
    {now:-1},{now:NaN},{now:Infinity},{now:200000,maxEntries:0},{now:200000,maxEntries:501},
-   {now:200000,maxEntries:2.5},{now:200000,deleteBackups:true},{now:200000,includeBodies:true}
+   {now:200000,maxEntries:2.5},{now:200000,startAt:-1},{now:200000,startAt:1.5},{now:200000,deleteBackups:true},{now:200000,includeBodies:true}
   ])await assert.rejects(redactFinishedTelegramReplies(f.store,opts as never),/REPLY_MAINTENANCE_INVALID_OPTIONS/);
   for(const opts of [
    {now:200000,staleAfterMs:0},{now:200000,staleAfterMs:-1},
