@@ -122,8 +122,8 @@ export class OwnerTelegramMenu{
  private async permittedCategories(run:ImportRun,actorId:string){
   return this.education.listCategories(actorId,run.scope);
  }
- private validPage(page:number,direction:OwnerMenuPage['direction']|undefined,count:number):boolean{
-  const pages=Math.ceil(count/10);
+ private validPage(page:number,direction:OwnerMenuPage['direction']|undefined,count:number,size=10):boolean{
+  const pages=Math.ceil(count/size);
   return page>=0&&page<pages&&
    (direction!=='next'||page>0)&&
    (direction!=='previous'||page<pages-1);
@@ -159,6 +159,30 @@ export class OwnerTelegramMenu{
    choices,{
     previous:page>0?ownerPageButton('candidates',page-1,'previous',run.id):undefined,
     next:page+1<pages?ownerPageButton('candidates',page+1,'next',run.id):undefined
+   });
+ }
+ private async categoryPage(run:ImportRun,index:number,actorId:string,
+  page:number,direction?:OwnerMenuPage['direction']):Promise<OwnerMenuScreen|null>{
+  const candidate=run.candidates[index];
+  if(!candidate||candidate.status!=='READY')return reject();
+  const categories=await this.permittedCategories(run,actorId);
+  if(!categories.length&&page===0&&!direction)
+   return screen('<b>معاينة المرشح 📑</b>\n'+line(candidate.title,120)+
+    '\nلا توجد أقسام معتمدة متاحة حاليًا.');
+  if(!this.validPage(page,direction,categories.length,9))return reject();
+  const pages=Math.ceil(categories.length/9);
+  const choices=categories.slice(page*9,page*9+9).map(c=>
+   '📂 اعتماد في · '+run.id+':'+index+':'+ownerCategoryToken(c.id));
+  choices.push('🗃️ الاستيراد · '+run.id);
+  return screen('<b>معاينة المرشح 📑</b>\n'
+   +'العنوان: '+line(candidate.title,120)+'\n'
+   +'الجامعة: '+line(candidate.university,100)+'\n'
+   +'الحالة: '+line(candidate.status,30)+'\n'
+   +'اختر القسم ثم أكّد الاعتماد بشكل صريح.\n'
+   +'صفحة '+(page+1)+' من '+pages,
+   choices,{
+    previous:page>0?ownerPageButton('categories',page-1,'previous',run.id,index):undefined,
+    next:page+1<pages?ownerPageButton('categories',page+1,'next',run.id,index):undefined
    });
  }
  async handle(text:string,ctx:VerifiedAdminContext):Promise<OwnerMenuScreen|null>{
