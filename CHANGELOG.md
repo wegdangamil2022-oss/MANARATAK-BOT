@@ -1,3 +1,11 @@
+## 0.7.8 — 2026-10-21 — Owner-safe per-channel removal from mandatory subscription rules (NOT DEPLOYED)
+
+- Each group subscription details panel now offers an owner-only **review removal** button for each currently required channel. The owner sees the exact channel to be removed, the remaining required-channel count and a separate **confirm removal** action.
+- New atomic `Policy.removeSubscriptionChannelAtRevision` checks configured owner identity, currently approved group with verification scope, required-channel membership, and exact group+rule revisions in a single durable BotStore transaction. `SubscriptionGate.removeRequiredChannelAtRevision` delegates to that same policy implementation. No stale Telegram button can add a channel, reenable a group, or overwrite more recent subscription changes.
+- A removal adjusts only the selected channel, preserves the remaining order and ALL/ANY mode, increments both revisions and appends a sanitized audit reason. Removing the last required channel makes the rule inactive. An independent `SubscriptionGate.verify` test confirms it consults **only remaining channels** after authorized changes.
+- Existing reasons and moderation operations are not lifted, retried or sent; no `getChatMember` or real Telegram send/moderation call is made by these buttons. Real verification, approval and new mandatory-channel configuration remain separate provider-gated operations.
+- RED-first tests exercise JSON+SQLite, multiple and last-channel removal, no unintended moderation, current runtime gate interpretation, old-button invalidation, forged channel IDs and non-owner rejection. Telegram integration stays OFF.
+
 ## 0.7.7 — 2026-10-21 — Owner subscription overview, controlled pause, and revocation cleanup (NOT DEPLOYED)
 
 - Added **owner-only Telegram group subscription inspection** for approved chats: saved ALL/ANY mode, count of mandatory channels and exact pre-approved channel IDs, explicitly labelled as local state, not live Telegram membership verification.
