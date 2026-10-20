@@ -9,7 +9,7 @@ export interface TelegramReplyOutboxReview{
  failedConfirmed:number;unknownOutcome:number;bodiesStored:number;
  staleQueued:number;staleSending:number;manualReviewRequired:number;
 }
-export interface TelegramReplyRedactOptions{now:number;maxEntries?:number}
+export interface TelegramReplyRedactOptions{now:number;maxEntries?:number;startAt?:number}
 export interface TelegramReplyRedactResult{
  scanned:number;redacted:number;skippedQueued:number;alreadyRedacted:number;remaining:number;
 }
@@ -22,7 +22,8 @@ const validReview=(v:TelegramReplyOutboxReviewOptions):boolean=>
  props(v,['now','staleAfterMs'])&&safeNonNegative(v.now)&&
  safeNonNegative(v.staleAfterMs)&&v.staleAfterMs>=60_000&&v.staleAfterMs<=VALID_AGE_MAX;
 const validRedaction=(v:TelegramReplyRedactOptions):boolean=>
- props(v,['now','maxEntries'])&&safeNonNegative(v.now)&&
+ props(v,['now','maxEntries','startAt'])&&safeNonNegative(v.now)&&
+ (v.startAt===undefined||safeNonNegative(v.startAt))&&
  (v.maxEntries===undefined||
  (typeof v.maxEntries==='number'&&Number.isSafeInteger(v.maxEntries)&&v.maxEntries>=1&&v.maxEntries<=LIMIT));
 const safeJobs=(value:TelegramReplyJob[]|undefined):TelegramReplyJob[]=>{
@@ -72,11 +73,12 @@ export async function redactFinishedTelegramReplies(store:BotStore,options:Teleg
   // Validate the ENTIRE ledger first so an invalid tail cannot cause a
   // partial loss of earlier replies.
   const jobs=safeJobs(state.telegramReplyJobs);
-  const max=options.maxEntries??LIMIT,scanned=Math.min(max,jobs.length);
+  const max=options.maxEntries??LIMIT,start=Math.min(options.startAt??0,jobs.length);
+  const scanned=Math.min(max,jobs.length-start);
   const result:TelegramReplyRedactResult={
-   scanned,redacted:0,skippedQueued:0,alreadyRedacted:0,remaining:jobs.length-scanned
+   scanned,redacted:0,skippedQueued:0,alreadyRedacted:0,remaining:jobs.length-start-scanned
   };
-  for(const job of jobs.slice(0,scanned)){
+  for(const job of jobs.slice(start,start+scanned)){
    if(job.status==='QUEUED'){result.skippedQueued++;continue;}
    if(job.plan===undefined){result.alreadyRedacted++;continue;}
    delete job.plan;
