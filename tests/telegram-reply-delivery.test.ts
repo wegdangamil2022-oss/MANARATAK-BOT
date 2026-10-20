@@ -150,3 +150,50 @@ test('webhook optional sender flushes persisted reply exactly once without token
   assert.equal((await f.store.snapshot()).telegramReplyJobs?.[0]?.status,'SENT');
  }finally{server.close();await once(server,'close');await f.close()}
 });
+
+test('live server configuration is fail-closed and never enables Telegram by default',async()=>{
+ const {loadLiveTelegramConfig}=await import('../src/telegram-live-server.js');
+ const f=await fixture('sqlite');try{
+  const config={BOT_ENV:'production',TELEGRAM_ENABLED:'true',TELEGRAM_REPLY_DELIVERY_ENABLED:'true',
+   BOT_OWNER_ID:OWNER,BOT_ID:'bot-main',BOT_USERNAME:'ManaratakBot',
+   BOT_STATE_FILE:f.file,TELEGRAM_BOT_TOKEN:TOKEN,
+   TELEGRAM_WEBHOOK_SECRET:SECRET,TELEGRAM_LISTEN_PORT:'8787'};
+  const c=loadLiveTelegramConfig(config);
+  assert.equal(c.ownerId,OWNER);assert.equal(c.stateFile,f.file);assert.equal(c.listenPort,8787);
+  for(const patch of [
+   {TELEGRAM_ENABLED:'false'}, {TELEGRAM_REPLY_DELIVERY_ENABLED:'false'},
+   {BOT_ENV:'development'}, {BOT_OWNER_ID:'student'}, {BOT_STATE_FILE:'relative.sqlite'},
+   {TELEGRAM_BOT_TOKEN:'bad'}, {TELEGRAM_WEBHOOK_SECRET:'short'},
+   {BOT_USERNAME:'bad'}, {TELEGRAM_LISTEN_PORT:'0'}, {TELEGRAM_LISTEN_PORT:'99999'},
+   {TELEGRAM_LISTEN_PORT:'80.5'}
+  ])assert.throws(()=>loadLiveTelegramConfig({...config,...patch}),/LIVE_TELEGRAM_CONFIG_INVALID/);
+  assert.throws(()=>loadLiveTelegramConfig({}),/LIVE_TELEGRAM_CONFIG_INVALID/);
+ }finally{await f.close()}
+});
+test('live server refuses missing, public and uninitialized state files before opening a port',async()=>{
+ const {loadLiveTelegramConfig,createLiveTelegramServer}=await import('../src/telegram-live-server.js');
+ const f=await fixture('sqlite');try{
+  const env={BOT_ENV:'production',TELEGRAM_ENABLED:'true',TELEGRAM_REPLY_DELIVERY_ENABLED:'true',
+   BOT_OWNER_ID:OWNER,BOT_ID:'bot-main',BOT_USERNAME:'ManaratakBot',
+   BOT_STATE_FILE:f.file,TELEGRAM_BOT_TOKEN:TOKEN,
+   TELEGRAM_WEBHOOK_SECRET:SECRET,TELEGRAM_LISTEN_PORT:'8787'};
+  await assert.rejects(createLiveTelegramServer(loadLiveTelegramConfig({...env,BOT_STATE_FILE:join(f.dir,'absent.sqlite')})),/LIVE_TELEGRAM_STATE_INVALID/);
+  const {chmod}=await import('node:fs/promises');
+  await chmod(f.file,0o644);
+  await assert.rejects(createLiveTelegramServer(loadLiveTelegramConfig(env)),/LIVE_TELEGRAM_STATE_INVALID/);
+  await chmod(f.file,0o600);
+  const server=await createLiveTelegramServer(loadLiveTelegramConfig(env));
+  try{assert.equal(server.listening,false);}finally{server.close();}
+ }finally{await f.close()}
+});
+test('private /start and /help produce user guidance without bypassing group admission',async()=>{
+ const f=await fixture();try{
+  const start=await f.app().handle(incoming(222,300,300,'/start'));
+  assert.equal(start.status,'APPLIED');assert.match(start.plan?.text??'',/منارتك/);
+  assert.ok(start.deliveryKey);
+  const help=await f.app().handle(incoming(223,300,300,'/help'));
+  assert.equal(help.status,'APPLIED');assert.match(help.plan?.text??'',/categories/);
+  assert.equal((await f.app().handle(incoming(224,300,-999,'/start','supergroup'))).deliveryKey,undefined);
+  assert.equal((await f.store.snapshot()).telegramReplyJobs?.length,2);
+ }finally{await f.close()}
+});
