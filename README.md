@@ -1,6 +1,6 @@
 # بوت منارتك — MANARATAK BOT
 
-**B0/B1 + B2-Core + B3 + B3 privacy-safe Telegram reply outbox and operational review (v0.6.2). Transport implemented but OFF by default — no live deployment verified.**
+**B0/B1 + B2-Core + B3 + B3 privacy-safe Telegram reply outbox and immutable owner review (v0.6.3). Transport implemented but OFF by default — no live deployment verified.**
 
 An independent TypeScript/Node.js 22 project based on `docs/MANARATAK_BOT_MASTER_v1.2.1_AR.md` and `docs/START_HERE_MANARATAK_BOT_v1.2.1_AR.md`. B0/B1 supply the secure baseline; B2-Core adds individual moderation and subscription policies; B3 adds the first locally tested education content flow.
 
@@ -10,6 +10,31 @@ An independent TypeScript/Node.js 22 project based on `docs/MANARATAK_BOT_MASTER
 
 
 
+
+## B3 v0.6.3 — owner-only explicit review of uncertain Telegram replies (OFF BY DEFAULT)
+
+This milestone provides an internal, testable **operator acknowledgement**, not automatic delivery reconciliation. Telegram sendMessage has no reliable idempotency key. A stale SENDING or UNKNOWN_OUTCOME receipt must never be blindly resent or converted to SENT merely because someone acknowledged it.
+
+- recordTelegramReplyManualReview(store,policy,options) requires policy.isOwner(options.actorId). The actor ID MUST come from a separate trusted operator authentication boundary. Do not accept it from user HTTP fields or untrusted chat messages.
+- The operator supplies the precise persisted updateKey and attemptId, a bounded integer now, a staleAfterMs threshold between 60 seconds and 30 days, and either ACKNOWLEDGED_UNRESOLVED or ESCALATED.
+- UNKNOWN_OUTCOME may be acknowledged; SENDING may be reviewed only after it is stale. Both **remain unresolved** with unchanged status, message receipt, attempt identity and queue eligibility. There is NO automatic retry.
+- The first decision persists immutably across JSON or SQLite restarts; repeating that exact decision is idempotent. Changing the decision, mismatching the attempt, duplicate keys, extra fields, text, or URLs fail closed.
+- Read-only reviewTelegramReplyOutbox returns reviewedUnresolved and awaitingFirstReview aggregate counts in addition to manualReviewRequired. Acknowledgements do not reduce the latter, because manual review is not proof of delivery.
+- No new public HTTP API, CLI accepting untrusted identities, Telegram callback, scheduled job, or outbound network request has been enabled. The existing live transport remains OFF.
+
+Trusted internal usage example:
+
+~~~ts
+import {recordTelegramReplyManualReview} from './src/telegram-reply-maintenance.js';
+const result=await recordTelegramReplyManualReview(privateStore,policy,{
+ actorId:authenticatedOperatorTelegramId, // verified by caller, never user supplied
+ updateKey:operatorVerifiedUpdateKey,
+ attemptId:operatorVerifiedStoredAttemptId,
+ decision:'ESCALATED',now:Date.now(),staleAfterMs:15*60_000
+}); // result is RECORDED, but delivery is STILL UNKNOWN
+~~~
+
+**Production boundary:** No authenticated operator interface, independent proof of a delivered message, live Telegram acceptance, public HTTPS proxy, bot rights verification, physical SQLite WAL/backup erasure or production alerting is shipped. Operator acknowledgement is only an immutable audit entry; do NOT infer successful delivery or enable the service from offline tests alone.
 
 ## B3 v0.6.2 — minimal persisted Telegram replies and unresolved-send audit (OFF BY DEFAULT)
 
