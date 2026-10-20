@@ -28,14 +28,16 @@ export class BoundedIngress {
   if(this.active>=this.maxActive)return null;
   this.active++;
   let left=false;
-  req.setTimeout(this.inactivityTimeoutMs,()=>{
-   // Never report a truncated request as valid, never initiate a retry.
-   req.destroy();
-  });
+  const socket=req.socket,originalTimeout=socket.timeout;
+  const onTimeout=()=>{req.destroy();};
+  socket.setTimeout(this.inactivityTimeoutMs);
+  socket.once('timeout',onTimeout);
   return ()=>{
    if(left)return;
    left=true;
-   req.setTimeout(0);
+   socket.removeListener('timeout',onTimeout);
+   // Restore the host's original timeout; never disable socket protection.
+   if(!socket.destroyed)socket.setTimeout(originalTimeout);
    this.active--;
   };
  }
