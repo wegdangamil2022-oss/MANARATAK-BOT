@@ -32,7 +32,7 @@ async function fixture(engine:'json'|'sqlite'='json'){
   botId:'bot-main',botUsername:'ManaratakBot',membership:async()=> 'UNKNOWN'});
  const upload=async(title='Scholarship Alpha')=>{
   const run=await admin.upload({origin:'TELEGRAM_PRIVATE',actorId:OWNER,chatId:OWNER,verified:true},
-   GROUP,'csv','scholarships.csv',\`title,university,cycle,degree,seats\n\${title},University A,2026,Bachelor,5\`);
+   GROUP,'csv','scholarships.csv','title,university,cycle,degree,seats\n'+title+',University A,2026,Bachelor,5');
   return run;
  };
  return {dir,file,store,policy,education,admin,app,upload,close:()=>rm(dir,{force:true,recursive:true})};
