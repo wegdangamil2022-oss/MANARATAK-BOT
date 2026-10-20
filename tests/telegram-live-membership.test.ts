@@ -1,6 +1,6 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
-import {mkdtemp,rm} from 'node:fs/promises';
+import {mkdtemp,rm,chmod} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {once} from 'node:events';
@@ -117,6 +117,7 @@ test('live webhook checks actual membership for private group catalog, sends rep
     result:{message_id:91,chat:{id:300}}}),{status:200});
   throw Error('UNEXPECTED_METHOD');
  });
+ await chmod(path,0o600);
  const server=await createLiveTelegramServer(loadLiveTelegramConfig(env),request);
  try{
   server.listen(0,'127.0.0.1');await once(server,'listening');
@@ -151,6 +152,7 @@ test('live denied membership cannot generate private scoped reply and never call
   if(!url.endsWith('/getChatMember'))throw Error('unexpected send');
   return body.user_id===123456789?admin():reply('left',300);
  });
+ await chmod(path,0o600);
  const server=await createLiveTelegramServer(loadLiveTelegramConfig(env),request);
  try{
   server.listen(0,'127.0.0.1');await once(server,'listening');
