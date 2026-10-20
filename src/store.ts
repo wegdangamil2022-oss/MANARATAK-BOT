@@ -84,6 +84,9 @@ export interface TelegramReplyJob {
  status:'QUEUED'|'SENDING'|'SENT'|'FAILED_CONFIRMED'|'UNKNOWN_OUTCOME';
  attemptId?:string;startedAt?:number;messageId?:number;
  queuedAt?:number;redactedAt?:number;
+ /** Immutable operator acknowledgement; it NEVER proves delivery or permits retry. */
+ manualReview?:{decision:'ACKNOWLEDGED_UNRESOLVED'|'ESCALATED';
+  reviewedBy:string;reviewedAt:number;attemptId:string};
 }
 /** Explicit owner-enabled retention REVIEW cadence. Tick only stores a preview, never redacts or deletes. */
 export interface PurgeRetentionReviewControl {
