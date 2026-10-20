@@ -76,7 +76,7 @@ export function parseMenuPageCommand(text:string):MenuPageCommand|null{
  return {kind,id,page,direction};
 }
 export function listingKeyboard(buttons:readonly string[],pageControls:{
- previous?:string;next?:string
+ previous?:string|undefined;next?:string|undefined
 }={}):TelegramReplyKeyboard{
  const rows:string[][]=[];
  for(let i=0;i<Math.min(buttons.length,10);i+=2)
