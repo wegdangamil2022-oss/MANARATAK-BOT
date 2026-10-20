@@ -439,7 +439,7 @@ test('B2-advanced: paused staff rights and source changes are revalidated after 
   assert.equal(f.gateway.calls.length,1);
   const b=await f.service().preview(OWNER,GROUP,{limit:1,beforeMessageId:2});
   await f.service().confirm(OWNER,b.id);
-  await f.observe(1,{pinned:true});
+  await f.observe(1,{pinned:true,sentAt:f.now()-HOUR-1000});
   assert.equal((await f.service().dispatchNext(b.id)).status,'BLOCKED');
   assert.equal(f.gateway.calls.length,1);
  }finally{await f.close()}
