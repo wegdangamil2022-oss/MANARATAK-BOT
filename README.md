@@ -1,6 +1,6 @@
 # بوت منارتك — MANARATAK BOT
 
-**B0/B1 + B2-Core + B3 + B3 privacy-safe Telegram reply outbox and opt-in authenticated owner review and deployment preflight and ingress hardening and outbox monitoring and emergency STOP (v0.6.8). Transport implemented but OFF by default — no live deployment verified.**
+**B0/B1 + B2-Core + B3 + B3 privacy-safe Telegram reply outbox and opt-in authenticated owner review and deployment preflight and ingress hardening and outbox monitoring and emergency STOP and offline acceptance (v0.6.9). Transport implemented but OFF by default — no live deployment verified.**
 
 An independent TypeScript/Node.js 22 project based on `docs/MANARATAK_BOT_MASTER_v1.2.1_AR.md` and `docs/START_HERE_MANARATAK_BOT_v1.2.1_AR.md`. B0/B1 supply the secure baseline; B2-Core adds individual moderation and subscription policies; B3 adds the first locally tested education content flow.
 
@@ -10,6 +10,22 @@ An independent TypeScript/Node.js 22 project based on `docs/MANARATAK_BOT_MASTER
 
 
 
+
+## B3 v0.6.9 — offline trial acceptance, backup matching and rollback drill gate (OFF)
+
+The local operator can check a *stopped* candidate SQLite database against a separately provisioned **private, independently validated matching SQLite backup**. The gate does not register a webhook, initiate an HTTP listener, restore anything or grant permission to turn on Telegram.
+
+```sh
+npm run telegram:acceptance -- --offline-only --state /private/manaratak/state.sqlite --backup /private/manaratak/snapshot.sqlite --safety /private/manaratak/emergency.flag --stale-ms 900000
+```
+
+Only explicitly named flags are accepted. The source, backup and safety files must be three distinct canonical private absolute paths. The emergency switch must read exactly `STOP\n`; the backup must match the decoded logical BotStore state; there must be no QUEUED or SENDING/UNKNOWN Telegram reply, unresolved update/operation, uncompleted B4 publication delivery/part or ready/pending purge. Even an acknowledged UNKNOWN remains an unresolved block.
+
+The tool produces **static, identifier-free JSON**, `stage: OFFLINE_ONLY` and a PASS (exit 0) or BLOCKED with reason codes (exit 2). Invalid files/options fail with a sanitized diagnostic (exit 1). It never creates a backup, changes STOP to RUN, promotes an attempt to SENT, erases records, automatically retries delivery or restores a live database.
+
+**Rollback operator runbook:** stop the ingress proxy/webhook before a test; retain the STOP switch; allow any in-flight work to drain and quarantine UNKNOWN; produce a protected SQLite snapshot through an authorized offline backup procedure; verify the backup matches the stopped state with the command above; perform any actual restore rehearsal **only on a separately isolated copy using the existing explicit restore-drill utilities**, with authorized supervision and evidence of data integrity. Never copy a raw live WAL file in place of a SQLite-consistent backup. On uncertainty, keep STOP. For a future deployment, separately inspect DNS/TLS, request ingress restrictions, allowlisted test chat, secrets, operator approval, independent provider evidence and observability.
+
+**Limitations:** this command does not prove the backup is at a different physical failure domain, that a real restore works on a new host, that no concurrent writer changes state after the check, or that Telegram has exactly-once sends. Passing these local checks is not production certification.
 
 ## B3 v0.6.8 — durable operator emergency STOP for Telegram (STILL OFF)
 
