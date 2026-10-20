@@ -11,6 +11,14 @@ An independent TypeScript/Node.js 22 project based on `docs/MANARATAK_BOT_MASTER
 
 
 
+## B3 v0.7.3 — Telegram owner dashboard with review and local publication (NOT DEPLOYED)
+
+The configured verified owner, and **only** that user ID in a private Telegram chat, now has functional keyboard screens beneath **🔐 لوحة المالك**: **🧾 مراجعة الوارد**, **📚 إدارة المكتبة**, **👥 المجموعات المعتمدة**, **📊 حالة الرسائل**, and **⚙️ إعدادات التشغيل**. Delegated administrators and students cannot execute those owner-only buttons by typing the same text; button labels are not a credential. No owner menu is accepted in a group.
+
+The owner's import review opens persisted batches from still-authorized scopes, then shows individual candidate details. A READY, unambiguous reviewed candidate may be assigned to a visible category using **📂 اعتماد في**; the next screen requires explicit **✅ تأكيد الاعتماد** before any state change. The separate **📝 معاينة النشر** screen then requires explicit **📤 تأكيد النشر المحلي**. This invokes the existing atomic EducationAdminFacade approval/publication boundary; publication makes the resource visible in the local reviewed education library **only**, never to Telegram channels and without a live network request. Duplicate/NEEDS_REVIEW items stay blocked, and approvals/publishing re-evaluate capabilities and scope.
+
+The dashboard also reports private counts of groups, library records, saved send statuses and AI configuration, without message content or user/attempt IDs. It never changes the physical STOP/RUN safety file or resolves UNKNOWN send outcomes. Long lists currently show a bounded first page in the owner review panel; next-page owner workflows and PDF/AI features remain separate milestones. This code is mock-tested; Telegram production remains OFF.
+
 ## B3 v0.7.2 — paginated Telegram private library (NOT DEPLOYED)
 
 Reply keyboards now offer **التالي / السابق** controls whenever a filtered private section or a published resource category contains more than ten items. The selected menu page is encoded as bounded plain Telegram text and **never serves as a permission grant**; every page transition re-reads the same current viewer authorization, category visibility and approved resource list. Outdated or malformed pages return a denial rather than disclosing private or archived material. Home and Back continue working. Telegram groups remain free from private reply keyboards.

@@ -1,3 +1,13 @@
+## 0.7.3 — 2026-10-21 — Interactive owner-only Telegram dashboard and reviewed local publication (NOT DEPLOYED)
+
+- The existing **🔐 لوحة المالك** now opens a real multi-button private Telegram dashboard for authorized import review, library statistics, approved-group summaries, delivery/outbox aggregate status, and configuration boundaries. It never presents owner controls to students or delegates.
+- An owner may select an authorized imported content batch, inspect each candidate's reviewed title/university/cycle/degree/status, select a currently enabled category, see a confirmation screen, then **explicitly approve** through the existing EducationAdminFacade transactional policy checks. No approval occurs on mere preview.
+- Once approved, a second **independent local publication preview and confirmation** can add the resource only to the internal education library. It does not post a Telegram channel message, create a campaign or touch Telegram Bot API credentials. Publishing remains idempotent and existing candidate status rules deny ambiguous/duplicate records.
+- Imported group content is only listed while the scope is currently authorized. Owner action text is untrusted, statically parsed and checked against the verified private actor, current import run, candidate state, enabled category, and group scope on every tap. No actions are honored from group chat or impersonating staff.
+- Delivery and group panels report limited locally persisted counts only. They do not claim live Telegram health, run recovery, disclose student messages or reset UNKNOWN outcomes. Safety STOP/RUN is never changed from Telegram.
+- New TDD JSON/SQLite and permission regression tests check real button-driven approval and publication, forged actions, revoked categories/chats, privacy and no outbound channel publishing.
+- **Remaining:** full reviewed PDF ingestion, live Telegram download proxy, richer owner wizard/pagination, Mini App UI, actual support, AI integration, production TLS/webhook and authorized live acceptance.
+
 ## 0.7.2 — 2026-10-21 — Authenticated full-library next/previous Telegram browsing (NOT DEPLOYED)
 
 - Extended the real Telegram reply keyboard with next/previous page controls for private scholarship, courses, universities, exams, forms and all-resource category listings, and for published resource lists within a category.
