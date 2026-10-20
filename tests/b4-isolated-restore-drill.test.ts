@@ -23,7 +23,7 @@ async function fixture(){
    status:'UNKNOWN_OUTCOME',attemptId:'immutable-pub-attempt',startedAt:900,leaseUntil:1000
   });
   s.historicalPublications.push({id:'history1',sourceScope:CHAT,destination:CHAT,
-   resourceId:'resource1',revision:'r1',status:'REVIEWED_SENT',diagnostic:'REVIEWED',
+   resourceId:'resource1',revision:'r1',status:'PUBLISHED_VERIFIED',diagnostic:'REVIEWED',
    reviewedBy:OWNER,reviewedAt:900});
   s.purgeJobs.push({
    id:'purge1',chatId:CHAT,actorId:OWNER,scopeVersion:1,createdAt:800,expiresAt:1200,
