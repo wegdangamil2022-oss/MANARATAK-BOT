@@ -165,11 +165,11 @@ test('B2-advanced: bulk always requires approval, pinned targets never enter pla
  const f=await fixture();try{
   await seed(f,60);
   for(let segment=0;segment<2;segment++){
-   const job=await f.service().preview(OWNER,GROUP,{limit:25,afterMessageId:segment?26:undefined});
+   const job=await f.service().preview(OWNER,GROUP,{limit:25,beforeMessageId:segment?36:undefined});
    await f.service().confirm(OWNER,job.id);
    for(let i=0;i<25;i++)assert.equal((await f.service().dispatchNext(job.id)).status,'ACKNOWLEDGED');
   }
-  const pending=await f.service().preview(OWNER,GROUP,{limit:10,afterMessageId:11});
+  const pending=await f.service().preview(OWNER,GROUP,{limit:10,beforeMessageId:11});
   await assert.rejects(f.service().confirm(OWNER,pending.id),/DAILY_PURGE_LIMIT/);
   assert.equal(f.gateway.calls.length,50);
  }finally{await f.close()}
