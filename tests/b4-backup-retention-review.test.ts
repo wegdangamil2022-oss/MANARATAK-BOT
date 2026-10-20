@@ -80,6 +80,7 @@ test('backup review: corrupt and uninitialized SQLite backups are never deemed s
   const db=new DatabaseSync(noBot);
   try{db.exec('CREATE TABLE unrelated (x INTEGER)');}finally{db.close()}
   const old=(NOW-60*DAY)/1000;
+  await chmod(fake,0o600);await chmod(noBot,0o600);
   await utimes(fake,old,old);await utimes(noBot,old,old);
   const beforeFake=await readFile(fake),beforeOther=await readFile(noBot);
   const result=await f.inspect();
@@ -105,7 +106,7 @@ test('backup review: canonical directory only, no symlinked ancestor, private pe
  const f=await fixture();try{
   const link=join(f.root,'alias-backups');
   await symlink(f.directory,link);
-  for(const dir of [link,join(f.root,'backups','..','backups'),'relative/backups']){
+  for(const dir of [link,f.directory+'/../backups','relative/backups']){
    await assert.rejects(reviewSqliteBackups({directory:dir,retentionDays:30,now:NOW}),
     /BACKUP_REVIEW_UNSAFE_DIRECTORY/);
   }
@@ -155,6 +156,7 @@ test('backup review: source contains unrecognized state schema and must never co
    db.exec('CREATE TABLE bot_state (id INTEGER PRIMARY KEY, data TEXT NOT NULL)');
    db.prepare('INSERT INTO bot_state (id,data) VALUES (1,?)').run(JSON.stringify({schemaVersion:999,updates:[]}));
   }finally{db.close()}
+  await chmod(file,0o600);
   const past=(NOW-70*DAY)/1000;await utimes(file,past,past);
   const r=await f.inspect();
   assert.equal(r.expiredCandidates,0);assert.equal(r.invalid,1);
