@@ -1,8 +1,8 @@
-import { mkdir, open, readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
+import { mkdir, open, readFile, rename, rm, stat, lstat, realpath, writeFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { DatabaseSync, backup } from 'node:sqlite';
-import { resolve } from 'node:path';
+import { resolve, isAbsolute } from 'node:path';
 
 export type Capability = 'ai.ask' | 'ai.settings.manage' | 'content.publish' | 'content.upload' | 'chat.manage' | 'education.navigate' | 'owner.dashboard' | 'subscription.verify' | 'support.use';
 export type GroupAIMode = 'OFF' | 'OWNER_MENTION' | 'STAFF_MENTION' | 'ALL_MENTION';
@@ -263,28 +263,72 @@ export class BotStore {
    * Online SQLite snapshot uses SQLite's backup API, NOT a raw copy of a live WAL file.
    * Reserve a new output path with O_EXCL; never overwrite an existing backup.
    */
+  /**
+   * Fail-closed local SQLite point-in-time backup. Validate the initialized
+   * source READ ONLY before creating any backup path; an existing empty or
+   * forged *.sqlite file must never be initialized by openSqlite() as a side
+   * effect. Checks are advisory in the face of a hostile filesystem actor;
+   * the host must enforce exclusive ownership / directory ACLs.
+   */
   static async backupSqlite(sourceFile: string, backupFile: string): Promise<void> {
-    if (resolve(sourceFile) === resolve(backupFile)) throw new Error('BACKUP_DESTINATION_COLLISION');
-    await stat(sourceFile); // do not create a new empty database for a missing source
-    await mkdir(dirname(backupFile), {recursive:true});
-    let reserved;
-    try { reserved = await open(backupFile, 'wx', 0o600); }
-    catch (err) {
-      if ((err as NodeJS.ErrnoException).code === 'EEXIST') throw new Error('BACKUP_ALREADY_EXISTS');
-      throw err;
-    }
-    await reserved.close();
-    const source = new BotStore(sourceFile,{engine:'sqlite'});
+    if(!isAbsolute(sourceFile)||!isAbsolute(backupFile)||
+       sourceFile!==resolve(sourceFile)||backupFile!==resolve(backupFile))
+      throw new Error('BACKUP_INVALID_PATH');
+    if(sourceFile===backupFile)throw new Error('BACKUP_DESTINATION_COLLISION');
+    const sourceInfo=await lstat(sourceFile); // missing source stays ENOENT
+    if(sourceInfo.isSymbolicLink())throw new Error('BACKUP_SOURCE_ALIAS');
+    if(!sourceInfo.isFile())throw new Error('BACKUP_SOURCE_INVALID');
+    let actualSource:string;
+    try {actualSource=await realpath(sourceFile);}
+    catch {throw new Error('BACKUP_SOURCE_INVALID');}
+    if(actualSource!==sourceFile)throw new Error('BACKUP_SOURCE_ALIAS');
+    if(sourceInfo.size<16)throw new Error('BACKUP_SOURCE_INVALID');
+    const sourceHandle=await open(sourceFile,'r').catch(()=>{throw new Error('BACKUP_SOURCE_INVALID');});
     try {
-      const db = await source.openSqlite();
-      try { await backup(db,backupFile); }
-      finally { db.close(); }
-      // Reopen and validate before treating this backup as a usable recovery checkpoint.
-      await new BotStore(backupFile,{engine:'sqlite'}).snapshot();
-    } catch (err) {
-      await rm(backupFile,{force:true});
-      throw err;
-    }
+      const header=Buffer.alloc(16);
+      const {bytesRead}=await sourceHandle.read(header,0,16,0).catch(()=>{
+        throw new Error('BACKUP_SOURCE_INVALID');
+      });
+      if(bytesRead!==16||!header.equals(Buffer.from('SQLite format 3\\0')))
+        throw new Error('BACKUP_SOURCE_INVALID');
+    }finally{await sourceHandle.close();}
+    // This readonly connection cannot manufacture a missing bot_state table
+    // or replace a bad schema with an apparently valid empty state.
+    let db:DatabaseSync;
+    try{db=new DatabaseSync(sourceFile,{readOnly:true});}
+    catch{throw new Error('BACKUP_SOURCE_INVALID');}
+    try{
+      let raw:string;
+      try{
+        const result=db.prepare("PRAGMA quick_check").get() as {quick_check?:unknown}|undefined;
+        if(result?.quick_check!=='ok')throw new Error('BACKUP_SOURCE_INVALID');
+        const row=db.prepare('SELECT data FROM bot_state WHERE id = 1').get() as {data?:unknown}|undefined;
+        if(typeof row?.data!=='string')throw new Error('BACKUP_SOURCE_INVALID');
+        raw=row.data;
+        // Decode in memory only. Supports known older schemas without writing.
+        new BotStore(sourceFile,{engine:'sqlite'}).decode(JSON.parse(raw));
+      }catch{throw new Error('BACKUP_SOURCE_INVALID');}
+      await mkdir(dirname(backupFile),{recursive:true});
+      let realParent:string;
+      try{realParent=await realpath(dirname(backupFile));}
+      catch{throw new Error('BACKUP_DESTINATION_ALIAS');}
+      if(realParent!==dirname(backupFile))throw new Error('BACKUP_DESTINATION_ALIAS');
+      let reserved;
+      try{reserved=await open(backupFile,'wx',0o600);}
+      catch(err){
+        if((err as NodeJS.ErrnoException).code==='EEXIST')throw new Error('BACKUP_ALREADY_EXISTS');
+        throw err;
+      }
+      await reserved.close();
+      try{
+        await backup(db,backupFile);
+        // A backup is usable only after its initialized BotStore state decodes.
+        await new BotStore(backupFile,{engine:'sqlite'}).snapshot();
+      }catch(err){
+        await rm(backupFile,{force:true});
+        throw err;
+      }
+    }finally{db.close();}
   }
 
   async claim(key: string, now: number, leaseMs = 30_000): Promise<'CLAIMED' | 'DUPLICATE' | 'UNKNOWN'> {
