@@ -16,7 +16,7 @@ export interface TelegramReplyRedactResult{
 const safeNonNegative=(n:unknown):n is number=>
  typeof n==='number'&&Number.isSafeInteger(n)&&n>=0;
 const props=(value:unknown,keys:string[]):boolean=>
- Boolean(value)&&typeof value==='object'&&!Array.isArray(value)&&
+ value!==null&&typeof value==='object'&&!Array.isArray(value)&&
  Object.keys(value).every(k=>keys.includes(k));
 const validReview=(v:TelegramReplyOutboxReviewOptions):boolean=>
  props(v,['now','staleAfterMs'])&&safeNonNegative(v.now)&&
