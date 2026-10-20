@@ -25,6 +25,53 @@ export class Policy {
     this.requireOwner(actor);
     await this.store.transaction(s => { const c = s.chats.find(x => x.id === chatId); if (c) { c.approved = false; c.version++; } });
   }
+  /** Owner-only restrictive mutations. Button text is never authorization:
+   * expectedVersion is checked inside the same durable transaction as the
+   * change, after current approval. No method can enable a disabled chat,
+   * add a capability or turn group AI on.
+   */
+  async revokeChatAtRevision(actor:string,chatId:string,expectedVersion:number):Promise<void>{
+    this.requireOwner(actor);
+    await this.store.transaction(s=>{
+      const c=s.chats.find(c=>c.id===chatId);
+      if(!c?.approved)throw Error('CHAT_NOT_APPROVED');
+      if(!Number.isSafeInteger(expectedVersion)||expectedVersion<=0||c.version!==expectedVersion)
+       throw Error('CHAT_POLICY_STALE');
+      c.approved=false;c.groupAI='OFF';c.version++;
+      s.audit.push({updateKey:'owner:chat:revoke:'+chatId+':'+c.version,decision:'ALLOW',
+       reason:'CHAT_OWNER_REVOKED_LOCALLY',policyVersion:c.version,at:this.clock()});
+    });
+  }
+  async restrictChatScopeAtRevision(actor:string,chatId:string,scope:string,expectedVersion:number):Promise<void>{
+    this.requireOwner(actor);
+    if(!['navigation','assistant','moderation','verification','publishing'].includes(scope))
+     throw Error('INVALID_CHAT_SCOPE');
+    await this.store.transaction(s=>{
+      const c=s.chats.find(c=>c.id===chatId);
+      if(!c?.approved)throw Error('CHAT_NOT_APPROVED');
+      if(!Number.isSafeInteger(expectedVersion)||expectedVersion<=0||c.version!==expectedVersion)
+       throw Error('CHAT_POLICY_STALE');
+      if(!c.scopes.includes(scope))throw Error('CHAT_SCOPE_ALREADY_RESTRICTED');
+      c.scopes=c.scopes.filter(x=>x!==scope);
+      if(scope==='assistant')c.groupAI='OFF';
+      c.version++;
+      s.audit.push({updateKey:'owner:chat:restrict:'+chatId+':'+scope+':'+c.version,
+       decision:'ALLOW',reason:'CHAT_OWNER_SCOPE_RESTRICTED',policyVersion:c.version,at:this.clock()});
+    });
+  }
+  async disableGroupAIAtRevision(actor:string,chatId:string,expectedVersion:number):Promise<void>{
+    this.requireOwner(actor);
+    await this.store.transaction(s=>{
+      const c=s.chats.find(c=>c.id===chatId);
+      if(!c?.approved)throw Error('CHAT_NOT_APPROVED');
+      if(!Number.isSafeInteger(expectedVersion)||expectedVersion<=0||c.version!==expectedVersion)
+       throw Error('CHAT_POLICY_STALE');
+      if(c.groupAI==='OFF')throw Error('CHAT_AI_ALREADY_OFF');
+      c.groupAI='OFF';c.version++;
+      s.audit.push({updateKey:'owner:chat:ai-off:'+chatId+':'+c.version,
+       decision:'ALLOW',reason:'CHAT_OWNER_AI_DISABLED',policyVersion:c.version,at:this.clock()});
+    });
+  }
   async setPresence(chatId: string, present: boolean): Promise<void> {
     await this.store.transaction(s => { const c = s.chats.find(x => x.id === chatId); if (c) c.present = present; });
   }
