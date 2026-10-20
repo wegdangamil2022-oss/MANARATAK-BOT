@@ -39,7 +39,7 @@ export class FakePurgeGateway implements PurgeGateway {
   return this.outcome;
  }
 }
-export type PurgeDispatchResult={status:PurgeOutcome|'RATE_LIMITED'|'EMPTY'|'BLOCKED'|'BLOCKED_UNKNOWN'|'BLOCKED_DAILY_LIMIT'|'NOT_CONFIRMED'|'PAUSED'|'CANCELLED';messageId?:number};
+export type PurgeDispatchResult={status:PurgeOutcome|'RATE_LIMITED'|'EMPTY'|'BLOCKED'|'BLOCKED_UNKNOWN'|'BLOCKED_PENDING'|'BLOCKED_DAILY_LIMIT'|'NOT_CONFIRMED'|'PAUSED'|'CANCELLED';messageId?:number};
 const hash=(m:RollingMessageMeta)=>createHash('sha256').update(JSON.stringify([
  m.chatId,m.messageId,m.senderKind,m.senderId??null,m.sentAt,m.contentType,m.hasLinks,
  m.pinned,m.linkedChannel,m.adminLog,m.approvedAnnouncement
@@ -184,6 +184,10 @@ export class ModerationPurgeService {
    const current=job.items.find(x=>x.status!=='ACKNOWLEDGED'&&x.status!=='CANCELLED');
    if(!current){job.status='COMPLETED';return {kind:'EMPTY' as const};}
    if(current.status!=='QUEUED')return {kind:'BLOCKED_UNKNOWN' as const};
+   // Serialize all outbound mock delete attempts per destination chat. A separate
+   // job must not race the first worker's awaited preflight or 429 response.
+   if(s.purgeJobs.some(other=>other.id!==job.id&&other.chatId===job.chatId&&
+      other.items.some(item=>item.status==='SENDING')))return {kind:'BLOCKED_PENDING' as const};
    const now=this.clock();
    if(chatCooldown(s,job.chatId)>now)return {kind:'RATE_LIMITED' as const};
    if(attemptsToday(s,now)>=DAILY_LIMIT)return {kind:'BLOCKED_DAILY_LIMIT' as const};
