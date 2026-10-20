@@ -68,7 +68,7 @@ export type PurgeItemStatus='QUEUED'|'SENDING'|'ACKNOWLEDGED'|'FAILED_CONFIRMED'
 export interface PurgeItem {
   messageId:number; metaDigest:string; status:PurgeItemStatus;
   attemptId?:string; startedAt?:number; leaseUntil?:number;
-  reconciliation?:{evidenceId?:string;reviewedBy:string;at:number;reason?:string;
+  reconciliation?:{evidenceId?:string;evidenceDigest?:string;reviewedBy:string;at:number;reason?:string;
      verifiedOutcome?:'ACKNOWLEDGED'|'FAILED_CONFIRMED'|'SKIPPED_UNVERIFIED'};
 }
 /** Separate explicit review required before any mock delete request. */

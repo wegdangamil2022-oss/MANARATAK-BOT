@@ -4,6 +4,15 @@ import {Policy} from './policy.js';
 import {nextDispatchLease,leaseExpired} from './publication-worker-lease.js';
 
 const WINDOW_MS=48*60*60*1000, REVIEW_MS=10*60*1000, MAX_PREVIEW=25, DAILY_LIMIT=50;
+const RETENTION_MS=30*24*60*60*1000;
+const retentionDigest=(value:unknown)=>createHash('sha256').update(JSON.stringify(value)).digest('hex');
+const evidenceDigest=(id:string)=>createHash('sha256').update('manaratak:purge:evidence:'+id).digest('hex');
+export interface PurgeRetentionPreview {
+ checkedAt:number; expiresAt:number; digest:string;
+ expiredObserved:number; eligibleJobs:number; reasonsToRedact:number;
+ evidenceIdsToRedact:number; senderFiltersToRedact:number;
+}
+
 type PurgeOutcome='ACKNOWLEDGED'|'FAILED_CONFIRMED'|'UNKNOWN_OUTCOME';
 /** A rate-limit is eligible for later retry only when the gateway explicitly proves
  * the provider rejected the request BEFORE any delete operation was accepted. */
@@ -313,7 +322,7 @@ export class ModerationPurgeService {
    current.status=evidence.outcome;
    current.reconciliation={evidenceId:evidence.evidenceId,reviewedBy:actor,at:this.clock(),
      verifiedOutcome:evidence.outcome};
-   s.audit.push({updateKey:`b2:purge:reconcile:${jobId}:${messageId}:${evidence.evidenceId}`,
+   s.audit.push({updateKey:`b2:purge:reconcile:${jobId}:${messageId}:${evidenceDigest(evidence.evidenceId)}`,
      actorId:actor,decision:'ALLOW',reason:'PURGE_EVIDENCE_RECONCILED',
      policyVersion:currentJob.scopeVersion,at:this.clock()});
    if(currentJob.status==='READY'&&currentJob.items.every(x=>terminalItem(x.status)))
@@ -322,7 +331,9 @@ export class ModerationPurgeService {
   });
  }
  private evidenceReused(s:BotState,evidenceId:string):boolean {
-  return s.purgeJobs.some(job=>job.items.some(i=>i.reconciliation?.evidenceId===evidenceId));
+  const hash=evidenceDigest(evidenceId);
+  return s.purgeJobs.some(job=>job.items.some(i=>i.reconciliation?.evidenceId===evidenceId||
+    i.reconciliation?.evidenceDigest===hash));
  }
  /** Owner's irrevocable choice to stop investigating—not a finding that the
   * message was deleted, nor approval to replay an UNKNOWN attempt. */
@@ -360,6 +371,92 @@ export class ModerationPurgeService {
   return {total:job.items.length,remaining:job.items.filter(i=>!terminalItem(i.status)).length,
     requestAccepted:count('ACKNOWLEDGED'),deletedConfirmed:0,skippedUnverified:count('SKIPPED_UNVERIFIED'),
     confirmedFailed:count('FAILED_CONFIRMED'),unknown:count('UNKNOWN_OUTCOME'),cancelled:count('CANCELLED')};
+ }
+ /**
+  * Owner-visible, read-only retention review. This function never deletes, redacts
+  * or alters the ledger and never makes a provider API request.
+  */
+ async previewRetention(actor:string):Promise<PurgeRetentionPreview>{
+  if(!this.policy.isOwner(actor))throw new Error('OWNER_ONLY');
+  return this.retentionCandidates(await this.store.snapshot(),this.clock()).preview;
+ }
+ private retentionCandidates(s:BotState,checkedAt:number):{preview:PurgeRetentionPreview;ids:string[]}{
+  // A message's send timestamp governs deletion eligibility; retained metadata
+  // older than 48h must be pruned independent of later observation time.
+  const expired=s.rollingMessageMeta.filter(m=>!recent(m,checkedAt));
+  const eligible=s.purgeJobs.filter(job=>{
+   if(!['COMPLETED','CANCELLED'].includes(job.status)||!job.items.every(i=>terminalItem(i.status)))return false;
+   // Last activity, not creation or initial confirmation, starts the redaction clock.
+   const latest=Math.max(job.createdAt,job.confirmedAt??0,
+     ...job.items.map(i=>Math.max(i.startedAt??0,i.reconciliation?.at??0)),
+     ...s.audit.filter(a=>a.updateKey.includes(job.id)).map(a=>a.at));
+   if(checkedAt-latest<RETENTION_MS)return false;
+   return job.filter.senderId!==undefined||job.items.some(i=>
+     i.metaDigest!=='REDACTED'||i.attemptId!==undefined||
+     i.reconciliation?.reason!==undefined||i.reconciliation?.evidenceId!==undefined);
+  });
+  const material={expired,eligible};
+  return {ids:eligible.map(x=>x.id),preview:{
+   checkedAt,expiresAt:checkedAt+REVIEW_MS,
+   digest:retentionDigest(material),
+   expiredObserved:expired.length,eligibleJobs:eligible.length,
+   reasonsToRedact:eligible.reduce((n,j)=>n+j.items.filter(x=>x.reconciliation?.reason!==undefined).length,0),
+   evidenceIdsToRedact:eligible.reduce((n,j)=>n+j.items.filter(x=>x.reconciliation?.evidenceId!==undefined).length,0),
+   senderFiltersToRedact:eligible.filter(x=>x.filter.senderId!==undefined).length
+  }};
+ }
+ /** Explicit second approval; optimistic fingerprint and time fence plus atomic state
+  * mutation prevent racing workers from scrubbing newly changed records.
+  * The message reservation IDs and statuses remain immutable tombstones.
+  */
+ async compactRetention(actor:string,review:PurgeRetentionPreview):Promise<{
+   expiredObserved:number;redactedJobs:number;redactedReasons:number;redactedEvidenceIds:number;
+ }>{
+  if(!this.policy.isOwner(actor))throw new Error('OWNER_ONLY');
+  const now=this.clock();
+  if(!review||!Number.isSafeInteger(review.checkedAt)||review.checkedAt>now||
+     now>review.checkedAt+REVIEW_MS)throw new Error('RETENTION_PREVIEW_EXPIRED');
+  return this.store.transaction(s=>{
+   const {preview,ids}=this.retentionCandidates(s,review.checkedAt);
+   if(preview.digest!==review.digest||preview.expiredObserved!==review.expiredObserved||
+      preview.eligibleJobs!==review.eligibleJobs||
+      preview.reasonsToRedact!==review.reasonsToRedact||
+      preview.evidenceIdsToRedact!==review.evidenceIdsToRedact||
+      preview.senderFiltersToRedact!==review.senderFiltersToRedact)
+      throw new Error('RETENTION_PREVIEW_STALE');
+   // Recheck eligibility at COMMIT time, not only when the preview was generated.
+   const current=this.retentionCandidates(s,now);
+   if(ids.some(id=>!current.ids.includes(id)))throw new Error('RETENTION_PREVIEW_STALE');
+   const expiredBefore=s.rollingMessageMeta.length;
+   prune(s,now);
+   let redactedReasons=0,redactedEvidenceIds=0;
+   for(const id of ids){
+    const job=s.purgeJobs.find(x=>x.id===id)!;
+    delete job.filter.senderId;
+    for(const item of job.items){
+     item.metaDigest='REDACTED'; // do not retain digest of a sender's metadata
+     delete item.attemptId;delete item.leaseUntil;delete item.startedAt;
+     const rec=item.reconciliation;
+     if(!rec)continue;
+     if(rec.reason!==undefined){delete rec.reason;redactedReasons++;}
+     if(rec.evidenceId!==undefined){
+      const oldId=rec.evidenceId;
+      rec.evidenceDigest=evidenceDigest(oldId); // retain one-use safety without raw identifier
+      delete rec.evidenceId;redactedEvidenceIds++;
+      // Legacy v0.5.2 audit IDs contained the raw proof ID in the updateKey.
+      // Scrub those while retaining a stable unique hashed audit key.
+      for(const audit of s.audit)if(audit.updateKey.includes(':purge:reconcile:'+job.id+':')&&
+           audit.updateKey.endsWith(':'+oldId))
+        audit.updateKey=audit.updateKey.slice(0,-oldId.length)+rec.evidenceDigest;
+     }
+    }
+   }
+   if(expiredBefore!==s.rollingMessageMeta.length||ids.length>0)
+    s.audit.push({updateKey:'b2:retention:'+randomUUID(),actorId:actor,
+      decision:'ALLOW',reason:'PURGE_RETENTION_COMPACTED',policyVersion:0,at:now});
+   return {expiredObserved:expiredBefore-s.rollingMessageMeta.length,
+     redactedJobs:ids.length,redactedReasons,redactedEvidenceIds};
+  });
  }
  async recoverPending():Promise<number>{
   return this.store.transaction(s=>{
