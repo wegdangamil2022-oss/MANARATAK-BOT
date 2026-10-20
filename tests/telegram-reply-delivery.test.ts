@@ -1,6 +1,6 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
-import {mkdtemp,rm} from 'node:fs/promises';
+import {mkdtemp,rm,writeFile} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {createServer} from 'node:http';
@@ -19,6 +19,7 @@ const incoming=(id:number,actor=300,chat=300,text='/categories private',kind='pr
 async function fixture(engine:'json'|'sqlite'='json'){
  const dir=await mkdtemp(join(tmpdir(),'manaratak-reply-'));
  const file=join(dir,engine==='sqlite'?'state.sqlite':'state.json'),store=new BotStore(file,{engine}),policy=new Policy(store,OWNER);
+ const safetyFile=join(dir,'safety.flag');await writeFile(safetyFile,'RUN\n',{mode:0o600});
  const education=new EducationService(store,policy),admin=new EducationAdminFacade(store,policy,education);
  const faq=new ApprovedAnswerService(store,policy),links=new ResourceLinkService(store,policy);
  await policy.approveChat(OWNER,GROUP,['navigation','assistant']);
@@ -29,7 +30,7 @@ async function fixture(engine:'json'|'sqlite'='json'){
  let response:'CONFIRMED'|'FAILED_CONFIRMED'|'UNKNOWN_OUTCOME'='CONFIRMED';
  const sender:TelegramReplySender={send:async(plan)=>{sent.push({chatId:plan.chatId,text:plan.text});return response==='CONFIRMED'?{status:'CONFIRMED',messageId:900}:{status:response}}};
  const dispatcher=()=>new TelegramReplyDispatcher(new BotStore(file,{engine}),new Policy(new BotStore(file,{engine}),OWNER),sender);
- return {dir,file,store,policy,app,dispatcher,sent,fail:(v:typeof response)=>{response=v},close:()=>rm(dir,{force:true,recursive:true})};
+ return {dir,file,safetyFile,store,policy,app,dispatcher,sent,fail:(v:typeof response)=>{response=v},close:()=>rm(dir,{force:true,recursive:true})};
 }
 for(const engine of ['json','sqlite'] as const){
  test(`reply outbox ${engine}: app persists plan atomically and dispatch confirms one Telegram send`,async()=>{
@@ -158,7 +159,8 @@ test('live server configuration is fail-closed and never enables Telegram by def
    BOT_OWNER_ID:OWNER,BOT_ID:'bot-main',BOT_USERNAME:'ManaratakBot',
    BOT_STATE_FILE:f.file,TELEGRAM_BOT_TOKEN:TOKEN,
    TELEGRAM_WEBHOOK_SECRET:SECRET,TELEGRAM_LISTEN_PORT:'8787',
-   TELEGRAM_WEBHOOK_PUBLIC_URL:'https://webhook.manaratak-ops.net/telegram/webhook'};
+   TELEGRAM_WEBHOOK_PUBLIC_URL:'https://webhook.manaratak-ops.net/telegram/webhook',
+   TELEGRAM_SAFETY_FILE:f.safetyFile};
   const c=loadLiveTelegramConfig(config);
   assert.equal(c.ownerId,OWNER);assert.equal(c.stateFile,f.file);assert.equal(c.listenPort,8787);
   for(const patch of [
@@ -178,7 +180,8 @@ test('live server refuses missing, public and uninitialized state files before o
    BOT_OWNER_ID:OWNER,BOT_ID:'bot-main',BOT_USERNAME:'ManaratakBot',
    BOT_STATE_FILE:f.file,TELEGRAM_BOT_TOKEN:TOKEN,
    TELEGRAM_WEBHOOK_SECRET:SECRET,TELEGRAM_LISTEN_PORT:'8787',
-   TELEGRAM_WEBHOOK_PUBLIC_URL:'https://webhook.manaratak-ops.net/telegram/webhook'};
+   TELEGRAM_WEBHOOK_PUBLIC_URL:'https://webhook.manaratak-ops.net/telegram/webhook',
+   TELEGRAM_SAFETY_FILE:f.safetyFile};
   await assert.rejects(createLiveTelegramServer(loadLiveTelegramConfig({...env,BOT_STATE_FILE:join(f.dir,'absent.sqlite')})),/LIVE_TELEGRAM_STATE_INVALID/);
   const {chmod}=await import('node:fs/promises');
   await chmod(f.file,0o644);
