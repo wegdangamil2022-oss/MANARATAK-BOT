@@ -5,6 +5,28 @@ import {nextDispatchLease,leaseExpired} from './publication-worker-lease.js';
 
 const WINDOW_MS=48*60*60*1000, REVIEW_MS=10*60*1000, MAX_PREVIEW=25, DAILY_LIMIT=50;
 const RETENTION_MS=30*24*60*60*1000;
+const MIN_REVIEW_CADENCE_MS=24*60*60*1000,MAX_REVIEW_CADENCE_MS=30*24*60*60*1000;
+const timeInt=(v:unknown):v is number=>typeof v==='number'&&Number.isSafeInteger(v)&&v>=0;
+function validRetentionControl(v:unknown):boolean{
+ if(!v||typeof v!=='object'||Array.isArray(v))return false;
+ const c=v as Record<string,unknown>;
+ if(Object.keys(c).some(k=>!['enabled','cadenceMs','version','nextCheckAt','lastCheckedAt','lastNotice'].includes(k)))return false;
+ if(typeof c.enabled!=='boolean'||!Number.isSafeInteger(c.cadenceMs)||
+    typeof c.cadenceMs!=='number'||c.cadenceMs<MIN_REVIEW_CADENCE_MS||
+    c.cadenceMs>MAX_REVIEW_CADENCE_MS||!timeInt(c.nextCheckAt)||
+    !Number.isSafeInteger(c.version)||typeof c.version!=='number'||c.version<1)return false;
+ if(c.lastCheckedAt!==undefined&&!timeInt(c.lastCheckedAt))return false;
+ if(c.lastNotice!==undefined){
+  const n=c.lastNotice;
+  if(!n||typeof n!=='object'||Array.isArray(n))return false;
+  const x=n as Record<string,unknown>;
+  if(Object.keys(x).some(k=>!['checkedAt','expiresAt','digest','expiredObserved','eligibleJobs','reasonsToRedact','evidenceIdsToRedact','senderFiltersToRedact'].includes(k))||
+   !['checkedAt','expiresAt','expiredObserved','eligibleJobs','reasonsToRedact','evidenceIdsToRedact','senderFiltersToRedact'].every(k=>timeInt(x[k]))||
+   typeof x.digest!=='string'||!(/^[0-9a-f]{64}$/.test(x.digest))||
+   c.lastCheckedAt!==x.checkedAt)return false;
+ }
+ return true;
+}
 const retentionDigest=(value:unknown)=>createHash('sha256').update(JSON.stringify(value)).digest('hex');
 const evidenceDigest=(id:string)=>createHash('sha256').update('manaratak:purge:evidence:'+id).digest('hex');
 export interface PurgeRetentionPreview {
@@ -376,6 +398,61 @@ export class ModerationPurgeService {
   * Owner-visible, read-only retention review. This function never deletes, redacts
   * or alters the ledger and never makes a provider API request.
   */
+ /** Only owner may opt in. Cadence is a minimum 24h and maximum 30 days.
+  * No cron, background task, provider call or deletion is started here. */
+ async configureRetentionReview(actor:string,settings:{enabled:boolean;cadenceMs:number}):
+ Promise<import('./store.js').PurgeRetentionReviewControl>{
+  if(!this.policy.isOwner(actor))throw new Error('OWNER_ONLY');
+  if(!settings||typeof settings!=='object'||Array.isArray(settings)||
+     Object.keys(settings).length!==2||Object.keys(settings).some(k=>!['enabled','cadenceMs'].includes(k))||
+     typeof settings.enabled!=='boolean'||!Number.isSafeInteger(settings.cadenceMs)||
+     typeof settings.cadenceMs!=='number'||settings.cadenceMs<MIN_REVIEW_CADENCE_MS||
+     settings.cadenceMs>MAX_REVIEW_CADENCE_MS)throw new Error('INVALID_RETENTION_SCHEDULE');
+  const now=this.clock();
+  if(!timeInt(now)||!timeInt(now+settings.cadenceMs))throw new Error('INVALID_RETENTION_SCHEDULE');
+  return this.store.transaction(s=>{
+   const old=s.purgeRetentionReview;
+   if(old!==undefined&&!validRetentionControl(old))throw new Error('INVALID_RETENTION_SCHEDULE');
+   const next={enabled:settings.enabled,cadenceMs:settings.cadenceMs,
+     version:(old?.version??0)+1,nextCheckAt:now+settings.cadenceMs};
+   if(!Number.isSafeInteger(next.version))throw new Error('INVALID_RETENTION_SCHEDULE');
+   s.purgeRetentionReview=next;
+   s.audit.push({actorId:actor,updateKey:'b2:retention:configure:'+randomUUID(),
+     decision:'ALLOW',reason:settings.enabled?'PURGE_RETENTION_REVIEW_ENABLED':'PURGE_RETENTION_REVIEW_DISABLED',
+     policyVersion:0,at:now});
+   return structuredClone(next);
+  });
+ }
+ /** Owner-only access to the previously generated aggregate notice; no sender IDs. */
+ async getRetentionReview(actor:string):Promise<import('./store.js').PurgeRetentionReviewControl|null>{
+  if(!this.policy.isOwner(actor))throw new Error('OWNER_ONLY');
+  const state=await this.store.snapshot(),config=state.purgeRetentionReview;
+  if(config===undefined)return null;
+  if(!validRetentionControl(config))throw new Error('INVALID_RETENTION_SCHEDULE');
+  return structuredClone(config);
+ }
+ /** Invoked only by a future trusted scheduler/manual operator. It NEVER redacts,
+  * deletes, calls Telegram or authorizes compactRetention. Cross-worker claiming
+  * and preview calculation happen in one atomic state transaction. */
+ async tickRetentionReview():Promise<{status:'DISABLED'|'NOT_DUE'|'CLOCK_ROLLBACK'|'READY';notice?:PurgeRetentionPreview}>{
+  return this.store.transaction(s=>{
+   const config=s.purgeRetentionReview;
+   if(config===undefined)return {status:'DISABLED' as const};
+   if(!validRetentionControl(config))throw new Error('INVALID_RETENTION_SCHEDULE');
+   if(!config.enabled)return {status:'DISABLED' as const};
+   const now=this.clock();
+   if(!timeInt(now)||!timeInt(now+config.cadenceMs))throw new Error('INVALID_RETENTION_SCHEDULE');
+   if(config.lastCheckedAt!==undefined&&now<config.lastCheckedAt)return {status:'CLOCK_ROLLBACK' as const};
+   if(now<config.nextCheckAt)return {status:'NOT_DUE' as const};
+   const notice=this.retentionCandidates(s,now).preview;
+   config.lastCheckedAt=now;
+   config.lastNotice=structuredClone(notice);
+   config.nextCheckAt=now+config.cadenceMs; // late ticks catch up once; no hourly replay loop
+   s.audit.push({actorId:'SYSTEM_RETENTION_REVIEW',updateKey:'b2:retention:review:'+randomUUID(),
+     decision:'NOOP',reason:'PURGE_RETENTION_REVIEW_DUE',policyVersion:0,at:now});
+   return {status:'READY' as const,notice};
+  });
+ }
  async previewRetention(actor:string):Promise<PurgeRetentionPreview>{
   if(!this.policy.isOwner(actor))throw new Error('OWNER_ONLY');
   return this.retentionCandidates(await this.store.snapshot(),this.clock()).preview;

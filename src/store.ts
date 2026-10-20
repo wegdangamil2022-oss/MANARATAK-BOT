@@ -78,6 +78,11 @@ export interface PurgeJob {
   status:'PREVIEW'|'READY'|'PAUSED'|'CANCELLED'|'COMPLETED';
   confirmedBy?:string; confirmedAt?:number; rateLimitedUntil?:number; items:PurgeItem[];
 }
+/** Explicit owner-enabled retention REVIEW cadence. Tick only stores a preview, never redacts or deletes. */
+export interface PurgeRetentionReviewControl {
+ enabled:boolean; cadenceMs:number; version:number; nextCheckAt:number;
+ lastCheckedAt?:number; lastNotice?:import('./moderation-purge.js').PurgeRetentionPreview;
+}
 export interface BotState {
   schemaVersion: 8;
   chats: Chat[];
@@ -103,6 +108,7 @@ export interface BotState {
   historicalPublications: HistoricalPublicationRecord[];
   rollingMessageMeta: RollingMessageMeta[];
   purgeJobs: PurgeJob[];
+  purgeRetentionReview?: PurgeRetentionReviewControl;
 }
 const empty = (): BotState => ({
   schemaVersion: 8, chats: [], grants: [], privateAI: 'OFF',
