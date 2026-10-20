@@ -56,7 +56,7 @@ export class Policy {
   async revokeChat(actor: string, chatId: string): Promise<void> {
     this.requireOwner(actor);
     await this.store.transaction(s => { const c = s.chats.find(x => x.id === chatId); if (c) {
-      c.approved = false; c.groupAI='OFF'; c.version++;
+      c.approved = false; c.version++;
       this.clearSubscriptionDependencies(s,chatId);
     } });
   }
