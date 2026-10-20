@@ -1,12 +1,25 @@
 # بوت منارتك — MANARATAK BOT
 
-**B0/B1 + B2-Core + B3 + B4 cancellation-safe, fenced campaign simulations (v0.4.7). Offline/test-only — no live Telegram bot.**
+**B0/B1 + B2-Core + B3 + B4 integrated cancellation and receipt integrity (v0.4.8). Offline/test-only — no live Telegram bot.**
 
 An independent TypeScript/Node.js 22 project based on `docs/MANARATAK_BOT_MASTER_v1.2.1_AR.md` and `docs/START_HERE_MANARATAK_BOT_v1.2.1_AR.md`. B0/B1 supply the secure baseline; B2-Core adds individual moderation and subscription policies; B3 adds the first locally tested education content flow.
 
 
 
 
+
+
+## B4 v0.4.8 — immutable multipart plans and receipt-boundary integrity (offline)
+
+Campaign dispatch now rederives the **entire canonical part plan from the approved resource text at send time**, even for older approved campaigns that predate `PublicationPreview.renderPlan`. A fingerprint printed in a mutable stored record cannot authorize modified copy or swapped parts. A mismatch returns BLOCKED without contacting the outbound fake gateway.
+
+`src/publication-receipts.ts` validates the **shape** of mock/provider message IDs before they can count as proof. Empty, whitespace-padded, newline/control, Unicode directional-control, and oversized IDs are quarantined as `UNKNOWN_OUTCOME`; they cannot settle an UNKNOWN receipt via a permissive fake verifier. The simulated gateway's printable opaque IDs remain supported. This is **only an input-format guard**: a real Telegram adapter still must verify the actual chat/message provenance and bot credentials through a separately approved receipt-verification design.
+
+`src/publication-reservation-integrity.ts` checks the existing **single** `BotStore.deliveries` ledger and the historical-review guard for every exact destination + resource ID + immutable revision. Duplicate entries or a newly imported historical reservation fail closed before the send, after the asynchronous `canPost` check, when the network result returns, and during confirmed-failure retry or provider-receipt reconciliation. An actual attempt that already crossed the fake network and then encounters a collision becomes UNKNOWN, not silently SENT or eligible for another send. Import history is never treated as proof of a new send.
+
+Offline coverage includes JSON and the optional SQLite engine, current and legacy campaigns, malformed provider outcomes, hostile metadata inserted during asynchronous gateway calls, conflicting historical records, and safe preservation of the previous receipt/attempt history. No migrations are needed for this patch; schema remains v7.
+
+**Not ready for production**: the SQLite BotState is still a full serialized row using experimental Node 22 APIs, the Telegram gateway and independently trusted evidence verifier remain unimplemented, and no real channel posts, credentials, production platform DB writes, or merges to `main` are authorized.
 
 
 ## B4 v0.4.7 — cancellation-safe multipart campaigns (offline)

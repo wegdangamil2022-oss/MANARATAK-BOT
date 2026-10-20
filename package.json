@@ -1,9 +1,9 @@
 {
   "name": "manaratak-bot",
-  "version": "0.4.7",
+  "version": "0.4.8",
   "private": true,
   "type": "module",
-  "description": "MANARATAK BOT B0-B4 mock-only core: cancelled multipart delivery review with durable attempts",
+  "description": "MANARATAK BOT B0-B4 mock-only: cancellation-safe multipart and immutable receipt/reservation safeguards",
   "engines": {
     "node": ">=22"
   },
