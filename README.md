@@ -1,6 +1,6 @@
 # بوت منارتك — MANARATAK BOT
 
-**B0/B1 + B2-Core + B3 + B2-Advanced deletion backoff and review safeguards (v0.5.1). Offline/test-only — no live Telegram bot.**
+**B0/B1 + B2-Core + B3 + B2-Advanced evidence-based purge review (v0.5.2). Offline/test-only — no live Telegram bot.**
 
 An independent TypeScript/Node.js 22 project based on `docs/MANARATAK_BOT_MASTER_v1.2.1_AR.md` and `docs/START_HERE_MANARATAK_BOT_v1.2.1_AR.md`. B0/B1 supply the secure baseline; B2-Core adds individual moderation and subscription policies; B3 adds the first locally tested education content flow.
 
@@ -10,6 +10,22 @@ An independent TypeScript/Node.js 22 project based on `docs/MANARATAK_BOT_MASTER
 
 
 
+
+## B2-Advanced v0.5.2 — UNKNOWN deletion reviews with trusted evidence (offline)
+
+**Scope:** Purge outcomes can be ambiguous after a fake network timeout, worker crash or lease expiry. No automatic retry may be inferred from an absent response; `UNKNOWN_OUTCOME` means the outbound effect cannot be proven either way. This version adds a **manual reconciliation** path, rather than changing request scheduling or enabling live Telegram deletion.
+
+`ModerationPurgeService.reconcileUnknown(actor,jobId,messageId,evidence)` accepts one **mock-verifiable** `PurgeEvidence` consisting of `evidenceId`, `chatId`, `messageId`, the exact durable `attemptId`, and a verified outcome `ACKNOWLEDGED` or `FAILED_CONFIRMED`. It requires effective approved-chat `chat.manage` authority and the original job actor or owner. **Independent injected verifier** `PurgeGateway.verifyEvidence()` must return `true` for exact bound evidence. All authorization, attempt status and global evidence-ID uniqueness are rechecked **after** asynchronous verification in the same state transaction. Untrusted, malformed, reused, mismatched, stale, or ambiguous proofs cannot silently close an UNKNOWN.
+
+Verified **ACKNOWLEDGED** is evidence that a test provider *accepted a request*, **not evidence of physical deletion**. Verified **FAILED_CONFIRMED** is a definitive no-effect outcome but remains blocked; **no automatic replay**. A previously cancelled job may still reconcile an attempted item without enabling any subsequent send.
+
+`skipForReview(owner,jobId,messageId,reason)` permits the owner alone to mark an UNKNOWN or confirmed failed attempt as `SKIPPED_UNVERIFIED` with a bounded explicit reason, without guessing what happened remotely. This stops investigating the item but does not claim it was deleted or retry it. Decisions are irreversible via the ordinary methods and have actor-specific audit entries; an owner may then proceed with other already reviewed items in an active job.
+
+`reviewProgress(actor,jobId)` returns **access-controlled counts** for total, remaining, accepted requests, confirmed failures, UNKNOWN, cancellations and unverified manual skips. It deliberately reports `deletedConfirmed: 0`: offline receipt acceptance and a manual decision never prove a Telegram message was physically deleted.
+
+`FakePurgeGateway.acceptEvidence` registers **test-only** proof artifacts for an independently injected fake verifier. It is not a trusted Telegram credential, API signature validation, a message-history scraper or an activated network adapter. Data continues in the **single BotStore v8 ledger** with additive optional item review metadata; no new schema/versioned DB rewrite. Both JSON and SQLite backends have async permission-revocation, cancellation, racing reviewer and evidence-reuse tests. **303/303 tests passed**, including the preexisting B0–B4 mock suite.
+
+**Remaining gate:** production evidence provenance/issuer verification, reliable Telegram API response mapping, privacy review for retained audit proofs, actual bot permissions, live private test and owner approval. None are claimed here.
 
 ## B2-Advanced v0.5.1 — durable confirmed 429 cooldown (offline, fake gateway only)
 

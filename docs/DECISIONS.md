@@ -144,3 +144,11 @@
 - Even a confirmed rejection consumed a transport attempt. The immutable purge audit records are the source of truth for the 50-attempt UTC-day cap, including 429 retries. Do not rely on mutable `startedAt` after resetting QUEUED.
 - No other job may start a delete request in the same chat while a current SENDING attempt exists. Recovery cannot infer remote failure after a timeout and never auto-replays an unknown request.
 - This slice is TESTED_MOCK, not real Telegram behavior validation; actual API contract, provider rights/rate limits and production retention must be independently verified before any activation.
+
+## B2-Advanced v0.5.2 — evidence-bound review of ambiguous deletion requests (20 October 2026)
+
+- A purge timeout or expired sending lease always remains `UNKNOWN_OUTCOME` until a trusted independently verified evidence artifact identifies **the exact chat, message, attempt and outcome**. A message ID by itself and a human guess are insufficient. Evidence ID is globally one-use across purge jobs.
+- `ACKNOWLEDGED` from a mocked gateway is a record of request acceptance, not proof of physical Telegram deletion. `FAILED_CONFIRMED` is verified no-effect and remains blocked without a separate human decision; automatic replay of ambiguous effects remains prohibited. A cancelled job may record its outstanding proof without restarting its cancelled queue.
+- `PurgeGateway.verifyEvidence()` is **an injected test-only contract**; the Fake gateway's proof registry is not a production receipt verifier. Recheck all source authorization and immutable attempt/evidence conditions **after await within one durable transaction**.
+- Owner-only `SKIPPED_UNVERIFIED` records an explicit bounded review reason in existing state and a minimal audit reason code. It means stop investigating, **not** delete confirmed or retry authorized. An immutable terminal decision cannot be rewritten with another review.
+- Aggregate `reviewProgress` is limited to authorized moderators in the approved chat and never claims a physical deleted count. No Telegram API client or production retention policy is activated.

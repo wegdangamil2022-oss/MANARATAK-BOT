@@ -1,3 +1,13 @@
+## 0.5.2 — 2026-10-20 — Explicit UNKNOWN purge outcome reconciliation (TESTED_MOCK)
+
+- Implemented `PurgeEvidence` exact proof binding (evidence ID, approved chat ID, message ID, immutable attempt ID, ACKNOWLEDGED vs FAILED_CONFIRMED).
+- Fake gateway now provides an independent asynchronous `verifyEvidence` contract, with a test-only evidence registry; no real Telegram verification. Rechecks authorization, proof status, uniqueness and identity after await inside one transaction, including SQLite.
+- Owner-only `skipForReview` explicitly records a bounded reason as `SKIPPED_UNVERIFIED`, without ever converting absence of evidence into deletion success.
+- Added access-restricted aggregate `reviewProgress` (accepted requests are not verified physical deletes; deletedConfirmed remains 0), preserving original receipts and cancellation status.
+- Reconciliation remains permitted for uncertain attempts from already cancelled jobs to settle historical evidence, never permitting further sends; verified FAILED_CONFIRMED is not auto retried.
+- Added 14 TDD tests (303/303 total) for JSON, SQLite, invalid/reused evidence, revoked reviewers, async racing decisions, report privacy and absence of network replay. Existing BotStore schema v8 retained with additive optional per-item reconciliation metadata.
+- No live Telegram or production DB interaction; verified mock receipts must not be presented as actual deletion confirmation.
+
 ## 0.5.1 — 2026-10-20 — B2-Advanced fake 429 safety and per-chat purge sequencing
 
 - Added strict structured fake gateway rate-limit outcome with valid retryAfterMs (1–3,600,000), preserving exact item after a confirmed rejected request.
