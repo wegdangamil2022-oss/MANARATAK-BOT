@@ -157,6 +157,15 @@ export class TelegramUpdateApplication {
       }
     }
     const result=(message:string):TelegramResult=>({status:'APPLIED',reason:'RESPONSE_PLANNED_ONLY',plan:this.plan(chatId,message)});
+    if(kind==='private'&&(cmd==='/start'||cmd==='/help')){
+      return result('<b>أهلًا بك في بوت منارتك 🎓</b>\\n'
+       +'يمكنك استكشاف المنح والجامعات والموارد التعليمية المعتمدة.\\n'
+       +'<b>الأوامر:</b>\\n'
+       +'/categories private — تصفح أقسام المحتوى المتاح\\n'
+       +'/resources private grants — تصفح الموارد المعتمدة في قسم المنح\\n'
+       +'/help — عرض المساعدة\\n'
+       +'بعض الأقسام والمجموعات تتطلب موافقة الإدارة والتحقق من العضوية.');
+    }
     if(cmd==='/admin'&&kind==='private'){
       const scope=words[1];if(!scope||!isScope(scope))return {status:'DENIED',reason:'INVALID_SCOPE'};
       const p=await this.opts.admin.panel(adminCtx,scope);
