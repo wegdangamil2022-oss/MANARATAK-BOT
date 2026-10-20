@@ -46,7 +46,7 @@ function parseArgs(args:readonly string[]):{path:string;engine:'json'|'sqlite'} 
   }else deny('RETENTION_RUNNER_INVALID_ARGUMENTS');
  }
  if(!mode||!path||!isAbsolute(path)||path!==resolve(path)||/[\u0000-\u001f\u007f]/u.test(path)||
-   !['json','sqlite'].includes(engine??''))deny('RETENTION_RUNNER_INVALID_ARGUMENTS');
+   !['json','sqlite'].includes(engine??''))throw new Error('RETENTION_RUNNER_INVALID_ARGUMENTS');
  return {path,engine:engine as 'json'|'sqlite'};
 }
 
@@ -73,24 +73,24 @@ export async function runRetentionReviewCli(
 ):Promise<RetentionReviewRunnerReport>{
  const {path,engine}=parseArgs(argv);
  const ownerId=env.MANARATAK_OWNER_ID;
- if(!ownerId||!/^\d+$/.test(ownerId)||ownerId==='0')deny('RETENTION_RUNNER_OWNER_REQUIRED');
+ if(!ownerId||!/^\d+$/.test(ownerId)||ownerId==='0')throw new Error('RETENTION_RUNNER_OWNER_REQUIRED');
  await requirePrivateExistingFile(path,engine);
  const store=new BotStore(path,{engine});
  const policy=new Policy(store,ownerId,clock);
  // A fake, non-networking gateway is a deliberately narrow type boundary.
  const svc=new ModerationPurgeService(store,policy,new FakePurgeGateway(),clock);
  // Validate persistent data before attempting to record a due checkpoint.
- try{await store.snapshot();}catch{deny('RETENTION_RUNNER_FAILED_CLOSED');}
- let result:Awaited<ReturnType<typeof svc.tickRetentionReview>>;
- try{result=await svc.tickRetentionReview();}catch{deny('RETENTION_RUNNER_FAILED_CLOSED');}
+ await store.snapshot().catch(()=>{throw new Error('RETENTION_RUNNER_FAILED_CLOSED');});
+ const result=await svc.tickRetentionReview().catch(()=>{throw new Error('RETENTION_RUNNER_FAILED_CLOSED');});
  if(result.status!=='READY')return {status:result.status};
- if(!result.notice)deny('RETENTION_RUNNER_FAILED_CLOSED');
+ const notice=result.notice;
+ if(!notice)throw new Error('RETENTION_RUNNER_FAILED_CLOSED');
  // Only aggregate counts are stdout material: never print DB path, owner ID,
  // message IDs, recipient IDs, review text, proof identifiers or plan digest.
- return {status:'READY',expiredObserved:result.notice.expiredObserved,
-  eligibleJobs:result.notice.eligibleJobs,reasonsToRedact:result.notice.reasonsToRedact,
-  evidenceIdsToRedact:result.notice.evidenceIdsToRedact,
-  senderFiltersToRedact:result.notice.senderFiltersToRedact};
+ return {status:'READY',expiredObserved:notice.expiredObserved,
+  eligibleJobs:notice.eligibleJobs,reasonsToRedact:notice.reasonsToRedact,
+  evidenceIdsToRedact:notice.evidenceIdsToRedact,
+  senderFiltersToRedact:notice.senderFiltersToRedact};
 }
 const directlyExecuted=process.argv[1]!==undefined&&
  fileURLToPath(import.meta.url)===resolve(process.argv[1]);
