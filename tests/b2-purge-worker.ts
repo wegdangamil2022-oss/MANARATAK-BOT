@@ -1,0 +1,10 @@
+import {BotStore} from '../src/store.js';
+import {Policy} from '../src/policy.js';
+import {ModerationPurgeService,FakePurgeGateway} from '../src/moderation-purge.js';
+const [file,id]=process.argv.slice(2);
+if(!file||!id)throw new Error('WORKER_ARGS_REQUIRED');
+const store=new BotStore(file,{engine:'sqlite'}),clock=()=>30*24*60*60*1000;
+const gateway=new FakePurgeGateway();
+const service=new ModerationPurgeService(store,new Policy(store,'100',clock),gateway,clock);
+const result=await service.dispatchNext(id);
+process.stdout.write(result.status+':'+gateway.calls.length+'\n');
