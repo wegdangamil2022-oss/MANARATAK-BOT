@@ -82,6 +82,10 @@ export class EducationService {
       if(!this.canPublish(s,actor,run.scope)) throw new Error('PUBLISH_DENIED');
       const category=s.educationCategories.find(c=>c.id===categoryId && c.scope===run.scope);
       if(!category) throw new Error('CATEGORY_SCOPE_MISMATCH');
+      // The approval transaction itself must enforce category visibility,
+      // not only a preflight UI read: a revoked/disabled category cannot gain
+      // a newly approved candidate from a delayed or forged action.
+      if(!this.visibleCategory(s,category))throw new Error('CATEGORY_DISABLED_OR_MISSING');
       const candidate=Number.isSafeInteger(index) ? run.candidates[index] : undefined;
       if(!candidate) throw new Error('CANDIDATE_NOT_FOUND');
       if(candidate.status==='NEEDS_REVIEW') throw new Error('NEEDS_REVIEW');
