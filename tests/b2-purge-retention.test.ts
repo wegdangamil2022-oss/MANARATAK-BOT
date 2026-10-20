@@ -170,3 +170,73 @@ test('retention: SQLite independent writers cannot both consume the same preview
   assert.equal((await f.store.snapshot()).audit.filter(x=>x.reason==='PURGE_RETENTION_COMPACTED').length,1);
  }finally{await f.close()}
 });
+
+test('retention: age is measured from the last reviewer decision, not old job creation',async()=>{
+ const f=await fixture('sqlite');try{
+  await f.unknownAndSkip();
+  f.advance(31*DAY);
+  // The original preview may have been created a month ago while its
+  // human reconciliation happened only yesterday.
+  await f.store.transaction(s=>{
+   const i=s.purgeJobs[0]!.items[0]!;
+   i.reconciliation!.at=f.now()-DAY;
+  });
+  const plan=await f.service().previewRetention(OWNER);
+  assert.equal(plan.eligibleJobs,0);
+  assert.equal(plan.expiredObserved,2);
+  await f.service().compactRetention(OWNER,plan);
+  assert.equal((await f.store.snapshot()).purgeJobs[0]!.items[0]!.reconciliation?.reason,
+    'Long case note for this investigation');
+ }finally{await f.close()}
+});
+
+test('retention: an already cancelled job retaining an UNKNOWN attempt cannot lose its proof identity',async()=>{
+ const f=await fixture('sqlite');try{
+  const j=await f.job(2);
+  f.gateway.throwAfterDelete=true;
+  assert.equal((await f.service().dispatchNext(j.id)).status,'UNKNOWN_OUTCOME');
+  await f.service().cancel(OWNER,j.id);
+  const before=(await f.store.snapshot()).purgeJobs[0]!.items[0]!;
+  assert.equal(before.status,'UNKNOWN_OUTCOME');
+  f.advance(31*DAY);
+  const p=await f.service().previewRetention(OWNER);
+  assert.equal(p.eligibleJobs,0);
+  await f.service().compactRetention(OWNER,p);
+  const after=(await f.store.snapshot()).purgeJobs[0]!.items[0]!;
+  assert.equal(after.status,'UNKNOWN_OUTCOME');
+  assert.equal(after.attemptId,before.attemptId);
+  assert.equal(after.metaDigest,before.metaDigest);
+  assert.equal((await f.service().dispatchNext(j.id)).status,'CANCELLED');
+ }finally{await f.close()}
+});
+
+test('retention: legacy plaintext evidence in the audit key is migrated to a stable digest',async()=>{
+ const f=await fixture();try{
+  const {evidence}=await f.unknownAndVerified();
+  await f.store.transaction(s=>{
+   const old=s.audit.find(a=>a.reason==='PURGE_EVIDENCE_RECONCILED')!;
+   const segments=old.updateKey.split(':');
+   segments[segments.length-1]=evidence.evidenceId;
+   old.updateKey=segments.join(':');
+  });
+  assert.equal(JSON.stringify(await f.store.snapshot()).includes(evidence.evidenceId),true);
+  f.advance(31*DAY);
+  await f.service().compactRetention(OWNER,await f.service().previewRetention(OWNER));
+  const after=await f.store.snapshot();
+  assert.equal(JSON.stringify(after).includes(evidence.evidenceId),false);
+  assert.match(after.audit.find(a=>a.reason==='PURGE_EVIDENCE_RECONCILED')!.updateKey,/:[0-9a-f]{64}$/);
+  assert.equal(after.purgeJobs[0]!.items[0]!.reconciliation?.evidenceId,undefined);
+ }finally{await f.close()}
+});
+
+test('retention: private owner preview contains counts and digest, not reviewer notes or proof identifiers',async()=>{
+ const f=await fixture();try{
+  const {reason}=await f.unknownAndSkip();
+  f.advance(31*DAY);
+  const preview=await f.service().previewRetention(OWNER);
+  assert.equal(JSON.stringify(preview).includes(reason),false);
+  assert.equal(Object.keys(preview).some(k=>k==='items'||k==='messageIds'),false);
+  assert.match(preview.digest,/^[0-9a-f]{64}$/);
+  assert.equal((await f.store.snapshot()).purgeJobs[0]!.items[0]!.reconciliation?.reason,reason);
+ }finally{await f.close()}
+});
