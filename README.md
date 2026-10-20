@@ -1,6 +1,6 @@
 # بوت منارتك — MANARATAK BOT
 
-**B0/B1 + B2-Core + B3 + B3 privacy-safe Telegram reply outbox and immutable owner review (v0.6.3). Transport implemented but OFF by default — no live deployment verified.**
+**B0/B1 + B2-Core + B3 + B3 privacy-safe Telegram reply outbox and opt-in authenticated owner review (v0.6.4). Transport implemented but OFF by default — no live deployment verified.**
 
 An independent TypeScript/Node.js 22 project based on `docs/MANARATAK_BOT_MASTER_v1.2.1_AR.md` and `docs/START_HERE_MANARATAK_BOT_v1.2.1_AR.md`. B0/B1 supply the secure baseline; B2-Core adds individual moderation and subscription policies; B3 adds the first locally tested education content flow.
 
@@ -9,6 +9,21 @@ An independent TypeScript/Node.js 22 project based on `docs/MANARATAK_BOT_MASTER
 
 
 
+
+
+## B3 v0.6.4 — opt-in, signed owner HTTP review adapter (NOT DEPLOYED)
+
+This release **does not** activate a web panel or the live Telegram server. It adds two optional operations to the existing Telegram Mini App HMAC-authenticated **local-only** web listener, suitable for *isolated mock integration* before a separately approved, hardened operator deployment.
+
+Pass `{store,policy,clock?}` as the optional **third** parameter to `telegramAdminWebListener(auth,educationAdmin,replyOps)`. With no third argument, both new routes return 404 and the old education-admin functionality is unchanged:
+
+- POST `/admin/replies/summary`: body `{}`; signed owner identity required; returns a content-free aggregate of queued, stale SENDING, UNKNOWN, reviewed and awaiting-first-review counts.
+- POST `/admin/replies/review`: exact body `{"updateKey":"b3-webhook:bot-id:123","attemptId":"trusted-existing-attempt","decision":"ESCALATED"}` (or `ACKNOWLEDGED_UNRESOLVED`). Actor identity is derived only from Telegram-signed `x-telegram-init-data`. Server supplies timestamp and 15-minute staleness threshold; client cannot override them.
+- Both routes require a valid, fresh Mini App HMAC signature, owner-only authorization, exact POST path, JSON content type, strict UTF-8 body limited to 2 KiB, and reject extra fields, arbitrary notes or links. No CORS opt-in, cookies, new Telegram commands, public HTTP listener, or automatic retry.
+- Owner acknowledgement **does not prove Telegram delivery**, change SENDING/UNKNOWN_OUTCOME, create a message receipt or authorize resending. Repeated identical reviews are idempotent, conflicting decisions are rejected with immutable audit metadata.
+- No sensitive message text, chat IDs, update keys, attempt IDs, tokens or reviewer identities appear in summary responses or HTTP errors. Any operator frontend that exposes raw stored selectors must have its own authenticated restricted access and data-minimization review.
+
+**Important:** `createLiveTelegramServer` still mounts only the Telegram webhook and DOES NOT enable these admin routes. The owner web listener is a library used in local tests; deploying an actual operator UI behind HTTPS, trusted host permissions, request-rate limits, authentication session policy, receipt verification, logging and secret management are separate milestones.
 
 
 ## B3 v0.6.3 — owner-only explicit review of uncertain Telegram replies (OFF BY DEFAULT)

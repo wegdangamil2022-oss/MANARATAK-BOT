@@ -115,3 +115,6 @@
 
 | B3 v0.6.2 Telegram reply outbox privacy and safe backlog review | telegram-reply-maintenance.ts / telegram-replies.ts / store.ts / tests/b3-reply-outbox-maintenance.test.ts | TESTED_MOCK (OFF_BY_DEFAULT) | 14 TDD tests, irreversible body removal at SENDING claim, persisted attempt receipt, sanitized stale/UNKNOWN review, explicit capped/paged legacy cleanup, concurrent JSON/SQLite |
 | B3 v0.6.2 physical secure erasure, lifecycle, evidence reconciliation | — | BLOCKED_LIVE | WAL/old SQLite backups may still retain plain text, pending QUEUED messages still store bodies; no auto-retry, maintenance scheduler, verified backup erasure or production approval |
+
+| B3 v0.6.4 signed local owner reply review interface | web-admin-auth.ts / tests/b3-reply-owner-web.test.ts | TESTED_MOCK_HTTP (OFF_BY_DEFAULT) | Optional signed Telegram Mini App HMAC/owner-only summary and immutable review endpoints; internal server-supplied time, 15-minute stale SENDING gate, fixed small request schemas and 2KiB limits; JSON/SQLite integration tests; no live Telegram server mount |
+| B3 v0.6.4 live operator UI / verified Telegram evidence / secure deployment | — | BLOCKED_LIVE | Real HTTPS, independent delivery evidence, dedicated trusted operator UI, ingress and rate-limit configuration and live acceptance are outstanding; acknowledgement is not confirmation of send success |
