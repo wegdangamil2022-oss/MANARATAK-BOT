@@ -314,6 +314,34 @@ export class BotStore {
     finally{db.close();}
   }
 
+  /**
+   * Read an initialized SQLite BotState WITHOUT invoking openSqlite(), WAL
+   * initialization, schema creation or a write transaction. Requires an exact
+   * canonical, privately owned file path. For local operator inventories only.
+   * The host must separately prevent filesystem races and protect sidecars.
+   */
+  static async snapshotSqliteReadOnly(filePath:string):Promise<BotState>{
+    const invalid=():never=>{throw Error('TELEGRAM_OUTBOX_STATE_INVALID');};
+    if(typeof filePath!=='string'||!isAbsolute(filePath)||filePath!==resolve(filePath))
+      return invalid();
+    try{
+      const info=await lstat(filePath);
+      if(!info.isFile()||info.isSymbolicLink()||(info.mode&0o077)!==0||
+        await realpath(filePath)!==filePath||
+        !(await BotStore.verifySqliteBackupReadOnly(filePath)))return invalid();
+    }catch{return invalid();}
+    let db:DatabaseSync;
+    try{db=new DatabaseSync(filePath,{readOnly:true});}
+    catch{return invalid();}
+    try{
+      const row=db.prepare('SELECT data FROM bot_state WHERE id=1').get() as {data?:unknown}|undefined;
+      if(typeof row?.data!=='string')return invalid();
+      const state=new BotStore(filePath,{engine:'sqlite'}).decode(JSON.parse(row.data) as unknown);
+      return structuredClone(state);
+    }catch{return invalid();}
+    finally{db.close();}
+  }
+
   static async backupSqlite(sourceFile: string, backupFile: string): Promise<void> {
     if(!isAbsolute(sourceFile)||!isAbsolute(backupFile)||
        sourceFile!==resolve(sourceFile)||backupFile!==resolve(backupFile))
