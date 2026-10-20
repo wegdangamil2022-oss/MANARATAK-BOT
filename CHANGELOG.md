@@ -1,3 +1,12 @@
+## 0.6.3 — 2026-10-20 — Owner-only immutable Telegram send review (NOT DEPLOYED)
+
+- Added internal recordTelegramReplyManualReview for trusted, authenticated owners. Stores only bounded decisions (ACKNOWLEDGED_UNRESOLVED or ESCALATED), reviewer ID, review time and the exact attempt ID.
+- Accepts only UNKNOWN_OUTCOME or stale SENDING. Attempt binding, bounded stale thresholds, duplicate detection, immutable decisions and idempotent identical calls prevent mistaken or conflicting review.
+- Does not mark delivery as SENT or FAILED, retry, call Telegram, expose an HTTP/CLI entry point, or store notes/URLs/student messages.
+- Adds aggregate reviewedUnresolved and awaitingFirstReview counters. The manualReviewRequired total remains unchanged by acknowledgements; operator review never proves delivery.
+- New JSON/SQLite regression tests for permissions, attempts, concurrency, stale gates, unchanged receipts, no resend and privacy.
+- Live Telegram/HTTPS activation, verified external evidence reconciliation, secure owner UI, full backup lifecycle and production acceptance remain open.
+
 ## 0.6.2 — 2026-10-20 — Durable Telegram reply privacy and operator review (NOT DEPLOYED)
 
 - Removed unnecessary persisted reply body **at the beginning of each exclusive outbound send claim**, not after the HTTP result. Keeps only status, attempt ID, timestamps and optional confirmed Telegram message ID. This blocks blind replay after a crash without retaining user-facing text in current serialized state.

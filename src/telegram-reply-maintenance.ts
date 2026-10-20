@@ -8,6 +8,7 @@ export interface TelegramReplyOutboxReview{
  asOf:number;total:number;queued:number;sending:number;sent:number;
  failedConfirmed:number;unknownOutcome:number;bodiesStored:number;
  staleQueued:number;staleSending:number;manualReviewRequired:number;
+ reviewedUnresolved:number;awaitingFirstReview:number;
 }
 export interface TelegramReplyRedactOptions{now:number;maxEntries?:number;startAt?:number}
 export interface TelegramReplyRedactResult{
@@ -41,7 +42,8 @@ export async function reviewTelegramReplyOutbox(store:BotStore,options:TelegramR
  const jobs=safeJobs((await store.snapshot()).telegramReplyJobs);
  const report:TelegramReplyOutboxReview={asOf:options.now,total:jobs.length,queued:0,
   sending:0,sent:0,failedConfirmed:0,unknownOutcome:0,bodiesStored:0,
-  staleQueued:0,staleSending:0,manualReviewRequired:0};
+  staleQueued:0,staleSending:0,manualReviewRequired:0,
+  reviewedUnresolved:0,awaitingFirstReview:0};
  for(const job of jobs){
   if(job.plan!==undefined)report.bodiesStored++;
   if(job.status==='QUEUED'){
@@ -59,6 +61,11 @@ export async function reviewTelegramReplyOutbox(store:BotStore,options:TelegramR
  // Started sends lack Telegram idempotency keys; old unresolved attempts must
  // never be recovered by automatically submitting another sendMessage.
  report.manualReviewRequired=report.unknownOutcome+report.staleSending;
+ // Acknowledged does not mean delivered or resolved. Maintain both counts.
+ report.reviewedUnresolved=jobs.filter(j=>j.manualReview!==undefined&&
+  (j.status==='UNKNOWN_OUTCOME'||(j.status==='SENDING'&&j.startedAt!==undefined&&
+   options.now>=j.startedAt&&options.now-j.startedAt>=options.staleAfterMs))).length;
+ report.awaitingFirstReview=report.manualReviewRequired-report.reviewedUnresolved;
  return report;
 }
 /** An explicit opt-in privacy operation. Never discards a queued message,
@@ -86,5 +93,66 @@ export async function redactFinishedTelegramReplies(store:BotStore,options:Teleg
    result.redacted++;
   }
   return result;
+ });
+}
+
+
+/** Internal operator-only audit action. Caller must supply an actor ID obtained
+ * from trusted authentication, NOT from arbitrary user text or HTTP query data.
+ * The persisted acknowledgement is not proof of send success/failure. No Bot API
+ * calls, retries, changing receipt status or customer content are performed.
+ */
+export interface TelegramReplyManualReviewOptions{
+ actorId:string;updateKey:string;attemptId:string;
+ decision:'ACKNOWLEDGED_UNRESOLVED'|'ESCALATED';
+ now:number;staleAfterMs:number;
+}
+export type TelegramReplyManualReviewResult={result:'RECORDED'|'ALREADY_RECORDED'};
+const validManualOptions=(o:TelegramReplyManualReviewOptions):boolean=>
+ props(o,['actorId','updateKey','attemptId','decision','now','staleAfterMs'])&&
+ typeof o.actorId==='string'&&/^[1-9]\d{0,19}$/.test(o.actorId)&&
+ typeof o.updateKey==='string'&&/^b3-webhook:[a-zA-Z0-9_-]{1,80}:\d+$/.test(o.updateKey)&&
+ typeof o.attemptId==='string'&&/^[a-zA-Z0-9_-]{1,128}$/.test(o.attemptId)&&
+ (o.decision==='ACKNOWLEDGED_UNRESOLVED'||o.decision==='ESCALATED')&&
+ safeNonNegative(o.now)&&safeNonNegative(o.staleAfterMs)&&
+ o.staleAfterMs>=60_000&&o.staleAfterMs<=VALID_AGE_MAX;
+
+/** A durable and fenced one-shot human acknowledgement. Deliberately refuses
+ * to convert SENDING/UNKNOWN_OUTCOME to SENT/FAILED or reset the send queue.
+ * No public HTTP route or CLI is exposed; a trusted operator UI will require
+ * separate authentication and independent evidence verification later.
+ */
+export async function recordTelegramReplyManualReview(
+ store:BotStore,policy:import('./policy.js').Policy,options:TelegramReplyManualReviewOptions
+):Promise<TelegramReplyManualReviewResult>{
+ if(!validManualOptions(options))throw Error('REPLY_REVIEW_INVALID_OPTIONS');
+ if(!policy.isOwner(options.actorId))throw Error('OWNER_ONLY');
+ return store.transaction(state=>{
+  let jobs:TelegramReplyJob[];
+  try{jobs=safeJobs(state.telegramReplyJobs);}
+  catch{throw Error('REPLY_REVIEW_INVALID_JOB');}
+  // Duplicate update keys are corrupt/ambiguous; never choose the first one.
+  const matches=jobs.filter(j=>j.updateKey===options.updateKey);
+  if(matches.length>1)throw Error('REPLY_REVIEW_INVALID_JOB');
+  const job=matches[0];
+  if(!job)throw Error('REPLY_REVIEW_NOT_FOUND');
+  if(job.status!=='SENDING'&&job.status!=='UNKNOWN_OUTCOME')
+   throw Error('REPLY_REVIEW_NOT_REVIEWABLE');
+  if(!job.attemptId||job.attemptId!==options.attemptId)
+   throw Error('REPLY_REVIEW_ATTEMPT_MISMATCH');
+  if(job.status==='SENDING'&&
+     (job.startedAt===undefined||options.now<job.startedAt||
+      options.now-job.startedAt<options.staleAfterMs))
+   throw Error('REPLY_REVIEW_NOT_STALE');
+  if(job.manualReview){
+   if(job.manualReview.attemptId===options.attemptId&&
+      job.manualReview.decision===options.decision&&
+      job.manualReview.reviewedBy===options.actorId)
+    return {result:'ALREADY_RECORDED' as const};
+   throw Error('REPLY_REVIEW_ALREADY_RECORDED');
+  }
+  job.manualReview={decision:options.decision,attemptId:options.attemptId,
+   reviewedBy:options.actorId,reviewedAt:options.now};
+  return {result:'RECORDED' as const};
  });
 }

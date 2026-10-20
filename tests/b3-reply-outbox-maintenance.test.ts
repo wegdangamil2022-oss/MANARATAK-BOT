@@ -35,7 +35,7 @@ for(const engine of ['json','sqlite'] as const){
    const report=await reviewTelegramReplyOutbox(f.same(),{now:200_000,staleAfterMs:60_000});
    assert.deepEqual(report,{asOf:200_000,total:6,queued:1,sending:1,sent:2,
     failedConfirmed:1,unknownOutcome:1,bodiesStored:5,staleQueued:1,staleSending:1,
-    manualReviewRequired:2});
+    manualReviewRequired:2,reviewedUnresolved:0,awaitingFirstReview:2});
    assert.equal(JSON.stringify(report).includes('Sensitive'),false);
    assert.equal(JSON.stringify(report).includes('b3-webhook'),false);
    assert.equal(JSON.stringify(report).includes('300'),false);
@@ -153,7 +153,8 @@ test('B3 reply privacy: empty historical snapshots require no migration',async()
  const f=await fixture('sqlite');try{
   assert.deepEqual(await reviewTelegramReplyOutbox(f.store,{now:200_000,staleAfterMs:60_000}),
    {asOf:200_000,total:0,queued:0,sending:0,sent:0,failedConfirmed:0,unknownOutcome:0,
-    bodiesStored:0,staleQueued:0,staleSending:0,manualReviewRequired:0});
+    bodiesStored:0,staleQueued:0,staleSending:0,manualReviewRequired:0,
+    reviewedUnresolved:0,awaitingFirstReview:0});
   assert.deepEqual(await redactFinishedTelegramReplies(f.store,{now:200_000}),
    {scanned:0,redacted:0,skippedQueued:0,alreadyRedacted:0,remaining:0});
  }finally{await f.close()}
