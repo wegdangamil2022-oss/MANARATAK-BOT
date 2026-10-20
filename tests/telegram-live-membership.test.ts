@@ -1,6 +1,6 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
-import {mkdtemp,rm,chmod} from 'node:fs/promises';
+import {mkdtemp,rm,chmod,writeFile} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {once} from 'node:events';
@@ -103,6 +103,7 @@ test('verifyMembership requires fresh administrator preflight and does not check
 });
 test('live webhook checks actual membership for private group catalog, sends reply and never discloses token',async()=>{
  const directory=await mkdtemp(join(tmpdir(),'manaratak-live-member-'));const path=join(directory,'state.sqlite');
+ const safetyFile=join(directory,'safety.flag');await writeFile(safetyFile,'RUN\n',{mode:0o600});
  const store=new BotStore(path,{engine:'sqlite'});
  const policy=new Policy(store,OWNER);await policy.approveChat(OWNER,GROUP,['navigation','verification']);
  const education=new EducationService(store,policy);
@@ -110,7 +111,8 @@ test('live webhook checks actual membership for private group catalog, sends rep
  const env={BOT_ENV:'production',TELEGRAM_ENABLED:'true',TELEGRAM_REPLY_DELIVERY_ENABLED:'true',
   BOT_OWNER_ID:OWNER,BOT_ID:'manaratak-test-bot',BOT_USERNAME:'ManaratakBot',
   BOT_STATE_FILE:path,TELEGRAM_BOT_TOKEN:TOKEN,TELEGRAM_WEBHOOK_SECRET:SECRET,
-  TELEGRAM_LISTEN_PORT:'8787',TELEGRAM_WEBHOOK_PUBLIC_URL:'https://webhook.manaratak-ops.net/telegram/webhook'};
+  TELEGRAM_LISTEN_PORT:'8787',TELEGRAM_WEBHOOK_PUBLIC_URL:'https://webhook.manaratak-ops.net/telegram/webhook',
+  TELEGRAM_SAFETY_FILE:safetyFile};
  const {request,calls}=fakeRequester((url,body)=>{
   if(url.endsWith('/getChatMember'))return body.user_id===123456789?admin():reply('member',300);
   if(url.endsWith('/sendMessage'))return new Response(JSON.stringify({ok:true,
@@ -141,13 +143,15 @@ test('live webhook checks actual membership for private group catalog, sends rep
 });
 test('live denied membership cannot generate private scoped reply and never calls sendMessage',async()=>{
  const directory=await mkdtemp(join(tmpdir(),'manaratak-live-refuse-'));const path=join(directory,'state.sqlite');
+ const safetyFile=join(directory,'safety.flag');await writeFile(safetyFile,'RUN\n',{mode:0o600});
  const store=new BotStore(path,{engine:'sqlite'}),policy=new Policy(store,OWNER);
  await policy.approveChat(OWNER,GROUP,['navigation','verification']);
  await new EducationService(store,policy).createCategory(OWNER,{id:'grants',scope:GROUP,title:'Scholarships',order:1});
  const env={BOT_ENV:'production',TELEGRAM_ENABLED:'true',TELEGRAM_REPLY_DELIVERY_ENABLED:'true',
   BOT_OWNER_ID:OWNER,BOT_ID:'manaratak-test-bot',BOT_USERNAME:'ManaratakBot',
   BOT_STATE_FILE:path,TELEGRAM_BOT_TOKEN:TOKEN,TELEGRAM_WEBHOOK_SECRET:SECRET,
-  TELEGRAM_LISTEN_PORT:'8787',TELEGRAM_WEBHOOK_PUBLIC_URL:'https://webhook.manaratak-ops.net/telegram/webhook'};
+  TELEGRAM_LISTEN_PORT:'8787',TELEGRAM_WEBHOOK_PUBLIC_URL:'https://webhook.manaratak-ops.net/telegram/webhook',
+  TELEGRAM_SAFETY_FILE:safetyFile};
  const {request,calls}=fakeRequester((url,body)=>{
   if(!url.endsWith('/getChatMember'))throw Error('unexpected send');
   return body.user_id===123456789?admin():reply('left',300);
@@ -170,6 +174,7 @@ test('live denied membership cannot generate private scoped reply and never call
 });
 test('live membership preflight honors group approval revoked during asynchronous provider call',async()=>{
  const directory=await mkdtemp(join(tmpdir(),'manaratak-live-revoke-'));const path=join(directory,'state.sqlite');
+ const safetyFile=join(directory,'safety.flag');await writeFile(safetyFile,'RUN\n',{mode:0o600});
  const store=new BotStore(path,{engine:'sqlite'}),policy=new Policy(store,OWNER);
  await policy.approveChat(OWNER,GROUP,['navigation','verification']);
  await new EducationService(store,policy).createCategory(OWNER,{id:'grants',scope:GROUP,title:'Scholarships',order:1});
