@@ -11,6 +11,38 @@ export class Policy {
     return s.grants.some(g => g.actor === actor && g.capability === capability && g.chatId === chatId && !g.revoked && g.expiresAt > now);
   }
   private requireOwner(actor: string): void { if (!this.isOwner(actor)) throw new Error('OWNER_ONLY'); }
+  /** Loss of verification authorization must invalidate stored subscriptions.
+   * They must never silently reactivate if the chat or channel is re-approved.
+   * This deliberately does NOT release existing moderation reasons.
+   */
+  private clearSubscriptionDependencies(s:BotState,chatId:string):void{
+    for(const config of s.subscriptionRequirements){
+      if(config.chatId===chatId || config.channelIds.includes(chatId)){
+        if(config.channelIds.length){config.channelIds=[];config.version++;}
+      }
+    }
+  }
+  /** Local pause only, not a Telegram unmute/leave. Both independent revisions
+   * are verified atomically to reject stale, copied or replayed confirmations.
+   */
+  async pauseSubscriptionAtRevision(owner:string,chatId:string,
+    expectedChatVersion:number,expectedRequirementVersion:number):Promise<void>{
+    this.requireOwner(owner);
+    await this.store.transaction(s=>{
+      const chat=s.chats.find(c=>c.id===chatId);
+      if(!chat?.approved || !chat.scopes.includes('verification'))
+        throw Error('CHAT_NO_VERIFICATION');
+      const config=s.subscriptionRequirements.find(c=>c.chatId===chatId);
+      if(!config?.channelIds.length)throw Error('SUBSCRIPTION_NOT_ACTIVE');
+      if(!Number.isSafeInteger(expectedChatVersion)||!Number.isSafeInteger(expectedRequirementVersion)||
+        chat.version!==expectedChatVersion || config.version!==expectedRequirementVersion)
+        throw Error('SUBSCRIPTION_POLICY_STALE');
+      config.channelIds=[];config.version++;chat.version++;
+      s.audit.push({updateKey:'owner:subscription:pause:'+chatId+':'+config.version,
+        decision:'ALLOW',reason:'SUBSCRIPTION_REQUIREMENT_PAUSED_LOCALLY',
+        policyVersion:chat.version,at:this.clock()});
+    });
+  }
   async approveChat(actor: string, chatId: string, scopes: string[]): Promise<void> {
     this.requireOwner(actor);
     if (!/^-[0-9]+$/.test(chatId)) throw new Error('Only explicit Telegram group/channel IDs can be approved');
@@ -23,7 +55,10 @@ export class Policy {
   }
   async revokeChat(actor: string, chatId: string): Promise<void> {
     this.requireOwner(actor);
-    await this.store.transaction(s => { const c = s.chats.find(x => x.id === chatId); if (c) { c.approved = false; c.version++; } });
+    await this.store.transaction(s => { const c = s.chats.find(x => x.id === chatId); if (c) {
+      c.approved = false; c.version++;
+      this.clearSubscriptionDependencies(s,chatId);
+    } });
   }
   /** Owner-only restrictive mutations. Button text is never authorization:
    * expectedVersion is checked inside the same durable transaction as the
@@ -38,6 +73,7 @@ export class Policy {
       if(!Number.isSafeInteger(expectedVersion)||expectedVersion<=0||c.version!==expectedVersion)
        throw Error('CHAT_POLICY_STALE');
       c.approved=false;c.groupAI='OFF';c.version++;
+      this.clearSubscriptionDependencies(s,chatId);
       s.audit.push({updateKey:'owner:chat:revoke:'+chatId+':'+c.version,decision:'ALLOW',
        reason:'CHAT_OWNER_REVOKED_LOCALLY',policyVersion:c.version,at:this.clock()});
     });
@@ -54,6 +90,7 @@ export class Policy {
       if(!c.scopes.includes(scope))throw Error('CHAT_SCOPE_ALREADY_RESTRICTED');
       c.scopes=c.scopes.filter(x=>x!==scope);
       if(scope==='assistant')c.groupAI='OFF';
+      if(scope==='verification')this.clearSubscriptionDependencies(s,chatId);
       c.version++;
       s.audit.push({updateKey:'owner:chat:restrict:'+chatId+':'+scope+':'+c.version,
        decision:'ALLOW',reason:'CHAT_OWNER_SCOPE_RESTRICTED',policyVersion:c.version,at:this.clock()});
