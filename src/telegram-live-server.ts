@@ -95,12 +95,13 @@ export async function preflightLiveTelegram(
  env:Readonly<Record<string,string|undefined>>):Promise<{
  readonly ready:true;readonly httpsWebhook:true;readonly privateSqlite:true;
  readonly listener:'LOOPBACK_ONLY';readonly telegramNetworkCalls:0;
+ readonly safetySwitch:'RUN'|'STOP';
 }>{
  const config=loadLiveTelegramConfig(env);
  await assertPrivateStateReady(config.stateFile);
- await readTelegramSafetySwitch(config.safetySwitchFile);
+ const safetySwitch=await readTelegramSafetySwitch(config.safetySwitchFile);
  return {ready:true,httpsWebhook:true,privateSqlite:true,
-  listener:'LOOPBACK_ONLY',telegramNetworkCalls:0};
+  listener:'LOOPBACK_ONLY',telegramNetworkCalls:0,safetySwitch};
 }
 /** Drain all existing accepted requests before stopping. Timeout is a status,
  * not authorization to abort a possibly committed Telegram send. A DRAINING
