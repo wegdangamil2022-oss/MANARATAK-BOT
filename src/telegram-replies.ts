@@ -2,6 +2,7 @@ import {randomUUID} from 'node:crypto';
 import {BotStore,type TelegramReplyJob} from './store.js';
 import {Policy} from './policy.js';
 import type {TelegramReplyPlan} from './telegram-transport.js';
+import {isValidTelegramReplyKeyboard} from './telegram-menu.js';
 
 export type TelegramSendResult={status:'CONFIRMED';messageId:number}|
  {status:'FAILED_CONFIRMED'|'UNKNOWN_OUTCOME'};
@@ -13,7 +14,10 @@ const validChat=(chat:string)=>/^(?:[1-9]\d{0,15}|-[1-9]\d{0,15})$/.test(chat)&&
 const validPlan=(p:unknown):p is TelegramReplyPlan=>{
  if(!p||typeof p!=='object'||Array.isArray(p))return false;
  const v=p as Record<string,unknown>;
- return Object.keys(v).length===3&&v.parseMode==='HTML'&&typeof v.chatId==='string'&&
+ return (Object.keys(v).length===(v.replyMarkup===undefined?3:4))&&
+  Object.keys(v).every(k=>['chatId','parseMode','text','replyMarkup'].includes(k))&&
+  (v.replyMarkup===undefined||isValidTelegramReplyKeyboard(v.replyMarkup))&&
+  v.parseMode==='HTML'&&typeof v.chatId==='string'&&
   validChat(v.chatId)&&typeof v.text==='string'&&v.text.length>0&&
   Buffer.byteLength(v.text,'utf8')<=4096&& !/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/u.test(v.text);
 };
@@ -34,7 +38,8 @@ export class TelegramBotApiTextSender implements TelegramReplySender {
    response=await this.request('https://api.telegram.org/bot'+this.token+'/sendMessage',{
     method:'POST',headers:{'content-type':'application/json'},
     body:JSON.stringify({chat_id:plan.chatId,text:plan.text,parse_mode:'HTML',
-     link_preview_options:{is_disabled:true},protect_content:true}),
+     link_preview_options:{is_disabled:true},protect_content:true,
+     ...(plan.replyMarkup?{reply_markup:plan.replyMarkup}:{})}),
     redirect:'error',signal:AbortSignal.timeout(8000)
    });
   }catch{return {status:'UNKNOWN_OUTCOME'};}
