@@ -2,7 +2,7 @@ import { randomBytes, randomUUID } from 'node:crypto';
 import { type BotState, type FAQEntry, BotStore } from './store.js';
 import { Policy } from './policy.js';
 import { publicEducationResource, type PublicEducationResource } from './education.js';
-import {faqReviewFingerprint} from './faq-review.js';
+import {faqReviewFingerprint,faqApprovalConflicts,normalizedFAQQuestion} from './faq-review.js';
 
 /** Only a trusted Telegram adapter may attest the chat membership status; user-provided claims are not evidence. */
 export type MembershipStatus = 'VERIFIED' | 'NOT_MEMBER' | 'UNKNOWN';
@@ -10,7 +10,7 @@ export type MembershipPort = (chatId: string, actorId: string) => Promise<Member
 export type FAQResult = {status:'ANSWER'; answer:string; sourceId:string} | {status:'DISABLED' | 'NO_MATCH' | 'AMBIGUOUS'};
 export type LinkResult = {status:'FOUND'; resource:PublicEducationResource} | {status:'DENIED'};
 
-const questionKey=(text:string):string=>text.normalize('NFKC').toLocaleLowerCase('en-US').replace(/[!?؟.,،؛:;\s]+/gu,' ').trim();
+const questionKey=normalizedFAQQuestion;
 const validText=(text:string,max:number):boolean=>typeof text==='string' && text.trim().length>0 && text.length<=max && !/[\u0000-\u001F\u007F]/u.test(text);
 function hasApprovedSource(s:BotState, scope:string, id:string):boolean {
   const resource=s.educationResources.find(r=>r.id===id && r.scope===scope && r.status==='PUBLISHED');
@@ -85,9 +85,15 @@ export class ApprovedAnswerService {
       if(target==='APPROVED'){
        if(q.status!=='DRAFT'||!hasApprovedSource(s,q.scope,q.sourceResourceId))
         throw Error('FAQ_REVIEW_STALE');
+       // The existing direct API deliberately reports AMBIGUOUS for legacy
+       // duplicates. The verified owner review path must never introduce a
+       // fresh ambiguity for an already working student answer.
+       if(faqApprovalConflicts(s,q)>0)throw Error('FAQ_REVIEW_COLLISION');
        q.status='APPROVED';q.approvedBy=by;
       }else{
-       if(q.status!=='APPROVED')throw Error('FAQ_REVIEW_STALE');
+       // Owner can discard an obsolete DRAFT without making it public first.
+       // An archived FAQ can never be implicitly restored by this endpoint.
+       if(q.status!=='DRAFT'&&q.status!=='APPROVED')throw Error('FAQ_REVIEW_STALE');
        q.status='ARCHIVED';
       }
       s.audit.push({updateKey:'owner:faq:'+id+':'+target,

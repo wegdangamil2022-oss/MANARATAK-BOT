@@ -1,3 +1,11 @@
+## 0.7.20 — 2026-10-21 — Prevent ambiguous owner FAQ approvals and retire invalid drafts (NOT DEPLOYED)
+
+- Before a verified Telegram owner approves a FAQ draft, the bot now checks normalized question and alias keys against all **other currently APPROVED FAQs in the same scope**. A would-be duplicate is denied as `FAQ_REVIEW_COLLISION` in the atomic store transaction, so delayed concurrent approvals cannot inadvertently turn a working group FAQ answer into AMBIGUOUS.
+- Added a current-state **conflict counter** to the private owner FAQ detail/review screens. For conflicting drafts, the Approve control is withheld; the owner can instead review and **archive a DRAFT directly**. Invalid-source drafts can likewise be discarded without publishing first.
+- The archive operation remains two-stage owner-only, bound to exact FAQ/source fingerprint and approved group policy epoch; replays, staff with delegated content.publish and stale buttons fail closed. The source educational resource and moderation records are never deleted or altered.
+- FAQ runtime matching uses precisely the same Unicode NFKC, punctuation/whitespace, Arabic/Latin case normalization as the reviewer conflict check. Existing legacy direct API ambiguity behavior remains fail-safe and unchanged.
+- New RED-first JSON+SQLite tests cover overlapping aliases, stale approvals after a concurrent conflicting answer, archiving invalid-source drafts, resolving conflicts after archiving an old answer and actor isolation. No live Telegram/AI use.
+
 ## 0.7.19 — 2026-10-21 — Real owner FAQ queue and reviewed source-bound decisions (NOT DEPLOYED)
 
 - Added **🧠 الأسئلة الشائعة** to the verified Telegram private owner dashboard, listing currently authorized FAQ records with at most ten per page, Next/Previous paging, draft/approved/archived status counts and sanitized question/answer previews. Student/delegate/group senders have no access even when copying owner labels.
