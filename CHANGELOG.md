@@ -1,3 +1,11 @@
+## 0.7.23 — 2026-10-21 — Prevent outdated membership results from driving moderation (NOT DEPLOYED)
+
+- Hardened the crucial handoff **after** SubscriptionGate membership verification to the moderation engine: captures a private before-verification snapshot of the group policy epoch, required-channel IDs, their individual policy epochs and the subscription rule version/mode.
+- The moderation service accepts a trusted internal state predicate and rechecks the same evidence **inside the durable transaction** that activates/deactivates a `SUBSCRIPTION` mute reason. An old VERIFIED/MEMBER or NOT_MEMBER decision no longer wins if mandatory rules were paused, changed or revoked while moderation rights were being checked.
+- The evidence is checked again while creating the moderation intent, and immediately before starting any effect; if policy changed during pre-dispatch, the prepared intent is safely marked CANCELLED rather than calling the fake Telegram moderation gateway. No user-supplied membership claims and no new live send path.
+- Unrelated group changes leave valid checks working. Existing independent manual moderation reasons remain untouched. No automatic replay of unknown effects.
+- Added RED-first JSON/SQLite deferred-rights and before-dispatch tests for post-verification pause, group/channel reapproval, replacing required channels, and preserving ordinary known-member mute/unmute behavior. These are offline fake-provider tests, **not live Telegram moderation proof**.
+
 ## 0.7.22 — 2026-10-21 — Numbered student FAQ question buttons bound to their current order (NOT DEPLOYED)
 
 - Student-private reviewed FAQ browse results now display **numbered question buttons** (for example, `📖 سؤال 1`), matching the numbered question snippets above the keyboard. All pages retain global ordinals so page two starts at question 11 rather than repeating question 1.
