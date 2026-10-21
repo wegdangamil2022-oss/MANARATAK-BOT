@@ -16,7 +16,7 @@ export interface ProcessedUpdate { key: string; status: 'CLAIMED' | 'DONE' | 'UN
 export interface Operation { id: string; updateKey: string; kind: 'CHAT_LEAVE'; chatId: string; policyVersion: number; status: OperationStatus; startedAt?: number; }
 export interface AuditRecord { actorId?: string; updateKey: string; decision: 'ALLOW' | 'DENY' | 'NOOP'; reason: string; policyVersion: number; at: number; }
 import type { Candidate, ImportFormat, ImportReport } from './ingestion.js';
-export interface EducationCategory { id: string; scope: string; parentId: string | null; title: string; order: number; enabled: boolean; }
+export interface EducationCategory { id: string; scope: string; parentId: string | null; title: string; order: number; enabled: boolean; /** Monotonic optional revision for preexisting saved categories. */ revision?: number; }
 export interface EducationResource { id: string; categoryId: string; scope: string; title: string; university: string; cycle: string; degree: string; seats: number | null; sourceImportId: string; sourceLocator: string; reviewedBy: string; status: 'PUBLISHED' | 'ARCHIVED'; publicationText?: string; publicationTextReviewedBy?: string; }
 export interface ImportRun { id: string; scope: string; uploadedBy: string; origin: 'TELEGRAM_ADMIN' | 'ADMIN_WEB'; format: ImportFormat; filename: string; digest: string; report: ImportReport; candidates: Candidate[]; createdAt: number; }
 export type RestrictionKind = 'NONE' | 'MUTE' | 'BAN';

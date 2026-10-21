@@ -1,3 +1,11 @@
+## 0.7.17 — 2026-10-21 — Owner-reviewed educational section visibility (NOT DEPLOYED)
+
+- Added a true **🗂️ إدارة الأقسام** entry to the verified private Telegram owner dashboard. Owner can browse all saved, currently authorized educational sections in 10-item pages, open sanitized details and explicitly review/confirm disabling or enabling their local visibility.
+- The enable/disable action checks the configured owner, current approved group-navigation policy revision, exact current category metadata/fingerprint and **monotonically increasing per-category optional revision inside a durable BotStore transaction**. Existing categories migrate naturally from revision zero; direct category visibility edits increment revision to invalidate stale confirmations even after a disable/re-enable flip-flop.
+- Disabled parents also hide their descendants. Attempting to enable a child while its parent is disabled is denied, while enabling a parent only exposes its currently approved/published descendants. Archived resources remain archived; Telegram channel posts are untouched.
+- Introduced short stable owner category ID tokens for up to 64-character IDs, uniquely resolved against freshly authorized categories; ambiguous, malformed, forged, stale, group-actor and staff/student buttons fail closed.
+- RED-first JSON/SQLite tests cover review-read-only, exact confirmation, branch visibility, stale revisions, parent guard, long IDs, 13-category navigation and owner-only authorization. No Telegram send, upload or third-party AI activity.
+
 ## 0.7.16 — 2026-10-21 — Owner library review and safeguarded local resource archival (NOT DEPLOYED)
 
 - Private verified Telegram owner now has **functional library navigation**, not only a status placeholder: see currently authorized local published resources, 10/page Next/Previous, open sanitized resource details and review/archive with separate confirmation.
