@@ -19,6 +19,12 @@ For `ALL` subscriptions, an unknown channel result makes the decision `UNAVAILAB
 
 This fixes **mock-tested provider failure behavior only**. It does not imply that real bot administrator rights, Telegram permissions or membership checks have been accepted or deployed.
 
+## B3 v0.7.18 — Arabic-friendly private student resource search (OFFLINE)
+
+Students can continue to use `/search <query>` inside their private bot chat. Search now matches Arabic scholarship titles even when the official title contains optional diacritics or stretched characters, and handles common alif/hamza/ya/ta-marbuta spellings and Arabic-Indic/Persian/Latin decimal digits. Example: typing `/search منحة اندونيسيا` can find a reviewed, published `مِنْحَةُ إِنْدُونِيسِيَا`. The existing Arabic/Latin 2–32 character command and bounded paging restrictions still apply.
+
+This is orthographic normalization only: no generative AI, OCR or external API calls. Search continues to exclude archived resources, disabled education categories, unapproved group-only content and secret import/reviewer metadata. Changing a category or archived status invalidates stale search selections upon the next tap.
+
 ## B3 v0.7.17 — owner-only educational section visibility controls (OFFLINE)
 
 In a verified private Telegram chat, the configured owner may open **🔐 لوحة المالك → 🗂️ إدارة الأقسام** to browse existing education categories in pages, review their local scope, status and directly assigned published resource count, and separately confirm **enabling** or **disabling** visibility. Disabling a parent hides its child categories from student navigation; enabling a child while its parent is still disabled is blocked.
