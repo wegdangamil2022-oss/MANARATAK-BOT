@@ -158,3 +158,28 @@ test('B3 real gate owner exemption is scoped to owner, while students still requ
    async(scope,actor)=>(await f.gate.verify(scope,actor)).status)).status,'DENIED');
  }finally{await f.close();}
 });
+
+
+test('B3 active required channel with lost local verification authorization rejects even claimed MEMBER',async()=>{
+ const f=await fixture('sqlite');try{
+  await f.gate.configure(OWNER,GROUP,[CHANNEL],'ALL');
+  await f.store.transaction(s=>{
+   s.chats.find(c=>c.id===CHANNEL)!.scopes=[];
+  });
+  const claimed={
+   verify:async()=>({status:'MEMBER' as const,channels:[CHANNEL]})
+  } as unknown as SubscriptionGate;
+  assert.equal((await f.links.resolve(f.ref,STUDENT,f.membership,
+   async()=> 'MEMBER')).status,'DENIED');
+  for(const [id,text,group] of [
+   [70,'/categories',true],
+   [71,'/resources grants',true],
+   [72,'/categories '+GROUP,false],
+   [73,'/resources '+GROUP+' grants',false]
+  ] as const){
+   const result=await f.app(claimed).handle(message(id,STUDENT,text,group));
+   assert.equal(result.status,'DENIED',text);
+   assert.equal(result.plan,undefined,text);
+  }
+ }finally{await f.close();}
+});
