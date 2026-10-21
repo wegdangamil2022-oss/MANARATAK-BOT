@@ -282,3 +282,9 @@
 - A provider-reported PUBLISHED offer and even `REVIEWED_METADATA_ONLY` do **not** authorize local publication. The immutable owner must independently approve a currently enabled private category under the reviewed candidate's exact saved source digest. This yields only `APPROVED_FOR_LOCAL`, invisible to students.
 - A later, separate owner call may publish to the local private education library only after another provider re-read and digest match, fresh category parent-chain and owner permission check within the JSON/SQLite transaction. A successful local resource has unknown seats, owner-reviewed metadata and a stable B5 source identifier; it is not evidence that an offer remains open or has official university endorsement.
 - Never revive an archived resource; idempotent owner repeats cannot duplicate. Queue state validation is additive and supports the existing schema-8 stored B5 entries without destructive migration. No Telegram broadcast, AI, real upstream API connection or owner action button yet in this slice.
+
+## B5 v0.7.37 — distinct owner approvals before student-library visibility (22 October 2026)
+
+- Avoid a single-click import: the Telegram mock owner menu must offer a category selection, then a separate owner approval, then a local publication preview, followed by a separate publication confirmation. None grants an outbound channel send or starts a campaign.
+- Reply-keyboard labels must satisfy BOTH 96 Unicode codepoints and 256 UTF-8 bytes. Use short deterministic selectors only as untrusted UI references, resolve a unique saved full digest and category/source ID, and revalidate source, owner and category inside the transaction. Any ambiguous or stale selector is rejected.
+- This capability remains opt-in behind an independently supplied B5 read-only platform reader; it is not a verified production platform API, real Telegram deployment, or external AI integration.
