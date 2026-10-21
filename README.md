@@ -19,6 +19,12 @@ For `ALL` subscriptions, an unknown channel result makes the decision `UNAVAILAB
 
 This fixes **mock-tested provider failure behavior only**. It does not imply that real bot administrator rights, Telegram permissions or membership checks have been accepted or deployed.
 
+## B3 v0.7.21 — browse reviewed questions from the private student menu (OFFLINE)
+
+In private Telegram open **💬 المساعد التعليمي → 📖 تصفح الأسئلة المعتمدة**. Reviewed local private FAQs with currently published sources appear ten at a time with Next/Previous and question-answer selection. The bot displays sanitized question summaries and opaque question buttons, not internal FAQ UUIDs. Opening an old button revalidates the FAQ and private navigation permission, returning no answer if the question was archived, category hidden or source unpublished.
+
+This browser never exposes group/channel FAQ content, owner/admin metadata, drafts or orphaned sources. Answers come from approved local resources, not generative AI. Nothing sends a Telegram channel post or enables the live bot. Students may also use `/faq <question>`.
+
 ## B3 v0.7.20 — student private reviewed FAQs without generative AI (OFFLINE)
 
 A student can now open **💬 المساعد التعليمي** and explicitly ask **`/faq ما شروط المنحة؟`** in the bot's private Telegram chat. The command matches an exact reviewed FAQ question/alias against **private**-scope, currently published and category-visible education resources only. The owner must first review and approve a draft FAQ: unpublished drafts or archived/disabled sources never contribute answers. Two competing approved FAQ matches give an ambiguity message instead of silently choosing one. Responses escape HTML and hide internal resource/admin identifiers.
