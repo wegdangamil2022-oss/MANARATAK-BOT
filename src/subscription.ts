@@ -22,6 +22,13 @@ export class SubscriptionGate {
     if (!['ALL', 'ANY'].includes(mode) || channelIds.length > 10 || new Set(channelIds).size !== channelIds.length) throw new Error('INVALID_SUBSCRIPTION_CONFIG');
     const state = await this.store.snapshot();
     if (!this.policy.canUseChat(state, chatId, 'verification')) throw new Error('GROUP_NOT_APPROVED');
+    // Capture current authorization epochs *before* external checks. A
+    // revoke + reapprove could restore the same scopes with a newer version;
+    // rereading only 'approved' would let a stale verification win.
+    const groupEpoch=state.chats.find(c=>c.id===chatId)?.version;
+    const channelEpochs=new Map(channelIds.map(id=>
+      [id,state.chats.find(c=>c.id===id)?.version] as const));
+    const priorRuleVersion=state.subscriptionRequirements.find(x=>x.chatId===chatId)?.version;
     for (const id of channelIds) {
       if (!/^-[0-9]+$/.test(id) || !this.policy.canUseChat(state, id, 'verification')) throw new Error('CHANNEL_NOT_APPROVED');
       // The provider may reject or time out even while a saved local channel
@@ -32,8 +39,13 @@ export class SubscriptionGate {
       if(!permitted)throw new Error('CHANNEL_UNVERIFIABLE');
     }
     await this.store.transaction(s => {
-      if (!this.policy.canUseChat(s, chatId, 'verification') || channelIds.some(id => !this.policy.canUseChat(s, id, 'verification'))) throw new Error('APPROVAL_REVOKED');
+      if (!this.policy.canUseChat(s, chatId, 'verification') ||
+          s.chats.find(c=>c.id===chatId)?.version!==groupEpoch ||
+          channelIds.some(id => !this.policy.canUseChat(s, id, 'verification') ||
+            s.chats.find(c=>c.id===id)?.version!==channelEpochs.get(id)))
+        throw new Error('APPROVAL_REVOKED');
       const old = s.subscriptionRequirements.find(x => x.chatId === chatId);
+      if(old?.version!==priorRuleVersion)throw new Error('SUBSCRIPTION_CONFIG_STALE');
       if (old) { old.channelIds = channelIds; old.mode = mode; old.version++; }
       else s.subscriptionRequirements.push({ chatId, channelIds, mode, version: 1 });
     });
@@ -51,6 +63,11 @@ export class SubscriptionGate {
     if (!userId || !this.policy.canUseChat(s, chatId, 'verification')) return { status: 'DENIED', channels: [] };
     const config = s.subscriptionRequirements.find(x => x.chatId === chatId);
     if (!config?.channelIds.length || this.policy.isOwner(userId)) return { status: 'NOT_REQUIRED', channels: [] };
+    // Membership proofs are scoped to the authorization epoch from which they
+    // were requested. Re-approval under the same IDs does not retain evidence.
+    const groupEpoch=s.chats.find(c=>c.id===chatId)?.version;
+    const channelEpochs=new Map(config.channelIds.map(id=>
+      [id,s.chats.find(c=>c.id===id)?.version] as const));
     const responses: Membership[] = [];
     for (const channel of config.channelIds) {
       if (!this.policy.canUseChat(s, channel, 'verification'))
@@ -69,8 +86,15 @@ export class SubscriptionGate {
     // Revalidation protects changes made while external checks were in flight.
     const latest = await this.store.snapshot();
     const current = latest.subscriptionRequirements.find(x => x.chatId === chatId);
-    if (!this.policy.canUseChat(latest, chatId, 'verification') || !current || current.version !== config.version ||
-        config.channelIds.some(id => !this.policy.canUseChat(latest, id, 'verification'))) return { status: 'UNAVAILABLE', channels: [] };
+    if (!this.policy.canUseChat(latest, chatId, 'verification') ||
+        latest.chats.find(c=>c.id===chatId)?.version!==groupEpoch ||
+        !current || current.version !== config.version ||
+        current.mode!==config.mode ||
+        current.channelIds.length!==config.channelIds.length ||
+        current.channelIds.some((id,i)=>id!==config.channelIds[i]) ||
+        config.channelIds.some(id => !this.policy.canUseChat(latest, id, 'verification') ||
+          latest.chats.find(c=>c.id===id)?.version!==channelEpochs.get(id)))
+      return { status: 'UNAVAILABLE', channels: [] };
     // An unknown result from the provider must not be used to punish a
     // student. For ALL, even a known negative alongside an unavailable
     // channel is treated as UNAVAILABLE until all evidence is known.

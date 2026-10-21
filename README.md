@@ -19,6 +19,12 @@ For `ALL` subscriptions, an unknown channel result makes the decision `UNAVAILAB
 
 This fixes **mock-tested provider failure behavior only**. It does not imply that real bot administrator rights, Telegram permissions or membership checks have been accepted or deployed.
 
+## B2-Core v0.7.13 — policy-version validation for external membership checks (OFFLINE)
+
+The subscription gate now treats each external channel verification result as valid only for the **specific saved approval policy revision** under which the call began. Revoking and reapproving a channel or group while a provider request is pending invalidates that request, even if the final permission scopes match the old ones. The gate also compares mandatory-channel rule revisions and contents before interpreting a membership result.
+
+Owner configuration is guarded similarly: an older slow pre-check cannot overwrite a newer confirmed rule or rely on a revoked-then-reapproved channel. Failed checks produce `UNAVAILABLE` (verification) or a deterministic configuration rejection, not a user penalty. These protections are tested using fake delayed providers in JSON and SQLite; they do **not** substitute for real Telegram bot admin-right checks.
+
 ## B3 v0.7.11 — owner-private view of locally saved subscription policy health (OFFLINE)
 
 Inside **🔐 لوحة المالك → 🛡 سلامة الاشتراكات**, the configured owner can inspect the same local subscription integrity summary that the offline trial acceptance uses. Each button press loads a fresh BotStore snapshot and reports PASS/BLOCKED, active/paused/invalid requirement counts, invalid group/channel authorization totals, duplicate/oversize requirements and static warning codes. This screen never exposes group/channel/student IDs, chat messages or provider tokens and never tries to repair state automatically.
