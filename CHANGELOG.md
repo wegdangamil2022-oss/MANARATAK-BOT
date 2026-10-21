@@ -1,3 +1,11 @@
+## 0.7.15 — 2026-10-21 — Search published, approved educational resources from student Telegram buttons (NOT DEPLOYED)
+
+- Added an actual **🔍 البحث في الموارد** Telegram ReplyKeyboard entry for students and owner. The button introduces a bounded text search: `/search منحة الصين` or `/search Grant`. No AI is required or invoked.
+- Added stateless Next/Previous search result pages (ten entries per page) and clickable existing resource-detail buttons. Query labels are deliberately short, canonical and validated in Arabic/Latin Unicode; every page is recomputed from currently accessible material and has no bearer/callback authority.
+- Added one-snapshot `EducationService.searchPublishedResources` that returns only safe public projections of **currently published private-scope** resources in enabled categories, respecting private education navigation permission. Archived/disabled/category-hidden and group/channel-only resources are never included. Searches match title, university, cycle and degree.
+- Preserved current exact resource-button authorization: a resource archived or hidden after search cannot be opened with an old button. HTML content is escaped in response text. Invalid query/page markers fail closed; `/search` inside groups never becomes a bypass around membership verification.
+- RED-first JSON+SQLite tests cover 23 result entries over three pages, scope isolation, non-public resources, feature switch revocation, stale buttons, malformed search pages, UI keyboard validity and escaped HTML. Telegram remains **offline**; no live student chat or web API requests occurred.
+
 ## 0.7.14 — 2026-10-21 — Malformed mandatory subscription rules cannot punish students (NOT DEPLOYED)
 
 - Introduced one strict, reusable, pure `isCanonicalSubscriptionRule` validator for **runtime membership enforcement** and the **offline subscription health audit**. It accepts valid paused zero-channel rules but requires canonical group/channel IDs, ALL/ANY mode, positive integer rule revisions, at most ten unique mandatory channels and an array shape.
