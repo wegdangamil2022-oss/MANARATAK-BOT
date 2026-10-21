@@ -276,3 +276,9 @@
 - Allow `📥 تسجيل مرشح` only for candidates currently present in the exact full-page verified external read (source ID, bounded cursor and page fingerprint). Every click must refetch and compare; a copied Telegram text button is a request, not an authenticated grant.
 - The separate `✅ تدقيق بيانات` action re-fetches the originally staged cursor page and checks source revision/metadata digest before storing `REVIEWED_METADATA_ONLY`. Neither button calls `approveCandidate`, `publishCandidate`, creates a campaign, or exposes records to students.
 - Preserve the source cursor in an optional, validated schema-8 field. Keep old first-page entries compatible, and fail closed when provider cursor/contents change. No production Manaratak API, live Telegram or AI execution has been activated.
+
+## B5 v0.7.36 — explicit owner category approval is distinct from local publication (22 October 2026)
+
+- A provider-reported PUBLISHED offer and even `REVIEWED_METADATA_ONLY` do **not** authorize local publication. The immutable owner must independently approve a currently enabled private category under the reviewed candidate's exact saved source digest. This yields only `APPROVED_FOR_LOCAL`, invisible to students.
+- A later, separate owner call may publish to the local private education library only after another provider re-read and digest match, fresh category parent-chain and owner permission check within the JSON/SQLite transaction. A successful local resource has unknown seats, owner-reviewed metadata and a stable B5 source identifier; it is not evidence that an offer remains open or has official university endorsement.
+- Never revive an archived resource; idempotent owner repeats cannot duplicate. Queue state validation is additive and supports the existing schema-8 stored B5 entries without destructive migration. No Telegram broadcast, AI, real upstream API connection or owner action button yet in this slice.
