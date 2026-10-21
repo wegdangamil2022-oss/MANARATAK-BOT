@@ -14,6 +14,7 @@ import {menuLabels,mainMenuKeyboard,backMenuKeyboard,categoryButton,
  matchingCategories,menuPageButton,parseMenuPageCommand,type MenuPageCommand,
  type TelegramReplyKeyboard} from './telegram-menu.js';
 import {OwnerTelegramMenu,isOwnerMenuText} from './telegram-owner-menu.js';
+import {parseSearchQuery,parseSearchPageCommand,searchPageButton} from './telegram-search.js';
 
 /** Inbound-only boundary. A test double may supply bytes; there is intentionally no live HTTP implementation. */
 export interface TelegramDocumentPort {
@@ -240,6 +241,44 @@ export class TelegramUpdateApplication {
         const selection=sections[text]!;
         return sectionPage(selection.section,selection.title,0);
       }
+      const searchPage=async(query:string,page:number,
+        direction?:'next'|'previous'):Promise<TelegramResult>=>{
+        // Keep the normal private navigation feature switch independent of AI
+        // and owner controls, and re-evaluate it on every untrusted page tap.
+        const state=await this.opts.store.snapshot();
+        if(!this.opts.policy.privateFeature(state,'education.navigate',actorId))
+          return {status:'DENIED',reason:'PRIVATE_EDUCATION_DISABLED'};
+        const matches=await this.opts.education.searchPublishedResources(actorId,query);
+        if(matches.length===0&&page===0&&!direction)
+          return result('<b>نتائج البحث 🔍</b>\n'
+            +'لم نعثر على موارد منشورة ومعتمدة تطابق هذا البحث.\n'
+            +'جرّب كلمات مختلفة أو تصفح أقسام المكتبة.',backMenuKeyboard());
+        const pages=Math.ceil(matches.length/10);
+        if(page<0||page>=pages||(direction==='next'&&page===0)||
+          (direction==='previous'&&page>=pages-1))return denyPage();
+        const selection=matches.slice(page*10,page*10+10);
+        return result('<b>نتائج البحث 🔍</b>\n'
+          +'البحث: '+escapeTelegramHtml(query)+'\n'
+          +'صفحة '+(page+1)+' من '+pages+'\n'
+          +selection.map(r=>'• '+escapeTelegramHtml(r.title)).join('\n'),
+          listingKeyboard(selection.map(resourceButton),{
+            previous:page>0?searchPageButton(query,page-1,'previous'):undefined,
+            next:page+1<pages?searchPageButton(query,page+1,'next'):undefined
+          }));
+      };
+      if(text===m.search)return result('<b>البحث في الموارد 🔍</b>\n'
+        +'اكتب /search ثم كلمة البحث. مثال: <code>/search Grant</code>\n'
+        +'يُعرض المحتوى المنشور والمعتمد فقط؛ لا تُعرض ملفات المراجعة.',
+        backMenuKeyboard());
+      if(text.startsWith('/search')){
+        const term=parseSearchQuery(text);
+        return term?searchPage(term,0):{status:'DENIED',reason:'INVALID_SEARCH_QUERY'};
+      }
+      const searchRequest=parseSearchPageCommand(text);
+      if(searchRequest)return searchPage(
+        searchRequest.query,searchRequest.page,searchRequest.direction);
+      if(text.startsWith('➡️ التالي · s:')||text.startsWith('⬅️ السابق · s:'))
+        return denyPage();
       const pageRequest=parseMenuPageCommand(text);
       if(pageRequest){
         if(pageRequest.kind==='c'){
