@@ -141,3 +141,70 @@ test('B3 private navigation disabled denies both alias and title matching withou
   assert.equal(after.educationResources.length,before.educationResources.length);
  }finally{await f.close();}
 });
+
+
+for(const engine of ['json','sqlite'] as const){
+ test('B3 '+engine+': Arabic private FAQ title search ignores tashkeel and matches Arabic-Indic digits',async()=>{
+  const f=await fixture(engine);try{
+   await f.add('مِنْحَةُ الصِّينِ ٢٠٢٧',['other'],'Approved 2027 answer',200);
+   const r=await f.app().handle(message(80,'/faqsearch منحة الصين 2027'));
+   assert.equal(r.status,'APPLIED');
+   assert.match(r.plan?.text??'',/مِنْحَةُ الصِّينِ ٢٠٢٧/);
+   assert.equal(buttons(r).filter(x=>x.startsWith('📖 سؤال ')).length,1);
+   const selected=await f.app().handle(message(81,buttons(r).find(x=>x.startsWith('📖 سؤال '))!));
+   assert.match(selected.plan?.text??'',/Approved 2027 answer/);
+  }finally{await f.close();}
+ });
+ test('B3 '+engine+': approved Arabic FAQ aliases match hamza, alef maqsurah and diacritics',async()=>{
+  const f=await fixture(engine);try{
+   await f.add('كيف أستفيد من المنحة؟',
+    ['إِخْتِبارُ القُدرات فى إندونيسيا'],'Answer through reviewed source',200);
+   const r=await f.app().handle(message(82,'/faqsearch اختبار القدرات في اندونيسيا'));
+   assert.equal(r.status,'APPLIED');
+   assert.match(r.plan?.text??'',/كيف أستفيد من المنحة؟/);
+   assert.equal((r.plan?.text??'').includes('إِخْتِبارُ'),false);
+   assert.ok(isValidTelegramReplyKeyboard(r.plan?.replyMarkup));
+  }finally{await f.close();}
+ });
+}
+test('B3 Arabic search folds punctuation, tatweel and repeated spaces but not the original question display',async()=>{
+ const f=await fixture();try{
+  await f.add('منح — الصــين، 2027',['another alias'],'Reviewed',20);
+  const r=await f.app().handle(message(84,'/faqsearch منح الصين 2027'));
+  assert.match(r.plan?.text??'',/منح — الصــين، 2027/);
+  assert.equal(buttons(r).filter(x=>x.startsWith('📖 سؤال ')).length,1);
+ }finally{await f.close();}
+});
+test('B3 Persian digits match 2027 and locale normalization does not alter reviewed source metadata',async()=>{
+ const f=await fixture('sqlite');try{
+  const id=await f.add('فرص دراسية ۲۰۲۷',['طلبات ۲۰۲۷'],'Approved',30);
+  const before=await f.store.snapshot();
+  const r=await f.app().handle(message(85,'/faqsearch 2027'));
+  assert.match(r.plan?.text??'',/فرص دراسية ۲۰۲۷/);
+  const after=await f.store.snapshot();
+  assert.deepEqual(after.faqEntries,before.faqEntries);
+  assert.equal((r.plan?.text??'').includes(id),false);
+ }finally{await f.close();}
+});
+test('B3 normalized empty symbols cannot accidentally enumerate all approved FAQ questions',async()=>{
+ const f=await fixture();try{
+  await f.add('private approved FAQ',['test'],'Secret approved answer',30);
+  for(const [id,term] of [[86,'•••'],[87,'ــــ'],[88,'َََ']] as const){
+   const result=await f.app().handle(message(id,'/faqsearch '+term));
+   assert.equal(result.status,'APPLIED');
+   assert.match(result.plan?.text??'',/لا توجد/);
+   assert.equal(buttons(result).some(x=>x.startsWith('📖 سؤال ')),false);
+  }
+ }finally{await f.close();}
+});
+test('B3 Arabic keyword search does not relax exact /faq command or private navigation authorization',async()=>{
+ const f=await fixture();try{
+  await f.add('ما شروط القُبول؟',['جواز السفر'],'Reviewed answer',30);
+  const exact=await f.app().handle(message(90,'/faq ما شروط القبول؟'));
+  assert.equal(exact.status,'APPLIED');
+  assert.match(exact.plan?.text??'',/لم نعثر/);
+  await f.store.transaction(s=>{s.privateFeatures['education.navigate']=false;});
+  const disabled=await f.app().handle(message(91,'/faqsearch شروط القبول'));
+  assert.equal(disabled.status,'DENIED');assert.equal(disabled.plan,undefined);
+ }finally{await f.close();}
+});
