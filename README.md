@@ -1,3 +1,14 @@
+## Current B3 security slice — v0.7.28 (offline; NOT DEPLOYED)
+
+Mandatory-channel requirements now share one conservative authorization model across private group resource links, group commands and private browsing of group catalogs:
+
+- Students require `MEMBER` when a verified group has an active mandatory-channel rule. `NOT_REQUIRED` never grants student access under an active rule; only the trusted bot owner may use that explicit exemption.
+- A group rule is not silently paused if its saved mode/version/channel IDs are malformed, its group has multiple conflicting rules, or any active required channel/group has lost its local verification scope. All such states block protected access.
+- Final group authorization is checked again after any pending subscription provider result. An owner changing or pausing the requirement while verification is in progress wins over stale evidence.
+- The JSON and SQLite offline integration suite covers authorized/unverified membership, corrupted rules, duplicates, owner exemption, and changed local approvals. No live Telegram token, real enforcement, moderation, AI provider, channel publication, or user-data migration is enabled.
+
+To validate locally with Node 22+: `npm install --no-audit --no-fund && npm run check`. See `docs/TRACEABILITY.md` and `CHANGELOG.md` for scope and outstanding live deployment blockers.
+
 # بوت منارتك — MANARATAK BOT
 
 **B0/B1 + B2-Core + B3 + B3 privacy-safe Telegram reply outbox and opt-in authenticated owner review and deployment preflight and ingress hardening and outbox monitoring and emergency STOP and offline acceptance and restore rehearsal (v0.7.0). Transport implemented but OFF by default — no live deployment verified.**

@@ -26,6 +26,32 @@ export function isCanonicalSubscriptionRule(value:unknown):value is Subscription
  if(r.channelIds.some(id=>typeof id!=='string'||!canonicalId.test(id)))return false;
  return new Set(r.channelIds).size===r.channelIds.length;
 }
+/** One canonical policy per group. A malformed or duplicated saved rule
+ * is never equivalent to an explicitly owner-paused requirement. This helper
+ * makes link, group-message and private-group browsing gates agree.
+ */
+export function subscriptionRequirementMode(state:BotState,chatId:string):
+ 'NONE'|'PAUSED'|'ACTIVE'|'INVALID'{
+ const matches=state.subscriptionRequirements.filter(r=>r?.chatId===chatId);
+ if(matches.length===0)return 'NONE';
+ if(matches.length!==1||!isCanonicalSubscriptionRule(matches[0]))return 'INVALID';
+ const rule=matches[0];
+ if(rule.channelIds.length){
+  const verified=(id:string)=>state.chats.some(c=>
+    c.id===id&&c.approved&&c.scopes.includes('verification'));
+  if(!verified(chatId)||rule.channelIds.some(id=>!verified(id)))
+    return 'INVALID';
+ }
+ return rule.channelIds.length?'ACTIVE':'PAUSED';
+}
+/** NOT_REQUIRED may be an explicit owner exception, but must never prove
+ * student membership while the owner has configured required channels.
+ */
+export function acceptsActiveSubscriptionEvidence(
+ status:'MEMBER'|'NOT_REQUIRED'|'NOT_MEMBER'|'UNAVAILABLE'|'DENIED',
+ isOwner:boolean):boolean{
+ return status==='MEMBER'||(status==='NOT_REQUIRED'&&isOwner);
+}
 /** No network. This is not proof that Telegram still considers the bot an
  * administrator: the result verifies ONLY local authorization invariants.
  */

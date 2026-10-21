@@ -1,3 +1,12 @@
+## 0.7.28 — 2026-10-22 — Strict active-subscription evidence across group access paths (NOT DEPLOYED)
+
+- Required channel membership can no longer be bypassed by a `NOT_REQUIRED` verification result for ordinary students. This status is accepted under an **active** mandatory-channel rule only for the explicit trusted owner identity; ordinary students require `MEMBER`. A paused or absent canonical rule remains an intentional exception.
+- The common read-only subscription-rule inspector now treats malformed/duplicate records, invalid modes, invalid revisions and active rules whose group or required channel has lost local verification authorization as **INVALID**. These records are never mistaken for paused or unrestricted subscriptions.
+- Apply the same fail-closed predicate independently to private `/resource` links, private `/categories <group>` and `/resources <group> <category>` browsing, group `/categories`, `/resources` and reviewed group FAQ eligibility, and the `SubscriptionGate.verify` facade.
+- Group-message eligibility is re-read after the asynchronous subscription gateway completes: owner pause/reconfiguration, chat policy changes or duplicate rule injection invalidate the old evidence before creating a reply plan.
+- RED-first JSON and SQLite regression tests cover injected `NOT_REQUIRED`, owner exception, malformed zero-channel rule, duplicated group requirements, in-flight pause, genuine provider behavior and orphaned active channel approval. No live Telegram, AI, enrollment or moderation operation is introduced.
+- Production deployment, official Telegram acceptance, channel permissions provisioning and operator approval remain separate.
+
 ## 0.7.27 — 2026-10-21 — Mandatory-channel verification for group-scoped opaque resource links (NOT DEPLOYED)
 
 - Closed a private `/resource <opaque-ref>` authorization bypass: a student with verified membership in an authorized group could previously open a link even when that group required joining separately approved mandatory channels. Group resource links now require both verified group membership **and** a passing trusted `SubscriptionGate.verify` result whenever the saved group subscription rule is active.
