@@ -19,6 +19,12 @@ For `ALL` subscriptions, an unknown channel result makes the decision `UNAVAILAB
 
 This fixes **mock-tested provider failure behavior only**. It does not imply that real bot administrator rights, Telegram permissions or membership checks have been accepted or deployed.
 
+## B3 v0.7.19 — source-bound FAQ moderation from private Telegram (OFFLINE)
+
+The verified **🔐 لوحة المالك → 🧠 الأسئلة الشائعة** ReplyKeyboard lists reviewed FAQ records in ten-item pages. Open a **❓ سؤال** to inspect a sanitized question, answer, status, scope and saved source availability. A draft can be explicitly **reviewed then approved** only while its linked educational resource is still locally PUBLISHED in an enabled, authorized category hierarchy. An already APPROVED FAQ can be **reviewed then archived** to stop its future approved FAQ responses; its linked scholarship/course resource remains untouched.
+
+Confirmations are checked again at the durable store transaction boundary: configured owner, verified private actor, current group policy epoch, FAQ status, exact FAQ copy, underlying linked resource and ancestor category revisions must remain unchanged. Forged, old, copied and non-owner buttons never confer authority; neither approval nor archive sends messages to Telegram or invokes an AI provider.
+
 ## B3 v0.7.18 — owner-controlled category order in Telegram (OFFLINE)
 
 In **🔐 لوحة المالك → 🗂️ إدارة الأقسام → القسم** a private verified owner can review **⬆️ مراجعة الرفع** or **⬇️ مراجعة الخفض** when an adjacent sibling exists. Each preview identifies the neighboring category; **✅ تأكيد** performs a single sibling-order move within that category's existing `scope` and `parentId`. No user may reparent a section, enable a disabled section or make an archived resource public by sorting.
