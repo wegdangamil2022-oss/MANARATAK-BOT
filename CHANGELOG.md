@@ -1,3 +1,11 @@
+## 0.7.14 — 2026-10-21 — Malformed mandatory subscription rules cannot punish students (NOT DEPLOYED)
+
+- Introduced one strict, reusable, pure `isCanonicalSubscriptionRule` validator for **runtime membership enforcement** and the **offline subscription health audit**. It accepts valid paused zero-channel rules but requires canonical group/channel IDs, ALL/ANY mode, positive integer rule revisions, at most ten unique mandatory channels and an array shape.
+- `SubscriptionGate.verify` now returns **UNAVAILABLE** immediately for any malformed stored rule. A malformed mode can no longer accidentally fall into ANY logic and turn a known `NOT_MEMBER` into a moderation decision; duplicate, over-limit, or unrecognized channel entries never trigger provider calls.
+- The offline aggregate audit now checks structure and duplicate group-rule identity **before** treating a zero-channel rule as harmlessly paused. A malformed or duplicate paused rule triggers redacted `INVALID_RULE_SHAPE` and blocks offline acceptance rather than silently passing.
+- Added RED-first JSON/SQLite tests covering malformed ALL/ANY, zero/negative revisions, duplicate and oversized channel lists, invalid IDs, malformed paused and duplicate-group rules, unchanged legitimate paused behavior, and no accidental moderation/API effects.
+- These tests use isolated fake adapters; real Telegram connection, live user punishment and provider admin checks remain OFF.
+
 ## 0.7.13 — 2026-10-21 — Avoid stale mandatory-subscription verification after reapproval (NOT DEPLOYED)
 
 - Closed a time-of-check/time-of-use gap in `SubscriptionGate.configure`: owner configuration can await third-party channel verification while group/channel approvals change. Configuration now compares the **exact saved policy revision** of the group and every required channel in the same transaction as the rule update. A revoke/reapprove cannot legitimize stale verification, even when the final scopes look identical.

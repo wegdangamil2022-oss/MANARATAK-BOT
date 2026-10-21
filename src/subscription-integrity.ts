@@ -1,4 +1,4 @@
-import {BotStore,type BotState} from './store.js';
+import {BotStore,type BotState,type SubscriptionRequirement} from './store.js';
 
 /** Aggregate-only operator record. Intentionally contains no chat ID, channel
  * ID, student identity, username, message text, SQLite path or API credential.
@@ -12,6 +12,20 @@ export interface SubscriptionIntegrityReport{
   'DUPLICATE_REQUIRED_CHANNELS'|'TOO_MANY_REQUIRED_CHANNELS')[];
 }
 const canonicalId=/^-[1-9][0-9]{0,18}$/u;
+/** Shared runtime + offline structural invariant. A paused zero-channel rule
+ * is valid only when its ID, mode and revision are still well formed.
+ * This is NOT external Telegram approval (checked separately).
+ */
+export function isCanonicalSubscriptionRule(value:unknown):value is SubscriptionRequirement{
+ if(!value||typeof value!=='object'||Array.isArray(value))return false;
+ const r=value as Partial<SubscriptionRequirement>;
+ if(typeof r.chatId!=='string'||!canonicalId.test(r.chatId)||
+   (r.mode!=='ALL'&&r.mode!=='ANY')||
+   !Number.isSafeInteger(r.version)||r.version===undefined||r.version<1||
+   !Array.isArray(r.channelIds)||r.channelIds.length>10)return false;
+ if(r.channelIds.some(id=>typeof id!=='string'||!canonicalId.test(id)))return false;
+ return new Set(r.channelIds).size===r.channelIds.length;
+}
 /** No network. This is not proof that Telegram still considers the bot an
  * administrator: the result verifies ONLY local authorization invariants.
  */
@@ -26,14 +40,13 @@ export function summarizeSubscriptionIntegrity(state:BotState):SubscriptionInteg
    invalidRules++;continue;
   }
   const channels=rule.channelIds;
+  // Structural corruption and duplicate rule identities are unsafe even if
+  // a rule currently has no active channels; a future edit must not silently
+  // revive malformed policies.
+  if(!isCanonicalSubscriptionRule(rule)||seenGroups.has(rule.chatId))invalidRules++;
+  if(typeof rule.chatId==='string')seenGroups.add(rule.chatId);
   if(channels.length===0){inactiveRules++;continue;}
   activeRules++;
-  const shapeInvalid=
-   typeof rule.chatId!=='string'||!canonicalId.test(rule.chatId)||
-   !['ALL','ANY'].includes(rule.mode)||!Number.isSafeInteger(rule.version)||rule.version<1||
-   seenGroups.has(rule.chatId);
-  if(shapeInvalid)invalidRules++;
-  seenGroups.add(rule.chatId);
   const group=state.chats.find(c=>c.id===rule.chatId);
   if(!group?.approved||!group.scopes.includes('verification'))invalidGroups++;
   if(channels.length>10)overLimitRules++;
