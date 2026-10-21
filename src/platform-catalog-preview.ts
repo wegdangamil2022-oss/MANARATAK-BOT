@@ -43,7 +43,8 @@ function parsePage(raw:unknown,limit:number,cursor:string|null):
   if(!isObject(item)||
     !exactKeys(item,['id','revision','scope','publication','title','university','cycle','degree'])||
     typeof item.id!=='string'||!validId.test(item.id)||
-    seen.has(item.id)||!Number.isSafeInteger(item.revision)||item.revision<1||
+    seen.has(item.id)||typeof item.revision!=='number'||
+    !Number.isSafeInteger(item.revision)||item.revision<1||
     item.scope!=='private'||item.publication!=='PUBLISHED'||
     !boundedText(item.title,160)||!boundedText(item.university,120)||
     !boundedText(item.cycle,32)||!boundedText(item.degree,64))return null;
