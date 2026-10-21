@@ -7,6 +7,7 @@ import { EducationAdminFacade, type VerifiedAdminContext } from './education-adm
 import { ApprovedAnswerService, ResourceLinkService, type MembershipPort } from './education-interactions.js';
 import type { ImportFormat } from './ingestion.js';
 import type { SubscriptionGate } from './subscription.js';
+import type {PlatformCatalogPreviewService} from './platform-catalog-preview.js';
 import {subscriptionRequirementMode,acceptsActiveSubscriptionEvidence} from './subscription-integrity.js';
 import type { TelegramReplyDispatcher } from './telegram-replies.js';
 import {BoundedIngress,decodeStrictJsonBytes,type IngressOptions} from './http-ingress-guard.js';
@@ -48,6 +49,8 @@ export interface TelegramApplicationOptions {
   store: BotStore; policy: Policy; education: EducationService; admin: EducationAdminFacade;
   faq: ApprovedAnswerService; links: ResourceLinkService; membership: MembershipPort;
   botId: string; botUsername: string; subscription?: SubscriptionGate; clock?: () => number; documentDownload?: TelegramDocumentPort;
+  /** Optional B5 read-only owner preview; absent in usual offline deployment. */
+  platformCatalog?:PlatformCatalogPreviewService;
 }
 
 type Event = {updateId: number; actorId: string; chatId: string; kind: 'private' | 'group'; text: string; document?: IncomingDocument};
@@ -218,7 +221,8 @@ export class TelegramUpdateApplication {
       if(isOwnerMenuText(text)){
         if(!owner)return {status:'DENIED',reason:'OWNER_ONLY'};
         const screen=await new OwnerTelegramMenu(
-          this.opts.store,this.opts.policy,this.opts.education,this.opts.admin
+          this.opts.store,this.opts.policy,this.opts.education,this.opts.admin,
+          this.opts.platformCatalog
         ).handle(text,adminCtx);
         if(!screen)return {status:'DENIED',reason:'OWNER_MENU_UNAVAILABLE'};
         return result(screen.text,screen.keyboard);

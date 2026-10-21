@@ -9,6 +9,8 @@ import {summarizeSubscriptionIntegrity} from './subscription-integrity.js';
 import {OwnerTelegramLibraryMenu,isOwnerLibraryText} from './telegram-owner-library.js';
 import {OwnerTelegramCategoryMenu,isOwnerCategoryText} from './telegram-owner-categories.js';
 import {OwnerTelegramFAQMenu,isOwnerFAQText} from './telegram-owner-faq.js';
+import type {PlatformCatalogPreviewService} from './platform-catalog-preview.js';
+import {escapeTelegramListPreview} from './telegram-preview.js';
 
 export const ownerMenuLabels={
  imports:'🧾 مراجعة الوارد',
@@ -18,6 +20,7 @@ export const ownerMenuLabels={
  groups:'👥 المجموعات المعتمدة',
  subscriptionHealth:'🛡 سلامة الاشتراكات',
  delivery:'📊 حالة الرسائل',
+ platformCatalog:'🔎 معاينة بيانات منارتك',
  settings:'⚙️ إعدادات التشغيل',
 } as const;
 type OwnerMenuAction={
@@ -89,6 +92,7 @@ const sections=new Set<string>(Object.values(ownerMenuLabels));
 export function isOwnerMenuText(text:string):boolean{
  return text===menuLabels.owner||sections.has(text)||isOwnerGroupText(text)||isOwnerLibraryText(text)||isOwnerCategoryText(text)||isOwnerFAQText(text)||
   text.startsWith('➡️ التالي · o:')||text.startsWith('⬅️ السابق · o:')||
+  text.startsWith('➡️ التالي · b5:')||text.startsWith('⬅️ السابق · b5:')||
   marks.some(([prefix])=>text.startsWith(prefix));
 }
 const esc=(s:string):string=>s.replace(/&/gu,'&amp;').replace(/</gu,'&lt;')
@@ -119,7 +123,8 @@ export class OwnerTelegramMenu{
   private readonly store:BotStore,
   private readonly policy:Policy,
   private readonly education:EducationService,
-  private readonly admin:EducationAdminFacade
+  private readonly admin:EducationAdminFacade,
+  private readonly platformCatalog?:PlatformCatalogPreviewService
  ){}
  private allowedRun(state:BotState,id:string):ImportRun|null{
   const run=state.importRuns.find(x=>x.id===id);
@@ -204,6 +209,40 @@ export class OwnerTelegramMenu{
    return new OwnerTelegramCategoryMenu(this.store,this.policy,this.education).handle(text,ctx);
   if(isOwnerFAQText(text))
    return new OwnerTelegramFAQMenu(this.store,this.policy).handle(text,ctx);
+  // A platform catalogue page is only a read-only owner request. Its cursor
+  // is copied through reply-keyboard text and NEVER confers authentication.
+  const platformPage=/^➡️ التالي · b5:([A-Za-z0-9_-]{1,64})$/u.exec(text);
+  if(text===ownerMenuLabels.platformCatalog||
+    text.startsWith('➡️ التالي · b5:')||text.startsWith('⬅️ السابق · b5:')){
+   if(!this.platformCatalog||(!platformPage&&text!==ownerMenuLabels.platformCatalog))
+    return reject();
+   const inspected=await this.platformCatalog.preview(ctx.actorId,
+     platformPage?{cursor:platformPage[1]!}:{});
+   if(inspected.status==='DENIED')return reject();
+   if(inspected.status==='UNAVAILABLE')
+    return screen('<b>معاينة بيانات منارتك 🔎</b>\n'
+     +'تعذر قراءة السجلات الخارجية بشكل آمن حاليًا.\n'
+     +'لم يتم استيراد أو نشر أي مورد.',
+     [ownerMenuLabels.settings]);
+   if(inspected.status!=='PREVIEW')return reject();
+   if(inspected.records.length===0)return screen(
+    '<b>معاينة بيانات منارتك 🔎</b>\n'
+    +'لا توجد سجلات منشورة في هذه الصفحة بحسب المصدر.\n'
+    +'لم يتم اعتماد أي سجل داخل البوت.',
+    [ownerMenuLabels.platformCatalog]);
+   const rows=inspected.records.map((r,i)=>
+    (i+1)+'. <code>'+r.id+'</code> — '+
+    escapeTelegramListPreview(r.title,115)+'\n'
+    +'الجامعة: '+escapeTelegramListPreview(r.university,70)).join('\n');
+   return screen('<b>معاينة خارجية للمالك — قراءة فقط 🔎</b>\n'
+    +'المصدر يدّعي نشر هذه السجلات، لكن لم يتحقق مالك البوت منها بعد.\n'
+    +'الحالة: غير متحقق منها — لا اعتماد أو نشر تلقائي.\n'
+    +rows+'\n'
+    +'السجلات الحالية للمعاينة فقط؛ لا يجوز الاستشهاد بها كمنح معتمدة.',
+    [ownerMenuLabels.platformCatalog],{
+     next:inspected.nextCursor?'➡️ التالي · b5:'+inspected.nextCursor:undefined
+    });
+  }
   const state=await this.store.snapshot();
   const pageRequest=parseOwnerMenuPageCommand(text);
   if(pageRequest){
@@ -223,7 +262,7 @@ export class OwnerTelegramMenu{
     +'رفع المحتوى في الخاص: '+(panel.canUpload?'مسموح':'مقيد')+'\n'
     +'نشر المحتوى إلى قنوات Telegram لم يُفعّل.\n'
     +'اختر وظيفة الإدارة من الأزرار أدناه.',
-    Object.values(ownerMenuLabels));
+    Object.values(ownerMenuLabels).filter(x=>this.platformCatalog||x!==ownerMenuLabels.platformCatalog));
   }
   if(text===ownerMenuLabels.imports)return this.pagedImports(state,0);
   if(text===ownerMenuLabels.subscriptionHealth){
