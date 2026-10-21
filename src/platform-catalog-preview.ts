@@ -124,13 +124,15 @@ export class PlatformCatalogPreviewService{
    * comes from a fresh, schema-validated read-only source projection.
    * Conflicting revisions cannot silently overwrite an existing review.
    */
-  async stage(actor:string,sourceId:string,expectedPageFingerprint:string):
+  async stage(actor:string,sourceId:string,expectedPageFingerprint:string,
+   request:Readonly<{cursor?:string|null}>={}):
    Promise<PlatformStageResult>{
    if(!this.policy.isOwner(actor))return {status:'DENIED'};
    if(typeof sourceId!=='string'||!validId.test(sourceId)||
      typeof expectedPageFingerprint!=='string'||!strictDigest.test(expectedPageFingerprint))
     return {status:'UNAVAILABLE'};
-   const preview=await this.preview(actor);
+   const cursor=request.cursor??null;
+   const preview=await this.preview(actor,{cursor});
    if(preview.status!=='PREVIEW')return preview;
    if(preview.fingerprint!==expectedPageFingerprint)return {status:'STALE'};
    const records=preview.records.filter(c=>c.id===sourceId);
@@ -149,7 +151,8 @@ export class PlatformCatalogPreviewService{
      }
      if(queue.length>=200)return {status:'LIMIT_REACHED'};
      const entry:PlatformReviewQueueEntry={
-      sourceId,sourceRevision:candidate.revision,title:candidate.title,
+      sourceId,...(cursor?{pageCursor:cursor}:{}),
+      sourceRevision:candidate.revision,title:candidate.title,
       university:candidate.university,cycle:candidate.cycle,
       degree:candidate.degree,digest,status:'UNVERIFIED_EXTERNAL',
       stagedBy:actor,stagedAt:Date.now()
@@ -179,7 +182,7 @@ export class PlatformCatalogPreviewService{
     previouslyStaged=state.platformReviewQueue?.find(x=>x.sourceId===sourceId);
    }catch{return {status:'UNAVAILABLE'};}
    if(!previouslyStaged||previouslyStaged.digest!==expectedDigest)return {status:'STALE'};
-   const preview=await this.preview(actor);
+   const preview=await this.preview(actor,{cursor:previouslyStaged.pageCursor??null});
    if(preview.status!=='PREVIEW')return preview;
    const candidates=preview.records.filter(c=>c.id===sourceId);
    if(candidates.length!==1||

@@ -1,3 +1,7 @@
+## B5 v0.7.35 — review external candidates from the owner's Telegram mock menu
+
+In the optional owner-only **🔎 معاينة بيانات منارتك** workflow, each externally self-reported published row now offers **📥 تسجيل مرشح**. The source is freshly verified against its complete page fingerprint before durable staging, including on later cursor pages. After staging the owner receives a separate **✅ تدقيق بيانات** action which rechecks the exact saved source revision and metadata and records only a **reviewed-metadata** state. There is still no import/publish action, no verified live Manaratak platform API or credentials, no public/student catalogue access and no live Telegram send/AI execution. This feature is exercised only in offline JSON/SQLite mock integration tests.
+
 ## B5 v0.7.34 — quarantine queue for external grant records (offline)
 
 An owner can stage one unverified platform candidate only from an unchanged, freshly re-read external page, preserving a SHA-256 digest of the source metadata. A second owner-only action may mark its metadata reviewed after independently re-fetching the same currently published external source and matching its revision and all fields. Both statuses remain **quarantined**: no student catalogue item, import, publication, campaign or Telegram outbound send is created. The optional schema-8 `platformReviewQueue` is bounded, JSON/SQLite validated, and has no platform tokens. The actual external API remains unconnected.

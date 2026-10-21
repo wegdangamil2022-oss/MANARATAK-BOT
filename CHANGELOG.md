@@ -1,3 +1,11 @@
+## 0.7.35 — 2026-10-22 — B5 two-step owner Telegram actions to stage and review external metadata (OFFLINE)
+
+- The optional owner-only Telegram external catalogue now renders an explicit `📥 تسجيل مرشح` action for each visible external candidate (up to ten per page). The selected source ID, page cursor and complete read-only page fingerprint are stateless untrusted button claims; the application re-fetches and reauthorizes the current source page before adding an immutable item to the quarantined B5 review queue.
+- After successful staging, a distinct `✅ تدقيق بيانات` button causes a new provider read and matches the original source revision and SHA-256 metadata digest. Only then can the source candidate be marked `REVIEWED_METADATA_ONLY`. Neither step is B3 import approval, local publication, campaign execution, student listing, or Telegram send.
+- Persist the source page cursor with an optional validated `pageCursor` field in schema 8 (no destructive data migration); this lets second and later pages be staged and reviewed from their original exact page rather than incorrectly searching the first page.
+- Forged, edited, stale, copy-replayed after source mutation, unauthorized student or group buttons and revoked owner-dashboard permissions are denied. Owner buttons remain bounded to Telegram's 256-byte text budget; no platform credentials or actual website network endpoint added.
+- Ten new offline JSON/SQLite and owner Telegram integration tests cover both steps, second-page records, page provenance, stale revisions, direct unauthorized requests, source mutation between display/staging/review and no education/publishing side effects.
+
 ## 0.7.34 — 2026-10-22 — B5 quarantined external candidate staging and metadata-only review (NOT DEPLOYED)
 
 - **Owner-only staged review queue** for external provider records. `stage(actor,sourceId,expectedPageFingerprint)` reads the *current* source preview again and accepts only a unique external record in the exact page the owner just inspected; no client-provided title, university, year or degree enters storage.
