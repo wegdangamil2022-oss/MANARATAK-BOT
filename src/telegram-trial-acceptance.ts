@@ -2,6 +2,7 @@ import {isAbsolute,resolve} from 'node:path';
 import {lstat} from 'node:fs/promises';
 import {BotStore,type BotState} from './store.js';
 import {readTelegramSafetySwitch} from './telegram-safety-switch.js';
+import {summarizeSubscriptionIntegrity} from './subscription-integrity.js';
 
 /** Offline-only advisory review. PASS is NOT permission to start Telegram,
  * does NOT authorize changing STOP to RUN and does NOT prove TLS or delivery.
@@ -12,7 +13,7 @@ export interface TelegramTrialAcceptanceReport{
  reasons:readonly (
   'SAFETY_NOT_STOP'|'BACKUP_STATE_MISMATCH'|'PENDING_REPLIES'|
   'UNRESOLVED_REPLIES'|'UNRESOLVED_UPDATES'|'UNRESOLVED_OPERATIONS'|
-  'UNRESOLVED_PUBLICATIONS'|'ACTIVE_PURGE'
+  'UNRESOLVED_PUBLICATIONS'|'ACTIVE_PURGE'|'INVALID_SUBSCRIPTION_REQUIREMENTS'
  )[];
 }
 export interface TelegramTrialAcceptanceOptions{
@@ -84,6 +85,12 @@ export async function inspectTelegramTrialAcceptanceReadOnly(
  if(live.purgeJobs.some(j=>j.status==='READY'||
    j.items.some(item=>uncertainPurgeItem.has(item.status))))
   reasons.push('ACTIVE_PURGE');
+ // The standalone local subscription audit is also a mandatory offline
+ // acceptance invariant. A matched backup is not proof that an orphaned or
+ // malformed verification rule is safe; include a static, redacted blocker.
+ // This reads only the existing in-memory snapshot, without provider calls.
+ if(summarizeSubscriptionIntegrity(live).status==='BLOCKED')
+  reasons.push('INVALID_SUBSCRIPTION_REQUIREMENTS');
 
  // Race-aware advisory check: a state mutation or switch change observed
  // during inspection fails CLOSED, never reports a clean release rehearsal.
