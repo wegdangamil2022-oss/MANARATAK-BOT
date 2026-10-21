@@ -19,6 +19,12 @@ For `ALL` subscriptions, an unknown channel result makes the decision `UNAVAILAB
 
 This fixes **mock-tested provider failure behavior only**. It does not imply that real bot administrator rights, Telegram permissions or membership checks have been accepted or deployed.
 
+## B3 v0.7.25 — in-flight private group browsing cannot bypass new requirements (OFFLINE)
+
+The `/categories -100…` and `/resources -100… CATEGORY` private-chat group-scoped flows require live **verified membership evidence** and saved authorization. The membership request is now bound to the current group authorization version and all currently saved subscription rule revisions/modes/channels. If the group is revoked and re-approved, scopes change, or a mandatory-channel rule is newly configured while the external provider call is pending, the in-flight request cannot reuse its stale proof. A fresh request is needed. Member identities, tokens and group content are never exposed on denial.
+
+This is an offline/mock hardening of existing Telegram transport and is **not** a real hosted bot or live Telegram membership proof.
+
 ## B3 v0.7.24 — find reviewed private FAQ answers by keyword (OFFLINE)
 
 In the private student chat, open **💬 المساعد التعليمي → 🔎 ابحث في الأسئلة**, then type `/faqsearch منحة`. The bot searches currently approved FAQ **question titles** backed by the private published education catalogue, shows up to 10 matching questions per page, and lets the student select the numbered matching question to read its reviewed answer. Page controls re-run the search on the latest currently authorized FAQ list rather than granting visibility to an old page.
