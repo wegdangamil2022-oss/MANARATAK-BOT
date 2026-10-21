@@ -110,16 +110,30 @@ export class TelegramUpdateApplication {
     if(scope==='private')return null;
     const before=await this.opts.store.snapshot();
     if(!this.opts.policy.canUseChat(before,scope,'navigation'))return 'CHAT_NOT_AUTHORIZED';
+    // An external membership check is evidence only for the exact group and
+    // subscription-rule epochs at which it started. Revoking/reapproving the
+    // group, or introducing a required channel mid-check, invalidates it.
+    const epoch=(state:Awaited<ReturnType<BotStore['snapshot']>>):string=>{
+      const group=state.chats.find(c=>c.id===scope);
+      const rules=state.subscriptionRequirements.filter(r=>r.chatId===scope)
+       .map(r=>[r.version,r.mode,...r.channelIds]);
+      return JSON.stringify([group?.version,group?.approved,group?.scopes,rules]);
+    };
+    const originalEpoch=epoch(before);
     let member:'VERIFIED'|'NOT_MEMBER'|'UNKNOWN'='UNKNOWN';
     try {member=await this.opts.membership(scope,actorId);}catch{return 'MEMBERSHIP_UNAVAILABLE';}
+    const during=await this.opts.store.snapshot();
+    if(!this.opts.policy.canUseChat(during,scope,'navigation'))return 'CHAT_NOT_AUTHORIZED';
+    if(epoch(during)!==originalEpoch)return 'MEMBERSHIP_UNAVAILABLE';
     if(member!=='VERIFIED')return member==='NOT_MEMBER'?'GROUP_MEMBERSHIP_REQUIRED':'MEMBERSHIP_UNAVAILABLE';
-    if(before.subscriptionRequirements.some(r=>r.chatId===scope&&r.channelIds.length)) {
+    if(during.subscriptionRequirements.some(r=>r.chatId===scope&&r.channelIds.length)) {
       if(!this.opts.subscription)return 'SUBSCRIPTION_UNAVAILABLE';
       const check=await this.opts.subscription.verify(scope,actorId);
       if(check.status!=='MEMBER'&&check.status!=='NOT_REQUIRED')return check.status==='NOT_MEMBER'?'SUBSCRIPTION_REQUIRED':'SUBSCRIPTION_UNAVAILABLE';
     }
     const after=await this.opts.store.snapshot();
     if(!this.opts.policy.canUseChat(after,scope,'navigation'))return 'CHAT_NOT_AUTHORIZED';
+    if(epoch(after)!==originalEpoch)return 'MEMBERSHIP_UNAVAILABLE';
     return null;
   }
   private async handleDocument(event:Event):Promise<TelegramResult> {
