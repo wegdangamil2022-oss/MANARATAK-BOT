@@ -138,6 +138,5 @@ test('B3 FAQ commands in authorized groups do not bypass mention/AI or access pr
   await f.faq.approve(OWNER,f.privateFAQ.id);
   const r=await f.app().handle(msg(70,'/faq ما شروط المنحة؟',STUDENT,true));
   assert.equal(r.plan,undefined);
-  assert.equal((r.plan?.text??'').includes('لا ترسل الجواز'),false);
  }finally{await f.close();}
 });
