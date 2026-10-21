@@ -97,8 +97,12 @@ export interface PurgeRetentionReviewControl {
 /** Owner-reviewed external metadata remains quarantined and never acts as a B3 import/publish grant. */
 export interface PlatformReviewQueueEntry{
  sourceId:string;sourceRevision:number;title:string;university:string;cycle:string;degree:string;
- digest:string;status:'UNVERIFIED_EXTERNAL'|'REVIEWED_METADATA_ONLY';
+ digest:string;status:'UNVERIFIED_EXTERNAL'|'REVIEWED_METADATA_ONLY'|'APPROVED_FOR_LOCAL'|'PUBLISHED_LOCALLY';
  stagedBy:string;stagedAt:number;reviewedBy?:string;reviewedAt?:number;
+ /** A separate owner decision, never inferred from external PUBLISHED state. */
+ approvedBy?:string;approvedAt?:number;approvedCategoryId?:string;
+ /** Exactly one local resource, not an outbound Telegram publication receipt. */
+ publishedResourceId?:string;
  /** Source page from which the owner reviewed this entry, never authorization. */
  pageCursor?:string;
 }
@@ -185,7 +189,8 @@ export class BotStore {
           const r=entry as Record<string,unknown>;
           const keys=Object.keys(r),base=['sourceId','sourceRevision','title','university','cycle',
             'degree','digest','status','stagedBy','stagedAt'];
-          const optional=['reviewedBy','reviewedAt','pageCursor'];
+          const optional=['reviewedBy','reviewedAt','pageCursor','approvedBy','approvedAt',
+            'approvedCategoryId','publishedResourceId'];
           if(keys.some(key=>!base.includes(key)&&!optional.includes(key))||
             base.some(key=>!Object.prototype.hasOwnProperty.call(r,key)))return true;
           const id=/^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/u;
@@ -198,14 +203,26 @@ export class BotStore {
             typeof r.sourceRevision!=='number'||!Number.isSafeInteger(r.sourceRevision)||r.sourceRevision<1||
             !safe(r.title,160)||!safe(r.university,120)||!safe(r.cycle,32)||
             !safe(r.degree,64)||typeof r.digest!=='string'||!sha.test(r.digest)||
-            !['UNVERIFIED_EXTERNAL','REVIEWED_METADATA_ONLY'].includes(String(r.status))||
+            !['UNVERIFIED_EXTERNAL','REVIEWED_METADATA_ONLY','APPROVED_FOR_LOCAL',
+              'PUBLISHED_LOCALLY'].includes(String(r.status))||
             typeof r.stagedBy!=='string'||!/^\d{1,20}$/u.test(r.stagedBy)||
             typeof r.stagedAt!=='number'||!Number.isSafeInteger(r.stagedAt)||r.stagedAt<0||
             (r.status==='UNVERIFIED_EXTERNAL'&&
               (r.reviewedBy!==undefined||r.reviewedAt!==undefined))||
-            (r.status==='REVIEWED_METADATA_ONLY'&&
+            (r.status!=='UNVERIFIED_EXTERNAL'&&
               (typeof r.reviewedBy!=='string'||!/^\d{1,20}$/u.test(r.reviewedBy)||
-                typeof r.reviewedAt!=='number'||!Number.isSafeInteger(r.reviewedAt)||r.reviewedAt<0));
+                typeof r.reviewedAt!=='number'||!Number.isSafeInteger(r.reviewedAt)||r.reviewedAt<0))||
+            (['UNVERIFIED_EXTERNAL','REVIEWED_METADATA_ONLY'].includes(String(r.status))&&
+              (r.approvedBy!==undefined||r.approvedAt!==undefined||
+                r.approvedCategoryId!==undefined||r.publishedResourceId!==undefined))||
+            (['APPROVED_FOR_LOCAL','PUBLISHED_LOCALLY'].includes(String(r.status))&&
+              (typeof r.approvedBy!=='string'||!/^\d{1,20}$/u.test(r.approvedBy)||
+               typeof r.approvedAt!=='number'||!Number.isSafeInteger(r.approvedAt)||r.approvedAt<0||
+               typeof r.approvedCategoryId!=='string'||!id.test(r.approvedCategoryId)))||
+            (r.status!=='PUBLISHED_LOCALLY'&&r.publishedResourceId!==undefined)||
+            (r.status==='PUBLISHED_LOCALLY'&&
+              (typeof r.publishedResourceId!=='string'||
+                !/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/u.test(r.publishedResourceId)));
         })||
         new Set(previous.platformReviewQueue.map((e:PlatformReviewQueueEntry)=>e.sourceId)).size!==previous.platformReviewQueue.length
       )) ||
