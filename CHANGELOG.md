@@ -1,3 +1,11 @@
+## 0.7.29 — 2026-10-22 — Arabic-friendly private FAQ discovery (NOT DEPLOYED)
+
+- Student `/faqsearch` now matches currently approved private FAQ titles and **owner-reviewed aliases** despite ordinary Arabic search variation: harakat/diacritics, alif/hamza spelling, alef maqsurah, tatweel, punctuation, multiple spaces, Arabic-Indic numerals and Persian numerals. NFKC and case-insensitive Latin matching remain available.
+- Search normalization is **read-only discovery only**. Original approved question titles remain unchanged in Telegram, aliases and administrative identifiers are hidden, answer buttons keep their existing opaque global ordinals and are re-authorized when opened, and exact `/faq` command semantics are deliberately unchanged.
+- A term that normalizes to empty is treated as **no matches**, not a universal substring. The existing 48-byte/40-codepoint query limits and invalid-control-character policy remain in effect.
+- Added RED-first JSON/SQLite and negative regression coverage for Arabic variants, aliases, Unicode digits, punctuation/spacing, empty after normalization, authorized answer clicks, immutable source records, no AI/authorization relaxation.
+- Live Telegram, deployment, generative AI and channel publishing remain OFF / unverified.
+
 ## 0.7.28 — 2026-10-22 — Strict active-subscription evidence across group access paths (NOT DEPLOYED)
 
 - Required channel membership can no longer be bypassed by a `NOT_REQUIRED` verification result for ordinary students. This status is accepted under an **active** mandatory-channel rule only for the explicit trusted owner identity; ordinary students require `MEMBER`. A paused or absent canonical rule remains an intentional exception.
