@@ -153,3 +153,53 @@ test('B3 arbitrary text or group commands cannot access private FAQ browsing',as
   assert.equal(ordinary.status,'IGNORED');
  }finally{await f.close();}
 });
+
+
+test('B3 numbered FAQ buttons visibly map to question numbers and remain UTF-8 bounded',()=>{
+ const id=randomUUID();
+ assert.match(privateFAQButton(id,1),/^📖 سؤال 1 · ~[a-f0-9]{16}$/u);
+ assert.match(privateFAQButton(id,9999),/^📖 سؤال 9999 · ~[a-f0-9]{16}$/u);
+ assert.ok(parsePrivateFAQSelection(privateFAQButton(id,1)));
+ for(const bad of ['📖 سؤال 01 · ~1111111111111111',
+  '📖 سؤال 0 · ~1111111111111111',
+  '📖 سؤال 10000 · ~1111111111111111',
+  '📖 سؤال -1 · ~1111111111111111'])
+  assert.equal(parsePrivateFAQSelection(bad),null);
+});
+test('B3 numbered FAQ selection is exact by current global ordinal, not only by hidden hash',async()=>{
+ const f=await fixture('sqlite');try{
+  const second=await f.faq.submit(OWNER,'private',{question:'سؤال إضافي',
+    answer:'Different safe answer',sourceResourceId:f.privateResource});
+  await f.faq.approve(OWNER,second.id);
+  const p1=await f.app().handle(msg(91,privateFAQBrowseLabel));
+  const selections=buttons(p1).filter(x=>x.startsWith('📖 سؤال '));
+  assert.equal(selections.length,2);
+  assert.match(selections[0]!,/^📖 سؤال 1 · ~[a-f0-9]{16}$/u);
+  assert.match(selections[1]!,/^📖 سؤال 2 · ~[a-f0-9]{16}$/u);
+  assert.match(p1.plan?.text??'',/1\. .*2\./s);
+  const choose2=await f.app().handle(msg(92,selections[1]!));
+  assert.equal(choose2.status,'APPLIED');
+  assert.ok((choose2.plan?.text??'').includes('المتطلبات')||
+    (choose2.plan?.text??'').includes('Different safe answer'));
+  const mismatched=selections[0]!.replace('سؤال 1','سؤال 2');
+  const invalid=await f.app().handle(msg(93,mismatched));
+  assert.equal(invalid.status,'DENIED');
+  const oldOpaque=privateFAQButton(f.privateFAQ.id);
+  assert.equal((await f.app().handle(msg(94,oldOpaque))).status,'DENIED');
+ }finally{await f.close();}
+});
+test('B3 FAQ numbering uses global row index across pages, not ten repeated one-to-ten labels',async()=>{
+ const f=await fixture();try{
+  for(let i=0;i<12;i++){
+   const q=await f.faq.submit(OWNER,'private',{question:'Review '+i,
+    answer:'Result '+i,sourceResourceId:f.privateResource});
+   await f.faq.approve(OWNER,q.id);
+  }
+  const second=await f.app().handle(msg(95,'➡️ التالي · pf:1'));
+  assert.equal(second.status,'APPLIED');
+  const keys=buttons(second).filter(x=>x.startsWith('📖 سؤال '));
+  assert.equal(keys.length,3);
+  assert.ok(keys[0]!.startsWith('📖 سؤال 11 · '));
+  assert.ok(keys[2]!.startsWith('📖 سؤال 13 · '));
+ }finally{await f.close();}
+});
