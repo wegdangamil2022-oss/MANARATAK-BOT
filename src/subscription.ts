@@ -24,7 +24,12 @@ export class SubscriptionGate {
     if (!this.policy.canUseChat(state, chatId, 'verification')) throw new Error('GROUP_NOT_APPROVED');
     for (const id of channelIds) {
       if (!/^-[0-9]+$/.test(id) || !this.policy.canUseChat(state, id, 'verification')) throw new Error('CHANNEL_NOT_APPROVED');
-      if (!await this.membership.canVerifyChannel(id)) throw new Error('CHANNEL_UNVERIFIABLE');
+      // The provider may reject or time out even while a saved local channel
+      // grant remains valid. Never leak provider errors through an owner API.
+      let permitted=false;
+      try{permitted=await this.membership.canVerifyChannel(id);}
+      catch{throw new Error('CHANNEL_UNVERIFIABLE');}
+      if(!permitted)throw new Error('CHANNEL_UNVERIFIABLE');
     }
     await this.store.transaction(s => {
       if (!this.policy.canUseChat(s, chatId, 'verification') || channelIds.some(id => !this.policy.canUseChat(s, id, 'verification'))) throw new Error('APPROVAL_REVOKED');
@@ -48,9 +53,17 @@ export class SubscriptionGate {
     if (!config?.channelIds.length || this.policy.isOwner(userId)) return { status: 'NOT_REQUIRED', channels: [] };
     const responses: Membership[] = [];
     for (const channel of config.channelIds) {
-      if (!this.policy.canUseChat(s, channel, 'verification') || !await this.membership.canVerifyChannel(channel)) return { status: 'UNAVAILABLE', channels: [] };
+      if (!this.policy.canUseChat(s, channel, 'verification'))
+       return {status:'UNAVAILABLE',channels:[]};
+      let verifiable=false;
+      try{verifiable=await this.membership.canVerifyChannel(channel);}
+      catch{return {status:'UNAVAILABLE',channels:[]};}
+      if(!verifiable)return {status:'UNAVAILABLE',channels:[]};
       let response: Membership;
-      try { response = await this.membership.getMember(channel, userId); } catch { response = 'UNKNOWN'; }
+      try{
+       const received=await this.membership.getMember(channel,userId);
+       response=received==='MEMBER'||received==='NOT_MEMBER'?received:'UNKNOWN';
+      }catch{response='UNKNOWN';}
       responses.push(response);
     }
     // Revalidation protects changes made while external checks were in flight.
@@ -58,9 +71,19 @@ export class SubscriptionGate {
     const current = latest.subscriptionRequirements.find(x => x.chatId === chatId);
     if (!this.policy.canUseChat(latest, chatId, 'verification') || !current || current.version !== config.version ||
         config.channelIds.some(id => !this.policy.canUseChat(latest, id, 'verification'))) return { status: 'UNAVAILABLE', channels: [] };
-    const passing = config.mode === 'ALL' ? responses.every(x => x === 'MEMBER') : responses.some(x => x === 'MEMBER');
-    const failing = config.mode === 'ALL' ? responses.some(x => x === 'NOT_MEMBER') : responses.every(x => x === 'NOT_MEMBER');
-    return { status: passing ? 'MEMBER' : failing ? 'NOT_MEMBER' : 'UNAVAILABLE', channels: [...config.channelIds] };
+    // An unknown result from the provider must not be used to punish a
+    // student. For ALL, even a known negative alongside an unavailable
+    // channel is treated as UNAVAILABLE until all evidence is known.
+    // For ANY, one verified MEMBER suffices independently of other unknowns.
+    const passing=config.mode==='ALL'
+     ?responses.every(x=>x==='MEMBER')
+     :responses.some(x=>x==='MEMBER');
+    const complete=responses.every(x=>x!=='UNKNOWN');
+    const failing=complete&&(config.mode==='ALL'
+     ?responses.some(x=>x==='NOT_MEMBER')
+     :responses.every(x=>x==='NOT_MEMBER'));
+    return {status:passing?'MEMBER':failing?'NOT_MEMBER':'UNAVAILABLE',
+     channels:[...config.channelIds]};
   }
   async syncSubscriptionRestriction(chatId: string, memberId: string): Promise<ModerationResult | SubscriptionDecision> {
     const result = await this.verify(chatId, memberId);
