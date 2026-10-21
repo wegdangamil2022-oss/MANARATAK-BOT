@@ -1,3 +1,11 @@
+## 0.7.11 — 2026-10-21 — Owner-only subscription health button in Telegram (NOT DEPLOYED)
+
+- The real private **لوحة المالك** now includes an **🛡 سلامة الاشتراكات** reply keyboard button. It recomputes the same saved mandatory-channel subscription audit used by the offline operator CLI and acceptance gate whenever the verified owner taps it.
+- Displays only aggregate active/inactive/invalid rule and group/channel counts, static PASS/BLOCKED and limited reason codes. No raw group/channel ID, student identity, chat content, API secrets, storage paths, provider calls, additional permissions, automated repairs or moderation changes are available from this surface.
+- The screen prominently marks its result OFFLINE_ONLY and explicitly disclaims realtime Telegram membership/administrator verification. It links back to the existing approved-groups and settings sections, without a RUN/STOP or force-override operation.
+- RED-first tests cover JSON and SQLite, owner keyboard presence and valid markup, fresh state on each tap, blocked revoked channel, unauthorized student/staff access, no dangerous controls and harmless paused rules retaining independent moderation state.
+- A clean local status does NOT enable Telegram or certify host deployment.
+
 ## 0.7.10 — 2026-10-21 — Mandatory subscription rule integrity as an offline Telegram acceptance gate
 
 - Incorporated the existing strict, privacy-limited `summarizeSubscriptionIntegrity` check into the **offline-only Telegram trial acceptance** procedure. Even with an exact matching rollback backup and STOP safety switch, malformed or orphaned mandatory-channel requirements now produce a static `INVALID_SUBSCRIPTION_REQUIREMENTS` blocker, preventing a false clean report from local trial rehearsal.
