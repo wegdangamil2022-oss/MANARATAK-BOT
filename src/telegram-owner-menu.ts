@@ -8,11 +8,13 @@ import {OwnerTelegramGroupMenu,isOwnerGroupText} from './telegram-owner-groups.j
 import {summarizeSubscriptionIntegrity} from './subscription-integrity.js';
 import {OwnerTelegramLibraryMenu,isOwnerLibraryText} from './telegram-owner-library.js';
 import {OwnerTelegramCategoryMenu,isOwnerCategoryText} from './telegram-owner-categories.js';
+import {OwnerTelegramFAQMenu,isOwnerFAQText} from './telegram-owner-faq.js';
 
 export const ownerMenuLabels={
  imports:'🧾 مراجعة الوارد',
  library:'📚 إدارة المكتبة',
  categories:'🗂️ إدارة الأقسام',
+ faq:'🧠 الأسئلة الشائعة',
  groups:'👥 المجموعات المعتمدة',
  subscriptionHealth:'🛡 سلامة الاشتراكات',
  delivery:'📊 حالة الرسائل',
@@ -85,7 +87,7 @@ const sections=new Set<string>(Object.values(ownerMenuLabels));
  * ordinary student message. Never use text alone to authenticate its sender.
  */
 export function isOwnerMenuText(text:string):boolean{
- return text===menuLabels.owner||sections.has(text)||isOwnerGroupText(text)||isOwnerLibraryText(text)||isOwnerCategoryText(text)||
+ return text===menuLabels.owner||sections.has(text)||isOwnerGroupText(text)||isOwnerLibraryText(text)||isOwnerCategoryText(text)||isOwnerFAQText(text)||
   text.startsWith('➡️ التالي · o:')||text.startsWith('⬅️ السابق · o:')||
   marks.some(([prefix])=>text.startsWith(prefix));
 }
@@ -200,6 +202,8 @@ export class OwnerTelegramMenu{
    return new OwnerTelegramLibraryMenu(this.store,this.policy,this.education).handle(text,ctx);
   if(isOwnerCategoryText(text))
    return new OwnerTelegramCategoryMenu(this.store,this.policy,this.education).handle(text,ctx);
+  if(isOwnerFAQText(text))
+   return new OwnerTelegramFAQMenu(this.store,this.policy).handle(text,ctx);
   const state=await this.store.snapshot();
   const pageRequest=parseOwnerMenuPageCommand(text);
   if(pageRequest){
