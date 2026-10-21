@@ -1,5 +1,5 @@
 import {createHash} from 'node:crypto';
-import type {EducationCategory} from './store.js';
+import type {BotState,EducationCategory} from './store.js';
 const idPattern=/^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/u;
 /** Compact text label token, uniquely resolved against current authorized
  * categories on each tap. Not an authentication credential.
@@ -15,5 +15,25 @@ export function ownerCategoryChoiceToken(id:string):string{
 export function categoryVisibilityFingerprint(cat:EducationCategory):string{
  return '~'+createHash('sha256').update(JSON.stringify([
   cat.id,cat.scope,cat.parentId,cat.title,cat.order,cat.enabled,cat.revision??0
+ ]),'utf8').digest('hex').slice(0,16);
+}
+
+/** Ordering is always relative to same-scope siblings (including roots).
+ * No global category IDs or groups can be moved across scope/parent.
+ */
+export function categoryOrderPeers(state:BotState,category:EducationCategory):EducationCategory[]{
+ return state.educationCategories.filter(c=>
+  c.scope===category.scope&&c.parentId===category.parentId)
+  .sort((a,b)=>a.order-b.order||a.id.localeCompare(b.id));
+}
+/** Bind ordering decisions to the entire currently saved sibling set, not just
+ * the clicked category. Concurrent edits, tie resolution, or sibling insertion
+ * invalidate an old confirmation. This fingerprint is not authorization.
+ */
+export function categoryOrderFingerprint(state:BotState,category:EducationCategory):string{
+ const peers=categoryOrderPeers(state,category);
+ return '~'+createHash('sha256').update(JSON.stringify([
+  category.id,category.scope,category.parentId,
+  peers.map(c=>[c.id,c.scope,c.parentId,c.title,c.order,c.enabled,c.revision??0])
  ]),'utf8').digest('hex').slice(0,16);
 }

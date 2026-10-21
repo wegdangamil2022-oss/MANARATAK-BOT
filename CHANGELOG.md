@@ -1,3 +1,11 @@
+## 0.7.18 — 2026-10-21 — Owner-reviewed ordering of educational categories (NOT DEPLOYED)
+
+- Verified private Telegram owner can now open a category and explicitly review/confirm **⬆️ رفع خطوة / ⬇️ خفض خطوة**. Only sibling categories sharing exactly the same scope and parent may swap; parent/child and private/group content are never cross-moved.
+- Both screens reveal the currently selected and neighboring category names and require separate confirmation. All labels remain bounded valid Telegram ReplyKeyboard text; forged, stale, student/delegate/group-origin actions fail closed.
+- The confirmed write executes in a single durable store transaction: require configured owner, currently approved navigation scope, exact group policy epoch, target category revision and hash of the **entire saved sibling set**. Reordering after category edits, sibling additions, group revocation/reapproval, or a previous confirmation is rejected.
+- Adjacent peer swaps normalize legacy tied order values to consecutive integer ranks and bump siblings' monotonic revisions so old confirmations cannot be replayed. Changing display order does not re-enable disabled categories, republish archived content, change category scope, create campaigns or call Telegram.
+- RED-first JSON+SQLite integration tests cover public browse ordering, two-step UX, boundaries, independent scope/parent, tied legacy rows, stale/replayed actions, owner actor checks and 64-character category tokens. Not deployed or live-tested.
+
 ## 0.7.17 — 2026-10-21 — Owner-reviewed educational section visibility (NOT DEPLOYED)
 
 - Added a true **🗂️ إدارة الأقسام** entry to the verified private Telegram owner dashboard. Owner can browse all saved, currently authorized educational sections in 10-item pages, open sanitized details and explicitly review/confirm disabling or enabling their local visibility.
