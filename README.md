@@ -1,3 +1,7 @@
+## B3 v0.7.30 — Telegram-safe Arabic catalogue pages (offline)
+
+Student FAQ, scholarship/resource search and category browsing now shorten only **displayed list snippets** so ten owner-reviewed HTML-heavy or Arabic titles cannot overrun a Telegram message. Resource/category buttons also fit Telegram's UTF-8 and codepoint limits. The saved source is unchanged, and a button still requires a freshly authorized published item on every selection. Tested on the JSON/SQLite offline adapters with Node 22; no live Telegram send, publishing, AI, or data migration is enabled.
+
 ## B3 reviewed Arabic FAQ keyword search — v0.7.29 (OFFLINE ONLY)
 
 Private students may use `/faqsearch <terms>` to discover approved questions by original title or reviewed aliases. Search now tolerates common Arabic differences such as tashkeel, alef variants, maqsurah, tatweel, Arabic/Persian digits and punctuation/space separators. The owner's original reviewed title and source remain unchanged, and results still require the current approved private publication and enabled education navigation. Normalization never produces answers by itself, is not AI, and does not relax the exact `/faq` operation or existing query input limits.
