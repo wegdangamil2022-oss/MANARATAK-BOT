@@ -1,5 +1,5 @@
-import {createHash} from 'node:crypto';
-import type {PlatformReviewQueueEntry} from './store.js';
+import {createHash,randomUUID} from 'node:crypto';
+import type {PlatformReviewQueueEntry,EducationResource,BotState,EducationCategory} from './store.js';
 import {BotStore} from './store.js';
 import {Policy} from './policy.js';
 
@@ -65,6 +65,28 @@ export type PlatformStageResult=
 export type PlatformReviewResult=
  |{status:'DENIED'|'STALE'|'UNAVAILABLE'}
  |{status:'REVIEWED';entry:PlatformReviewQueueEntry};
+export type PlatformApproveResult=
+ |{status:'DENIED'|'STALE'|'UNAVAILABLE'}
+ |{status:'APPROVED';entry:PlatformReviewQueueEntry};
+export type PlatformLocalPublishResult=
+ |{status:'DENIED'|'STALE'|'UNAVAILABLE'}
+ |{status:'PUBLISHED';resource:EducationResource};
+/** A category's entire private parent chain must remain visible. Fail closed
+ * on missing/cyclic parents, including old or malicious stored state.
+ */
+function activePrivateCategory(state:BotState,id:string):EducationCategory|null{
+ const visited=new Set<string>();let current=id;
+ while(current){
+  if(visited.has(current))return null;
+  visited.add(current);
+  const cat=state.educationCategories.find(c=>c.id===current&&c.scope==='private');
+  if(!cat||!cat.enabled)return null;
+  if(!cat.parentId)return state.educationCategories.find(c=>c.id===id&&c.scope==='private')??null;
+  current=cat.parentId;
+ }
+ return null;
+}
+const PLATFORM_IMPORT_SOURCE='b5-external-catalog-v1';
 const strictDigest=/^[a-f0-9]{64}$/u;
 export function platformCandidateDigest(record:PlatformReviewCandidate):string{
  return createHash('sha256').update(JSON.stringify([
@@ -194,12 +216,122 @@ export class PlatformCatalogPreviewService{
      if(!current||current.digest!==expectedDigest)return {status:'STALE'};
      if(current.status==='REVIEWED_METADATA_ONLY')
       return {status:'REVIEWED',entry:structuredClone(current)};
+     if(current.status!=='UNVERIFIED_EXTERNAL')return {status:'STALE'};
      current.status='REVIEWED_METADATA_ONLY';
      current.reviewedBy=actor;current.reviewedAt=Date.now();
      s.audit.push({updateKey:'b5:review:'+sourceId+':'+expectedDigest.slice(0,16),
       decision:'ALLOW',reason:'EXTERNAL_METADATA_REVIEW_ONLY',
       policyVersion:0,at:current.reviewedAt});
      return {status:'REVIEWED',entry:structuredClone(current)};
+    });
+   }catch{return {status:'UNAVAILABLE'};}
+  }
+
+  /** Local owner approval is a *different action* from source metadata review.
+   * No item becomes visible until a separate publishLocally call succeeds.
+   * Category and owner permissions are checked inside the atomic transaction.
+   */
+  async approveForLocal(actor:string,sourceId:string,expectedDigest:string,
+   categoryId:string):Promise<PlatformApproveResult>{
+   if(!this.policy.isOwner(actor))return {status:'DENIED'};
+   if(typeof sourceId!=='string'||!validId.test(sourceId)||
+      typeof expectedDigest!=='string'||!strictDigest.test(expectedDigest)||
+      typeof categoryId!=='string'||!validId.test(categoryId))
+     return {status:'UNAVAILABLE'};
+   const before=await this.store.snapshot();
+   if(!this.policy.privateFeature(before,'owner.dashboard',actor))return {status:'DENIED'};
+   const entry=before.platformReviewQueue?.find(e=>e.sourceId===sourceId);
+   if(!entry||entry.digest!==expectedDigest||
+     !['REVIEWED_METADATA_ONLY','APPROVED_FOR_LOCAL'].includes(entry.status))
+     return {status:'STALE'};
+   const fresh=await this.preview(actor,{cursor:entry.pageCursor??null});
+   if(fresh.status!=='PREVIEW')return fresh;
+   const match=fresh.records.filter(c=>c.id===sourceId);
+   if(match.length!==1||platformCandidateDigest(match[0]!)!==expectedDigest)
+     return {status:'STALE'};
+   try{
+    return await this.store.transaction<PlatformApproveResult>(s=>{
+     if(!this.policy.privateFeature(s,'owner.dashboard',actor)||
+       !this.policy.has(s,actor,'content.publish','private'))
+       return {status:'DENIED'};
+     if(!activePrivateCategory(s,categoryId))return {status:'STALE'};
+     const current=s.platformReviewQueue?.find(x=>x.sourceId===sourceId);
+     if(!current||current.digest!==expectedDigest||
+       (current.status!=='REVIEWED_METADATA_ONLY'&&current.status!=='APPROVED_FOR_LOCAL'))
+       return {status:'STALE'};
+     if(current.status==='APPROVED_FOR_LOCAL'){
+      return current.approvedCategoryId===categoryId
+       ?{status:'APPROVED',entry:structuredClone(current)}:{status:'STALE'};
+     }
+     current.status='APPROVED_FOR_LOCAL';
+     current.approvedCategoryId=categoryId;current.approvedBy=actor;
+     current.approvedAt=Date.now();
+     s.audit.push({updateKey:'b5:approve-local:'+sourceId+':'+expectedDigest.slice(0,16),
+       decision:'ALLOW',reason:'EXTERNAL_METADATA_APPROVED_FOR_LOCAL_ONLY',
+       policyVersion:0,at:current.approvedAt});
+     return {status:'APPROVED',entry:structuredClone(current)};
+    });
+   }catch{return {status:'UNAVAILABLE'};}
+  }
+  /**
+   * Distinct, explicit owner action publishes to the bot's LOCAL private
+   * library, never to a Telegram channel. A fresh trusted provider snapshot
+   * is required again; metadata cannot be pulled from an arbitrary message.
+   * An archived previously published resource is never resurrected.
+   */
+  async publishLocally(actor:string,sourceId:string,expectedDigest:string,
+   categoryId:string):Promise<PlatformLocalPublishResult>{
+   if(!this.policy.isOwner(actor))return {status:'DENIED'};
+   if(typeof sourceId!=='string'||!validId.test(sourceId)||
+     typeof expectedDigest!=='string'||!strictDigest.test(expectedDigest)||
+     typeof categoryId!=='string'||!validId.test(categoryId))
+    return {status:'UNAVAILABLE'};
+   const before=await this.store.snapshot();
+   if(!this.policy.privateFeature(before,'owner.dashboard',actor))return {status:'DENIED'};
+   const entry=before.platformReviewQueue?.find(x=>x.sourceId===sourceId);
+   if(!entry||entry.digest!==expectedDigest||entry.approvedCategoryId!==categoryId||
+      !['APPROVED_FOR_LOCAL','PUBLISHED_LOCALLY'].includes(entry.status))
+    return {status:'STALE'};
+   const fresh=await this.preview(actor,{cursor:entry.pageCursor??null});
+   if(fresh.status!=='PREVIEW')return fresh;
+   const match=fresh.records.filter(c=>c.id===sourceId);
+   if(match.length!==1||platformCandidateDigest(match[0]!)!==expectedDigest)
+    return {status:'STALE'};
+   try{
+    return await this.store.transaction<PlatformLocalPublishResult>(s=>{
+     if(!this.policy.privateFeature(s,'owner.dashboard',actor)||
+       !this.policy.has(s,actor,'content.publish','private'))return {status:'DENIED'};
+     if(!activePrivateCategory(s,categoryId))return {status:'STALE'};
+     const current=s.platformReviewQueue?.find(x=>x.sourceId===sourceId);
+     if(!current||current.digest!==expectedDigest||
+       current.approvedCategoryId!==categoryId||
+       (current.status!=='APPROVED_FOR_LOCAL'&&current.status!=='PUBLISHED_LOCALLY'))
+      return {status:'STALE'};
+     const matches=s.educationResources.filter(r=>
+       r.scope==='private'&&r.sourceImportId===PLATFORM_IMPORT_SOURCE&&r.sourceLocator===sourceId);
+     if(matches.length>1||matches.some(x=>x.status!=='PUBLISHED'))return {status:'STALE'};
+     if(matches.length===1){
+      const existing=matches[0]!;
+      if(current.status!=='PUBLISHED_LOCALLY'||
+        current.publishedResourceId!==existing.id||
+        existing.categoryId!==categoryId||existing.title!==current.title||
+        existing.university!==current.university||existing.cycle!==current.cycle||
+        existing.degree!==current.degree)return {status:'STALE'};
+      return {status:'PUBLISHED',resource:structuredClone(existing)};
+     }
+     if(current.status!=='APPROVED_FOR_LOCAL')return {status:'STALE'};
+     const resource:EducationResource={
+      id:randomUUID(),categoryId,scope:'private',title:current.title,
+      university:current.university,cycle:current.cycle,degree:current.degree,seats:null,
+      sourceImportId:PLATFORM_IMPORT_SOURCE,sourceLocator:sourceId,
+      reviewedBy:actor,status:'PUBLISHED'
+     };
+     s.educationResources.push(resource);
+     current.status='PUBLISHED_LOCALLY';current.publishedResourceId=resource.id;
+     s.audit.push({updateKey:'b5:publish-local:'+sourceId+':'+resource.id,
+       decision:'ALLOW',reason:'EXTERNAL_REVIEWED_RESOURCE_PUBLISHED_LOCALLY',
+       policyVersion:0,at:Date.now()});
+     return {status:'PUBLISHED',resource:structuredClone(resource)};
     });
    }catch{return {status:'UNAVAILABLE'};}
   }
