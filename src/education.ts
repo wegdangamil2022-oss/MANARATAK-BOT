@@ -4,6 +4,7 @@ import { Policy } from './policy.js';
 import { parseDocument, type ImportFormat } from './ingestion.js';
 import { planPublicationPreview } from './publication-preview-plan.js';
 import {resourceArchiveFingerprint} from './education-archive.js';
+import {categoryVisibilityFingerprint} from './education-category-policy.js';
 
 type Origin = 'TELEGRAM_ADMIN' | 'ADMIN_WEB';
 /** Public resource projections must not reveal internal audit identities or import job IDs. */
@@ -56,6 +57,37 @@ export class EducationService {
     await this.store.transaction(s=>{
       const cat=s.educationCategories.find(c=>c.id===id); if(!cat) throw new Error('CATEGORY_NOT_FOUND');
       cat.enabled=enabled;
+      cat.revision=(cat.revision??0)+1;
+    });
+  }
+  /** A private owner UI action must be independently authorized during the
+   * write, bound to current category metadata/revision and to group epoch.
+   * This may expand visible published resources on explicit enable, never
+   * re-publishes archived resources or contacts Telegram channel providers.
+   */
+  async setCategoryEnabledIfCurrent(actor:string,id:string,enabled:boolean,
+    proof:string,scopeRevision:number,categoryRevision:number):Promise<void>{
+    this.assertOwner(actor);
+    if(!goodId(id)||typeof enabled!=='boolean'||!/^~[a-f0-9]{16}$/u.test(proof)||
+      !Number.isSafeInteger(scopeRevision)||scopeRevision<0||
+      !Number.isSafeInteger(categoryRevision)||categoryRevision<0)
+      throw Error('CATEGORY_VISIBILITY_STALE');
+    await this.store.transaction(s=>{
+      const cat=s.educationCategories.find(x=>x.id===id);
+      if(!cat||!this.scopeReady(s,cat.scope))throw Error('CATEGORY_VISIBILITY_STALE');
+      const currentEpoch=cat.scope==='private'?0:this.policy.chatRevision(s,cat.scope);
+      if(currentEpoch!==scopeRevision||(cat.revision??0)!==categoryRevision||
+         categoryVisibilityFingerprint(cat)!==proof||cat.enabled===enabled)
+        throw Error('CATEGORY_VISIBILITY_STALE');
+      if(enabled&&cat.parentId){
+        const parent=s.educationCategories.find(x=>x.id===cat.parentId&&x.scope===cat.scope);
+        if(!parent||!this.visibleCategory(s,parent))throw Error('CATEGORY_PARENT_DISABLED');
+      }
+      cat.enabled=enabled;
+      cat.revision=categoryRevision+1;
+      s.audit.push({updateKey:'b3:category-visibility:'+id+':'+cat.revision,
+       decision:'ALLOW',reason:'CATEGORY_VISIBILITY_CHANGED',
+       policyVersion:currentEpoch,at:this.clock()});
     });
   }
   async listCategories(viewer:string,scope:string):Promise<EducationCategory[]> {
