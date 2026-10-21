@@ -1,3 +1,10 @@
+## 0.7.10 — 2026-10-21 — Mandatory subscription rule integrity as an offline Telegram acceptance gate
+
+- Incorporated the existing strict, privacy-limited `summarizeSubscriptionIntegrity` check into the **offline-only Telegram trial acceptance** procedure. Even with an exact matching rollback backup and STOP safety switch, malformed or orphaned mandatory-channel requirements now produce a static `INVALID_SUBSCRIPTION_REQUIREMENTS` blocker, preventing a false clean report from local trial rehearsal.
+- Revoked source groups, lost required channel verification rights, malformed ALL/ANY, duplicate or excess required channels are caught without Telegram calls, student/channel ID disclosure, mutation or automatic moderation release.
+- Paused empty subscription rules remain valid. Reasons are cumulative with STOP/backup/outbox blockers and are evaluated against the same already loaded state snapshot, retaining the existing race-aware re-read.
+- Six RED-first JSON/SQLite-integrated and explicit STOP/rollback tests prove fail-closed behavior. **This is not real Telegram approval or proof of live admin permissions.**
+
 ## 0.7.9 — 2026-10-21 — Offline subscription configuration integrity audit (NOT DEPLOYED)
 
 - Added a production-file **read-only local operator audit** for mandatory channel subscription rules. Checks the canonical private SQLite snapshot for configuration shape, valid ALL/ANY policy and versions, group and channel authorization for verification, duplicate required channels and the ten-channel maximum. Active and paused rules are reported separately.
