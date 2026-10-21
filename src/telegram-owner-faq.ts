@@ -2,7 +2,7 @@ import type {BotStore,BotState,FAQEntry} from './store.js';
 import type {Policy} from './policy.js';
 import type {VerifiedAdminContext} from './education-admin.js';
 import {ApprovedAnswerService} from './education-interactions.js';
-import {faqReviewFingerprint} from './faq-review.js';
+import {faqReviewFingerprint,faqApprovalConflicts} from './faq-review.js';
 import {menuLabels,type TelegramReplyKeyboard} from './telegram-menu.js';
 
 export const ownerFAQLabel='🧠 الأسئلة الشائعة';
@@ -111,28 +111,34 @@ export class OwnerTelegramFAQMenu{
   const fp=faqReviewFingerprint(state,q);
   const suffix=' · '+q.id+':'+fp+':'+epoch;
   const isSourceValid=sourceAvailable(state,q);
+  const collisionCount=faqApprovalConflicts(state,q);
   if(action.kind==='detail'){
-   const choice=q.status==='DRAFT'&&isSourceValid?
-    '🧾 معاينة اعتماد FAQ'+suffix:
-    q.status==='APPROVED'?'🗃️ معاينة أرشفة FAQ'+suffix:null;
+   const choices=[
+    ...(q.status==='DRAFT'&&isSourceValid&&collisionCount===0?
+      ['🧾 معاينة اعتماد FAQ'+suffix]:[]),
+    ...(q.status==='DRAFT'||q.status==='APPROVED'?
+      ['🗃️ معاينة أرشفة FAQ'+suffix]:[])
+   ];
    return screen('<b>تفاصيل الإجابة المعتمدة على مصدر 📋</b>\n'
     +'السؤال: '+safe(q.question,200)+'\n'
     +'الإجابة: '+safe(q.answer,310)+'\n'
     +'النطاق: '+safe(q.scope,35)+'\n'
     +'الحالة: '+q.status+'\n'
     +'المصدر المنشور والمصرح به محليًا: '+(isSourceValid?'نعم':'غير متاح')+'\n'
-    +'لا يُسمح باعتماد الإجابة من مصدر غير متاح؛ الأرشفة محلية فقط.',
-    choice?[choice,ownerFAQLabel]:[ownerFAQLabel]);
+    +'تعارض مع إجابات معتمدة: '+collisionCount+'\n'
+    +'وجود تعارض يمنع اعتماد مسودة جديدة حتى تُعالج الإجابات القديمة؛ الأرشفة محلية فقط.',
+    [...choices,ownerFAQLabel]);
   }
   if(action.proof!==fp||action.scopeVersion!==epoch)return null;
   const approve=action.kind.startsWith('approve');
-  if(approve?(q.status!=='DRAFT'||!isSourceValid):q.status!=='APPROVED')return null;
+  if(approve?(q.status!=='DRAFT'||!isSourceValid||collisionCount>0):
+    (q.status!=='APPROVED'&&q.status!=='DRAFT'))return null;
   if(action.kind==='approveReview'||action.kind==='archiveReview'){
    return screen('<b>مراجعة قرار FAQ</b>\n'
     +'السؤال: '+safe(q.question,200)+'\n'
     +'الإجابة: '+safe(q.answer,310)+'\n'
     +'القرار: '+(approve?'اعتماد الإجابة للنطاق الحالي':'أرشفة الإجابة ومنع استخدامها مستقبلًا')+'\n'
-    +'المصدر الحالي: '+(isSourceValid?'منشور محليًا':'غير متاح')+'\n'
+    +'المصدر الحالي: '+(isSourceValid?'منشور محليًا':'غير متاح')+'\n'    +'تعارض مع الإجابات المعتمدة الأخرى: '+collisionCount+'\n'
     +'لا اتصال بTelegram أو إرسال رسائل.',
     [approve?'✅ تأكيد اعتماد FAQ'+suffix:'⛔ تأكيد أرشفة FAQ'+suffix,
      '❓ سؤال · '+q.id]);
