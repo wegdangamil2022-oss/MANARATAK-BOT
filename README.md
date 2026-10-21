@@ -19,6 +19,12 @@ For `ALL` subscriptions, an unknown channel result makes the decision `UNAVAILAB
 
 This fixes **mock-tested provider failure behavior only**. It does not imply that real bot administrator rights, Telegram permissions or membership checks have been accepted or deployed.
 
+## B3 v0.7.18 — owner-controlled category order in Telegram (OFFLINE)
+
+In **🔐 لوحة المالك → 🗂️ إدارة الأقسام → القسم** a private verified owner can review **⬆️ مراجعة الرفع** or **⬇️ مراجعة الخفض** when an adjacent sibling exists. Each preview identifies the neighboring category; **✅ تأكيد** performs a single sibling-order move within that category's existing `scope` and `parentId`. No user may reparent a section, enable a disabled section or make an archived resource public by sorting.
+
+The transaction checks the owner's trusted identity, current group approval and policy version, selected category revision and a fingerprint of all currently saved sibling names/order/visibility/revisions. It normalizes tied legacy order ranks and increments sibling revisions. Saved menu buttons are untrusted text, never authority; old, forged or copied confirmations cannot override subsequent edits. Read-only public resource browsing re-sorts using the updated local ranks. These controls never send Telegram messages or modify external channel posts.
+
 ## B3 v0.7.17 — owner-only educational section visibility controls (OFFLINE)
 
 In a verified private Telegram chat, the configured owner may open **🔐 لوحة المالك → 🗂️ إدارة الأقسام** to browse existing education categories in pages, review their local scope, status and directly assigned published resource count, and separately confirm **enabling** or **disabling** visibility. Disabling a parent hides its child categories from student navigation; enabling a child while its parent is still disabled is blocked.
