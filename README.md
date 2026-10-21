@@ -11,6 +11,14 @@ An independent TypeScript/Node.js 22 project based on `docs/MANARATAK_BOT_MASTER
 
 
 
+## B2-Core v0.7.12 — fail closed when mandatory-channel membership evidence is incomplete
+
+The existing `SubscriptionGate` now treats an exception from `canVerifyChannel` as `UNAVAILABLE` for an attempted student check, not an unhandled crash or confirmation of non-subscription. An owner attempting to configure a required channel while verification is unavailable gets the static `CHANNEL_UNVERIFIABLE` outcome, with no saved configuration update or leaked provider error.
+
+For `ALL` subscriptions, an unknown channel result makes the decision `UNAVAILABLE` **even if another channel is confirmed NOT_MEMBER**: incomplete provider evidence must not produce a new restriction. For `ANY`, a confirmed MEMBER is sufficient, but absent a confirmed MEMBER, an UNKNOWN result prevents a false NOT_MEMBER decision. Unexpected membership values also become UNKNOWN. The existing `syncSubscriptionRestriction` continues to leave moderation reasons untouched on UNAVAILABLE and keeps revalidating rule versions after asynchronous checks.
+
+This fixes **mock-tested provider failure behavior only**. It does not imply that real bot administrator rights, Telegram permissions or membership checks have been accepted or deployed.
+
 ## B3 v0.7.11 — owner-private view of locally saved subscription policy health (OFFLINE)
 
 Inside **🔐 لوحة المالك → 🛡 سلامة الاشتراكات**, the configured owner can inspect the same local subscription integrity summary that the offline trial acceptance uses. Each button press loads a fresh BotStore snapshot and reports PASS/BLOCKED, active/paused/invalid requirement counts, invalid group/channel authorization totals, duplicate/oversize requirements and static warning codes. This screen never exposes group/channel/student IDs, chat messages or provider tokens and never tries to repair state automatically.

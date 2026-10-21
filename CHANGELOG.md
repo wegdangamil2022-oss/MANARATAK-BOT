@@ -1,3 +1,10 @@
+## 0.7.12 — 2026-10-21 — Fail-closed mandatory-channel verification on provider errors (NOT DEPLOYED)
+
+- Hardened the core mandatory-channel `SubscriptionGate` against Telegram membership verification provider timeouts/rejections. A failed `canVerifyChannel` call yields `UNAVAILABLE` for student checks, and a static `CHANNEL_UNVERIFIABLE` error during owner configuration; provider exception details are never propagated into stored audit or user replies.
+- Invalid/unknown `getMember` provider results are normalized to `UNKNOWN`. For `ALL`, even a known `NOT_MEMBER` accompanied by an unknown channel now produces `UNAVAILABLE`, avoiding punitive decisions on incomplete verification. For `ANY`, one confirmed `MEMBER` remains sufficient; without a confirmed `MEMBER`, unknown results are never treated as a definitive violation.
+- `syncSubscriptionRestriction` retains the existing policy of **no mutation or punishment** for `UNAVAILABLE` and continues to revalidate saved rule/chats after asynchronous membership checks.
+- Eleven RED-first tests cover JSON/SQLite provider exceptions, incomplete ALL/ANY evidence, invalid provider enum results, owner configuration error redaction, stale chat approval while external checks are pending and no calls to moderation gateways for unavailable results. No live Telegram calls are enabled by this release.
+
 ## 0.7.11 — 2026-10-21 — Owner-only subscription health button in Telegram (NOT DEPLOYED)
 
 - The real private **لوحة المالك** now includes an **🛡 سلامة الاشتراكات** reply keyboard button. It recomputes the same saved mandatory-channel subscription audit used by the offline operator CLI and acceptance gate whenever the verified owner taps it.
