@@ -4,14 +4,19 @@ const id=/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/u;
 /** Hashes hide private FAQ database identifiers from student's button text.
  * This token is a locator only; all authorized records must be re-read.
  */
-export function privateFAQButton(faqId:string):string{
- if(!id.test(faqId))throw Error('INVALID_PRIVATE_FAQ_ID');
- return '📖 سؤال · ~'+createHash('sha256').update(faqId,'utf8').digest('hex').slice(0,16);
+export function privateFAQButton(faqId:string,ordinal?:number):string{
+ if(!id.test(faqId)||ordinal!==undefined&&
+   (!Number.isSafeInteger(ordinal)||ordinal<1||ordinal>10000))
+  throw Error('INVALID_PRIVATE_FAQ_ID');
+ const hash='~'+createHash('sha256').update(faqId,'utf8').digest('hex').slice(0,16);
+ return ordinal===undefined?'📖 سؤال · '+hash:'📖 سؤال '+ordinal+' · '+hash;
 }
 export function parsePrivateFAQSelection(text:string):string|null{
  if(typeof text!=='string'||text.length>50)return null;
- const found=/^📖 سؤال · (~[a-f0-9]{16})$/u.exec(text);
- return found?.[1]??null;
+ const found=/^📖 سؤال (?:([1-9][0-9]{0,3}|10000) · )?(~[a-f0-9]{16})$/u.exec(text);
+ if(found)return found[2]!;
+ const legacy=/^📖 سؤال · (~[a-f0-9]{16})$/u.exec(text);
+ return legacy?.[1]??null;
 }
 export type PrivateFAQPage={page:number;direction:'next'|'previous'};
 export function parsePrivateFAQPage(text:string):PrivateFAQPage|null{
@@ -24,7 +29,7 @@ export function privateFAQPageLabel(page:number,direction:PrivateFAQPage['direct
  return (direction==='next'?'➡️ التالي':'⬅️ السابق')+' · pf:'+page;
 }
 export function isPrivateFAQBrowseText(text:string):boolean{
- return text===privateFAQBrowseLabel||text.startsWith('📖 سؤال · ')||
+ return text===privateFAQBrowseLabel||text.startsWith('📖 سؤال ')||
   text.startsWith('➡️ التالي · pf:')||text.startsWith('⬅️ السابق · pf:');
 }
 

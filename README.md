@@ -19,6 +19,10 @@ For `ALL` subscriptions, an unknown channel result makes the decision `UNAVAILAB
 
 This fixes **mock-tested provider failure behavior only**. It does not imply that real bot administrator rights, Telegram permissions or membership checks have been accepted or deployed.
 
+## B3 v0.7.22 — number-matched student FAQ answers (OFFLINE)
+
+Private FAQ browsing now shows **📖 سؤال 1**, **📖 سؤال 2**, etc. matching the question numbers in the message; page two continues at question 11. Buttons still carry only an opaque fingerprint rather than internal UUIDs. Their **exact currently authorized row number and fingerprint** must match the saved ordered catalogue at the next tap. A reordered/archived/disabled FAQ makes its stale button unusable, not an accidental response to a different question. Existing explicit `/faq` text lookup is unchanged and external AI remains OFF.
+
 ## B3 v0.7.21 — browse reviewed questions from the private student menu (OFFLINE)
 
 In private Telegram open **💬 المساعد التعليمي → 📖 تصفح الأسئلة المعتمدة**. Reviewed local private FAQs with currently published sources appear ten at a time with Next/Previous and question-answer selection. The bot displays sanitized question summaries and opaque question buttons, not internal FAQ UUIDs. Opening an old button revalidates the FAQ and private navigation permission, returning no answer if the question was archived, category hidden or source unpublished.

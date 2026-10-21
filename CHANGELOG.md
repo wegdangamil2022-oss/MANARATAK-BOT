@@ -1,3 +1,10 @@
+## 0.7.22 — 2026-10-21 — Numbered student FAQ question buttons bound to their current order (NOT DEPLOYED)
+
+- Student-private reviewed FAQ browse results now display **numbered question buttons** (for example, `📖 سؤال 1`), matching the numbered question snippets above the keyboard. All pages retain global ordinals so page two starts at question 11 rather than repeating question 1.
+- The owner-review and content authorization model remains unchanged: each student choice carries both its current ordinal and a short opaque question fingerprint. At selection time the bot recomputes the entire currently visible private FAQ catalogue and requires the exact saved ordinal+token to match before re-reading the source-backed answer. Old copies automatically fail when a question moves or disappears instead of opening an unintended answer.
+- Both number and SHA-derived fingerprint are bounded and parsed canonically; leading-zero, negative, out-of-range, forged and outdated controls fail closed. Internal UUIDs and group-only FAQ content stay hidden.
+- Added RED-first tests for exact label/question correspondence, page-two global numbering, mismatched ordinal denial, previous unnumbered-button denial and malformed labels. No external AI or Telegram channel sends were added.
+
 ## 0.7.21 — 2026-10-21 — Private student FAQ browser (NOT DEPLOYED)
 
 - The private student assistant now provides an actual “📖 تصفح الأسئلة المعتمدة” ReplyKeyboard choice to browse owner-approved FAQs with currently published, category-visible private sources, ten per page with Next/Previous navigation.
