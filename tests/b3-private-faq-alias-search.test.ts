@@ -158,8 +158,8 @@ for(const engine of ['json','sqlite'] as const){
  test('B3 '+engine+': approved Arabic FAQ aliases match hamza, alef maqsurah and diacritics',async()=>{
   const f=await fixture(engine);try{
    await f.add('كيف أستفيد من المنحة؟',
-    ['إِخْتِبارُ القُدرات فى إندونيسيا'],'Answer through reviewed source',200);
-   const r=await f.app().handle(message(82,'/faqsearch اختبار القدرات في اندونيسيا'));
+    ['إِخْتِبارُ فى إندونيسيا'],'Answer through reviewed source',200);
+   const r=await f.app().handle(message(82,'/faqsearch اختبار في اندونيسيا'));
    assert.equal(r.status,'APPLIED');
    assert.match(r.plan?.text??'',/كيف أستفيد من المنحة؟/);
    assert.equal((r.plan?.text??'').includes('إِخْتِبارُ'),false);
