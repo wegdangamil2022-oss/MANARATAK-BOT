@@ -281,6 +281,7 @@ export class BotStore {
       }
       const state = await this.read();
       const result = await work(state);
+      this.decode(structuredClone(state)); // Match SQLite: reject malformed state before a JSON commit.
       await mkdir(dirname(this.file), { recursive: true });
       const tmp = this.file + '.' + randomUUID() + '.tmp';
       await writeFile(tmp, JSON.stringify(state), { encoding: 'utf8', mode: 0o600, flag: 'wx' });
