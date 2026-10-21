@@ -231,3 +231,10 @@
 - A `NOT_REQUIRED` result produced by a trusted subscription adapter may legitimately represent the immutable bot owner exemption. With an active group requirement, students cannot use that result as `MEMBER` evidence. The checks use the trusted actor ID from inbound Telegram parsing, never user-supplied claims in the message body.
 - Check the same invariants for group resource-link opening, group messages, and private browsing of a group. Final checks follow external awaits to avoid accepting a stale rule after an owner pause or edit. No moderation action is coupled to educational content access.
 - These checks are additional local safety guards, **not** a substitute for administrator permissions in Telegram, independent provider verification, live deployment review or real bot integration tests.
+
+## B3 v0.7.29 — Arabic-friendly FAQ search is discovery only (22 October 2026)
+
+- Apply tolerant Arabic text normalization to **keyword discovery over already owner-reviewed** private FAQ titles and aliases, never to the saved answer payload or the exact `/faq` question-answer matching contract. This preserves editorial review and avoids merging distinct authoritative answers.
+- Fold well-understood Arabic writing variations (diacritics, alef spelling, maqsurah, kashida/tatweel, space/punctuation separators and Arabic/Persian decimal digits) after Unicode NFKC. If canonical search text is empty, return no results to avoid enumerating all approved questions.
+- Preserve the original reviewed title for display and the existing global ordinal/opaque answer selection authorization; don't display alternative terms or store student searches. Query length and Unicode control/bidi checks stay unchanged.
+- Unicode normalization is an aid to discovery, not a linguistic guarantee, semantic/AI search, new publishing workflow, or change to source verification.

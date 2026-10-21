@@ -1,3 +1,9 @@
+## B3 reviewed Arabic FAQ keyword search — v0.7.29 (OFFLINE ONLY)
+
+Private students may use `/faqsearch <terms>` to discover approved questions by original title or reviewed aliases. Search now tolerates common Arabic differences such as tashkeel, alef variants, maqsurah, tatweel, Arabic/Persian digits and punctuation/space separators. The owner's original reviewed title and source remain unchanged, and results still require the current approved private publication and enabled education navigation. Normalization never produces answers by itself, is not AI, and does not relax the exact `/faq` operation or existing query input limits.
+
+Example: `/faqsearch منحة الصين 2027` can find a reviewed question titled `مِنْحَةُ الصِّينِ ٢٠٢٧`; selecting its current opaque button opens the same source-backed reviewed answer. A query consisting only of stripped punctuation/diacritics returns no results, not the entire FAQ catalogue. No live Telegram activation, messaging or student search history is added.
+
 ## Current B3 security slice — v0.7.28 (offline; NOT DEPLOYED)
 
 Mandatory-channel requirements now share one conservative authorization model across private group resource links, group commands and private browsing of group catalogs:
