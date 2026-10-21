@@ -50,7 +50,7 @@ test('Arabic fold normalizes harakat, tatweel, alif/hamza, ya, ta marbuta and bo
  assert.equal(normalizeStudentSearchText('جــامِعَة آلعِراق'),'جامعه العراق');
  assert.equal(normalizeStudentSearchText('مُسْتَشْفَى'), 'مستشفي');
  assert.equal(normalizeStudentSearchText('العام ٢٠٢٦ / ۲۰۲۶'), 'العام 2026 / 2026');
- assert.equal(normalizeStudentSearchText('پێشەنگی کوردستان'), 'پێشهنگي كردستان');
+ assert.equal(normalizeStudentSearchText('پێشەنگی کوردستان'), 'پێشهنگي كوردستان');
  assert.equal(normalizeStudentSearchText('  ABSHEER   CSCA  '),'absheer csca');
 });
 for(const engine of ['json','sqlite'] as const){
