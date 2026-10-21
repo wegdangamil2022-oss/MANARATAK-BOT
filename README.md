@@ -11,6 +11,12 @@ An independent TypeScript/Node.js 22 project based on `docs/MANARATAK_BOT_MASTER
 
 
 
+## B3 v0.7.11 — owner-private view of locally saved subscription policy health (OFFLINE)
+
+Inside **🔐 لوحة المالك → 🛡 سلامة الاشتراكات**, the configured owner can inspect the same local subscription integrity summary that the offline trial acceptance uses. Each button press loads a fresh BotStore snapshot and reports PASS/BLOCKED, active/paused/invalid requirement counts, invalid group/channel authorization totals, duplicate/oversize requirements and static warning codes. This screen never exposes group/channel/student IDs, chat messages or provider tokens and never tries to repair state automatically.
+
+This is deliberately **OFFLINE_ONLY**, NOT a live Telegram membership/admin-rights check. A PASS means local saved data satisfies the bounded invariants, not approval for production. The user cannot change the emergency STOP switch, add channels, automatically unmute or start real Telegram operation from the report.
+
 ## B3 v0.7.10 — mandatory-channel integrity blocks offline acceptance
 
 The existing local `telegram:acceptance` safety/rollback rehearsal now includes subscription-configuration health. If an active mandatory-channel rule references a revoked group or unverifiable channel, has malformed version/mode/IDs, duplicates channels or violates the configured maximum, the offline acceptance result is `BLOCKED` with the **static** `INVALID_SUBSCRIPTION_REQUIREMENTS` reason. A matching backup and STOP switch cannot hide this defect. Paused rules with zero required channels are not treated as active obligations.
