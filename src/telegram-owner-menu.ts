@@ -93,6 +93,7 @@ export function isOwnerMenuText(text:string):boolean{
  return text===menuLabels.owner||sections.has(text)||isOwnerGroupText(text)||isOwnerLibraryText(text)||isOwnerCategoryText(text)||isOwnerFAQText(text)||
   text.startsWith('➡️ التالي · o:')||text.startsWith('⬅️ السابق · o:')||
   text.startsWith('➡️ التالي · b5:')||text.startsWith('⬅️ السابق · b5:')||
+  text.startsWith('📥 تسجيل مرشح · ')||text.startsWith('✅ تدقيق بيانات · ')||
   marks.some(([prefix])=>text.startsWith(prefix));
 }
 const esc=(s:string):string=>s.replace(/&/gu,'&amp;').replace(/</gu,'&lt;')
@@ -209,6 +210,39 @@ export class OwnerTelegramMenu{
    return new OwnerTelegramCategoryMenu(this.store,this.policy,this.education).handle(text,ctx);
   if(isOwnerFAQText(text))
    return new OwnerTelegramFAQMenu(this.store,this.policy).handle(text,ctx);
+  // Owner-only external source actions never confer B3 import/publish
+  // authority. Each button is an untrusted, bounded request for a fresh
+  // re-read and an atomic metadata-only quarantine transition.
+  const stageAction=/^📥 تسجيل مرشح · ([A-Za-z0-9][A-Za-z0-9_-]{0,63}):(none|[A-Za-z0-9_-]{1,64}):([a-f0-9]{64})$/u.exec(text);
+  if(text.startsWith('📥 تسجيل مرشح · ')){
+   if(!this.platformCatalog||!stageAction)return reject();
+   const staged=await this.platformCatalog.stage(ctx.actorId,
+    stageAction[1]!,stageAction[3]!,{
+     cursor:stageAction[2]==='none'?null:stageAction[2]!
+    });
+   if(staged.status!=='STAGED')return reject();
+   const entry=staged.entry;
+   return screen('<b>تم حفظ المرشح للمراجعة 📥</b>\\n'
+    +'المصدر: <code>'+entry.sourceId+'</code>\\n'
+    +'العنوان: '+escapeTelegramListPreview(entry.title,160)+'\\n'
+    +'الحالة: '+(entry.status==='REVIEWED_METADATA_ONLY'?
+       'تم تدقيق البيانات سابقًا.':'خارجية غير متحقق منها؛ يحتاج تدقيقًا مستقلاً.')+'\\n'
+    +'هذه العملية لا تعتمد منحة للطلاب ولا تنشر أي محتوى.',
+    entry.status==='REVIEWED_METADATA_ONLY'?[ownerMenuLabels.platformCatalog]:
+    ['✅ تدقيق بيانات · '+entry.sourceId+':'+entry.digest,
+     ownerMenuLabels.platformCatalog]);
+  }
+  const reviewAction=/^✅ تدقيق بيانات · ([A-Za-z0-9][A-Za-z0-9_-]{0,63}):([a-f0-9]{64})$/u.exec(text);
+  if(text.startsWith('✅ تدقيق بيانات · ')){
+   if(!this.platformCatalog||!reviewAction)return reject();
+   const checked=await this.platformCatalog.review(ctx.actorId,reviewAction[1]!,reviewAction[2]!);
+   if(checked.status!=='REVIEWED')return reject();
+   return screen('<b>تم تدقيق بيانات المرشح ✅</b>\\n'
+    +'المصدر: <code>'+checked.entry.sourceId+'</code>\\n'
+    +'راجعتَ نسخة البيانات التي تطابق المصدر عند الطلب.\\n'
+    +'الحالة: مراجعة بيانات فقط، ليست موافقة نشر أو اعتماد منحة.',
+    [ownerMenuLabels.platformCatalog]);
+  }
   // A platform catalogue page is only a read-only owner request. Its cursor
   // is copied through reply-keyboard text and NEVER confers authentication.
   const platformPage=/^➡️ التالي · b5:([A-Za-z0-9_-]{1,64})$/u.exec(text);
@@ -230,16 +264,18 @@ export class OwnerTelegramMenu{
     +'لا توجد سجلات منشورة في هذه الصفحة بحسب المصدر.\n'
     +'لم يتم اعتماد أي سجل داخل البوت.',
     [ownerMenuLabels.platformCatalog]);
+   const pageCursor=platformPage?.[1]??'none';
    const rows=inspected.records.map((r,i)=>
     (i+1)+'. <code>'+r.id+'</code> — '+
     escapeTelegramListPreview(r.title,115)+'\n'
     +'الجامعة: '+escapeTelegramListPreview(r.university,70)).join('\n');
-   return screen('<b>معاينة خارجية للمالك — قراءة فقط 🔎</b>\n'
+   return screen('<b>معاينة خارجية للمالك 🔎</b>\n'
     +'المصدر يدّعي نشر هذه السجلات، لكن لم يتحقق مالك البوت منها بعد.\n'
     +'الحالة: غير متحقق منها — لا اعتماد أو نشر تلقائي.\n'
     +rows+'\n'
-    +'السجلات الحالية للمعاينة فقط؛ لا يجوز الاستشهاد بها كمنح معتمدة.',
-    [ownerMenuLabels.platformCatalog],{
+    +'يمكن حفظ سجل للمراجعة فقط؛ ليس منحة معتمدة أو منشورة.',
+    inspected.records.map(r=>'📥 تسجيل مرشح · '+r.id+':'+
+     pageCursor+':'+inspected.fingerprint),{
      next:inspected.nextCursor?'➡️ التالي · b5:'+inspected.nextCursor:undefined
     });
   }
