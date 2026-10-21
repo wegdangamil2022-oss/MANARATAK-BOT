@@ -207,6 +207,8 @@ export class TelegramUpdateApplication {
         +'توجد أكثر من إجابة معتمدة متشابهة لهذا السؤال؛ يلزم مراجعة الإدارة.\n'
         +'لم نختر إجابة عشوائية.',
         backMenuKeyboard());
+       if(answer.status!=='ANSWER')
+        return {status:'DENIED',reason:'PRIVATE_FAQ_UNAVAILABLE'};
        return result('<b>إجابة من موارد منارتك المعتمدة ✅</b>\n'
         +escapeTelegramHtml(answer.answer)+'\n'
         +'هذه إجابة من سؤال شائع معتمد وليست محتوى مولّدًا بالذكاء الاصطناعي.',
