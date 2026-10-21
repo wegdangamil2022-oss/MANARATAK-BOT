@@ -1,6 +1,7 @@
 import { BotStore, type BotState } from './store.js';
 import { Policy } from './policy.js';
 import { ModerationService, type ModerationResult } from './moderation.js';
+import {isCanonicalSubscriptionRule} from './subscription-integrity.js';
 
 export type Membership = 'MEMBER' | 'NOT_MEMBER' | 'UNKNOWN';
 export type SubscriptionDecision = { status: 'MEMBER' | 'NOT_MEMBER' | 'UNAVAILABLE' | 'NOT_REQUIRED' | 'DENIED'; channels: string[] };
@@ -62,7 +63,12 @@ export class SubscriptionGate {
     const s = await this.store.snapshot();
     if (!userId || !this.policy.canUseChat(s, chatId, 'verification')) return { status: 'DENIED', channels: [] };
     const config = s.subscriptionRequirements.find(x => x.chatId === chatId);
-    if (!config?.channelIds.length || this.policy.isOwner(userId)) return { status: 'NOT_REQUIRED', channels: [] };
+    if(!config)return {status:'NOT_REQUIRED',channels:[]};
+    // Never interpret malformed saved rules as ALL or ANY, nor silently
+    // classify a corrupt paused rule as NOT_REQUIRED. The operator health
+    // audit flags the same broken state; runtime must fail closed as well.
+    if(!isCanonicalSubscriptionRule(config))return {status:'UNAVAILABLE',channels:[]};
+    if (!config.channelIds.length || this.policy.isOwner(userId)) return { status: 'NOT_REQUIRED', channels: [] };
     // Membership proofs are scoped to the authorization epoch from which they
     // were requested. Re-approval under the same IDs does not retain evidence.
     const groupEpoch=s.chats.find(c=>c.id===chatId)?.version;
