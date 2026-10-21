@@ -104,6 +104,21 @@ export class ApprovedAnswerService {
     if(matches.length>1)return {status:'AMBIGUOUS'};
     return {status:'ANSWER',answer:matches[0]!.answer,sourceId:matches[0]!.sourceResourceId};
   }
+  /**
+   * Strictly source-backed private FAQ retrieval, independent of generative
+   * AI mode. The user must explicitly issue /faq in the private transport.
+   * Never select a group FAQ or draft, and honor education.navigate on each
+   * request and the current linked publication/category hierarchy.
+   */
+  async answerPrivateApprovedFAQ(actor:string,question:string):Promise<FAQResult>{
+    if(!/^[1-9][0-9]*$/u.test(actor)||typeof question!=='string'||
+       question.trim().length===0||question.length>240||
+       /[\u0000-\u001f\u007f\u202a-\u202e\u2066-\u2069]/u.test(question))
+      return {status:'NO_MATCH'};
+    const s=await this.store.snapshot();
+    if(!this.policy.privateFeature(s,'education.navigate',actor))return {status:'DISABLED'};
+    return this.match(s,'private',question);
+  }
   async answerGroup(actor:string,chatId:string,question:string,explicitMention:boolean):Promise<FAQResult> {
     const s=await this.store.snapshot();
     if(!this.policy.mayAskGroup(s,chatId,actor,explicitMention))return {status:'DISABLED'};

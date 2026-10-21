@@ -15,6 +15,7 @@ import {menuLabels,mainMenuKeyboard,backMenuKeyboard,categoryButton,
  type TelegramReplyKeyboard} from './telegram-menu.js';
 import {OwnerTelegramMenu,isOwnerMenuText} from './telegram-owner-menu.js';
 import {parseSearchQuery,parseSearchPageCommand,searchPageButton} from './telegram-search.js';
+import {parsePrivateFAQQuery} from './telegram-private-faq.js';
 
 /** Inbound-only boundary. A test double may supply bytes; there is intentionally no live HTTP implementation. */
 export interface TelegramDocumentPort {
@@ -185,6 +186,34 @@ export class TelegramUpdateApplication {
         if(!screen)return {status:'DENIED',reason:'OWNER_MENU_UNAVAILABLE'};
         return result(screen.text,screen.keyboard);
       }
+      if(text==='/faq')return result(
+       '<b>الأسئلة الشائعة المعتمدة ❓</b>\n'
+       +'للحصول على إجابة من مورد تعليمي منشور ومعتمد، اكتب: '
+       +'<code>/faq ما شروط المنحة؟</code>\n'
+       +'هذه إجابات محفوظة يراجعها المالك؛ لا يوجد ذكاء اصطناعي توليدي.',
+       backMenuKeyboard());
+      if(text.startsWith('/faq')){
+       const question=parsePrivateFAQQuery(text);
+       if(!question)return {status:'DENIED',reason:'INVALID_PRIVATE_FAQ_QUERY'};
+       const answer=await this.opts.faq.answerPrivateApprovedFAQ(actorId,question);
+       if(answer.status==='DISABLED')return {status:'DENIED',reason:'PRIVATE_EDUCATION_DISABLED'};
+       if(answer.status==='NO_MATCH')return result(
+        '<b>الأسئلة الشائعة ❓</b>\n'
+        +'لم نعثر على إجابة معتمدة لهذا السؤال ضمن موارد الخاص المنشورة.\n'
+        +'جرّب صياغة أخرى أو تصفح مكتبة المنح.',
+        backMenuKeyboard());
+       if(answer.status==='AMBIGUOUS')return result(
+        '<b>الأسئلة الشائعة ❓</b>\n'
+        +'توجد أكثر من إجابة معتمدة متشابهة لهذا السؤال؛ يلزم مراجعة الإدارة.\n'
+        +'لم نختر إجابة عشوائية.',
+        backMenuKeyboard());
+       if(answer.status!=='ANSWER')
+        return {status:'DENIED',reason:'PRIVATE_FAQ_UNAVAILABLE'};
+       return result('<b>إجابة من موارد منارتك المعتمدة ✅</b>\n'
+        +escapeTelegramHtml(answer.answer)+'\n'
+        +'هذه إجابة من سؤال شائع معتمد وليست محتوى مولّدًا بالذكاء الاصطناعي.',
+        backMenuKeyboard());
+      }
       const sections:Readonly<Record<string,{section:string;title:string}>>={
         [m.scholarships]:{section:'scholarships',title:'المنح الدراسية'},
         [m.courses]:{section:'courses',title:'الدورات التعليمية'},
@@ -292,9 +321,11 @@ export class TelegramUpdateApplication {
         return denyPage();
       if(text===m.assistant)return result(
         '<b>المساعد التعليمي 💬</b>\n'
-        +'الإجابات المعتمدة من قاعدة الأسئلة متاحة ضمن المجموعات التي تسمح بها الإدارة، باستخدام /ask@'
-        +escapeTelegramHtml(this.opts.botUsername)+' مع السؤال.\n'
-        +'المساعد الذكي التوليدي غير متصل حتى الآن؛ لا توجد إجابات AI مفعّلة للطلاب.',
+        +'يمكنك السؤال من قاعدة الأسئلة المعتمدة في الخاص عبر '
+        +'<code>/faq ما شروط المنحة؟</code>\n'
+        +'ضمن المجموعات المسموح بها: <code>/ask@'
+        +escapeTelegramHtml(this.opts.botUsername)+' السؤال</code> حسب سياسة المجموعة.\n'
+        +'المساعد الذكي التوليدي غير متصل؛ إجابات /faq مستندة إلى موارد منشورة.',
         backMenuKeyboard());
       if(text===m.communities)return result(
         '<b>المجموعات والقنوات 👥</b>\n'

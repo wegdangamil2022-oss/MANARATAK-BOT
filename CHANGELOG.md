@@ -1,3 +1,11 @@
+## 0.7.20 — 2026-10-21 — Real private student questions against reviewed local FAQs (NOT DEPLOYED)
+
+- The student **💬 المساعد التعليمي** private reply keyboard now explains a working, explicit **`/faq <question>`** command and distinguishes it from external generative AI, which stays OFF/unconnected.
+- Added a bounded Unicode private FAQ query parser and a source-backed `ApprovedAnswerService.answerPrivateApprovedFAQ` lookup. A student receives an exact matching, currently APPROVED answer only from `private` scope whose cited education resource remains PUBLISHED under a currently enabled category/ancestor hierarchy. Group-only FAQs, drafts, stale sources and archived FAQ entries cannot cross into the student's private chat.
+- Private FAQ lookup is intentionally **independent of the generative `privateAI` feature setting**, but still checks `education.navigate` on every request. It requires an explicit user-sent command; arbitrary chat messages never activate FAQ or AI. Student replies are HTML-escaped, do not reveal resource IDs or admin metadata, and return neutral no-match/ambiguous messages rather than picking an unreviewed or duplicate answer.
+- Added RED-first JSON+SQLite transport integration tests for approved/draft answers, archived FAQ and hidden categories, group-scope isolation, duplicate matches, student feature-off denial, malformed commands, no accidental AI startup and no Telegram group command bypass.
+- This is still a locally tested planned reply; Telegram live deployment and AI provider connection remain separately blocked.
+
 ## 0.7.19 — 2026-10-21 — Real owner FAQ queue and reviewed source-bound decisions (NOT DEPLOYED)
 
 - Added **🧠 الأسئلة الشائعة** to the verified Telegram private owner dashboard, listing currently authorized FAQ records with at most ten per page, Next/Previous paging, draft/approved/archived status counts and sanitized question/answer previews. Student/delegate/group senders have no access even when copying owner labels.
