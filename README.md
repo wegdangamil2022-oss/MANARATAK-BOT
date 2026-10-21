@@ -11,6 +11,12 @@ An independent TypeScript/Node.js 22 project based on `docs/MANARATAK_BOT_MASTER
 
 
 
+## B3 v0.7.10 — mandatory-channel integrity blocks offline acceptance
+
+The existing local `telegram:acceptance` safety/rollback rehearsal now includes subscription-configuration health. If an active mandatory-channel rule references a revoked group or unverifiable channel, has malformed version/mode/IDs, duplicates channels or violates the configured maximum, the offline acceptance result is `BLOCKED` with the **static** `INVALID_SUBSCRIPTION_REQUIREMENTS` reason. A matching backup and STOP switch cannot hide this defect. Paused rules with zero required channels are not treated as active obligations.
+
+The check consumes the same read-only source snapshot already captured by acceptance, and runs no new database write or Telegram call. Result strings contain no student, group, or channel IDs. A PASS is **only** an offline local consistency result; real Telegram permissions, bot deployment, HTTPS and subscriber access still require separately authorized live acceptance.
+
 ## B3 v0.7.9 — one-shot mandatory-channel rule integrity audit (OFFLINE)
 
 From an authorized host with a preexisting canonical private SQLite state file, operators can use:
