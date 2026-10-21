@@ -19,6 +19,14 @@ For `ALL` subscriptions, an unknown channel result makes the decision `UNAVAILAB
 
 This fixes **mock-tested provider failure behavior only**. It does not imply that real bot administrator rights, Telegram permissions or membership checks have been accepted or deployed.
 
+## B3 v0.7.16 — owner-reviewed Telegram library archival (OFFLINE)
+
+The private, verified owner may choose **📚 إدارة المكتبة** to page through currently published, locally authorized education resources (10 per page). Choosing **📚 المورد** opens a sanitized description. To hide a published item from the local student catalog, choose **🗃️ معاينة الأرشفة** and separately **⛔ تأكيد الأرشفة**.
+
+Unlike a blind archive command, the confirmation captures an opaque fingerprint of the precise published education resource, plus its group authorization policy revision; the existing EducationService performs all owner, scope, current-resource and revision checks **inside a durable storage transaction**. A copied, outdated, changed or replayed button cannot archive a different revision. Archived records stay in the local store with their audit history and are excluded from published views.
+
+This operation **does not delete or edit any Telegram channel message**, automatically retry publication, activate an external account or create a production webhook. The operational deployment gate and real Telegram acceptance remain separate.
+
 ## B3 v0.7.15 — student search in the published private educational library (OFFLINE)
 
 Private students now have **🔍 البحث في الموارد** in Telegram's real ReplyKeyboard. Tap it to learn the command, then send `/search Grant` or `/search منحة الصين` for a paginated list of **only** published approved educational resources. Ten results are shown per page, with Next/Previous controls and resource detail buttons. Unicode Arabic and Latin terms (2–32 characters) are accepted; malformed controls, markup injection and unsafe page claims are denied.
