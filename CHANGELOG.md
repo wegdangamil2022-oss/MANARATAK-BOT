@@ -1,3 +1,10 @@
+## 0.7.21 — 2026-10-21 — Private student FAQ browser (NOT DEPLOYED)
+
+- The private student assistant now provides an actual “📖 تصفح الأسئلة المعتمدة” ReplyKeyboard choice to browse owner-approved FAQs with currently published, category-visible private sources, ten per page with Next/Previous navigation.
+- A question button carries only a 16-character SHA-256 fingerprint of an FAQ UUID, never the raw internal identifier. Each request re-evaluates allowed source/category visibility, current private navigation permissions, draft/approval/archive status and the currently authorized unique match before answering.
+- An archived/disabled/stale question disappears immediately; group-only FAQs, drafts, unreviewed/hidden data, editor IDs and internal source references never appear. Question display HTML-escaped; no external AI, Telegram posting or automatic group interaction.
+- Added RED-first JSON+SQLite paging, stale-button, group/private isolation and invalid-control integration tests.
+
 ## 0.7.20 — 2026-10-21 — Real private student questions against reviewed local FAQs (NOT DEPLOYED)
 
 - The student **💬 المساعد التعليمي** private reply keyboard now explains a working, explicit **`/faq <question>`** command and distinguishes it from external generative AI, which stays OFF/unconnected.
