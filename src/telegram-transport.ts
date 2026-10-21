@@ -21,6 +21,7 @@ import {parsePrivateFAQQuery,privateFAQBrowseLabel,parsePrivateFAQPage,
  isPrivateFAQBrowseText} from './telegram-private-faq.js';
 import {privateFAQSearchLabel,parsePrivateFAQSearchQuery,parsePrivateFAQSearchPage,
  privateFAQSearchPageLabel,isPrivateFAQSearchText} from './telegram-private-faq-search.js';
+import {escapeTelegramListPreview} from './telegram-preview.js';
 
 /** Inbound-only boundary. A test double may supply bytes; there is intentionally no live HTTP implementation. */
 export interface TelegramDocumentPort {
@@ -261,7 +262,7 @@ export class TelegramUpdateApplication {
        return result('<b>نتائج البحث في الأسئلة 🔎</b>\n'
         +'المطابقات: '+hits.length+'\nصفحة '+(page+1)+' من '+pages+'\n'
         +shown.map(({q,ordinal})=>ordinal+'. '+
-          escapeTelegramHtml(q.question.slice(0,160))).join('\n')
+          escapeTelegramListPreview(q.question,220)).join('\n')
         +'\nاختر رقم السؤال المطابق لفتح إجابته المعتمدة.',
         listingKeyboard(shown.map(({q,ordinal})=>privateFAQButton(q.id,ordinal)),{
          previous:page>0?privateFAQSearchPageLabel(query,page-1,'previous'):undefined,
@@ -314,7 +315,7 @@ export class TelegramUpdateApplication {
         return result('<b>تصفح الأسئلة المعتمدة 📖</b>\n'
           +'عدد الأسئلة المتاحة: '+items.length+'\n'
           +'صفحة '+(page+1)+' من '+pages+'\n'
-          +visible.map((q,i)=>(page*10+i+1)+'. '+escapeTelegramHtml(q.question.slice(0,160))).join('\n')
+          +visible.map((q,i)=>(page*10+i+1)+'. '+escapeTelegramListPreview(q.question,220)).join('\n')
           +'\nاختر رقم السؤال المطابق من الأزرار لعرض الإجابة المعتمدة.',
           listingKeyboard(visible.map((q,i)=>privateFAQButton(q.id,page*10+i+1)),{
            previous:page>0?privateFAQPageLabel(page-1,'previous'):undefined,
@@ -356,7 +357,7 @@ export class TelegramUpdateApplication {
         const view=categories.slice(page*10,page*10+10);
         return result('<b>'+escapeTelegramHtml(title)+'</b>\n'
           +'صفحة '+(page+1)+' من '+pages+'\n'
-          +'اختر القسم المناسب:\n'+view.map(c=>'• '+escapeTelegramHtml(c.title)).join('\n'),
+          +'اختر القسم المناسب:\n'+view.map(c=>'• '+escapeTelegramListPreview(c.title,220)).join('\n'),
           listingKeyboard(view.map(categoryButton),{
             previous:page>0?menuPageButton('c',section,page-1,'previous'):undefined,
             next:page+1<pages?menuPageButton('c',section,page+1,'next'):undefined
@@ -378,7 +379,7 @@ export class TelegramUpdateApplication {
         const view=resources.slice(page*10,page*10+10);
         return result('<b>'+escapeTelegramHtml(cat.title)+'</b>\n'
           +'صفحة '+(page+1)+' من '+pages+'\n'
-          +view.map(r=>'• '+escapeTelegramHtml(r.title)).join('\n'),
+          +view.map(r=>'• '+escapeTelegramListPreview(r.title,220)).join('\n'),
           listingKeyboard(view.map(resourceButton),{
             previous:page>0?menuPageButton('r',cat.id,page-1,'previous'):undefined,
             next:page+1<pages?menuPageButton('r',cat.id,page+1,'next'):undefined
@@ -407,7 +408,7 @@ export class TelegramUpdateApplication {
         return result('<b>نتائج البحث 🔍</b>\n'
           +'البحث: '+escapeTelegramHtml(query)+'\n'
           +'صفحة '+(page+1)+' من '+pages+'\n'
-          +selection.map(r=>'• '+escapeTelegramHtml(r.title)).join('\n'),
+          +selection.map(r=>'• '+escapeTelegramListPreview(r.title,220)).join('\n'),
           listingKeyboard(selection.map(resourceButton),{
             previous:page>0?searchPageButton(query,page-1,'previous'):undefined,
             next:page+1<pages?searchPageButton(query,page+1,'next'):undefined
@@ -512,7 +513,7 @@ export class TelegramUpdateApplication {
       }
       const categories=await this.opts.education.listCategories(actorId,scope);
       if(!categories.length)return {status:'DENIED',reason:'NO_ACCESSIBLE_CATEGORIES'};
-      return result('<b>التعليم والموارد</b>\n'+categories.slice(0,12).map(c=>`• ${escapeTelegramHtml(c.title)} (<code>${escapeTelegramHtml(c.id)}</code>)`).join('\n'));
+      return result('<b>التعليم والموارد</b>\n'+categories.slice(0,12).map(c=>`• ${escapeTelegramListPreview(c.title,220)} (<code>${escapeTelegramHtml(c.id)}</code>)`).join('\n'));
     }
     if(cmd==='/resources'){
       const scope=kind==='private'?(words[1]??''):chatId,cat=kind==='private'?words[2]:words[1];
@@ -523,7 +524,7 @@ export class TelegramUpdateApplication {
       }
       const resources=await this.opts.education.listResources(actorId,scope,cat);
       if(!resources.length)return {status:'DENIED',reason:'NO_ACCESSIBLE_RESOURCES'};
-      return result('<b>الموارد المنشورة</b>\n'+resources.slice(0,12).map(r=>`• ${escapeTelegramHtml(r.title)}${r.university?` — ${escapeTelegramHtml(r.university)}`:''}`).join('\n'));
+      return result('<b>الموارد المنشورة</b>\n'+resources.slice(0,12).map(r=>`• ${escapeTelegramListPreview(r.title,180)}${r.university?` — ${escapeTelegramListPreview(r.university,80)}`:''}`).join('\n'));
     }
     if(cmd==='/resource'&&kind==='private'){
       if(words.length!==2)return {status:'DENIED',reason:'INVALID_RESOURCE_REF'};
