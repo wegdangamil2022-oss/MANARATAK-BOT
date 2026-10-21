@@ -1,3 +1,11 @@
+## 0.7.34 — 2026-10-22 — B5 quarantined external candidate staging and metadata-only review (NOT DEPLOYED)
+
+- **Owner-only staged review queue** for external provider records. `stage(actor,sourceId,expectedPageFingerprint)` reads the *current* source preview again and accepts only a unique external record in the exact page the owner just inspected; no client-provided title, university, year or degree enters storage.
+- Each staged candidate holds bounded external metadata, the source revision and a SHA-256 review digest, with initial `UNVERIFIED_EXTERNAL` status. Only `review(actor,sourceId,expectedDigest)` may mark it `REVIEWED_METADATA_ONLY`, and only after a fresh external read confirms the exact same fields. A changed revision/title/metadata, forged page proof or missing candidate fails closed rather than silently overwriting old reviews.
+- Review is **not publication**: this queue is separate from `importRuns`, `educationResources`, campaigns and deliveries. It cannot grant student visibility, trigger B3 approval, or write/send Telegram content.
+- Queue is additive and optional on schema-8 JSON/SQLite data, bounded to 200 unique records, strictly decoded including review status/actor/time consistency. JSON writes now validate state before disk commit like SQLite, preventing malformed persistent review queue entries.
+- Tests include JSON and SQLite persistence, mock source mutation, forged proofs, simultaneous stage idempotency, owner dashboard revocation during a pending provider read, no provider call for nonowners and missing authorization, malformed state rejection. No actual production API, Telegram send or AI enabled.
+
 ## 0.7.33 — 2026-10-22 — B5 optional read-only external preview on Telegram owner menu (OFFLINE / NOT CONNECTED)
 
 - When (and only when) an explicitly injected `PlatformCatalogPreviewService` is configured, the owner Telegram panel offers a **read-only external Manaratak candidate preview** button; default installations without a reader hide the button and reject forged open and next-page labels.
