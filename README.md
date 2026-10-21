@@ -1,3 +1,7 @@
+## B5 v0.7.32 — proposed read-only Manaratak catalogue contract (offline only)
+
+A provider-neutral, owner-only `PlatformCatalogReader` adapter and strict `PlatformCatalogPreviewService` can preview up to ten externally self-reported published private catalogue records without writing to local storage or exposing them to students. Every candidate remains **UNVERIFIED_EXTERNAL** and cannot become a local approved resource without a future explicit review workflow. The real platform's API, URL, credentials, schema and connectivity are **not** connected or inferred. Owner dashboard permissions are checked both before and after fetching; all tests use mocked providers.
+
 ## B3 v0.7.31 — improved Arabic search for published scholarships (offline)
 
 The student `/search` route now uses the same Arabic-friendly keyword normalization as the approved FAQ search. For example, `/search منحة الصين 2027` can locate an authorized published title written `مِنْحَة الصِّين ٢٠٢٧`, and `/search جامعة اندونيسيا` can match a verified owner's university field containing `جَامِعَة إندونيسيا`. Academic cycle and degree metadata also participate. Search results remain confined to published private resources with currently enabled categories and current source checks on tapping; no group leakage, autonomous publishing, external AI or live Telegram activation.
