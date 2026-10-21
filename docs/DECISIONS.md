@@ -244,3 +244,9 @@
 - Preserve approved data and the existing opaque/ID-based current-source access checks. Restrict **only visible list excerpt** lengths after escaping, so Unicode characters and HTML entities remain intact. The Telegram reply renderer's existing 4096-byte hard limit remains an independent defense.
 - Restrict every owner-supplied category/resource reply-keyboard label to both 256 UTF-8 bytes and 96 codepoints; compute the same deterministic button string when the student taps it. Renamed, hidden, archived or revoked entities still fail closed.
 - Do not silently truncate full authoritative FAQ answers, attempt multipart delivery, or send Telegram messages in this slice. A separate reviewed delivery design would be necessary for unusually long encoded answer bodies.
+
+## B3 v0.7.31 — share bounded Arabic discovery normalization (22 October 2026)
+
+- Resource discovery and owner-reviewed private FAQ search use one pure Unicode fold function for common orthographic variants. It is for *matching* only; approved source records, FAQ exact-answer contract and external publish permissions remain untouched.
+- Allow Arabic combining marks in bounded typed `/search` terms and stateless copied page labels; retain strict length, bidi/control and source ACL constraints. Strings normalized to empty must not enumerate all items.
+- Search only currently published resources in enabled private categories, never automatic cross-group search. Store no extra per-student search history or AI data. Live operation remains explicitly disabled.

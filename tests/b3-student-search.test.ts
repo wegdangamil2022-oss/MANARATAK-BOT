@@ -188,3 +188,65 @@ test('B3 search: malformed, out-of-range, direction-forged private search reques
   assert.equal(group.plan,undefined);
  }finally{await f.close();}
 });
+
+
+for(const engine of ['json','sqlite'] as const){
+ test('B3 '+engine+': Arabic student grant title matches diacritics and Arabic-Indic years',async()=>{
+  const f=await fixture(engine);try{
+   await f.store.transaction(s=>{
+    s.educationResources.find(r=>r.id==='resource-00')!.title='مِنْحَةُ الصِّينِ ٢٠٢٧';
+   });
+   const res=await f.app().handle(msg(100,'/search منحة الصين 2027'));
+   assert.equal(res.status,'APPLIED');assert.match(res.plan?.text??'',/مِنْحَةُ الصِّينِ ٢٠٢٧/);
+   const key=buttons(res).find(x=>x.includes('resource-00'))!;
+   assert.ok(key);
+   const opened=await f.app().handle(msg(101,key));
+   assert.equal(opened.status,'APPLIED');
+   assert.match(opened.plan?.text??'',/مِنْحَةُ الصِّينِ ٢٠٢٧/);
+  }finally{await f.close();}
+ });
+ test('B3 '+engine+': university spelling with hamza/tatweel and Persian digits is discoverable',async()=>{
+  const f=await fixture(engine);try{
+   await f.store.transaction(s=>{
+    const grant=s.educationResources.find(r=>r.id==='resource-00')!;
+    grant.title='فرص ۲۰۲۷';grant.university='جَامِعَة إندونيسيا الصــينية';
+   });
+   for(const [i,term] of ['2027','جامعة اندونيسيا الصينية'].entries()){
+    const res=await f.app().handle(msg(102+i,'/search '+term));
+    assert.equal(res.status,'APPLIED',term);
+    assert.ok(buttons(res).some(x=>x.includes('resource-00')),term);
+   }
+  }finally{await f.close();}
+ });
+ test('B3 '+engine+': search separator normalization does not list hidden, archived or group scholarship sources',async()=>{
+  const f=await fixture(engine);try{
+   await f.store.transaction(s=>{
+    s.educationResources.find(r=>r.id==='archived')!.title='CSCA—2027 hidden archive';
+    s.educationResources.find(r=>r.id==='hidden-resource')!.title='CSCA_2027 category';
+    s.educationResources.find(r=>r.id==='group-resource')!.title='CSCA-2027 group private';
+    s.educationResources.find(r=>r.id==='resource-00')!.title='CSCA—2027 public';
+   });
+   const result=await f.app().handle(msg(104,'/search CSCA 2027'));
+   assert.equal(result.status,'APPLIED');
+   assert.ok(buttons(result).some(x=>x.includes('resource-00')));
+   const text=(result.plan?.text??'')+buttons(result).join('');
+   for(const hidden of ['archived','hidden-resource','group-resource','hidden archive','category','group private'])
+    assert.equal(text.includes(hidden),false,hidden);
+  }finally{await f.close();}
+ });
+}
+test('B3 resource search accepts legitimate Arabic vowel marks in explicit bounded commands and page labels',()=>{
+ assert.equal(parseSearchQuery('/search مِـنحَة'),'مِـنحَة');
+ assert.deepEqual(parseSearchPageCommand(searchPageButton('مِـنحَة',1,'next')),
+  {query:'مِـنحَة',page:1,direction:'next'});
+ for(const input of ['/search \u064e\u064e','/search \u202eمنحة','/search '+'أ'.repeat(33)])
+  assert.equal(parseSearchQuery(input),null);
+});
+test('B3 search-only non-meaningful kashida never causes all approved grants to be returned',async()=>{
+ const f=await fixture('sqlite');try{
+  const result=await f.app().handle(msg(120,'/search ــ'));
+  assert.equal(result.status,'APPLIED');
+  assert.match(result.plan?.text??'',/لم نعثر/);
+  assert.equal(buttons(result).some(x=>x.startsWith('🔎 ')),false);
+ }finally{await f.close();}
+});

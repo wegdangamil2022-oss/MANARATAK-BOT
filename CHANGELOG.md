@@ -1,3 +1,11 @@
+## 0.7.31 — 2026-10-22 — Arabic-aware published scholarship and university search (NOT DEPLOYED)
+
+- The existing private student `/search` command now finds currently published and visible scholarships by **resource title, university name, academic cycle and degree**, despite Arabic vowel marks, hamza/alef and alef-maqsura variants, tatweel, punctuation separators and Arabic-Indic/Persian numerals.
+- Search uses the same pure discovery-only Unicode folding as reviewed private FAQ searches, avoiding inconsistent Arabic text matches between sections. Saved scholarship records and reviewed FAQ questions and answers are never rewritten by a query.
+- Bounded `/search` and page-label parsers now permit Arabic combining marks in otherwise valid terms without enabling controls, bidi overrides, overly long commands or forged cursors.
+- Normalization does **not** expand access: group-only sources, archived records, disabled categories and private navigation OFF still exclude results. Empty normalized terms return no matches instead of enumerating the whole catalogue. Existing current visible-item/ID selection and HTML rendering constraints remain.
+- Eight JSON/SQLite and input-grammar integration tests guard these improvements. No live Telegram operation, AI/semantic search or content publication added.
+
 ## 0.7.30 — 2026-10-22 — Bounded Telegram student catalogue previews and UTF-8 buttons (NOT DEPLOYED)
 
 - Private FAQ browse/search, resource/category listings, search results, and group educational catalogues now escape owner-supplied titles **before** limiting their displayed UTF-8 byte lengths. Long HTML-heavy and Arabic text can no longer exceed the 4096-byte Telegram reply plan budget just by filling a page of authorized rows.
