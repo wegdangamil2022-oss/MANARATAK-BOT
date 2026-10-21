@@ -3,6 +3,7 @@ import { type BotState, type FAQEntry, BotStore } from './store.js';
 import { Policy } from './policy.js';
 import { publicEducationResource, type PublicEducationResource } from './education.js';
 import {faqReviewFingerprint} from './faq-review.js';
+import {subscriptionRequirementMode,acceptsActiveSubscriptionEvidence} from './subscription-integrity.js';
 
 /** Only a trusted Telegram adapter may attest the chat membership status; user-provided claims are not evidence. */
 export type MembershipStatus = 'VERIFIED' | 'NOT_MEMBER' | 'UNKNOWN';
@@ -226,17 +227,18 @@ export class ResourceLinkService {
        .map(r=>[r.version,r.mode,...r.channelIds]));
     const subscriptionEpoch=link.scope==='private'?'':requiredEpoch(afterMember,link.scope);
     if(link.scope!=='private'){
+      const requirement=subscriptionRequirementMode(afterMember,link.scope);
+      if(requirement==='INVALID')return {status:'DENIED'};
       if(!this.policy.canUseChat(afterMember,link.scope,'navigation') ||
         this.policy.chatRevision(afterMember,link.scope)!==link.policyVersion)
         return {status:'DENIED'};
-      const active=afterMember.subscriptionRequirements.some(r=>
-        r.chatId===link.scope&&r.channelIds.length>0);
-      if(active){
+      if(requirement==='ACTIVE'){
         if(!verifySubscription)return {status:'DENIED'};
         let verdict:'MEMBER'|'NOT_REQUIRED'|'NOT_MEMBER'|'UNAVAILABLE'|'DENIED';
         try{verdict=await verifySubscription(link.scope,actor);}
         catch{return {status:'DENIED'};}
-        if(verdict!=='MEMBER'&&verdict!=='NOT_REQUIRED')return {status:'DENIED'};
+        if(!acceptsActiveSubscriptionEvidence(verdict,this.policy.isOwner(actor)))
+          return {status:'DENIED'};
       }
     }
     // Re-read after ALL external checks. Policy, links, publication sources
@@ -247,7 +249,9 @@ export class ResourceLinkService {
       current.policyVersion!==link.policyVersion||
       current.resourceRevision!==1||(current.boundUserId && current.boundUserId!==actor))
       return {status:'DENIED'};
-    if(link.scope!=='private'&&requiredEpoch(s,link.scope)!==subscriptionEpoch)
+    if(link.scope!=='private'&&(
+      subscriptionRequirementMode(s,link.scope)==='INVALID'||
+      requiredEpoch(s,link.scope)!==subscriptionEpoch))
       return {status:'DENIED'};
     if(current.scope==='private') {
       if(!this.policy.privateFeature(s,'education.navigate',actor))return {status:'DENIED'};
