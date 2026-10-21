@@ -165,3 +165,33 @@ test('B5 no configured platform reader means every owner local-approval text is 
   assert.equal(state.educationResources.length,0);
  }finally{await f.close();}
 });
+test('B5 maximal private category identifiers use short, unambiguous Telegram button tokens',async()=>{
+ const f=await fixture('json');try{
+  const digest=await f.reviewed();
+  const longId='c'.repeat(64);
+  await f.education.createCategory(String(OWNER),{
+   id:longId,scope:'private',title:'قسم كبير',order:3});
+  const picker=await f.app().handle(message(75,OWNER,'📋 اختيار قسم · china-2027:'+digest));
+  assert.equal(picker.status,'APPLIED');
+  assert.equal(isValidTelegramReplyKeyboard(picker.plan?.replyMarkup),true);
+  const choice=keys(picker).find(x=>x.startsWith('📁 تعيين قسم · china-2027:~'))!;
+  assert.ok(choice);
+  const confirm=await f.app().handle(message(76,OWNER,choice));
+  assert.equal(confirm.status,'APPLIED');
+  assert.equal(isValidTelegramReplyKeyboard(confirm.plan?.replyMarkup),true);
+  const approve=keys(confirm).find(x=>x.startsWith('✅ تأكيد اعتماد محلي ·'))!;
+  assert.ok(approve);
+  const approved=await f.app().handle(message(77,OWNER,approve));
+  assert.equal(approved.status,'APPLIED');
+  assert.equal((await f.store.snapshot()).platformReviewQueue?.[0]?.approvedCategoryId,longId);
+  assert.equal(isValidTelegramReplyKeyboard(approved.plan?.replyMarkup),true);
+  const preview=keys(approved).find(x=>x.startsWith('📝 معاينة إتاحة ·'))!;
+  const confirmation=await f.app().handle(message(78,OWNER,preview));
+  assert.equal(confirmation.status,'APPLIED');
+  assert.equal(isValidTelegramReplyKeyboard(confirmation.plan?.replyMarkup),true);
+  const publish=keys(confirmation).find(x=>x.startsWith('📚 تأكيد إتاحة محلية ·'))!;
+  const done=await f.app().handle(message(79,OWNER,publish));
+  assert.equal(done.status,'APPLIED');
+  assert.equal((await f.store.snapshot()).educationResources[0]?.categoryId,longId);
+ }finally{await f.close();}
+});
