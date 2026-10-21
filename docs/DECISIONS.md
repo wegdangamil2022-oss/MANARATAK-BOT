@@ -257,3 +257,10 @@
 - External `PUBLISHED` status means only source-reported publication; map it to `UNVERIFIED_EXTERNAL` for owner inspection. Fingerprint cannot authorize imported/public student content or replace existing B3 review/publish procedures.
 - No implicit real Manaratak URL, network fetch, bot-to-platform token, production credentials, database copy or write operations in this slice. Scope and permission checks happen before and after the upstream await to deny revoked access.
 - Any real production connection requires explicit external API/schema verification, staging and a separately reviewed owner configuration path. No live Telegram/AI deployment follows.
+
+## B5 v0.7.33 — optional owner projection of external candidates (22 October 2026)
+
+- Only display the B5 read-only catalogue preview action when a provider has been **explicitly injected** into the application; otherwise hide and reject even forged old preview selectors. Every request still needs a verified owner in Telegram private chat. A copied page label is not authorization, simply a validated cursor request.
+- Render only source candidate identifiers and escaped bounded metadata with a visible `UNVERIFIED_EXTERNAL` interpretation. Do not add local approval/import/publish actions, and do not modify the B3 content workflow because an external source claims publication.
+- Keep the normal webhook audit/outbound-plan persistence for inbound Telegram updates, but assert no changes to local educational resources, imports, campaigns or deliveries. Unavailable external service gives a safe explanation without leaking transport exception details.
+- Mock adapter validation is not a deployed Manaratak platform integration; never silently enable remote endpoints, credentials or real Telegram send on a test pass.
