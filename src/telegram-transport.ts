@@ -15,7 +15,9 @@ import {menuLabels,mainMenuKeyboard,backMenuKeyboard,categoryButton,
  type TelegramReplyKeyboard} from './telegram-menu.js';
 import {OwnerTelegramMenu,isOwnerMenuText} from './telegram-owner-menu.js';
 import {parseSearchQuery,parseSearchPageCommand,searchPageButton} from './telegram-search.js';
-import {parsePrivateFAQQuery} from './telegram-private-faq.js';
+import {parsePrivateFAQQuery,privateFAQBrowseLabel,parsePrivateFAQPage,
+ privateFAQPageLabel,parsePrivateFAQSelection,privateFAQButton,
+ isPrivateFAQBrowseText} from './telegram-private-faq.js';
 
 /** Inbound-only boundary. A test double may supply bytes; there is intentionally no live HTTP implementation. */
 export interface TelegramDocumentPort {
@@ -214,6 +216,48 @@ export class TelegramUpdateApplication {
         +'هذه إجابة من سؤال شائع معتمد وليست محتوى مولّدًا بالذكاء الاصطناعي.',
         backMenuKeyboard());
       }
+      if(isPrivateFAQBrowseText(text)){
+       // Every page and choice is independently authorized from the current
+       // library snapshot. Opaque button hashes are not grants and can only
+       // resolve to exactly one currently visible reviewed private FAQ.
+       const catalogue=await this.opts.faq.listPrivateReviewedFAQs(actorId);
+       if(catalogue.status==='DISABLED')
+        return {status:'DENIED',reason:'PRIVATE_EDUCATION_DISABLED'};
+       const items=catalogue.items;
+       const requested=parsePrivateFAQPage(text);
+       if(text===privateFAQBrowseLabel||requested){
+        const page=requested?.page??0;
+        const pages=Math.min(1000,Math.ceil(items.length/10));
+        if(requested&&(!pages||page>=pages||
+          (requested.direction==='next'&&page===0)||
+          (requested.direction==='previous'&&page===pages-1)))
+         return {status:'DENIED',reason:'INVALID_PRIVATE_FAQ_PAGE'};
+        if(!pages)return result('<b>تصفح الأسئلة المعتمدة 📖</b>\n'
+         +'لا توجد أسئلة معتمدة من موارد الخاص المنشورة حاليًا.\n'
+         +'يمكنك البحث في المكتبة أو إرسال سؤال محدد عبر /faq.',
+         backMenuKeyboard());
+        const visible=items.slice(page*10,page*10+10);
+        return result('<b>تصفح الأسئلة المعتمدة 📖</b>\n'
+          +'عدد الأسئلة المتاحة: '+items.length+'\n'
+          +'صفحة '+(page+1)+' من '+pages+'\n'
+          +visible.map((q,i)=>(page*10+i+1)+'. '+escapeTelegramHtml(q.question.slice(0,160))).join('\n')
+          +'\nاختر رقم السؤال المطابق من الأزرار لعرض الإجابة المعتمدة.',
+          listingKeyboard(visible.map(q=>privateFAQButton(q.id)),{
+           previous:page>0?privateFAQPageLabel(page-1,'previous'):undefined,
+           next:page+1<pages?privateFAQPageLabel(page+1,'next'):undefined
+          }));
+       }
+       const token=parsePrivateFAQSelection(text);
+       if(!token)return {status:'DENIED',reason:'INVALID_PRIVATE_FAQ_SELECTION'};
+       const matches=items.filter(q=>privateFAQButton(q.id).endsWith(token));
+       if(matches.length!==1)return {status:'DENIED',reason:'PRIVATE_FAQ_NOT_ACCESSIBLE'};
+       const answer=await this.opts.faq.answerPrivateReviewedFAQById(actorId,matches[0]!.id);
+       if(answer.status!=='ANSWER')return {status:'DENIED',reason:'PRIVATE_FAQ_NOT_ACCESSIBLE'};
+       return result('<b>إجابة معتمدة من مكتبة منارتك ✅</b>\n'
+         +escapeTelegramHtml(answer.answer)+'\n'
+         +'مصدرها منشور ومعتمد في مكتبة الخاص، وليس إجابة AI مولدة.',
+         listingKeyboard([privateFAQBrowseLabel]));
+      }
       const sections:Readonly<Record<string,{section:string;title:string}>>={
         [m.scholarships]:{section:'scholarships',title:'المنح الدراسية'},
         [m.courses]:{section:'courses',title:'الدورات التعليمية'},
@@ -325,8 +369,9 @@ export class TelegramUpdateApplication {
         +'<code>/faq ما شروط المنحة؟</code>\n'
         +'ضمن المجموعات المسموح بها: <code>/ask@'
         +escapeTelegramHtml(this.opts.botUsername)+' السؤال</code> حسب سياسة المجموعة.\n'
-        +'المساعد الذكي التوليدي غير متصل؛ إجابات /faq مستندة إلى موارد منشورة.',
-        backMenuKeyboard());
+        +'المساعد الذكي التوليدي غير متصل؛ إجابات /faq مستندة إلى موارد منشورة.\n'
+        +'أو اضغط «تصفح الأسئلة المعتمدة» لاختيار سؤال من القائمة.',
+        listingKeyboard([privateFAQBrowseLabel]));
       if(text===m.communities)return result(
         '<b>المجموعات والقنوات 👥</b>\n'
         +'تُدار صلاحيات المجموعات والتحقق من العضوية ضمن أنظمة منارتك.\n'
