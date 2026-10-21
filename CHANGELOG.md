@@ -1,3 +1,10 @@
+## 0.7.19 — 2026-10-21 — Real owner FAQ queue and reviewed source-bound decisions (NOT DEPLOYED)
+
+- Added **🧠 الأسئلة الشائعة** to the verified Telegram private owner dashboard, listing currently authorized FAQ records with at most ten per page, Next/Previous paging, draft/approved/archived status counts and sanitized question/answer previews. Student/delegate/group senders have no access even when copying owner labels.
+- Added explicit **review and confirm** for promoting a DRAFT FAQ to APPROVED or archiving an APPROVED FAQ locally. Decisions use the existing FAQ library and immediately affect subsequent authorized FAQ answers; archiving a FAQ does not archive its educational source and approval never publishes to Telegram channels.
+- Every confirmed write checks configured owner identity, current approved group navigation epoch (or private scope), current FAQ DRAFT/APPROVED status, exact question/aliases/answer fingerprint, source resource revision/status and ancestor category visibility/revisions **inside a single BotStore transaction**. Disabled/archived/missing sources prevent approval and stale/replayed/forged confirmations fail closed.
+- The UI has no external AI call, Telegram channel delivery or automatic action on old response messages. New RED-first JSON+SQLite integration tests cover staged approvals, live local FAQ answers, local archival, source removal/hide, group revoke/reapprove, HTML escaping, 13-record navigation, malformed buttons, and student/delegate isolation.
+
 ## 0.7.18 — 2026-10-21 — Owner-reviewed ordering of educational categories (NOT DEPLOYED)
 
 - Verified private Telegram owner can now open a category and explicitly review/confirm **⬆️ رفع خطوة / ⬇️ خفض خطوة**. Only sibling categories sharing exactly the same scope and parent may swap; parent/child and private/group content are never cross-moved.
