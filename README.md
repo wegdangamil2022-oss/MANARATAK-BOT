@@ -19,6 +19,12 @@ For `ALL` subscriptions, an unknown channel result makes the decision `UNAVAILAB
 
 This fixes **mock-tested provider failure behavior only**. It does not imply that real bot administrator rights, Telegram permissions or membership checks have been accepted or deployed.
 
+## B3 v0.7.24 — find reviewed private FAQ answers by keyword (OFFLINE)
+
+In the private student chat, open **💬 المساعد التعليمي → 🔎 ابحث في الأسئلة**, then type `/faqsearch منحة`. The bot searches currently approved FAQ **question titles** backed by the private published education catalogue, shows up to 10 matching questions per page, and lets the student select the numbered matching question to read its reviewed answer. Page controls re-run the search on the latest currently authorized FAQ list rather than granting visibility to an old page.
+
+Each answer-selection button retains its **true global question number** and hashed locator; stale/forged/hidden/reordered selections are rejected against the full current catalogue. Search is explicitly requested, byte-bounded, normalized and private only. **Neither this search nor `/faq` invokes external generative AI or performs Telegram channel posting.** Real Telegram deployment remains separate.
+
 ## B2-Core v0.7.23 — membership proof remains current through moderation (OFFLINE)
 
 `SubscriptionGate.syncSubscriptionRestriction` now binds each confirmed subscriber / non-subscriber result to the initial saved group authorization revision, channel authorization revisions, mandatory rule version, mode and ordered channel list. These conditions are rechecked inside the moderation transaction that stores/removes a subscription-specific MUTE reason, while planning a moderation operation, and just before starting the external effect.
