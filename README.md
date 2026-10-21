@@ -19,6 +19,14 @@ For `ALL` subscriptions, an unknown channel result makes the decision `UNAVAILAB
 
 This fixes **mock-tested provider failure behavior only**. It does not imply that real bot administrator rights, Telegram permissions or membership checks have been accepted or deployed.
 
+## B3 v0.7.17 — owner-only educational section visibility controls (OFFLINE)
+
+In a verified private Telegram chat, the configured owner may open **🔐 لوحة المالك → 🗂️ إدارة الأقسام** to browse existing education categories in pages, review their local scope, status and directly assigned published resource count, and separately confirm **enabling** or **disabling** visibility. Disabling a parent hides its child categories from student navigation; enabling a child while its parent is still disabled is blocked.
+
+Every confirmation uses a short category choice token resolved against freshly authorized categories, an opaque fingerprint of its exact saved metadata, a backwards-compatible monotonic category revision, and the current group authorization policy revision. These conditions are all rechecked during the atomic write; stale Telegram button texts never become privileges. Existing direct `setCategoryEnabled` calls also invalidate prior confirmation tokens by advancing the category revision.
+
+Enabling a category does **not** re-publish archived resources or send material to Telegram channels. No production Telegram webhook or AI is started here; deployment still requires separate explicit controlled acceptance.
+
 ## B3 v0.7.16 — owner-reviewed Telegram library archival (OFFLINE)
 
 The private, verified owner may choose **📚 إدارة المكتبة** to page through currently published, locally authorized education resources (10 per page). Choosing **📚 المورد** opens a sanitized description. To hide a published item from the local student catalog, choose **🗃️ معاينة الأرشفة** and separately **⛔ تأكيد الأرشفة**.
