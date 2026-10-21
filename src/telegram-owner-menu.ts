@@ -245,17 +245,26 @@ export class OwnerTelegramMenu{
     +'المصدر: <code>'+checked.entry.sourceId+'</code>\n'
     +'راجعتَ نسخة البيانات التي تطابق المصدر عند الطلب.\n'
     +'الحالة: مراجعة بيانات فقط؛ اختر قسمًا لاعتمادها محليًا، ولا نشر تلقائي.',
-    ['📋 اختيار قسم · '+checked.entry.sourceId+':'+checked.entry.digest,
+    ['📋 اختيار قسم · '+(checked.entry.sourceId.length<=16?checked.entry.sourceId:
+      '~'+createHash('sha256').update(checked.entry.sourceId,'utf8').digest('hex').slice(0,16))+
+      ':'+checked.entry.digest.slice(0,24),
       ownerMenuLabels.platformCatalog]);
   }
-  // Owner-only stateless requests. No copied button grants privilege:
-  // services re-fetch external source and recheck authorization atomically.
-  const picker=/^📋 اختيار قسم · ([A-Za-z0-9][A-Za-z0-9_-]{0,63}):([a-f0-9]{64})$/u.exec(text);
-  const category=/^📁 تعيين قسم · ([A-Za-z0-9][A-Za-z0-9_-]{0,63}):([A-Za-z0-9][A-Za-z0-9_-]{0,63}):([a-f0-9]{64})$/u.exec(text);
-  const approval=/^✅ تأكيد اعتماد محلي · ([A-Za-z0-9][A-Za-z0-9_-]{0,63}):([A-Za-z0-9][A-Za-z0-9_-]{0,63}):([a-f0-9]{64})$/u.exec(text);
-  const publicationPreview=/^📝 معاينة إتاحة · ([A-Za-z0-9][A-Za-z0-9_-]{0,63}):([A-Za-z0-9][A-Za-z0-9_-]{0,63}):([a-f0-9]{64})$/u.exec(text);
-  const publication=/^📚 تأكيد إتاحة محلية · ([A-Za-z0-9][A-Za-z0-9_-]{0,63}):([A-Za-z0-9][A-Za-z0-9_-]{0,63}):([a-f0-9]{64})$/u.exec(text);
-  const categoryPage=/^(➡️ التالي|⬅️ السابق) · b5c:([A-Za-z0-9][A-Za-z0-9_-]{0,63}):([a-f0-9]{64}):(0|[1-9][0-9]{0,2})$/u.exec(text);
+  // Telegram reply keyboard labels must fit both <=96 Unicode codepoints
+  // and <=256 UTF-8 bytes. Tokens are only selectors, NEVER authority:
+  // resolve uniquely against owner-checked state, then use full SHA-256 proof
+  // and fresh external source reread for all mutations.
+  const b5Token=(value:string):string=>
+   value.length<=16?value:'~'+createHash('sha256').update(value,'utf8').digest('hex').slice(0,16);
+  const b5Proof=(digest:string):string=>digest.slice(0,24);
+  const b5Selector='([A-Za-z0-9][A-Za-z0-9_-]{0,63}|~[a-f0-9]{16})';
+  const b5Hash='([a-f0-9]{24}|[a-f0-9]{64})';
+  const picker=new RegExp('^📋 اختيار قسم · '+b5Selector+':'+b5Hash+'$','u').exec(text);
+  const category=new RegExp('^📁 تعيين قسم · '+b5Selector+':'+b5Selector+':'+b5Hash+'$','u').exec(text);
+  const approval=new RegExp('^✅ تأكيد اعتماد محلي · '+b5Selector+':'+b5Selector+':'+b5Hash+'$','u').exec(text);
+  const publicationPreview=new RegExp('^📝 معاينة إتاحة · '+b5Selector+':'+b5Selector+':'+b5Hash+'$','u').exec(text);
+  const publication=new RegExp('^📚 تأكيد إتاحة محلية · '+b5Selector+':'+b5Selector+':'+b5Hash+'$','u').exec(text);
+  const categoryPage=new RegExp('^(➡️ التالي|⬅️ السابق) · b5c:'+b5Selector+':'+b5Hash+':(0|[1-9][0-9]{0,2})$','u').exec(text);
   const localAction=text.startsWith('📋 اختيار قسم · ')||
    text.startsWith('📁 تعيين قسم · ')||text.startsWith('✅ تأكيد اعتماد محلي · ')||
    text.startsWith('📝 معاينة إتاحة · ')||text.startsWith('📚 تأكيد إتاحة محلية · ')||
@@ -263,14 +272,19 @@ export class OwnerTelegramMenu{
   if(localAction){
    if(!this.platformCatalog||!(picker||category||approval||
      publicationPreview||publication||categoryPage))return reject();
-   const sourceId=(picker?.[1]??category?.[1]??approval?.[1]??
+   const sourceKey=(picker?.[1]??category?.[1]??approval?.[1]??
      publicationPreview?.[1]??publication?.[1]??categoryPage?.[2])!;
-   const digest=(picker?.[2]??category?.[3]??approval?.[3]??
+   const proof=(picker?.[2]??category?.[3]??approval?.[3]??
      publicationPreview?.[3]??publication?.[3]??categoryPage?.[3])!;
    const state=await this.store.snapshot();
    if(!this.policy.privateFeature(state,'owner.dashboard',ctx.actorId))return reject();
-   const saved=state.platformReviewQueue?.find(q=>q.sourceId===sourceId&&q.digest===digest);
-   if(!saved)return reject();
+   const matches=state.platformReviewQueue?.filter(q=>
+     (q.sourceId===sourceKey||b5Token(q.sourceId)===sourceKey)&&
+     (q.digest===proof||b5Proof(q.digest)===proof))??[];
+   if(matches.length!==1)return reject();
+   const saved=matches[0]!;
+   const sourceId=saved.sourceId,digest=saved.digest;
+   const sourceButton=b5Token(sourceId),digestButton=b5Proof(digest);
    const categories=await this.education.listCategories(ctx.actorId,'private');
    if(picker||categoryPage){
     if(saved.status!=='REVIEWED_METADATA_ONLY')return reject();
@@ -285,22 +299,25 @@ export class OwnerTelegramMenu{
      +'هذا اعتماد مستقل، ولا يجعل المورد منشورًا.\n'
      +'صفحة '+(page+1)+' من '+pages,
      categories.slice(page*8,page*8+8).map(c=>
-      '📁 تعيين قسم · '+sourceId+':'+c.id+':'+digest),{
-      previous:page>0?'⬅️ السابق · b5c:'+sourceId+':'+digest+':'+(page-1):undefined,
-      next:page+1<pages?'➡️ التالي · b5c:'+sourceId+':'+digest+':'+(page+1):undefined
+      '📁 تعيين قسم · '+sourceButton+':'+b5Token(c.id)+':'+digestButton),{
+      previous:page>0?'⬅️ السابق · b5c:'+sourceButton+':'+digestButton+':'+(page-1):undefined,
+      next:page+1<pages?'➡️ التالي · b5c:'+sourceButton+':'+digestButton+':'+(page+1):undefined
      });
    }
-   const categoryId=(category?.[2]??approval?.[2]??
+   const categoryKey=(category?.[2]??approval?.[2]??
      publicationPreview?.[2]??publication?.[2])!;
-   const currentCategory=categories.find(c=>c.id===categoryId);
-   if(!currentCategory)return reject();
+   const categoryMatches=categories.filter(c=>
+     c.id===categoryKey||b5Token(c.id)===categoryKey);
+   if(categoryMatches.length!==1)return reject();
+   const currentCategory=categoryMatches[0]!;
+   const categoryId=currentCategory.id,categoryButton=b5Token(categoryId);
    if(category){
     if(saved.status!=='REVIEWED_METADATA_ONLY')return reject();
     return screen('<b>معاينة اعتماد مرشح خارجي 📁</b>\n'
      +'العنوان: '+escapeTelegramListPreview(saved.title,150)+'\n'
      +'القسم: '+escapeTelegramListPreview(currentCategory.title,130)+'\n'
      +'هل تؤكد الاعتماد لهذا القسم فقط؟ لن تُنشر المنحة بعد.',
-     ['✅ تأكيد اعتماد محلي · '+sourceId+':'+categoryId+':'+digest,
+     ['✅ تأكيد اعتماد محلي · '+sourceButton+':'+categoryButton+':'+digestButton,
        ownerMenuLabels.platformCatalog]);
    }
    if(approval){
@@ -310,7 +327,7 @@ export class OwnerTelegramMenu{
     return screen('<b>تم اعتماد المرشح محليًا ✅</b>\n'
      +'القسم: '+escapeTelegramListPreview(currentCategory.title,130)+'\n'
      +'لم يُنشر للطلاب. يلزم تأكيد إتاحته في خطوة مستقلة.',
-     ['📝 معاينة إتاحة · '+sourceId+':'+categoryId+':'+digest,
+     ['📝 معاينة إتاحة · '+sourceButton+':'+categoryButton+':'+digestButton,
        ownerMenuLabels.platformCatalog]);
    }
    if(publicationPreview){
@@ -322,7 +339,7 @@ export class OwnerTelegramMenu{
      +'القسم: '+escapeTelegramListPreview(currentCategory.title,120)+'\n'
      +'المقاعد: غير محددة. لا ضمان قبول ولا مصدر رسمي موثق.\n'
      +'هذا التأكيد يتيح موردًا داخل مكتبة الخاص فقط، بلا إرسال لقناة Telegram.',
-     ['📚 تأكيد إتاحة محلية · '+sourceId+':'+categoryId+':'+digest,
+     ['📚 تأكيد إتاحة محلية · '+sourceButton+':'+categoryButton+':'+digestButton,
        ownerMenuLabels.platformCatalog]);
    }
    if(publication){
