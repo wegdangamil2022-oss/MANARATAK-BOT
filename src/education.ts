@@ -1,3 +1,4 @@
+import {normalizeEducationDiscovery} from './education-search-normalization.js';
 import { randomUUID } from 'node:crypto';
 import { BotStore, type BotState, type EducationCategory, type EducationResource, type ImportRun } from './store.js';
 import { Policy } from './policy.js';
@@ -227,13 +228,11 @@ export class EducationService {
     if(!this.canBrowse(s,viewer,'private'))return [];
     const visible=new Set(s.educationCategories
       .filter(c=>c.scope==='private'&&this.visibleCategory(s,c)).map(c=>c.id));
-    const fold=(text:string)=>text.normalize('NFKC').toLowerCase()
-      .replace(/\s+/gu,' ').trim();
-    const needle=fold(query);
+    const needle=normalizeEducationDiscovery(query);
     if(!needle)return [];
     return s.educationResources.filter(r=>
       r.scope==='private'&&r.status==='PUBLISHED'&&visible.has(r.categoryId)&&
-      [r.title,r.university,r.cycle,r.degree].some(v=>fold(v).includes(needle)))
+      [r.title,r.university,r.cycle,r.degree].some(v=>normalizeEducationDiscovery(v).includes(needle)))
       .sort((a,b)=>a.title.localeCompare(b.title,'ar')||a.id.localeCompare(b.id))
       .map(publicEducationResource);
   }
