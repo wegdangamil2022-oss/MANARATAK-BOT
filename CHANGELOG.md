@@ -1,3 +1,11 @@
+## 0.7.33 — 2026-10-22 — B5 optional read-only external preview on Telegram owner menu (OFFLINE / NOT CONNECTED)
+
+- When (and only when) an explicitly injected `PlatformCatalogPreviewService` is configured, the owner Telegram panel offers a **read-only external Manaratak candidate preview** button; default installations without a reader hide the button and reject forged open and next-page labels.
+- Owner-only private verified sender authorization is enforced for the panel and every stateless cursor page request. The preview service rechecks the owner dashboard switch before and after the asynchronous provider call; student/group/delegated actors cannot fetch external data through it.
+- Preview rows show short HTML-safe escaped external title, university and source ID with an explicit **not locally verified** label. Every response and 10-row keyboard page is bounded; upstream exceptions, unknown fields, secrets, drafts, group data and suspicious cursors are rejected by the v0.7.32 contract.
+- No approve/import/publish button is offered for external candidates; browsing writes only normal inbound Telegram replay/audit/reply-plan records, not educational resources, import runs, campaigns or deliveries.
+- 10 additional offline JSON/SQLite and owner UI security tests cover reader absence, owner pagination, scope isolation, worst-case HTML expansion, malformed cursors, masked failures, mid-read feature revocation and content non-mutation. No connected live platform API or Telegram send/AI activation.
+
 ## 0.7.32 — 2026-10-22 — B5 owner-only read-only platform catalogue preview contract (NOT CONNECTED / NOT DEPLOYED)
 
 - Introduce an opt-in `PlatformCatalogReader` port with a strictly bounded `private` 10-row page/cursor, and an offline `PlatformCatalogPreviewService` for **owner-only**, policy-gated previews. No unknown real website API, endpoints, tokens or credentials have been assumed.
