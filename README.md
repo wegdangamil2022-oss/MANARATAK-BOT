@@ -19,6 +19,12 @@ For `ALL` subscriptions, an unknown channel result makes the decision `UNAVAILAB
 
 This fixes **mock-tested provider failure behavior only**. It does not imply that real bot administrator rights, Telegram permissions or membership checks have been accepted or deployed.
 
+## B3 v0.7.27 — prevent mandatory-channel subscription bypass via resource links (OFFLINE)
+
+An opaque `/resource r_...` link to a reviewed **group-scoped** resource is not a bypass around group subscription policies. The existing trusted membership check must show the student belongs to that group. When the group additionally requires mandatory-channel subscriptions, the link now calls the configured `SubscriptionGate` and requires verified compliance; a missing/unavailable verifier, a confirmed nonmember or unknown membership yields a private denial without exposing the group's content. This step remains read-only and **does not automatically mute or unmute**.
+
+The source, authorization revision, link validity, subscription mode/channel list/version and current group rights are checked after awaited provider calls, so changing the requirement during verification cannot turn an outdated result into access. Group links without active mandatory-channel requirements remain usable by eligible verified members. The live Bot API adapter and deployment are still OFF pending separate acceptance.
+
 ## B3 v0.7.26 — FAQ keyword search includes reviewed aliases (OFFLINE)
 
 Students can search the private approved FAQ library with `/faqsearch WORDS` or **💬 المساعد التعليمي → 🔎 ابحث في الأسئلة**. Results now include questions whose **owner-reviewed alternate wording** contains the requested word, even when the original displayed question title does not. The original title—not aliases, raw UUIDs or a synthesized answer—is displayed. A selected numbered result is checked again against the fresh currently visible approved private FAQ and its published source before its approved answer is revealed. Pagination remains 10 items/page and all results stay local, without new search logs or AI calls.
