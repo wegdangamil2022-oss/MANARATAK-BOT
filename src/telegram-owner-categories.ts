@@ -2,11 +2,12 @@ import type {BotStore,BotState,EducationCategory} from './store.js';
 import type {Policy} from './policy.js';
 import type {EducationService} from './education.js';
 import type {VerifiedAdminContext} from './education-admin.js';
-import {categoryVisibilityFingerprint,ownerCategoryChoiceToken} from './education-category-policy.js';
+import {categoryVisibilityFingerprint,categoryOrderFingerprint,categoryOrderPeers,ownerCategoryChoiceToken} from './education-category-policy.js';
 import {menuLabels,type TelegramReplyKeyboard} from './telegram-menu.js';
 
 export const ownerCategoryMenuLabel='🗂️ إدارة الأقسام';
-type CategoryAction={kind:'detail'|'disableReview'|'disableConfirm'|'enableReview'|'enableConfirm';
+type CategoryAction={kind:'detail'|'disableReview'|'disableConfirm'|'enableReview'|'enableConfirm'|
+ 'raiseReview'|'raiseConfirm'|'lowerReview'|'lowerConfirm';
  token:string;proof?:string;scopeRevision?:number;categoryRevision?:number};
 export type CategoryPage={page:number;direction:'next'|'previous'};
 const token='([A-Za-z0-9_-]{1,24}|~[a-f0-9]{16})';
@@ -17,7 +18,11 @@ const patterns=[
  ['🔴 مراجعة التعطيل · ','disableReview'],
  ['⛔ تأكيد التعطيل · ','disableConfirm'],
  ['🟢 مراجعة التفعيل · ','enableReview'],
- ['✅ تأكيد التفعيل · ','enableConfirm']
+ ['✅ تأكيد التفعيل · ','enableConfirm'],
+ ['⬆️ مراجعة الرفع · ','raiseReview'],
+ ['✅ تأكيد الرفع · ','raiseConfirm'],
+ ['⬇️ مراجعة الخفض · ','lowerReview'],
+ ['✅ تأكيد الخفض · ','lowerConfirm']
 ] as const;
 const actionRe=patterns.map(([prefix,kind])=>({
  kind,regex:new RegExp('^'+prefix+token+':'+proof+':'+number+':'+number+'$','u')
@@ -109,21 +114,59 @@ export class OwnerTelegramCategoryMenu{
   const suffix=' · '+action.token+':'+fp+':'+scopeRev+':'+categoryRev;
   const parentsReady=this.parentVisible(state,cat);
   const enabling=!cat.enabled;
+  const peers=categoryOrderPeers(state,cat);
+  const peerIndex=peers.findIndex(c=>c.id===cat.id);
+  const orderProof=categoryOrderFingerprint(state,cat);
+  const moveSuffix=' · '+action.token+':'+orderProof+':'+scopeRev+':'+categoryRev;
   if(action.kind==='detail'){
    const currentStatus=cat.enabled?(parentsReady?'مفعّل':'مفعّل لكن الأب مخفي'):'معطّل';
    const impacts=state.educationResources.filter(r=>
     r.scope===cat.scope&&r.categoryId===cat.id&&r.status==='PUBLISHED').length;
    const choice=cat.enabled?'🔴 مراجعة التعطيل'+suffix:
     parentsReady?'🟢 مراجعة التفعيل'+suffix:null;
+   const moves=[
+    ...(peerIndex>0?['⬆️ مراجعة الرفع'+moveSuffix]:[]),
+    ...(peerIndex>=0&&peerIndex<peers.length-1?['⬇️ مراجعة الخفض'+moveSuffix]:[])
+   ];
    return screen('<b>تفاصيل القسم التعليمي 🗂️</b>\n'
     +'القسم: '+safe(cat.title)+'\n'
     +'المعرّف: '+safe(cat.id,64)+'\n'
     +'النطاق: '+safe(cat.scope,32)+'\n'
     +'الحالة المحلية: '+currentStatus+'\n'
+    +'الترتيب الحالي بين الأقسام الشقيقة: '+(peerIndex+1)+' من '+peers.length+'\n'
     +'الموارد المنشورة مباشرة في هذا القسم: '+impacts+'\n'
-    +'تعطيل الأب يخفي الأقسام التابعة أيضًا؛ يتطلب تفعيل الابن ظهور أبيه أولًا.\n'
-    +'لا يتغير أي منشور Telegram حي.',
-    choice?[choice,ownerCategoryMenuLabel]:[ownerCategoryMenuLabel]);
+    +'ترتيب الأقسام يُحدّث المكتبة المحلية فقط، ولا يُنشئ منشورات Telegram.\n'
+    +'تعطيل الأب يخفي الأقسام التابعة أيضًا؛ يتطلب تفعيل الابن ظهور أبيه أولًا.',
+    [...(choice?[choice]:[]),...moves,ownerCategoryMenuLabel]);
+  }
+  if(action.kind==='raiseReview'||action.kind==='raiseConfirm'||
+    action.kind==='lowerReview'||action.kind==='lowerConfirm'){
+   if(action.proof!==orderProof||action.scopeRevision!==scopeRev||
+      action.categoryRevision!==categoryRev)return null;
+   const up=action.kind.startsWith('raise');
+   const direction=up?'up':'down';
+   const index=peerIndex+(up?-1:1);
+   const neighbor=peers[index];
+   if(!neighbor)return null;
+   if(action.kind==='raiseReview'||action.kind==='lowerReview'){
+    const confirm=up?'✅ تأكيد الرفع'+moveSuffix:'✅ تأكيد الخفض'+moveSuffix;
+    return screen('<b>مراجعة تغيير ترتيب القسم</b>\n'
+     +'القسم المختار: '+safe(cat.title)+'\n'
+     +'تبديل الموضع مع: '+safe(neighbor.title)+'\n'
+     +'الاتجاه: '+(up?'رفع خطوة':'خفض خطوة')+'\n'
+     +'التبديل يشمل الأشقاء في نفس النطاق والأب فقط.\n'
+     +'المواد المعطّلة والمؤرشفة لا تُفعّل؛ لا نشر إلى Telegram.',
+     [confirm,'🗂️ القسم · '+action.token]);
+   }
+   try{
+    await this.education.moveCategoryIfCurrent(ctx.actorId,cat.id,direction,
+     orderProof,scopeRev,categoryRev);
+   }catch{return null;}
+   return screen('<b>تم تحديث ترتيب القسم محليًا ✅</b>\n'
+    +'القسم: '+safe(cat.title)+'\n'
+    +'الحركة: '+(up?'رفع خطوة':'خفض خطوة')+'\n'
+    +'لم تُعدّل منشورات Telegram، ولم تتغير صلاحيات القسم.',
+    [ownerCategoryMenuLabel]);
   }
   const target=action.kind.startsWith('enable');
   if(target!==enabling||action.proof!==fp||
