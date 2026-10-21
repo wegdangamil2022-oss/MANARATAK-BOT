@@ -203,7 +203,9 @@ export class ResourceLinkService {
       return ref;
     });
   }
-  async resolve(ref:string,actor:string,membership:MembershipPort):Promise<LinkResult> {
+  async resolve(ref:string,actor:string,membership:MembershipPort,
+    verifySubscription?:(chatId:string,actorId:string)=>Promise<
+      'MEMBER'|'NOT_REQUIRED'|'NOT_MEMBER'|'UNAVAILABLE'|'DENIED'>):Promise<LinkResult> {
     if(!/^r_[A-Za-z0-9_-]{24}$/.test(ref) || !/^\d+$/.test(actor))return {status:'DENIED'};
     const preliminary=await this.store.snapshot();
     const link=preliminary.resourceLinks.find(x=>x.ref===ref);
@@ -214,9 +216,39 @@ export class ResourceLinkService {
       try { member=await membership(link.scope,actor); }catch {return {status:'DENIED'};}
       if(member!=='VERIFIED')return {status:'DENIED'};
     }
-    // Re-read after the external membership check, so a concurrent revocation cannot pass.
+    // A group-scoped resource link must NOT bypass mandatory channel
+    // subscriptions. Check requirements after the membership await, because
+    // the owner could introduce a new mandatory channel in the meantime.
+    // Provider callbacks are trusted internal adapters, never message claims.
+    const afterMember=await this.store.snapshot();
+    const requiredEpoch=(s:BotState,scope:string):string=>
+      JSON.stringify(s.subscriptionRequirements.filter(r=>r.chatId===scope)
+       .map(r=>[r.version,r.mode,...r.channelIds]));
+    const subscriptionEpoch=link.scope==='private'?'':requiredEpoch(afterMember,link.scope);
+    if(link.scope!=='private'){
+      if(!this.policy.canUseChat(afterMember,link.scope,'navigation') ||
+        this.policy.chatRevision(afterMember,link.scope)!==link.policyVersion)
+        return {status:'DENIED'};
+      const active=afterMember.subscriptionRequirements.some(r=>
+        r.chatId===link.scope&&r.channelIds.length>0);
+      if(active){
+        if(!verifySubscription)return {status:'DENIED'};
+        let verdict:'MEMBER'|'NOT_REQUIRED'|'NOT_MEMBER'|'UNAVAILABLE'|'DENIED';
+        try{verdict=await verifySubscription(link.scope,actor);}
+        catch{return {status:'DENIED'};}
+        if(verdict!=='MEMBER'&&verdict!=='NOT_REQUIRED')return {status:'DENIED'};
+      }
+    }
+    // Re-read after ALL external checks. Policy, links, publication sources
+    // and subscribed-channel rule version must still match the exact evidence.
     const s=await this.store.snapshot();const current=s.resourceLinks.find(x=>x.ref===ref);
-    if(!current || current.revoked || current.expiresAt<=this.clock() || current.resourceRevision!==1 || (current.boundUserId && current.boundUserId!==actor))return {status:'DENIED'};
+    if(!current || current.revoked || current.expiresAt<=this.clock() ||
+      current.scope!==link.scope||current.resourceId!==link.resourceId||
+      current.policyVersion!==link.policyVersion||
+      current.resourceRevision!==1||(current.boundUserId && current.boundUserId!==actor))
+      return {status:'DENIED'};
+    if(link.scope!=='private'&&requiredEpoch(s,link.scope)!==subscriptionEpoch)
+      return {status:'DENIED'};
     if(current.scope==='private') {
       if(!this.policy.privateFeature(s,'education.navigate',actor))return {status:'DENIED'};
     } else if(!this.policy.canUseChat(s,current.scope,'navigation') || this.policy.chatRevision(s,current.scope)!==current.policyVersion)return {status:'DENIED'};
