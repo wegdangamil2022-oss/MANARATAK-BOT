@@ -8,7 +8,7 @@ export interface SearchPageCommand{
 /** Bounded, predictable Unicode search; no markup, colon, controls, newlines
  * or whitespace ambiguity in a copyable Telegram reply-keyboard label.
  */
-const queryPattern=/^[\p{L}\p{N}][\p{L}\p{N} _-]{0,30}[\p{L}\p{N}]$/u;
+const queryPattern=/^[\p{L}\p{N}][\p{L}\p{N}\u0610-\u061a\u064b-\u065f\u0670\u06d6-\u06ed _-]{0,30}[\p{L}\p{N}\u0610-\u061a\u064b-\u065f\u0670\u06d6-\u06ed]$/u;
 export function isValidSearchTerm(value:unknown):value is string{
  return typeof value==='string'&&value.length<=64&&
   Array.from(value).length>=2&&Array.from(value).length<=32&&
