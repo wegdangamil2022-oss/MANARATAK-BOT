@@ -1,3 +1,12 @@
+## 0.7.27 — 2026-10-21 — Mandatory-channel verification for group-scoped opaque resource links (NOT DEPLOYED)
+
+- Closed a private `/resource <opaque-ref>` authorization bypass: a student with verified membership in an authorized group could previously open a link even when that group required joining separately approved mandatory channels. Group resource links now require both verified group membership **and** a passing trusted `SubscriptionGate.verify` result whenever the saved group subscription rule is active.
+- The `ResourceLinkService.resolve` internal API accepts an optional trusted subscription-verification function. If a group has active mandatory requirements and the adapter is unavailable, access is **DENIED**, never treated as not required. Inactive/empty requirements and private-scope resources continue to work as before.
+- Subscriptions are checked after the external group membership request to catch a rule created during that wait, then re-checked after any awaited channel-subscription verification. A mode/list/version edit while awaiting evidence invalidates the response. Existing published-source, link revocation, bound user, policy-version and resource checks still run after provider awaits.
+- The Telegram `/resource` route passes the same existing read-only `SubscriptionGate` used for group/category browsing; no new AI, live Telegram call, moderation, automatic unmute, enrollment or external data disclosure is introduced.
+- RED-first JSON+SQLite integration tests include verified group member without required-channel membership, complete verified eligibility, missing verifier, UNAVAILABLE/UNKNOWN provider results, newly added rules during a pending check, rule changes during verification, archival, group revoke/reapprove, and provider exceptions.
+- This is a MOCK-tested / OFF-by-default library and reply-plan implementation, not a live Telegram acceptance claim.
+
 ## 0.7.26 — 2026-10-21 — Approved FAQ keyword aliases in student-private search (NOT DEPLOYED)
 
 - The existing private **💬 المساعد التعليمي → 🔎 ابحث في الأسئلة** and `/faqsearch` workflow now matches either an owner-reviewed question title or any of its saved reviewed alternate wordings (FAQ aliases), using the same Unicode NFKC case-insensitive normalization already applied to titles.
