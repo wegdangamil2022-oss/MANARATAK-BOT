@@ -4,7 +4,7 @@ import { Policy } from './policy.js';
 import { parseDocument, type ImportFormat } from './ingestion.js';
 import { planPublicationPreview } from './publication-preview-plan.js';
 import {resourceArchiveFingerprint} from './education-archive.js';
-import {categoryVisibilityFingerprint} from './education-category-policy.js';
+import {categoryVisibilityFingerprint,categoryOrderFingerprint,categoryOrderPeers} from './education-category-policy.js';
 
 type Origin = 'TELEGRAM_ADMIN' | 'ADMIN_WEB';
 /** Public resource projections must not reveal internal audit identities or import job IDs. */
@@ -88,6 +88,44 @@ export class EducationService {
       s.audit.push({updateKey:'b3:category-visibility:'+id+':'+cat.revision,
        decision:'ALLOW',reason:'CATEGORY_VISIBILITY_CHANGED',
        policyVersion:currentEpoch,at:this.clock()});
+    });
+  }
+  /** Explicit owner category reordering: one adjacent sibling swap. Never
+   * changes scope/parent, visibility or stored resource publication status.
+   * The entire sibling-set fingerprint and group epoch are checked inside
+   * one BotStore transaction. Reindexing ties assigns deterministic integer
+   * ranks and bumps revisions to invalidate stale owner buttons.
+   */
+  async moveCategoryIfCurrent(actor:string,id:string,direction:'up'|'down',
+    proof:string,scopeRevision:number,categoryRevision:number):Promise<void>{
+    this.assertOwner(actor);
+    if(!goodId(id)||!['up','down'].includes(direction)||
+      !/^~[a-f0-9]{16}$/u.test(proof)||
+      !Number.isSafeInteger(scopeRevision)||scopeRevision<0||
+      !Number.isSafeInteger(categoryRevision)||categoryRevision<0)
+      throw Error('CATEGORY_ORDER_STALE');
+    await this.store.transaction(s=>{
+      const cat=s.educationCategories.find(c=>c.id===id);
+      if(!cat||!this.scopeReady(s,cat.scope))throw Error('CATEGORY_ORDER_STALE');
+      const epoch=cat.scope==='private'?0:this.policy.chatRevision(s,cat.scope);
+      if(epoch!==scopeRevision||(cat.revision??0)!==categoryRevision||
+        categoryOrderFingerprint(s,cat)!==proof)throw Error('CATEGORY_ORDER_STALE');
+      const peers=categoryOrderPeers(s,cat);
+      const index=peers.findIndex(c=>c.id===id);
+      const target=index+(direction==='up'?-1:1);
+      if(index<0||target<0||target>=peers.length)throw Error('CATEGORY_ORDER_BOUNDARY');
+      [peers[index],peers[target]]=[peers[target]!,peers[index]!];
+      // Reindex only this parent/scope's siblings, never unrelated groups
+      // or descendants. Revision bumps invalidate confirmations even after
+      // a later reversal that restores the original sort order.
+      for(let i=0;i<peers.length;i++){
+        const sibling=peers[i]!;
+        sibling.order=i+1;
+        sibling.revision=(sibling.revision??0)+1;
+      }
+      s.audit.push({updateKey:'b3:category-order:'+id+':'+cat.revision,
+       decision:'ALLOW',reason:'CATEGORY_ORDER_CHANGED',
+       policyVersion:epoch,at:this.clock()});
     });
   }
   async listCategories(viewer:string,scope:string):Promise<EducationCategory[]> {
