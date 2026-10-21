@@ -126,7 +126,7 @@ test('B5 stage refuses forged source IDs, stale/invalid fingerprints, malformed 
    ['../../private',p.fingerprint],['none',p.fingerprint],
    ['grant-one','broken'],['grant-one','0'.repeat(64)],
    ['grant-one',p.fingerprint.toUpperCase()]
-  ] as const)){
+  ] as const){
    const result=await f.service.stage(OWNER,id,proof);
    assert.ok(result.status==='STALE'||result.status==='UNAVAILABLE',result.status);
   }
