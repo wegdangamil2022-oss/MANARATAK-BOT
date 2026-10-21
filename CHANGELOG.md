@@ -1,3 +1,11 @@
+## 0.7.16 — 2026-10-21 — Owner library review and safeguarded local resource archival (NOT DEPLOYED)
+
+- Private verified Telegram owner now has **functional library navigation**, not only a status placeholder: see currently authorized local published resources, 10/page Next/Previous, open sanitized resource details and review/archive with separate confirmation.
+- Archive is owner-only and compares the **opaque fingerprint of the exact currently reviewed publication** plus its current group-policy revision **inside the atomic BotStore transaction** before writing ARCHIVED. A changed publication copy, revoked/reapproved group, previously archived resource, copied label, or stale button fails closed. The old direct admin archiver remains available to existing authorized API callers.
+- Archived resources disappear from the student's currently published lists/search results. No deletion or edit of Telegram channel posts is requested, and no pending sender is automatically retried. Audit records capture one local archival transition without private content.
+- New RED-first JSON and SQLite integration tests cover list/detail, escaping, two-stage confirmation, 13-item pagination, students/staff/group context denial, changed content/group policy, unauthorized direct mutations and malformed button rejection. Test fixtures use only local stores and mocked Telegram events.
+- Telegram activation, external publishing, AI and live group acceptance remain separately blocked.
+
 ## 0.7.15 — 2026-10-21 — Search published, approved educational resources from student Telegram buttons (NOT DEPLOYED)
 
 - Added an actual **🔍 البحث في الموارد** Telegram ReplyKeyboard entry for students and owner. The button introduces a bounded text search: `/search منحة الصين` or `/search Grant`. No AI is required or invoked.
