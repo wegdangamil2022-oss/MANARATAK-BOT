@@ -238,3 +238,9 @@
 - Fold well-understood Arabic writing variations (diacritics, alef spelling, maqsurah, kashida/tatweel, space/punctuation separators and Arabic/Persian decimal digits) after Unicode NFKC. If canonical search text is empty, return no results to avoid enumerating all approved questions.
 - Preserve the original reviewed title for display and the existing global ordinal/opaque answer selection authorization; don't display alternative terms or store student searches. Query length and Unicode control/bidi checks stay unchanged.
 - Unicode normalization is an aid to discovery, not a linguistic guarantee, semantic/AI search, new publishing workflow, or change to source verification.
+
+## B3 v0.7.30 — Telegram list display budget is not content or authority (22 October 2026)
+
+- Preserve approved data and the existing opaque/ID-based current-source access checks. Restrict **only visible list excerpt** lengths after escaping, so Unicode characters and HTML entities remain intact. The Telegram reply renderer's existing 4096-byte hard limit remains an independent defense.
+- Restrict every owner-supplied category/resource reply-keyboard label to both 256 UTF-8 bytes and 96 codepoints; compute the same deterministic button string when the student taps it. Renamed, hidden, archived or revoked entities still fail closed.
+- Do not silently truncate full authoritative FAQ answers, attempt multipart delivery, or send Telegram messages in this slice. A separate reviewed delivery design would be necessary for unusually long encoded answer bodies.
