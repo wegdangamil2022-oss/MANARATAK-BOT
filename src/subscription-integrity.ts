@@ -35,7 +35,14 @@ export function subscriptionRequirementMode(state:BotState,chatId:string):
  const matches=state.subscriptionRequirements.filter(r=>r?.chatId===chatId);
  if(matches.length===0)return 'NONE';
  if(matches.length!==1||!isCanonicalSubscriptionRule(matches[0]))return 'INVALID';
- return matches[0].channelIds.length?'ACTIVE':'PAUSED';
+ const rule=matches[0];
+ if(rule.channelIds.length){
+  const verified=(id:string)=>state.chats.some(c=>
+    c.id===id&&c.approved&&c.scopes.includes('verification'));
+  if(!verified(chatId)||rule.channelIds.some(id=>!verified(id)))
+    return 'INVALID';
+ }
+ return rule.channelIds.length?'ACTIVE':'PAUSED';
 }
 /** NOT_REQUIRED may be an explicit owner exception, but must never prove
  * student membership while the owner has configured required channels.
