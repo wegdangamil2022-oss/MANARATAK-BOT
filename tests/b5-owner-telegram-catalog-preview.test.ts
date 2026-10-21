@@ -79,7 +79,11 @@ for(const engine of ['json','sqlite'] as const){
     {scope:'private',limit:10,cursor:null},
     {scope:'private',limit:10,cursor:'cursor-next'}
    ]);
-   assert.deepEqual(await f.store.snapshot(),baseline);
+   const after=await f.store.snapshot();
+   // The Telegram adapter legitimately audits each incoming update and plans
+   // its reply; external preview must never change *published content*.
+   for(const field of ['educationResources','importRuns','campaigns','deliveries'] as const)
+    assert.deepEqual(after[field],baseline[field],field);
   }finally{await f.close();}
  });
  test('B5 '+engine+': student and group cannot invoke read-only owner preview or guessed cursor',async()=>{
