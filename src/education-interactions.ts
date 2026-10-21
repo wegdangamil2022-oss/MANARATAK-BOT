@@ -12,6 +12,22 @@ export type FAQResult = {status:'ANSWER'; answer:string; sourceId:string} | {sta
 export type LinkResult = {status:'FOUND'; resource:PublicEducationResource} | {status:'DENIED'};
 
 const questionKey=(text:string):string=>text.normalize('NFKC').toLocaleLowerCase('en-US').replace(/[!?؟.,،؛:;\s]+/gu,' ').trim();
+/** Discovery-only normalization: keep exact /faq matching unchanged.
+ * Arabic vowel marks, alef spelling, maqsurah, tatweel, punctuation spacing
+ * and Arabic/Persian decimal digits should not obscure approved titles.
+ * This does not change stored questions, aliases or answer verification.
+ */
+function normalizedFAQDiscovery(value:string):string{
+ return value.normalize('NFKC').toLocaleLowerCase('en-US')
+  .replace(/[\u064b-\u065f\u0670\u06d6-\u06ed]/gu,'')
+  .replace(/[\u0622\u0623\u0625\u0671]/gu,'ا')
+  .replace(/\u0649/gu,'ي')
+  .replace(/\u0640/gu,'')
+  .replace(/[\u0660-\u0669]/gu,d=>String(d.charCodeAt(0)-0x0660))
+  .replace(/[\u06f0-\u06f9]/gu,d=>String(d.charCodeAt(0)-0x06f0))
+  .replace(/[\p{P}\p{Z}\s]+/gu,' ').trim();
+}
+
 const validText=(text:string,max:number):boolean=>typeof text==='string' && text.trim().length>0 && text.length<=max && !/[\u0000-\u001F\u007F]/u.test(text);
 function hasApprovedSource(s:BotState, scope:string, id:string):boolean {
   const resource=s.educationResources.find(r=>r.id===id && r.scope===scope && r.status==='PUBLISHED');
@@ -144,15 +160,17 @@ export class ApprovedAnswerService {
     if(typeof query!=='string'||!query.trim()||query.length>80||
       /[\u0000-\u001f\u007f\u202a-\u202e\u2066-\u2069]/u.test(query))
       return {status:'OK',items:[]};
-    const normalize=(value:string)=>value.normalize('NFKC').toLocaleLowerCase('en-US');
-    const needle=normalize(query);
+    const needle=normalizedFAQDiscovery(query);
+    // Queries made solely of stripped marks/punctuation must never match
+    // every visible question via String.includes('').
+    if(!needle)return {status:'OK',items:[]};
     const visible=s.faqEntries.filter(q=>q.scope==='private'&&q.status==='APPROVED'&&
       hasApprovedSource(s,'private',q.sourceResourceId))
       .sort((a,b)=>b.createdAt-a.createdAt||a.id.localeCompare(b.id))
       .slice(0,10000);
     const items=visible.flatMap((q,i)=>
-      normalize(q.question).includes(needle)||
-      q.aliases.some(alias=>normalize(alias).includes(needle))
+      normalizedFAQDiscovery(q.question).includes(needle)||
+      q.aliases.some(alias=>normalizedFAQDiscovery(alias).includes(needle))
        ?[{id:q.id,question:q.question,ordinal:i+1}]:[]);
     return {status:'OK',items};
   }
