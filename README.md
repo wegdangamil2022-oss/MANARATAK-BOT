@@ -19,6 +19,12 @@ For `ALL` subscriptions, an unknown channel result makes the decision `UNAVAILAB
 
 This fixes **mock-tested provider failure behavior only**. It does not imply that real bot administrator rights, Telegram permissions or membership checks have been accepted or deployed.
 
+## B2-Core v0.7.14 — malformed rules fail closed without punishment (OFFLINE)
+
+Subscription membership enforcement now shares the strict structural rule validator used by the owner/operator audit. A malformed mode (`ALL` vs `ANY`), invalid revision, wrong channel ID format, duplicate required channel or oversized rule produces `UNAVAILABLE`, not `NOT_MEMBER`, and will never trigger a moderation action from that evidence. Normal approved rules and valid paused requirements retain their established behavior.
+
+Paused rules do not bypass the integrity audit: a paused empty-channel rule is valid only when its group ID, mode and revision remain well formed, and two rules for the same group cannot hide behind active/paused status. The report still contains only aggregate redacted codes, and offline acceptance blocks corrupted local state. The feature never enables live Telegram, bypasses permissions, changes student records or automatically unmutes users.
+
 ## B2-Core v0.7.13 — policy-version validation for external membership checks (OFFLINE)
 
 The subscription gate now treats each external channel verification result as valid only for the **specific saved approval policy revision** under which the call began. Revoking and reapproving a channel or group while a provider request is pending invalidates that request, even if the final permission scopes match the old ones. The gate also compares mandatory-channel rule revisions and contents before interpreting a membership result.
