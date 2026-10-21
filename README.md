@@ -19,6 +19,12 @@ For `ALL` subscriptions, an unknown channel result makes the decision `UNAVAILAB
 
 This fixes **mock-tested provider failure behavior only**. It does not imply that real bot administrator rights, Telegram permissions or membership checks have been accepted or deployed.
 
+## B3 v0.7.20 — conflicting FAQs and unfinished drafts (OFFLINE)
+
+The owner FAQ detail screen now shows the number of currently approved same-scope answers whose normalized question or alias overlaps the selected FAQ. For a DRAFT, the approval button is available only when the linked education source is still currently visible and the conflict count is zero. The owner can **review and archive** a DRAFT that is obsolete, has lost its source or conflicts with another approved answer. This never publishes or reactivates the draft first.
+
+The final transaction checks the current alias collision set in addition to the owner, exact FAQ/source fingerprint, group authorization revision and status. If another answer was approved while the owner reviewed a draft, the stale confirmation fails closed rather than introducing new AMBIGUOUS answers. Existing approved answers can still be explicitly archived with their original reviewed flow; no group/channel messages or AI provider calls are made by the owner menu.
+
 ## B3 v0.7.19 — source-bound FAQ moderation from private Telegram (OFFLINE)
 
 The verified **🔐 لوحة المالك → 🧠 الأسئلة الشائعة** ReplyKeyboard lists reviewed FAQ records in ten-item pages. Open a **❓ سؤال** to inspect a sanitized question, answer, status, scope and saved source availability. A draft can be explicitly **reviewed then approved** only while its linked educational resource is still locally PUBLISHED in an enabled, authorized category hierarchy. An already APPROVED FAQ can be **reviewed then archived** to stop its future approved FAQ responses; its linked scholarship/course resource remains untouched.
