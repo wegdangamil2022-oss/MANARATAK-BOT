@@ -60,7 +60,7 @@ test('B3 FAQ keyword search parser is canonical, bounded and round-trips safe Ar
  }
  for(const text of ['➡️ التالي · fq:01:YWJj',
   '➡️ التالي · fq:1000:YWJj','➡️ التالي · fq:0:YWJj',
-  '⬅️ السابق · fq:1:YWJj',button+'\n',
+  '⬅️ السابق · fq:999:YWJj',button+'\n',
   '➡️ التالي · fq:1:==','➡️ التالي · fq:1:YWJj=']){
   assert.equal(parsePrivateFAQSearchPage(text),null,text);
  }
