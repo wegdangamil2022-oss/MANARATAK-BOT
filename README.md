@@ -19,6 +19,12 @@ For `ALL` subscriptions, an unknown channel result makes the decision `UNAVAILAB
 
 This fixes **mock-tested provider failure behavior only**. It does not imply that real bot administrator rights, Telegram permissions or membership checks have been accepted or deployed.
 
+## B2-Core v0.7.23 — membership proof remains current through moderation (OFFLINE)
+
+`SubscriptionGate.syncSubscriptionRestriction` now binds each confirmed subscriber / non-subscriber result to the initial saved group authorization revision, channel authorization revisions, mandatory rule version, mode and ordered channel list. These conditions are rechecked inside the moderation transaction that stores/removes a subscription-specific MUTE reason, while planning a moderation operation, and just before starting the external effect.
+
+This prevents delayed moderation checks from applying a punishment or clearing a saved subscription reason after a channel/group was revoked/reapproved, a mandatory rule was paused, or the required channels were changed. Old prepared intents are cancelled before fake provider dispatch. The rule is intentionally narrow: unrelated policy updates do not invalidate otherwise current evidence; manual reasons remain independent. The system remains offline-only, and this is **not a live Telegram restrict/unrestrict integration**.
+
 ## B3 v0.7.22 — number-matched student FAQ answers (OFFLINE)
 
 Private FAQ browsing now shows **📖 سؤال 1**, **📖 سؤال 2**, etc. matching the question numbers in the message; page two continues at question 11. Buttons still carry only an opaque fingerprint rather than internal UUIDs. Their **exact currently authorized row number and fingerprint** must match the saved ordered catalogue at the next tap. A reordered/archived/disabled FAQ makes its stale button unusable, not an accidental response to a different question. Existing explicit `/faq` text lookup is unchanged and external AI remains OFF.

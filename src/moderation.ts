@@ -70,17 +70,22 @@ export class ModerationService {
     return changed ? this.reconcile(actorId, chatId, memberId) : { status: 'NO_CHANGE', reason: 'NOT_ACTIVE' };
   }
   /** Invoked only by SubscriptionGate's trusted membership reconciliation; never expose as a user command. */
-  async setSubscriptionReason(chatId: string, memberId: string, reference: string, active: boolean): Promise<ModerationResult> {
+  async setSubscriptionReason(chatId: string, memberId: string, reference: string, active: boolean,
+    stillCurrent?: (state:BotState)=>boolean): Promise<ModerationResult> {
     if (!reference || reference.length > 80 || !await this.check(this.policy.ownerId, chatId, memberId)) return { status: 'DENIED', reason: 'NOT_AUTHORIZED_OR_BOT_RIGHTS' };
-    const changed = await this.store.transaction(s => {
-      if (!this.authorized(s, this.policy.ownerId, chatId, memberId)) return false;
+    const change = await this.store.transaction(s => {
+      if (!this.authorized(s, this.policy.ownerId, chatId, memberId) ||
+          (stillCurrent && !stillCurrent(s)))return 'STALE' as const;
       const found = s.moderationReasons.find(x => byTarget(x, chatId, memberId) && x.source === 'SUBSCRIPTION' && x.reference === reference);
-      if (Boolean(found?.active) === active) return false;
+      if (Boolean(found?.active) === active) return 'UNCHANGED' as const;
       if (found) found.active = active;
       else if (active) s.moderationReasons.push({ chatId, memberId, source: 'SUBSCRIPTION', reference, kind: 'MUTE', createdBy: 'SYSTEM_SUBSCRIPTION', active: true });
-      return true;
+      return 'CHANGED' as const;
     });
-    return changed ? this.reconcile(this.policy.ownerId, chatId, memberId) : { status: 'NO_CHANGE', reason: 'REASON_UNCHANGED' };
+    if(change==='STALE')return {status:'DENIED',reason:'SUBSCRIPTION_EVIDENCE_STALE'};
+    return change==='CHANGED'
+      ?this.reconcile(this.policy.ownerId,chatId,memberId,stillCurrent)
+      :{status:'NO_CHANGE',reason:'REASON_UNCHANGED'};
   }
   async issueWarning(actorId: string, chatId: string, memberId: string, reference: string): Promise<{ status: 'ADDED' | 'NO_CHANGE' | 'DENIED'; count: number }> {
     if (!reference || reference.length > 80) throw new Error('Invalid warning reference');
@@ -103,10 +108,12 @@ export class ModerationService {
       return { status: 'REVOKED' as const, count: count() };
     });
   }
-  async reconcile(actorId: string, chatId: string, memberId: string): Promise<ModerationResult> {
+  async reconcile(actorId: string, chatId: string, memberId: string,
+    stillCurrent?: (state:BotState)=>boolean): Promise<ModerationResult> {
     if (!await this.check(actorId, chatId, memberId)) return { status: 'DENIED', reason: 'NOT_AUTHORIZED_OR_BOT_RIGHTS' };
     const candidate = await this.store.transaction(s => {
-      if (!this.authorized(s, actorId, chatId, memberId)) return { status: 'DENIED' as const };
+      if (!this.authorized(s, actorId, chatId, memberId) ||
+          (stillCurrent && !stillCurrent(s)))return {status:'DENIED' as const};
       const operations = s.moderationOperations.filter(x => byTarget(x, chatId, memberId));
       if (operations.some(x => x.status === 'UNKNOWN_OUTCOME')) return { status: 'BLOCKED_UNKNOWN' as const };
       if (operations.some(x => ['STARTED', 'INTENT'].includes(x.status))) return { status: 'BLOCKED_PENDING' as const };
@@ -124,6 +131,7 @@ export class ModerationService {
     const started = await this.store.transaction(s => {
       const op = s.moderationOperations.find(x => x.id === candidate.id)!;
       const valid = rights && this.authorized(s, actorId, chatId, memberId) &&
+        (!stillCurrent||stillCurrent(s)) &&
         this.policy.chatRevision(s, chatId) === op.policyVersion && fingerprint(s, chatId, memberId) === op.reasonFingerprint;
       if (!valid) { op.status = 'CANCELLED'; return false; }
       op.status = 'STARTED'; return true;

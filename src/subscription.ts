@@ -116,9 +116,34 @@ export class SubscriptionGate {
      channels:[...config.channelIds]};
   }
   async syncSubscriptionRestriction(chatId: string, memberId: string): Promise<ModerationResult | SubscriptionDecision> {
-    const result = await this.verify(chatId, memberId);
-    if (result.status === 'MEMBER' || result.status === 'NOT_REQUIRED') return this.moderation.setSubscriptionReason(chatId, memberId, 'subscription-gate', false);
-    if (result.status === 'NOT_MEMBER') return this.moderation.setSubscriptionReason(chatId, memberId, 'subscription-gate', true);
+    // The public verify() response contains no durable proof. Keep a private
+    // pre-check epoch and require the SAME saved rule/group/channel epochs in
+    // ModerationService's atomic reason-write and immediately before dispatch.
+    // This closes the window *after* verify() revalidation but *before*
+    // moderation's external rights check and Telegram-effect intent.
+    const before=await this.store.snapshot();
+    const groupEpoch=this.policy.chatRevision(before,chatId);
+    const rule=before.subscriptionRequirements.find(x=>x.chatId===chatId);
+    const channelEpochs=new Map((rule?.channelIds??[]).map(id=>
+      [id,this.policy.chatRevision(before,id)] as const));
+    const stillCurrent=(s:BotState):boolean=>{
+      if(!this.policy.canUseChat(s,chatId,'verification')||
+        this.policy.chatRevision(s,chatId)!==groupEpoch)return false;
+      const current=s.subscriptionRequirements.find(x=>x.chatId===chatId);
+      if(!rule)return !current;
+      if(!current||!isCanonicalSubscriptionRule(rule)||
+        !isCanonicalSubscriptionRule(current)||current.version!==rule.version||
+        current.mode!==rule.mode||current.channelIds.length!==rule.channelIds.length||
+        current.channelIds.some((id,i)=>id!==rule.channelIds[i]))return false;
+      return rule.channelIds.every(id=>
+        this.policy.canUseChat(s,id,'verification')&&
+        this.policy.chatRevision(s,id)===channelEpochs.get(id));
+    };
+    const result=await this.verify(chatId,memberId);
+    if(result.status==='MEMBER'||result.status==='NOT_REQUIRED')
+      return this.moderation.setSubscriptionReason(chatId,memberId,'subscription-gate',false,stillCurrent);
+    if(result.status==='NOT_MEMBER')
+      return this.moderation.setSubscriptionReason(chatId,memberId,'subscription-gate',true,stillCurrent);
     return result; // Unavailable is NOT a confirmed violation or punishment.
   }
 }
