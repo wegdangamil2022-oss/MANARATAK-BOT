@@ -38,7 +38,7 @@ async function fixture(engine:'json'|'sqlite',reader?:PlatformCatalogReader){
  const service=reader?new PlatformCatalogPreviewService(store,policy,reader):undefined;
  const app=()=>new TelegramUpdateApplication({
   store,policy,education,admin,faq,links,botId:'bot',botUsername:'ManaratakBot',
-  membership:async()=> 'UNKNOWN',platformCatalog:service
+  membership:async()=> 'UNKNOWN',...(service?{platformCatalog:service}:{})
  });
  return {store,app,close:()=>rm(dir,{recursive:true,force:true})};
 }
