@@ -144,6 +144,28 @@ export class EducationService {
     if(!category || !this.visibleCategory(s,category)) return [];
     return s.educationResources.filter(r=>r.scope===scope&&r.categoryId===categoryId&&r.status==='PUBLISHED').map(publicEducationResource);
   }
+  /** Search the currently visible, published, private student library only.
+   * One immutable snapshot provides a consistent scoped result. Group/channel
+   * content is deliberately excluded: its subscription gate is independent.
+   * Return the existing public projection, never import or reviewer metadata.
+   */
+  async searchPublishedResources(viewer:string,query:string):Promise<PublicEducationResource[]>{
+    if(typeof query!=='string'||Array.from(query).length<2||Array.from(query).length>32)
+      return [];
+    const s=await this.store.snapshot();
+    if(!this.canBrowse(s,viewer,'private'))return [];
+    const visible=new Set(s.educationCategories
+      .filter(c=>c.scope==='private'&&this.visibleCategory(s,c)).map(c=>c.id));
+    const fold=(text:string)=>text.normalize('NFKC').toLowerCase()
+      .replace(/\s+/gu,' ').trim();
+    const needle=fold(query);
+    if(!needle)return [];
+    return s.educationResources.filter(r=>
+      r.scope==='private'&&r.status==='PUBLISHED'&&visible.has(r.categoryId)&&
+      [r.title,r.university,r.cycle,r.degree].some(v=>fold(v).includes(needle)))
+      .sort((a,b)=>a.title.localeCompare(b.title,'ar')||a.id.localeCompare(b.id))
+      .map(publicEducationResource);
+  }
   async archiveResource(actor:string,id:string):Promise<void> {
     await this.store.transaction(s=>{
       const resource=s.educationResources.find(r=>r.id===id); if(!resource) throw new Error('RESOURCE_NOT_FOUND');
