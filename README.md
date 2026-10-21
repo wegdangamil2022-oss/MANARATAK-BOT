@@ -1,3 +1,7 @@
+## B5 v0.7.33 — owner Telegram preview for an explicitly injected platform reader (offline)
+
+The Telegram owner's administrative menu conditionally offers **🔎 معاينة بيانات منارتك** when the application has a B5 read-only reader adapter. It shows only bounded escaped titles, universities and source IDs that remain **externally unverified**, with an owner-only next-page control. No reader means **no preview button**; stale/forged, student and group requests are denied. This does not import or publish anything and does not connect to a real Manaratak production API. The normal Telegram webhook audit still records the inbound mock interactions.
+
 ## B5 v0.7.32 — proposed read-only Manaratak catalogue contract (offline only)
 
 A provider-neutral, owner-only `PlatformCatalogReader` adapter and strict `PlatformCatalogPreviewService` can preview up to ten externally self-reported published private catalogue records without writing to local storage or exposing them to students. Every candidate remains **UNVERIFIED_EXTERNAL** and cannot become a local approved resource without a future explicit review workflow. The real platform's API, URL, credentials, schema and connectivity are **not** connected or inferred. Owner dashboard permissions are checked both before and after fetching; all tests use mocked providers.
