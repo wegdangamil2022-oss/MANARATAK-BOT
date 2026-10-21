@@ -1,3 +1,10 @@
+## 0.7.25 — 2026-10-21 — Prevent outdated private-group membership from bypassing a newly required subscription (NOT DEPLOYED)
+
+- Fixed a read-after-await authorization gap in private `/categories <group>` and `/resources <group> <category>`: a trusted external group membership result is now bound to the exact saved **group authorization revision**, current permitted navigation scopes, and current mandatory-channel rule revisions/modes/channel lists.
+- New authorization and subscription snapshots are taken after the group membership check and after any mandatory-channel verification. A revoke-then-reapprove, scope reconfiguration, newly added mandatory channel, or changed subscription rule during provider latency invalidates stale membership evidence, even if a group ends up with identical permissions. The request fails closed without revealing group-scoped resources.
+- Unchanged active authorized group members can still browse reviewed group library content; unknown or changed evidence does not become a success or a moderation punishment.
+- RED-first tests cover JSON and SQLite, interleaved revoke/reapprove, identical-looking scope changes, new subscription gates during provider latency, and unchanged successful membership. All Telegram interactions are simulated; this does not prove live provider permissions.
+
 ## 0.7.24 — 2026-10-21 — Private student keyword search over reviewed FAQ titles (NOT DEPLOYED)
 
 - The student-private **💬 المساعد التعليمي** ReplyKeyboard now includes **🔎 ابحث في الأسئلة**, which provides an actual explicit `/faqsearch <keywords>` workflow rather than a placeholder. Only owner-approved, private-scope FAQ questions with currently published, visible education sources are searched; no generative AI, third-party retrieval or group FAQ disclosure.
