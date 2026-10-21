@@ -78,8 +78,8 @@ for(const engine of ['json','sqlite'] as const){
    assert.equal((index.plan?.text??'').includes('SECRET_GROUP_QUESTION'),false);
    assert.equal((index.plan?.text??'').includes('سؤال مسودة'),false);
    assert.equal(isValidTelegramReplyKeyboard(index.plan?.replyMarkup),true);
-   const choice=buttons(index).find(x=>x.startsWith('📖 سؤال · '))!;
-   assert.ok(choice);assert.equal(buttons(index).filter(x=>x.startsWith('📖 سؤال · ')).length,1);
+   const choice=buttons(index).find(x=>x.startsWith('📖 سؤال '))!;
+   assert.ok(choice);assert.equal(buttons(index).filter(x=>x.startsWith('📖 سؤال ')).length,1);
    const result=await f.app().handle(msg(3,choice));
    assert.equal(result.status,'APPLIED');
    assert.match(result.plan?.text??'',/المتطلبات &amp; المعايير &lt;الرسمية&gt;/);
@@ -98,11 +98,11 @@ test('B3 13 approved private FAQs paginate 10+4 and reject forged/stale/cross-di
    await f.faq.approve(OWNER,q.id);
   }
   const page1=await f.app().handle(msg(10,privateFAQBrowseLabel));
-  assert.equal(buttons(page1).filter(x=>x.startsWith('📖 سؤال · ')).length,10);
+  assert.equal(buttons(page1).filter(x=>x.startsWith('📖 سؤال ')).length,10);
   assert.match(page1.plan?.text??'',/صفحة 1 من 2/);
   const second=await f.app().handle(msg(11,'➡️ التالي · pf:1'));
   assert.equal(second.status,'APPLIED');
-  assert.equal(buttons(second).filter(x=>x.startsWith('📖 سؤال · ')).length,4);
+  assert.equal(buttons(second).filter(x=>x.startsWith('📖 سؤال ')).length,4);
   assert.equal(isValidTelegramReplyKeyboard(second.plan?.replyMarkup),true);
   assert.match(second.plan?.text??'',/صفحة 2 من 2/);
   assert.equal((await f.app().handle(msg(12,'⬅️ السابق · pf:0'))).status,'APPLIED');
@@ -117,7 +117,7 @@ test('B3 13 approved private FAQs paginate 10+4 and reject forged/stale/cross-di
 test('B3 stale reviewed FAQ button is denied immediately after source category hide, FAQ archival or source archive',async()=>{
  const f=await fixture('sqlite');try{
   const index=await f.app().handle(msg(40,privateFAQBrowseLabel));
-  const choice=buttons(index).find(x=>x.startsWith('📖 سؤال · '))!;
+  const choice=buttons(index).find(x=>x.startsWith('📖 سؤال '))!;
   await f.education.setCategoryEnabled(OWNER,'guide',false);
   const hidden=await f.app().handle(msg(41,choice));
   assert.equal(hidden.status,'DENIED');assert.equal(hidden.plan,undefined);
@@ -128,13 +128,13 @@ test('B3 stale reviewed FAQ button is denied immediately after source category h
   const archived=await f.app().handle(msg(43,choice));
   assert.equal(archived.status,'DENIED');assert.equal(archived.plan,undefined);
   const list=await f.app().handle(msg(44,privateFAQBrowseLabel));
-  assert.equal(buttons(list).some(x=>x.startsWith('📖 سؤال · ')),false);
+  assert.equal(buttons(list).some(x=>x.startsWith('📖 سؤال ')),false);
  }finally{await f.close();}
 });
 test('B3 student private FAQ browser honors navigation feature off on both new and old buttons',async()=>{
  const f=await fixture();try{
   const index=await f.app().handle(msg(50,privateFAQBrowseLabel));
-  const button=buttons(index).find(x=>x.startsWith('📖 سؤال · '))!;
+  const button=buttons(index).find(x=>x.startsWith('📖 سؤال '))!;
   await f.store.transaction(s=>{s.privateFeatures['education.navigate']=false;});
   for(const [i,c] of [privateFAQBrowseLabel,button,'➡️ التالي · pf:1'].entries()){
    const r=await f.app().handle(msg(51+i,c));
@@ -162,7 +162,7 @@ test('B3 numbered FAQ buttons visibly map to question numbers and remain UTF-8 b
  assert.ok(parsePrivateFAQSelection(privateFAQButton(id,1)));
  for(const bad of ['📖 سؤال 01 · ~1111111111111111',
   '📖 سؤال 0 · ~1111111111111111',
-  '📖 سؤال 10000 · ~1111111111111111',
+  '📖 سؤال 10001 · ~1111111111111111',
   '📖 سؤال -1 · ~1111111111111111'])
   assert.equal(parsePrivateFAQSelection(bad),null);
 });
