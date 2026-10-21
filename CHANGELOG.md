@@ -1,3 +1,11 @@
+## 0.7.32 — 2026-10-22 — B5 owner-only read-only platform catalogue preview contract (NOT CONNECTED / NOT DEPLOYED)
+
+- Introduce an opt-in `PlatformCatalogReader` port with a strictly bounded `private` 10-row page/cursor, and an offline `PlatformCatalogPreviewService` for **owner-only**, policy-gated previews. No unknown real website API, endpoints, tokens or credentials have been assumed.
+- Reject entire external pages with unknown/extra fields, duplicate IDs, unpublished drafts, archived or group records, malformed cursors, control/bidi characters, oversized titles and invalid revisions. Preserve safe `UNAVAILABLE` errors without exposing upstream exceptions or secrets.
+- Each candidate is marked `UNVERIFIED_EXTERNAL` even if its external service says `PUBLISHED`; preview fingerprints are deterministic **review references only** and never grants to publish. All paths are read-only: no BotStore publication, campaign, student display or Telegram sends.
+- Owner dashboard authorization is checked before calling the external adapter and again after its await, so revocation in-flight denies the preview. Owner-only restriction also excludes delegated content publishers.
+- 11 new offline JSON/SQLite and contract tests, with full typecheck and all demos passing. This stage delivers an adapter boundary, **not** a working connected platform API or owner Telegram button; real platform schema and credentials require separate verified integration.
+
 ## 0.7.31 — 2026-10-22 — Arabic-aware published scholarship and university search (NOT DEPLOYED)
 
 - The existing private student `/search` command now finds currently published and visible scholarships by **resource title, university name, academic cycle and degree**, despite Arabic vowel marks, hamza/alef and alef-maqsura variants, tatweel, punctuation separators and Arabic-Indic/Persian numerals.

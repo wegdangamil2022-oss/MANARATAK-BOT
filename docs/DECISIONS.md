@@ -250,3 +250,10 @@
 - Resource discovery and owner-reviewed private FAQ search use one pure Unicode fold function for common orthographic variants. It is for *matching* only; approved source records, FAQ exact-answer contract and external publish permissions remain untouched.
 - Allow Arabic combining marks in bounded typed `/search` terms and stateless copied page labels; retain strict length, bidi/control and source ACL constraints. Strings normalized to empty must not enumerate all items.
 - Search only currently published resources in enabled private categories, never automatic cross-group search. Store no extra per-student search history or AI data. Live operation remains explicitly disabled.
+
+## B5 v0.7.32 — external platform candidate preview has no publication authority (22 October 2026)
+
+- The read-only `PlatformCatalogReader` interface accepts a precise private-scoped bounded cursor request and yields unknown upstream data. The preview boundary must reject unexpected fields, drafts, group-only records, ambiguous IDs, invalid UTF-8 display text and unauthorized owner requests before exposure.
+- External `PUBLISHED` status means only source-reported publication; map it to `UNVERIFIED_EXTERNAL` for owner inspection. Fingerprint cannot authorize imported/public student content or replace existing B3 review/publish procedures.
+- No implicit real Manaratak URL, network fetch, bot-to-platform token, production credentials, database copy or write operations in this slice. Scope and permission checks happen before and after the upstream await to deny revoked access.
+- Any real production connection requires explicit external API/schema verification, staging and a separately reviewed owner configuration path. No live Telegram/AI deployment follows.
