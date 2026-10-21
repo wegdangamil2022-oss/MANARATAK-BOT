@@ -125,3 +125,36 @@ test('B3 correctly paused canonical subscription still permits verified group me
   assert.match(r.plan?.text??'',/Private grants/);
  }finally{await f.close();}
 });
+
+
+test('B3 group response cannot use a once-valid membership result after owner pauses channels mid-verification',async()=>{
+ const f=await fixture('sqlite');try{
+  await f.gate.configure(OWNER,GROUP,[CHANNEL],'ALL');
+  let entered!:()=>void,finish!:(status:'MEMBER')=>void;
+  const started=new Promise<void>(r=>{entered=r;});
+  const external=new Promise<'MEMBER'>(r=>{finish=r;});
+  const fake={
+   verify:async()=>{entered();return {status:await external,channels:[CHANNEL]};}
+  } as unknown as SubscriptionGate;
+  const pending=f.app(fake).handle(message(60,STUDENT,'/resources grants',true));
+  await started;
+  const chatRev=(await f.store.snapshot()).chats.find(c=>c.id===GROUP)!.version;
+  const ruleRev=(await f.store.snapshot()).subscriptionRequirements[0]!.version;
+  await f.policy.pauseSubscriptionAtRevision(OWNER,GROUP,chatRev,ruleRev);
+  finish('MEMBER');
+  const response=await pending;
+  assert.equal(response.status,'DENIED');
+  assert.equal(response.plan,undefined);
+ }finally{await f.close();}
+});
+test('B3 real gate owner exemption is scoped to owner, while students still require verified channels',async()=>{
+ const f=await fixture();try{
+  await f.gate.configure(OWNER,GROUP,[CHANNEL],'ANY');
+  assert.equal((await f.gate.verify(GROUP,OWNER)).status,'NOT_REQUIRED');
+  assert.equal((await f.gate.verify(GROUP,STUDENT)).status,'UNAVAILABLE');
+  assert.equal((await f.links.resolve(f.ref,OWNER,f.membership,
+   async(scope,actor)=>(await f.gate.verify(scope,actor)).status)).status,'FOUND');
+  assert.equal((await f.links.resolve(f.ref,STUDENT,f.membership,
+   async(scope,actor)=>(await f.gate.verify(scope,actor)).status)).status,'DENIED');
+ }finally{await f.close();}
+});
