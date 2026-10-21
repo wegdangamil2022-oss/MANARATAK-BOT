@@ -110,6 +110,34 @@ export class ApprovedAnswerService {
    * Never select a group FAQ or draft, and honor education.navigate on each
    * request and the current linked publication/category hierarchy.
    */
+  /** A current, private-scope-only catalogue of reviewed questions.
+   * No IDs, draft text, unapproved sources or cross-chat metadata are returned
+   * to Telegram; transport renders opaque fingerprints as button locators.
+   */
+  async listPrivateReviewedFAQs(actor:string):Promise<
+    {status:'DISABLED';items:[]} | {status:'OK';items:{id:string;question:string}[]}>{
+    if(!/^[1-9][0-9]*$/u.test(actor))return {status:'DISABLED',items:[]};
+    const s=await this.store.snapshot();
+    if(!this.policy.privateFeature(s,'education.navigate',actor))
+      return {status:'DISABLED',items:[]};
+    const items=s.faqEntries.filter(q=>q.scope==='private'&&q.status==='APPROVED'&&
+      hasApprovedSource(s,'private',q.sourceResourceId))
+      .sort((a,b)=>b.createdAt-a.createdAt||a.id.localeCompare(b.id))
+      .map(q=>({id:q.id,question:q.question}));
+    return {status:'OK',items};
+  }
+  /** The answer must be revalidated after any UI browse/snapshot. */
+  async answerPrivateReviewedFAQById(actor:string,id:string):Promise<FAQResult>{
+    if(!/^[1-9][0-9]*$/u.test(actor)||
+      !/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/u.test(id))
+      return {status:'DISABLED'};
+    const s=await this.store.snapshot();
+    if(!this.policy.privateFeature(s,'education.navigate',actor))
+      return {status:'DISABLED'};
+    const q=s.faqEntries.find(x=>x.id===id&&x.scope==='private'&&x.status==='APPROVED'&&
+      hasApprovedSource(s,'private',x.sourceResourceId));
+    return q?{status:'ANSWER',answer:q.answer,sourceId:q.sourceResourceId}:{status:'NO_MATCH'};
+  }
   async answerPrivateApprovedFAQ(actor:string,question:string):Promise<FAQResult>{
     if(!/^[1-9][0-9]*$/u.test(actor)||typeof question!=='string'||
        question.trim().length===0||question.length>240||
