@@ -7,6 +7,7 @@ import { EducationAdminFacade, type VerifiedAdminContext } from './education-adm
 import { ApprovedAnswerService, ResourceLinkService, type MembershipPort } from './education-interactions.js';
 import type { ImportFormat } from './ingestion.js';
 import type { SubscriptionGate } from './subscription.js';
+import {subscriptionRequirementMode,acceptsActiveSubscriptionEvidence} from './subscription-integrity.js';
 import type { TelegramReplyDispatcher } from './telegram-replies.js';
 import {BoundedIngress,decodeStrictJsonBytes,type IngressOptions} from './http-ingress-guard.js';
 import {menuLabels,mainMenuKeyboard,backMenuKeyboard,categoryButton,
@@ -110,6 +111,7 @@ export class TelegramUpdateApplication {
     if(scope==='private')return null;
     const before=await this.opts.store.snapshot();
     if(!this.opts.policy.canUseChat(before,scope,'navigation'))return 'CHAT_NOT_AUTHORIZED';
+    if(subscriptionRequirementMode(before,scope)==='INVALID')return 'SUBSCRIPTION_UNAVAILABLE';
     // An external membership check is evidence only for the exact group and
     // subscription-rule epochs at which it started. Revoking/reapproving the
     // group, or introducing a required channel mid-check, invalidates it.
@@ -125,15 +127,19 @@ export class TelegramUpdateApplication {
     const during=await this.opts.store.snapshot();
     if(!this.opts.policy.canUseChat(during,scope,'navigation'))return 'CHAT_NOT_AUTHORIZED';
     if(epoch(during)!==originalEpoch)return 'MEMBERSHIP_UNAVAILABLE';
+    const requirement=subscriptionRequirementMode(during,scope);
+    if(requirement==='INVALID')return 'SUBSCRIPTION_UNAVAILABLE';
     if(member!=='VERIFIED')return member==='NOT_MEMBER'?'GROUP_MEMBERSHIP_REQUIRED':'MEMBERSHIP_UNAVAILABLE';
-    if(during.subscriptionRequirements.some(r=>r.chatId===scope&&r.channelIds.length)) {
+    if(requirement==='ACTIVE') {
       if(!this.opts.subscription)return 'SUBSCRIPTION_UNAVAILABLE';
       const check=await this.opts.subscription.verify(scope,actorId);
-      if(check.status!=='MEMBER'&&check.status!=='NOT_REQUIRED')return check.status==='NOT_MEMBER'?'SUBSCRIPTION_REQUIRED':'SUBSCRIPTION_UNAVAILABLE';
+      if(!acceptsActiveSubscriptionEvidence(check.status,this.opts.policy.isOwner(actorId)))
+        return check.status==='NOT_MEMBER'?'SUBSCRIPTION_REQUIRED':'SUBSCRIPTION_UNAVAILABLE';
     }
     const after=await this.opts.store.snapshot();
     if(!this.opts.policy.canUseChat(after,scope,'navigation'))return 'CHAT_NOT_AUTHORIZED';
     if(epoch(after)!==originalEpoch)return 'MEMBERSHIP_UNAVAILABLE';
+    if(subscriptionRequirementMode(after,scope)==='INVALID')return 'SUBSCRIPTION_UNAVAILABLE';
     return null;
   }
   private async handleDocument(event:Event):Promise<TelegramResult> {
@@ -175,12 +181,24 @@ export class TelegramUpdateApplication {
     const cmd=words[0]??'';
     if(kind==='group'&&(cmd==='/categories'||cmd==='/resources'||cmd===`/ask@${this.opts.botUsername}`)) {
       const snapshot=await this.opts.store.snapshot();
-      if(snapshot.subscriptionRequirements.some(r=>r.chatId===chatId&&r.channelIds.length)) {
+      const requirement=subscriptionRequirementMode(snapshot,chatId);
+      if(requirement==='INVALID')
+        return {status:'DENIED',reason:'SUBSCRIPTION_UNAVAILABLE'};
+      if(requirement==='ACTIVE') {
         if(!this.opts.subscription)return {status:'DENIED',reason:'SUBSCRIPTION_UNAVAILABLE'};
         const verified=await this.opts.subscription.verify(chatId,actorId);
-        if(verified.status!=='MEMBER'&&verified.status!=='NOT_REQUIRED')return {status:'DENIED',reason:verified.status==='NOT_MEMBER'?'SUBSCRIPTION_REQUIRED':'SUBSCRIPTION_UNAVAILABLE'};
-        // SubscriptionGate re-evaluates its own configuration; the content services
-        // below re-read permissions after the async membership lookup.
+        if(!acceptsActiveSubscriptionEvidence(verified.status,this.opts.policy.isOwner(actorId)))
+          return {status:'DENIED',reason:verified.status==='NOT_MEMBER'?'SUBSCRIPTION_REQUIRED':'SUBSCRIPTION_UNAVAILABLE'};
+        // Do not let mid-flight changes (including pause/recreate, policy scope
+        // edits or duplicate rules) turn the old proof into access.
+        const current=await this.opts.store.snapshot();
+        const revision=(state:Awaited<ReturnType<BotStore['snapshot']>>)=>
+          JSON.stringify([state.chats.find(c=>c.id===chatId)?.version,
+            state.subscriptionRequirements.filter(r=>r?.chatId===chatId)]);
+        if(!this.opts.policy.canUseChat(current,chatId,'navigation') ||
+          subscriptionRequirementMode(current,chatId)!=='ACTIVE' ||
+          revision(current)!==revision(snapshot))
+          return {status:'DENIED',reason:'SUBSCRIPTION_UNAVAILABLE'};
       }
     }
     const result=(message:string,replyMarkup?:TelegramReplyKeyboard):TelegramResult=>({
