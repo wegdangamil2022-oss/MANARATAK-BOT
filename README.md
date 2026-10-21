@@ -19,6 +19,14 @@ For `ALL` subscriptions, an unknown channel result makes the decision `UNAVAILAB
 
 This fixes **mock-tested provider failure behavior only**. It does not imply that real bot administrator rights, Telegram permissions or membership checks have been accepted or deployed.
 
+## B3 v0.7.15 — student search in the published private educational library (OFFLINE)
+
+Private students now have **🔍 البحث في الموارد** in Telegram's real ReplyKeyboard. Tap it to learn the command, then send `/search Grant` or `/search منحة الصين` for a paginated list of **only** published approved educational resources. Ten results are shown per page, with Next/Previous controls and resource detail buttons. Unicode Arabic and Latin terms (2–32 characters) are accepted; malformed controls, markup injection and unsafe page claims are denied.
+
+The search works independently of AI and queries **only the approved private student library**. It respects the `education.navigate` private feature switch, category visibility, archival and source-scope checks on every page. There is no search over unpublished import candidates, messages, student personal data, group-only content or administrator state. Results contain safe public resource projections, and any saved/copied result button is separately revalidated at opening time.
+
+No Telegram group subscription bypass, external API fetch, student message broadcast or live deployment is implied.
+
 ## B2-Core v0.7.14 — malformed rules fail closed without punishment (OFFLINE)
 
 Subscription membership enforcement now shares the strict structural rule validator used by the owner/operator audit. A malformed mode (`ALL` vs `ANY`), invalid revision, wrong channel ID format, duplicate required channel or oversized rule produces `UNAVAILABLE`, not `NOT_MEMBER`, and will never trigger a moderation action from that evidence. Normal approved rules and valid paused requirements retain their established behavior.
