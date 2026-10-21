@@ -82,8 +82,8 @@ test('B3 moving down only reorders same-parent siblings and keeps other group an
 });
 test('B3 boundary categories display only valid direction buttons and forbid forged move',async()=>{
  const f=await fixture();try{
-  const a=buttons(await f.app().handle(msg(20,'🗂️ القسم · catA'));
-  const c=buttons(await f.app().handle(msg(21,'🗂️ القسم · catC'));
+  const a=buttons(await f.app().handle(msg(20,'🗂️ القسم · catA')));
+  const c=buttons(await f.app().handle(msg(21,'🗂️ القسم · catC')));
   assert.equal(a.some(x=>x.startsWith('⬆️ مراجعة الرفع · ')),false);
   assert.ok(a.some(x=>x.startsWith('⬇️ مراجعة الخفض · ')));
   assert.equal(c.some(x=>x.startsWith('⬇️ مراجعة الخفض · ')),false);
