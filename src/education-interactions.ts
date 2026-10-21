@@ -2,6 +2,7 @@ import { randomBytes, randomUUID } from 'node:crypto';
 import { type BotState, type FAQEntry, BotStore } from './store.js';
 import { Policy } from './policy.js';
 import { publicEducationResource, type PublicEducationResource } from './education.js';
+import {faqReviewFingerprint} from './faq-review.js';
 
 /** Only a trusted Telegram adapter may attest the chat membership status; user-provided claims are not evidence. */
 export type MembershipStatus = 'VERIFIED' | 'NOT_MEMBER' | 'UNKNOWN';
@@ -62,6 +63,36 @@ export class ApprovedAnswerService {
       if(!mayPublish(s,this.policy,by,q.scope,this.clock()))throw new Error('PUBLISH_DENIED');
       q.status='ARCHIVED';
       s.audit.push({updateKey:`faq:archive:${id}`,reason:'FAQ_ARCHIVED',decision:'ALLOW',policyVersion:0,at:this.clock()});
+    });
+  }
+  /** Verified private owner FAQ decision with atomic exact-copy and
+   * source/ancestor fingerprint and group policy-epoch checks. A draft cannot
+   * become public if the cited source is no longer published and visible.
+   * An approved entry may be archived even if its source later goes stale.
+   */
+  async transitionIfCurrent(by:string,id:string,target:'APPROVED'|'ARCHIVED',
+    proof:string,scopeVersion:number):Promise<void>{
+    if(!this.policy.isOwner(by))throw Error('OWNER_ONLY');
+    if(!/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/u.test(id)||
+      !['APPROVED','ARCHIVED'].includes(target)||!/^~[a-f0-9]{16}$/u.test(proof)||
+      !Number.isSafeInteger(scopeVersion)||scopeVersion<0)throw Error('FAQ_REVIEW_STALE');
+    await this.store.transaction(s=>{
+      const q=s.faqEntries.find(f=>f.id===id);
+      if(!q||!scopeActive(s,this.policy,q.scope))throw Error('FAQ_REVIEW_STALE');
+      const policyVersion=q.scope==='private'?0:this.policy.chatRevision(s,q.scope);
+      if(policyVersion!==scopeVersion || faqReviewFingerprint(s,q)!==proof)
+       throw Error('FAQ_REVIEW_STALE');
+      if(target==='APPROVED'){
+       if(q.status!=='DRAFT'||!hasApprovedSource(s,q.scope,q.sourceResourceId))
+        throw Error('FAQ_REVIEW_STALE');
+       q.status='APPROVED';q.approvedBy=by;
+      }else{
+       if(q.status!=='APPROVED')throw Error('FAQ_REVIEW_STALE');
+       q.status='ARCHIVED';
+      }
+      s.audit.push({updateKey:'owner:faq:'+id+':'+target,
+       decision:'ALLOW',reason:target==='APPROVED'?'FAQ_OWNER_APPROVED':'FAQ_OWNER_ARCHIVED',
+       policyVersion,at:this.clock()});
     });
   }
   private match(s:BotState,scope:string,question:string):FAQResult {
