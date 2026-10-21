@@ -270,3 +270,9 @@
 - Store external reviewed-source candidates only in `platformReviewQueue`, not in B3 import, educational resource, FAQ or campaign collections. Both `UNVERIFIED_EXTERNAL` and `REVIEWED_METADATA_ONLY` are quarantine states, NEVER authorization to publish, reply to student or advertise an offer.
 - Require the owner dashboard gate before any external fetch and at the storage commit. Pin a stage to the current validated full-page fingerprint; a metadata-only review re-fetches and compares record revision and all approved display fields to the saved SHA-256 digest. Reject stale records and do not silently replace an earlier staged source ID.
 - Cap persisted source records at 200; enforce strict queue validation in both SQLite and JSON transactions without migrating schema 8. Any later approval-to-publication action needs a separate explicitly reviewed design with independent fresh source and owner confirmation.
+
+## B5 v0.7.35 — external owner review Telegram buttons have no B3 publication authority (22 October 2026)
+
+- Allow `📥 تسجيل مرشح` only for candidates currently present in the exact full-page verified external read (source ID, bounded cursor and page fingerprint). Every click must refetch and compare; a copied Telegram text button is a request, not an authenticated grant.
+- The separate `✅ تدقيق بيانات` action re-fetches the originally staged cursor page and checks source revision/metadata digest before storing `REVIEWED_METADATA_ONLY`. Neither button calls `approveCandidate`, `publishCandidate`, creates a campaign, or exposes records to students.
+- Preserve the source cursor in an optional, validated schema-8 field. Keep old first-page entries compatible, and fail closed when provider cursor/contents change. No production Manaratak API, live Telegram or AI execution has been activated.
