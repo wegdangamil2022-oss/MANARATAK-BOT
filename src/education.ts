@@ -5,6 +5,7 @@ import { parseDocument, type ImportFormat } from './ingestion.js';
 import { planPublicationPreview } from './publication-preview-plan.js';
 import {resourceArchiveFingerprint} from './education-archive.js';
 import {categoryVisibilityFingerprint} from './education-category-policy.js';
+import {normalizeStudentSearchText} from './education-search-normalization.js';
 
 type Origin = 'TELEGRAM_ADMIN' | 'ADMIN_WEB';
 /** Public resource projections must not reveal internal audit identities or import job IDs. */
@@ -189,10 +190,9 @@ export class EducationService {
     if(!this.canBrowse(s,viewer,'private'))return [];
     const visible=new Set(s.educationCategories
       .filter(c=>c.scope==='private'&&this.visibleCategory(s,c)).map(c=>c.id));
-    const fold=(text:string)=>text.normalize('NFKC').toLowerCase()
-      .replace(/\s+/gu,' ').trim();
+    const fold=normalizeStudentSearchText;
     const needle=fold(query);
-    if(!needle)return [];
+    if(Array.from(needle).length<2)return [];
     return s.educationResources.filter(r=>
       r.scope==='private'&&r.status==='PUBLISHED'&&visible.has(r.categoryId)&&
       [r.title,r.university,r.cycle,r.degree].some(v=>fold(v).includes(needle)))
