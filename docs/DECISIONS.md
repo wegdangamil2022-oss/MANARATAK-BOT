@@ -264,3 +264,9 @@
 - Render only source candidate identifiers and escaped bounded metadata with a visible `UNVERIFIED_EXTERNAL` interpretation. Do not add local approval/import/publish actions, and do not modify the B3 content workflow because an external source claims publication.
 - Keep the normal webhook audit/outbound-plan persistence for inbound Telegram updates, but assert no changes to local educational resources, imports, campaigns or deliveries. Unavailable external service gives a safe explanation without leaking transport exception details.
 - Mock adapter validation is not a deployed Manaratak platform integration; never silently enable remote endpoints, credentials or real Telegram send on a test pass.
+
+## B5 v0.7.34 — external review does not grant publication authority (22 October 2026)
+
+- Store external reviewed-source candidates only in `platformReviewQueue`, not in B3 import, educational resource, FAQ or campaign collections. Both `UNVERIFIED_EXTERNAL` and `REVIEWED_METADATA_ONLY` are quarantine states, NEVER authorization to publish, reply to student or advertise an offer.
+- Require the owner dashboard gate before any external fetch and at the storage commit. Pin a stage to the current validated full-page fingerprint; a metadata-only review re-fetches and compares record revision and all approved display fields to the saved SHA-256 digest. Reject stale records and do not silently replace an earlier staged source ID.
+- Cap persisted source records at 200; enforce strict queue validation in both SQLite and JSON transactions without migrating schema 8. Any later approval-to-publication action needs a separate explicitly reviewed design with independent fresh source and owner confirmation.

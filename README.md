@@ -1,3 +1,7 @@
+## B5 v0.7.34 — quarantine queue for external grant records (offline)
+
+An owner can stage one unverified platform candidate only from an unchanged, freshly re-read external page, preserving a SHA-256 digest of the source metadata. A second owner-only action may mark its metadata reviewed after independently re-fetching the same currently published external source and matching its revision and all fields. Both statuses remain **quarantined**: no student catalogue item, import, publication, campaign or Telegram outbound send is created. The optional schema-8 `platformReviewQueue` is bounded, JSON/SQLite validated, and has no platform tokens. The actual external API remains unconnected.
+
 ## B5 v0.7.33 — owner Telegram preview for an explicitly injected platform reader (offline)
 
 The Telegram owner's administrative menu conditionally offers **🔎 معاينة بيانات منارتك** when the application has a B5 read-only reader adapter. It shows only bounded escaped titles, universities and source IDs that remain **externally unverified**, with an owner-only next-page control. No reader means **no preview button**; stale/forged, student and group requests are denied. This does not import or publish anything and does not connect to a real Manaratak production API. The normal Telegram webhook audit still records the inbound mock interactions.

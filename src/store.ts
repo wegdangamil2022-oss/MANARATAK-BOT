@@ -94,6 +94,12 @@ export interface PurgeRetentionReviewControl {
  enabled:boolean; cadenceMs:number; version:number; nextCheckAt:number;
  lastCheckedAt?:number; lastNotice?:import('./moderation-purge.js').PurgeRetentionPreview;
 }
+/** Owner-reviewed external metadata remains quarantined and never acts as a B3 import/publish grant. */
+export interface PlatformReviewQueueEntry{
+ sourceId:string;sourceRevision:number;title:string;university:string;cycle:string;degree:string;
+ digest:string;status:'UNVERIFIED_EXTERNAL'|'REVIEWED_METADATA_ONLY';
+ stagedBy:string;stagedAt:number;reviewedBy?:string;reviewedAt?:number;
+}
 export interface BotState {
   schemaVersion: 8;
   chats: Chat[];
@@ -121,6 +127,8 @@ export interface BotState {
   purgeJobs: PurgeJob[];
   purgeRetentionReview?: PurgeRetentionReviewControl;
   telegramReplyJobs?: TelegramReplyJob[];
+  /** Optional additive B5 owner review queue; absent on old schema-8 files. */
+  platformReviewQueue?: PlatformReviewQueueEntry[];
 }
 const empty = (): BotState => ({
   schemaVersion: 8, chats: [], grants: [], privateAI: 'OFF',
@@ -167,6 +175,36 @@ export class BotStore {
     }
     if (previous.schemaVersion !== 8 ||
       !Array.isArray(previous.rollingMessageMeta) || !Array.isArray(previous.purgeJobs) ||
+      (previous.platformReviewQueue!==undefined&&(
+        !Array.isArray(previous.platformReviewQueue)||
+        previous.platformReviewQueue.length>200||
+        previous.platformReviewQueue.some((entry:unknown)=>{
+          if(!entry||typeof entry!=='object'||Array.isArray(entry))return true;
+          const r=entry as Record<string,unknown>;
+          const keys=Object.keys(r),base=['sourceId','sourceRevision','title','university','cycle',
+            'degree','digest','status','stagedBy','stagedAt'];
+          const optional=['reviewedBy','reviewedAt'];
+          if(keys.some(key=>!base.includes(key)&&!optional.includes(key))||
+            base.some(key=>!Object.prototype.hasOwnProperty.call(r,key)))return true;
+          const id=/^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/u;
+          const sha=/^[a-f0-9]{64}$/u;
+          const safe=(v:unknown,max:number)=>typeof v==='string'&&v.length>0&&
+            v.length<=max&&v.trim()===v&&!/[\u0000-\u001f\u007f\u202a-\u202e\u2066-\u2069]/u.test(v);
+          return typeof r.sourceId!=='string'||!id.test(r.sourceId)||
+            typeof r.sourceRevision!=='number'||!Number.isSafeInteger(r.sourceRevision)||r.sourceRevision<1||
+            !safe(r.title,160)||!safe(r.university,120)||!safe(r.cycle,32)||
+            !safe(r.degree,64)||typeof r.digest!=='string'||!sha.test(r.digest)||
+            !['UNVERIFIED_EXTERNAL','REVIEWED_METADATA_ONLY'].includes(String(r.status))||
+            typeof r.stagedBy!=='string'||!/^\d{1,20}$/u.test(r.stagedBy)||
+            typeof r.stagedAt!=='number'||!Number.isSafeInteger(r.stagedAt)||r.stagedAt<0||
+            (r.status==='UNVERIFIED_EXTERNAL'&&
+              (r.reviewedBy!==undefined||r.reviewedAt!==undefined))||
+            (r.status==='REVIEWED_METADATA_ONLY'&&
+              (typeof r.reviewedBy!=='string'||!/^\d{1,20}$/u.test(r.reviewedBy)||
+                typeof r.reviewedAt!=='number'||!Number.isSafeInteger(r.reviewedAt)||r.reviewedAt<0));
+        })||
+        new Set(previous.platformReviewQueue.map((e:PlatformReviewQueueEntry)=>e.sourceId)).size!==previous.platformReviewQueue.length
+      )) ||
       (previous.telegramReplyJobs!==undefined&&!Array.isArray(previous.telegramReplyJobs)) ||
       !Array.isArray(previous.historicalPublications) || !Array.isArray(previous.campaigns) ||
       !Array.isArray(previous.deliveries) || !Array.isArray(previous.faqEntries) ||
@@ -243,6 +281,7 @@ export class BotStore {
       }
       const state = await this.read();
       const result = await work(state);
+      this.decode(structuredClone(state)); // Match SQLite: reject malformed state before a JSON commit.
       await mkdir(dirname(this.file), { recursive: true });
       const tmp = this.file + '.' + randomUUID() + '.tmp';
       await writeFile(tmp, JSON.stringify(state), { encoding: 'utf8', mode: 0o600, flag: 'wx' });

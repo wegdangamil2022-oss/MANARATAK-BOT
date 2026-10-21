@@ -1,4 +1,5 @@
 import {createHash} from 'node:crypto';
+import type {PlatformReviewQueueEntry} from './store.js';
 import {BotStore} from './store.js';
 import {Policy} from './policy.js';
 
@@ -58,6 +59,19 @@ function parsePage(raw:unknown,limit:number,cursor:string|null):
  return {records:result,nextCursor:raw.nextCursor as string|null};
 }
 
+export type PlatformStageResult=
+ |{status:'DENIED'|'STALE'|'UNAVAILABLE'|'LIMIT_REACHED'}
+ |{status:'STAGED';entry:PlatformReviewQueueEntry};
+export type PlatformReviewResult=
+ |{status:'DENIED'|'STALE'|'UNAVAILABLE'}
+ |{status:'REVIEWED';entry:PlatformReviewQueueEntry};
+const strictDigest=/^[a-f0-9]{64}$/u;
+export function platformCandidateDigest(record:PlatformReviewCandidate):string{
+ return createHash('sha256').update(JSON.stringify([
+  'b5-candidate-v1',record.id,record.revision,record.title,record.university,
+  record.cycle,record.degree
+ ]),'utf8').digest('hex');
+}
 /** Owner-only, ephemeral external candidate preview. Never writes BotStore,
  * never publishes locally, never changes Telegram buttons, never sends to
  * channels or makes network requests by itself. Platform self-reported
@@ -104,4 +118,87 @@ export class PlatformCatalogPreviewService{
   return {status:'PREVIEW',records:parsed.records,
    nextCursor:parsed.nextCursor,fingerprint};
  }
+  /**
+   * Owner explicitly stages *one* candidate from the current full-page
+   * fingerprint. No values supplied by the caller are persisted: every field
+   * comes from a fresh, schema-validated read-only source projection.
+   * Conflicting revisions cannot silently overwrite an existing review.
+   */
+  async stage(actor:string,sourceId:string,expectedPageFingerprint:string):
+   Promise<PlatformStageResult>{
+   if(!this.policy.isOwner(actor))return {status:'DENIED'};
+   if(typeof sourceId!=='string'||!validId.test(sourceId)||
+     typeof expectedPageFingerprint!=='string'||!strictDigest.test(expectedPageFingerprint))
+    return {status:'UNAVAILABLE'};
+   const preview=await this.preview(actor);
+   if(preview.status!=='PREVIEW')return preview;
+   if(preview.fingerprint!==expectedPageFingerprint)return {status:'STALE'};
+   const records=preview.records.filter(c=>c.id===sourceId);
+   if(records.length!==1)return {status:'STALE'};
+   const candidate=records[0]!;
+   const digest=platformCandidateDigest(candidate);
+   try{
+    return await this.store.transaction<PlatformStageResult>(s=>{
+     if(!this.policy.privateFeature(s,'owner.dashboard',actor))return {status:'DENIED'};
+     const queue=s.platformReviewQueue??(s.platformReviewQueue=[]);
+     const existing=queue.find(x=>x.sourceId===sourceId);
+     if(existing){
+      if(existing.digest!==digest||existing.sourceRevision!==candidate.revision)
+       return {status:'STALE'};
+      return {status:'STAGED',entry:structuredClone(existing)};
+     }
+     if(queue.length>=200)return {status:'LIMIT_REACHED'};
+     const entry:PlatformReviewQueueEntry={
+      sourceId,sourceRevision:candidate.revision,title:candidate.title,
+      university:candidate.university,cycle:candidate.cycle,
+      degree:candidate.degree,digest,status:'UNVERIFIED_EXTERNAL',
+      stagedBy:actor,stagedAt:Date.now()
+     };
+     queue.push(entry);
+     s.audit.push({updateKey:'b5:stage:'+sourceId+':'+digest.slice(0,16),
+      decision:'ALLOW',reason:'EXTERNAL_CANDIDATE_STAGED_ONLY',policyVersion:0,at:entry.stagedAt});
+     return {status:'STAGED',entry:structuredClone(entry)};
+    });
+   }catch{return {status:'UNAVAILABLE'};}
+  }
+  /**
+   * 'Reviewed' means metadata was manually checked against a fresh external
+   * read. It is NEVER a publication or local B3 import approval. A different
+   * revision/title/university/cycle/degree invalidates the old digest.
+   */
+  async review(actor:string,sourceId:string,expectedDigest:string):
+   Promise<PlatformReviewResult>{
+   if(!this.policy.isOwner(actor))return {status:'DENIED'};
+   if(typeof sourceId!=='string'||!validId.test(sourceId)||
+     typeof expectedDigest!=='string'||!strictDigest.test(expectedDigest))
+    return {status:'UNAVAILABLE'};
+   let previouslyStaged:PlatformReviewQueueEntry|undefined;
+   try{
+    const state=await this.store.snapshot();
+    if(!this.policy.privateFeature(state,'owner.dashboard',actor))return {status:'DENIED'};
+    previouslyStaged=state.platformReviewQueue?.find(x=>x.sourceId===sourceId);
+   }catch{return {status:'UNAVAILABLE'};}
+   if(!previouslyStaged||previouslyStaged.digest!==expectedDigest)return {status:'STALE'};
+   const preview=await this.preview(actor);
+   if(preview.status!=='PREVIEW')return preview;
+   const candidates=preview.records.filter(c=>c.id===sourceId);
+   if(candidates.length!==1||
+     platformCandidateDigest(candidates[0]!)!==expectedDigest)return {status:'STALE'};
+   try{
+    return await this.store.transaction<PlatformReviewResult>(s=>{
+     if(!this.policy.privateFeature(s,'owner.dashboard',actor))return {status:'DENIED'};
+     const current=s.platformReviewQueue?.find(x=>x.sourceId===sourceId);
+     if(!current||current.digest!==expectedDigest)return {status:'STALE'};
+     if(current.status==='REVIEWED_METADATA_ONLY')
+      return {status:'REVIEWED',entry:structuredClone(current)};
+     current.status='REVIEWED_METADATA_ONLY';
+     current.reviewedBy=actor;current.reviewedAt=Date.now();
+     s.audit.push({updateKey:'b5:review:'+sourceId+':'+expectedDigest.slice(0,16),
+      decision:'ALLOW',reason:'EXTERNAL_METADATA_REVIEW_ONLY',
+      policyVersion:0,at:current.reviewedAt});
+     return {status:'REVIEWED',entry:structuredClone(current)};
+    });
+   }catch{return {status:'UNAVAILABLE'};}
+  }
+
 }
