@@ -19,6 +19,7 @@ export const menuLabels={
  universities:'🏛 الجامعات والتخصصات',
  exams:'📝 الاختبارات',
  library:'📂 التعليم والموارد',
+ search:'🔍 البحث في الموارد',
  files:'📄 الملفات والنماذج',
  assistant:'💬 المساعد التعليمي',
  communities:'👥 المجموعات والقنوات',
@@ -34,9 +35,9 @@ export function mainMenuKeyboard(owner:boolean):TelegramReplyKeyboard{
   [m.universities,m.exams],
   [m.library,m.files],
   [m.assistant,m.communities],
-  [m.help]
+  [m.help,m.search]
  ];
- if(owner)rows[4]!.push(m.owner);
+ if(owner)rows.push([m.owner]);
  return keyboard(rows);
 }
 export function backMenuKeyboard():TelegramReplyKeyboard{
