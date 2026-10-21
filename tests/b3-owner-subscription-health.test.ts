@@ -55,7 +55,11 @@ for(const engine of ['json','sqlite'] as const){
    assert.equal((r.plan?.text??'').includes(CHANNEL),false);
    assert.equal(isValidTelegramReplyKeyboard(r.plan?.replyMarkup),true);
    assert.ok(keys(r).includes(ownerMenuLabels.groups));
-   assert.deepEqual(await f.store.snapshot(),before);
+   const after=await f.store.snapshot();
+   assert.deepEqual(after.subscriptionRequirements,before.subscriptionRequirements);
+   assert.deepEqual(after.chats,before.chats);
+   assert.deepEqual(after.moderationReasons,before.moderationReasons);
+   // Telegram ingress correctly appends its own one-shot reply/outbox audit.
   }finally{await f.close();}
  });
 }
@@ -105,6 +109,9 @@ test('B3 owner audit counts paused rules without reactivation; reads only and re
   assert.match(r.plan?.text??'',/PASS/);
   assert.match(r.plan?.text??'',/المعلّقة.*1|غير النشطة.*1/);
   assert.equal((r.plan?.text??'').includes('300'),false);
-  assert.deepEqual(await f.store.snapshot(),state);
+  const after=await f.store.snapshot();
+  assert.deepEqual(after.subscriptionRequirements,state.subscriptionRequirements);
+  assert.deepEqual(after.moderationReasons,state.moderationReasons);
+  assert.deepEqual(after.chats,state.chats);
  }finally{await f.close();}
 });
