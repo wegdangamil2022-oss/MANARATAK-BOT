@@ -6,6 +6,7 @@ import type {EducationAdminFacade,VerifiedAdminContext} from './education-admin.
 import {menuLabels,type TelegramReplyKeyboard} from './telegram-menu.js';
 import {OwnerTelegramGroupMenu,isOwnerGroupText} from './telegram-owner-groups.js';
 import {summarizeSubscriptionIntegrity} from './subscription-integrity.js';
+import {OwnerTelegramLibraryMenu,isOwnerLibraryText} from './telegram-owner-library.js';
 
 export const ownerMenuLabels={
  imports:'🧾 مراجعة الوارد',
@@ -82,7 +83,7 @@ const sections=new Set<string>(Object.values(ownerMenuLabels));
  * ordinary student message. Never use text alone to authenticate its sender.
  */
 export function isOwnerMenuText(text:string):boolean{
- return text===menuLabels.owner||sections.has(text)||isOwnerGroupText(text)||
+ return text===menuLabels.owner||sections.has(text)||isOwnerGroupText(text)||isOwnerLibraryText(text)||
   text.startsWith('➡️ التالي · o:')||text.startsWith('⬅️ السابق · o:')||
   marks.some(([prefix])=>text.startsWith(prefix));
 }
@@ -193,6 +194,8 @@ export class OwnerTelegramMenu{
     ctx.chatId!==ctx.actorId||!this.policy.isOwner(ctx.actorId))return reject();
   if(isOwnerGroupText(text))
    return new OwnerTelegramGroupMenu(this.store,this.policy).handle(text,ctx);
+  if(isOwnerLibraryText(text))
+   return new OwnerTelegramLibraryMenu(this.store,this.policy,this.education).handle(text,ctx);
   const state=await this.store.snapshot();
   const pageRequest=parseOwnerMenuPageCommand(text);
   if(pageRequest){
@@ -234,18 +237,6 @@ export class OwnerTelegramMenu{
     +'هذا فحص للحالة المحفوظة فقط، وليس تحققًا حيًا من Telegram.\n'
     +'لا يمكن تفعيل البوت أو تعديل شروط الاشتراك من تقرير الفحص.',
     [ownerMenuLabels.groups,ownerMenuLabels.settings]);
-  }
-  if(text===ownerMenuLabels.library){
-   const published=state.educationResources.filter(r=>r.status==='PUBLISHED').length;
-   const archived=state.educationResources.filter(r=>r.status==='ARCHIVED').length;
-   const enabled=state.educationCategories.filter(c=>c.enabled).length;
-   return screen('<b>إدارة المكتبة 📚</b>\n'
-    +'الأقسام المفعلة: '+enabled+'\n'
-    +'الموارد المنشورة محليًا: '+published+'\n'
-    +'الموارد المؤرشفة: '+archived+'\n'
-    +'تغيير ترتيب الأقسام وأرشفة الملفات ما زال عبر وظائف الإدارة المعتمدة.\n'
-    +'يمكنك مراجعة الوارد قبل نشره في المكتبة المحلية.',
-    [ownerMenuLabels.imports]);
   }
   if(text===ownerMenuLabels.delivery){
    const jobs=state.telegramReplyJobs??[];

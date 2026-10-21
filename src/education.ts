@@ -3,6 +3,7 @@ import { BotStore, type BotState, type EducationCategory, type EducationResource
 import { Policy } from './policy.js';
 import { parseDocument, type ImportFormat } from './ingestion.js';
 import { planPublicationPreview } from './publication-preview-plan.js';
+import {resourceArchiveFingerprint} from './education-archive.js';
 
 type Origin = 'TELEGRAM_ADMIN' | 'ADMIN_WEB';
 /** Public resource projections must not reveal internal audit identities or import job IDs. */
@@ -165,6 +166,29 @@ export class EducationService {
       [r.title,r.university,r.cycle,r.degree].some(v=>fold(v).includes(needle)))
       .sort((a,b)=>a.title.localeCompare(b.title,'ar')||a.id.localeCompare(b.id))
       .map(publicEducationResource);
+  }
+  /** Archive only the resource the owner just reviewed, not an outdated item
+   * with matching ID. Recheck group authorization epoch and the exact reviewed
+   * publication fingerprint atomically in the durable BotStore transaction.
+   * This changes only the LOCAL library status; it does not edit/send Telegram.
+   */
+  async archiveResourceIfCurrent(actor:string,id:string,proof:string,scopeRevision:number):Promise<void>{
+    this.assertOwner(actor);
+    if(!/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/u.test(id)||
+      !/^~[a-f0-9]{16}$/u.test(proof)||
+      !Number.isSafeInteger(scopeRevision)||scopeRevision<0)
+      throw Error('RESOURCE_ARCHIVE_STALE');
+    await this.store.transaction(s=>{
+      const resource=s.educationResources.find(r=>r.id===id);
+      if(!resource||resource.status!=='PUBLISHED'||!this.canPublish(s,actor,resource.scope))
+       throw Error('RESOURCE_ARCHIVE_STALE');
+      const currentRevision=resource.scope==='private'?0:this.policy.chatRevision(s,resource.scope);
+      if(currentRevision!==scopeRevision||resourceArchiveFingerprint(resource)!==proof)
+       throw Error('RESOURCE_ARCHIVE_STALE');
+      resource.status='ARCHIVED';
+      s.audit.push({updateKey:'b3:archive:'+id,decision:'ALLOW',
+       reason:'RESOURCE_ARCHIVED',policyVersion:currentRevision,at:this.clock()});
+    });
   }
   async archiveResource(actor:string,id:string):Promise<void> {
     await this.store.transaction(s=>{
