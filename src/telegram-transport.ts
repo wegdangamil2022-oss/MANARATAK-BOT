@@ -242,14 +242,14 @@ export class TelegramUpdateApplication {
           +'صفحة '+(page+1)+' من '+pages+'\n'
           +visible.map((q,i)=>(page*10+i+1)+'. '+escapeTelegramHtml(q.question.slice(0,160))).join('\n')
           +'\nاختر رقم السؤال المطابق من الأزرار لعرض الإجابة المعتمدة.',
-          listingKeyboard(visible.map(q=>privateFAQButton(q.id)),{
+          listingKeyboard(visible.map((q,i)=>privateFAQButton(q.id,page*10+i+1)),{
            previous:page>0?privateFAQPageLabel(page-1,'previous'):undefined,
            next:page+1<pages?privateFAQPageLabel(page+1,'next'):undefined
           }));
        }
        const token=parsePrivateFAQSelection(text);
        if(!token)return {status:'DENIED',reason:'INVALID_PRIVATE_FAQ_SELECTION'};
-       const matches=items.filter(q=>privateFAQButton(q.id).endsWith(token));
+       const matches=items.filter((q,i)=>privateFAQButton(q.id,i+1)===text);
        if(matches.length!==1)return {status:'DENIED',reason:'PRIVATE_FAQ_NOT_ACCESSIBLE'};
        const answer=await this.opts.faq.answerPrivateReviewedFAQById(actorId,matches[0]!.id);
        if(answer.status!=='ANSWER')return {status:'DENIED',reason:'PRIVATE_FAQ_NOT_ACCESSIBLE'};
