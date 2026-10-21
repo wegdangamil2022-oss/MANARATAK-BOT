@@ -11,7 +11,8 @@ import {EducationAdminFacade} from '../src/education-admin.js';
 import {ApprovedAnswerService,ResourceLinkService} from '../src/education-interactions.js';
 import {TelegramUpdateApplication} from '../src/telegram-transport.js';
 import {ownerMenuLabels} from '../src/telegram-owner-menu.js';
-import {parseOwnerLibraryAction,parseOwnerLibraryPage,resourceArchiveFingerprint} from '../src/telegram-owner-library.js';
+import {parseOwnerLibraryAction,parseOwnerLibraryPage} from '../src/telegram-owner-library.js';
+import {resourceArchiveFingerprint} from '../src/education-archive.js';
 import {isValidTelegramReplyKeyboard} from '../src/telegram-menu.js';
 
 const OWNER='100',GROUP='-100123',STUDENT=300;
