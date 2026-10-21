@@ -222,11 +222,11 @@ export class OwnerTelegramMenu{
     });
    if(staged.status!=='STAGED')return reject();
    const entry=staged.entry;
-   return screen('<b>تم حفظ المرشح للمراجعة 📥</b>\\n'
-    +'المصدر: <code>'+entry.sourceId+'</code>\\n'
-    +'العنوان: '+escapeTelegramListPreview(entry.title,160)+'\\n'
+   return screen('<b>تم حفظ المرشح للمراجعة 📥</b>\n'
+    +'المصدر: <code>'+entry.sourceId+'</code>\n'
+    +'العنوان: '+escapeTelegramListPreview(entry.title,160)+'\n'
     +'الحالة: '+(entry.status==='REVIEWED_METADATA_ONLY'?
-       'تم تدقيق البيانات سابقًا.':'خارجية غير متحقق منها؛ يحتاج تدقيقًا مستقلاً.')+'\\n'
+       'تم تدقيق البيانات سابقًا.':'خارجية غير متحقق منها؛ يحتاج تدقيقًا مستقلاً.')+'\n'
     +'هذه العملية لا تعتمد منحة للطلاب ولا تنشر أي محتوى.',
     entry.status==='REVIEWED_METADATA_ONLY'?[ownerMenuLabels.platformCatalog]:
     ['✅ تدقيق بيانات · '+entry.sourceId+':'+entry.digest,
@@ -237,9 +237,9 @@ export class OwnerTelegramMenu{
    if(!this.platformCatalog||!reviewAction)return reject();
    const checked=await this.platformCatalog.review(ctx.actorId,reviewAction[1]!,reviewAction[2]!);
    if(checked.status!=='REVIEWED')return reject();
-   return screen('<b>تم تدقيق بيانات المرشح ✅</b>\\n'
-    +'المصدر: <code>'+checked.entry.sourceId+'</code>\\n'
-    +'راجعتَ نسخة البيانات التي تطابق المصدر عند الطلب.\\n'
+   return screen('<b>تم تدقيق بيانات المرشح ✅</b>\n'
+    +'المصدر: <code>'+checked.entry.sourceId+'</code>\n'
+    +'راجعتَ نسخة البيانات التي تطابق المصدر عند الطلب.\n'
     +'الحالة: مراجعة بيانات فقط، ليست موافقة نشر أو اعتماد منحة.',
     [ownerMenuLabels.platformCatalog]);
   }
