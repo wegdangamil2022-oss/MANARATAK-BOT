@@ -1,3 +1,11 @@
+## 0.7.24 — 2026-10-21 — Private student keyword search over reviewed FAQ titles (NOT DEPLOYED)
+
+- The student-private **💬 المساعد التعليمي** ReplyKeyboard now includes **🔎 ابحث في الأسئلة**, which provides an actual explicit `/faqsearch <keywords>` workflow rather than a placeholder. Only owner-approved, private-scope FAQ questions with currently published, visible education sources are searched; no generative AI, third-party retrieval or group FAQ disclosure.
+- Query input is bounded by code points and UTF-8 bytes and excludes control/bidi characters. Searches case-insensitively across NFKC-normalized currently visible private question titles, with ten results per page and stateless Next/Previous reply keyboard controls. Searches and their results are not persisted as a new query history.
+- Each matching result uses the **global currently authorized FAQ row number plus the existing SHA-based opaque question fingerprint**. The student's subsequent tap is rechecked against the full refreshed visible private catalogue and the current approved source before opening the answer. Archived/hidden/reordered questions cannot turn stale search buttons into access to a different FAQ. Internal FAQ UUIDs and administrative data remain hidden.
+- Pagination tokens encode only the bounded user-entered query and canonical page index (neither a permission grant nor a secret). Forged/noncanonical/out-of-range requests are denied and rendered titles are HTML-escaped. RED-first JSON+SQLite integration tests cover matching results, 12-item paging, current ordinal selection, revoked source visibility, forgery and group/private isolation.
+- This is local Telegram ReplyKeyboard simulation only. **No hosted Telegram bot, external AI or automatic channel sends.**
+
 ## 0.7.23 — 2026-10-21 — Prevent outdated membership results from driving moderation (NOT DEPLOYED)
 
 - Hardened the crucial handoff **after** SubscriptionGate membership verification to the moderation engine: captures a private before-verification snapshot of the group policy epoch, required-channel IDs, their individual policy epochs and the subscription rule version/mode.
