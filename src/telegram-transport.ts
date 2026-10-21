@@ -413,8 +413,8 @@ export class TelegramUpdateApplication {
         +'ضمن المجموعات المسموح بها: <code>/ask@'
         +escapeTelegramHtml(this.opts.botUsername)+' السؤال</code> حسب سياسة المجموعة.\n'
         +'المساعد الذكي التوليدي غير متصل؛ إجابات /faq مستندة إلى موارد منشورة.\n'
-        +'أو اضغط «تصفح الأسئلة المعتمدة» لاختيار سؤال من القائمة.',
-        listingKeyboard([privateFAQBrowseLabel]));
+        +'اضغط «تصفح الأسئلة المعتمدة» أو «ابحث في الأسئلة» للعثور على إجابة منشورة.',
+        listingKeyboard([privateFAQBrowseLabel,privateFAQSearchLabel]));
       if(text===m.communities)return result(
         '<b>المجموعات والقنوات 👥</b>\n'
         +'تُدار صلاحيات المجموعات والتحقق من العضوية ضمن أنظمة منارتك.\n'
