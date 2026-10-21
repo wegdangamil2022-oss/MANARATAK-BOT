@@ -18,6 +18,8 @@ import {parseSearchQuery,parseSearchPageCommand,searchPageButton} from './telegr
 import {parsePrivateFAQQuery,privateFAQBrowseLabel,parsePrivateFAQPage,
  privateFAQPageLabel,parsePrivateFAQSelection,privateFAQButton,
  isPrivateFAQBrowseText} from './telegram-private-faq.js';
+import {privateFAQSearchLabel,parsePrivateFAQSearchQuery,parsePrivateFAQSearchPage,
+ privateFAQSearchPageLabel,isPrivateFAQSearchText} from './telegram-private-faq-search.js';
 
 /** Inbound-only boundary. A test double may supply bytes; there is intentionally no live HTTP implementation. */
 export interface TelegramDocumentPort {
@@ -194,6 +196,47 @@ export class TelegramUpdateApplication {
        +'<code>/faq ما شروط المنحة؟</code>\n'
        +'هذه إجابات محفوظة يراجعها المالك؛ لا يوجد ذكاء اصطناعي توليدي.',
        backMenuKeyboard());
+      if(isPrivateFAQSearchText(text)){
+       if(text===privateFAQSearchLabel)return result(
+        '<b>البحث في الأسئلة المعتمدة 🔎</b>\n'
+        +'اكتب <code>/faqsearch منحة</code> للبحث بكلمة داخل عناوين الأسئلة المعتمدة.\n'
+        +'النتائج تأتي من موارد الخاص المنشورة فقط، ولا تستخدم AI خارجيًا.',
+        listingKeyboard([privateFAQBrowseLabel]));
+       const command=parsePrivateFAQSearchQuery(text);
+       const paging=parsePrivateFAQSearchPage(text);
+       if(!command&&!paging)return {status:'DENIED',reason:'INVALID_PRIVATE_FAQ_SEARCH'};
+       const query=command??paging!.query;
+       const catalogue=await this.opts.faq.listPrivateReviewedFAQs(actorId);
+       if(catalogue.status==='DISABLED')
+        return {status:'DENIED',reason:'PRIVATE_EDUCATION_DISABLED'};
+       // Ordinals are from the entire currently authorized private catalogue,
+       // NOT from search rows. Existing FAQ choice handling recomputes both
+       // its global ordinal and opaque fingerprint before showing the answer.
+       const normalized=query.normalize('NFKC').toLocaleLowerCase('en-US');
+       const hits=catalogue.items.slice(0,10000).map((q,i)=>({q,ordinal:i+1}))
+        .filter(({q})=>q.question.normalize('NFKC')
+         .toLocaleLowerCase('en-US').includes(normalized));
+       const page=paging?.page??0,pages=Math.ceil(hits.length/10);
+       if(paging&&(!pages||page>=pages||
+         (paging.direction==='next'&&page===0)||
+         (paging.direction==='previous'&&page===pages-1)))
+        return {status:'DENIED',reason:'INVALID_PRIVATE_FAQ_SEARCH_PAGE'};
+       if(!hits.length)return result(
+        '<b>البحث في الأسئلة المعتمدة 🔎</b>\n'
+        +'لا توجد أسئلة معتمدة مطابقة لهذه الكلمات ضمن مكتبة الخاص الحالية.\n'
+        +'يمكنك تغيير الكلمات أو تصفح القائمة المعتمدة.',
+        listingKeyboard([privateFAQBrowseLabel]));
+       const shown=hits.slice(page*10,page*10+10);
+       return result('<b>نتائج البحث في الأسئلة 🔎</b>\n'
+        +'المطابقات: '+hits.length+'\nصفحة '+(page+1)+' من '+pages+'\n'
+        +shown.map(({q,ordinal})=>ordinal+'. '+
+          escapeTelegramHtml(q.question.slice(0,160))).join('\n')
+        +'\nاختر رقم السؤال المطابق لفتح إجابته المعتمدة.',
+        listingKeyboard(shown.map(({q,ordinal})=>privateFAQButton(q.id,ordinal)),{
+         previous:page>0?privateFAQSearchPageLabel(query,page-1,'previous'):undefined,
+         next:page+1<pages?privateFAQSearchPageLabel(query,page+1,'next'):undefined
+        }));
+      }
       if(text.startsWith('/faq')){
        const question=parsePrivateFAQQuery(text);
        if(!question)return {status:'DENIED',reason:'INVALID_PRIVATE_FAQ_QUERY'};
@@ -370,8 +413,8 @@ export class TelegramUpdateApplication {
         +'ضمن المجموعات المسموح بها: <code>/ask@'
         +escapeTelegramHtml(this.opts.botUsername)+' السؤال</code> حسب سياسة المجموعة.\n'
         +'المساعد الذكي التوليدي غير متصل؛ إجابات /faq مستندة إلى موارد منشورة.\n'
-        +'أو اضغط «تصفح الأسئلة المعتمدة» لاختيار سؤال من القائمة.',
-        listingKeyboard([privateFAQBrowseLabel]));
+        +'اضغط «تصفح الأسئلة المعتمدة» أو «ابحث في الأسئلة» للعثور على إجابة منشورة.',
+        listingKeyboard([privateFAQBrowseLabel,privateFAQSearchLabel]));
       if(text===m.communities)return result(
         '<b>المجموعات والقنوات 👥</b>\n'
         +'تُدار صلاحيات المجموعات والتحقق من العضوية ضمن أنظمة منارتك.\n'
