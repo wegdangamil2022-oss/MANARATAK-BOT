@@ -19,6 +19,12 @@ For `ALL` subscriptions, an unknown channel result makes the decision `UNAVAILAB
 
 This fixes **mock-tested provider failure behavior only**. It does not imply that real bot administrator rights, Telegram permissions or membership checks have been accepted or deployed.
 
+## B3 v0.7.26 — FAQ keyword search includes reviewed aliases (OFFLINE)
+
+Students can search the private approved FAQ library with `/faqsearch WORDS` or **💬 المساعد التعليمي → 🔎 ابحث في الأسئلة**. Results now include questions whose **owner-reviewed alternate wording** contains the requested word, even when the original displayed question title does not. The original title—not aliases, raw UUIDs or a synthesized answer—is displayed. A selected numbered result is checked again against the fresh currently visible approved private FAQ and its published source before its approved answer is revealed. Pagination remains 10 items/page and all results stay local, without new search logs or AI calls.
+
+For example, a reviewed FAQ titled «كيف أقدم على المنحة؟» with the alternate wording «اختبار CSCA» can be found using `/faqsearch CSCA`. Its answer is still the owner's reviewed answer, and archiving its educational source immediately removes it from all search and browse paths.
+
 ## B3 v0.7.25 — in-flight private group browsing cannot bypass new requirements (OFFLINE)
 
 The `/categories -100…` and `/resources -100… CATEGORY` private-chat group-scoped flows require live **verified membership evidence** and saved authorization. The membership request is now bound to the current group authorization version and all currently saved subscription rule revisions/modes/channels. If the group is revoked and re-approved, scopes change, or a mandatory-channel rule is newly configured while the external provider call is pending, the in-flight request cannot reuse its stale proof. A fresh request is needed. Member identities, tokens and group content are never exposed on denial.

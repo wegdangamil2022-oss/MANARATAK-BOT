@@ -126,6 +126,35 @@ export class ApprovedAnswerService {
       .map(q=>({id:q.id,question:q.question}));
     return {status:'OK',items};
   }
+  /**
+   * Private approved FAQ keyword discovery through reviewed titles AND their
+   * owner-supplied aliases. Only original public question text is returned;
+   * aliases are search terms, never separate unreviewed answer objects.
+   * Ordinals belong to the complete currently permitted catalogue, so
+   * existing opaque answer buttons still use the identical authorization path.
+   */
+  async searchPrivateReviewedFAQs(actor:string,query:string):Promise<
+    {status:'DISABLED';items:[]} |
+    {status:'OK';items:{id:string;question:string;ordinal:number}[]}>{
+    if(!/^[1-9][0-9]*$/u.test(actor))return {status:'DISABLED',items:[]};
+    const s=await this.store.snapshot();
+    if(!this.policy.privateFeature(s,'education.navigate',actor))
+      return {status:'DISABLED',items:[]};
+    if(typeof query!=='string'||!query.trim()||query.length>80||
+      /[\u0000-\u001f\u007f\u202a-\u202e\u2066-\u2069]/u.test(query))
+      return {status:'OK',items:[]};
+    const normalize=(value:string)=>value.normalize('NFKC').toLocaleLowerCase('en-US');
+    const needle=normalize(query);
+    const visible=s.faqEntries.filter(q=>q.scope==='private'&&q.status==='APPROVED'&&
+      hasApprovedSource(s,'private',q.sourceResourceId))
+      .sort((a,b)=>b.createdAt-a.createdAt||a.id.localeCompare(b.id))
+      .slice(0,10000);
+    const items=visible.flatMap((q,i)=>
+      normalize(q.question).includes(needle)||
+      q.aliases.some(alias=>normalize(alias).includes(needle))
+       ?[{id:q.id,question:q.question,ordinal:i+1}]:[]);
+    return {status:'OK',items};
+  }
   /** The answer must be revalidated after any UI browse/snapshot. */
   async answerPrivateReviewedFAQById(actor:string,id:string):Promise<FAQResult>{
     if(!/^[1-9][0-9]*$/u.test(actor)||

@@ -213,23 +213,22 @@ export class TelegramUpdateApplication {
       if(isPrivateFAQSearchText(text)){
        if(text===privateFAQSearchLabel)return result(
         '<b>البحث في الأسئلة المعتمدة 🔎</b>\n'
-        +'اكتب <code>/faqsearch منحة</code> للبحث بكلمة داخل عناوين الأسئلة المعتمدة.\n'
+        +'اكتب <code>/faqsearch منحة</code> للبحث داخل عناوين الأسئلة وصيغها البديلة المعتمدة.\n'
         +'النتائج تأتي من موارد الخاص المنشورة فقط، ولا تستخدم AI خارجيًا.',
         listingKeyboard([privateFAQBrowseLabel]));
        const command=parsePrivateFAQSearchQuery(text);
        const paging=parsePrivateFAQSearchPage(text);
        if(!command&&!paging)return {status:'DENIED',reason:'INVALID_PRIVATE_FAQ_SEARCH'};
        const query=command??paging!.query;
-       const catalogue=await this.opts.faq.listPrivateReviewedFAQs(actorId);
+       // The trusted service matches reviewed titles and approved aliases
+       // on a single freshly authorized source snapshot. It exposes only
+       // question titles and GLOBAL ordinals, never alias/admin metadata.
+       const catalogue=await this.opts.faq.searchPrivateReviewedFAQs(actorId,query);
        if(catalogue.status==='DISABLED')
         return {status:'DENIED',reason:'PRIVATE_EDUCATION_DISABLED'};
-       // Ordinals are from the entire currently authorized private catalogue,
-       // NOT from search rows. Existing FAQ choice handling recomputes both
-       // its global ordinal and opaque fingerprint before showing the answer.
-       const normalized=query.normalize('NFKC').toLocaleLowerCase('en-US');
-       const hits=catalogue.items.slice(0,10000).map((q,i)=>({q,ordinal:i+1}))
-        .filter(({q})=>q.question.normalize('NFKC')
-         .toLocaleLowerCase('en-US').includes(normalized));
+       const hits=catalogue.items.map(({id,question,ordinal})=>({
+        q:{id,question},ordinal
+       }));
        const page=paging?.page??0,pages=Math.ceil(hits.length/10);
        if(paging&&(!pages||page>=pages||
          (paging.direction==='next'&&page===0)||

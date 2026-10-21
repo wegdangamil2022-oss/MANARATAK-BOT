@@ -1,3 +1,11 @@
+## 0.7.26 — 2026-10-21 — Approved FAQ keyword aliases in student-private search (NOT DEPLOYED)
+
+- The existing private **💬 المساعد التعليمي → 🔎 ابحث في الأسئلة** and `/faqsearch` workflow now matches either an owner-reviewed question title or any of its saved reviewed alternate wordings (FAQ aliases), using the same Unicode NFKC case-insensitive normalization already applied to titles.
+- Search runs inside the existing `ApprovedAnswerService` authorization boundary against a **single current snapshot** of approved private FAQs with still-published/visible source resources; group-scoped, draft, archived or otherwise inaccessible entries are not returned.
+- Results only expose original public question titles and global authorized FAQ ordinals. Internal IDs, aliases, administrative provenance and query history are not emitted or persisted. Search result buttons reuse the existing SHA-based opaque locator and **revalidate** original item visibility and ordinal when the student taps.
+- Retains ten results per page, canonical next/previous navigation, bounded query validation and no external AI/provider calls. Archived source after search cannot be reopened with an old result button.
+- RED-first integration tests cover JSON+SQLite, normalized Unicode aliases, title matching, global ordinal selection, 12-result pagination, revoked visibility, scope isolation and disabled education. Real Telegram remains OFF.
+
 ## 0.7.25 — 2026-10-21 — Prevent outdated private-group membership from bypassing a newly required subscription (NOT DEPLOYED)
 
 - Fixed a read-after-await authorization gap in private `/categories <group>` and `/resources <group> <category>`: a trusted external group membership result is now bound to the exact saved **group authorization revision**, current permitted navigation scopes, and current mandatory-channel rule revisions/modes/channel lists.
