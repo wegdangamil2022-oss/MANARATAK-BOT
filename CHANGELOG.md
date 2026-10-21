@@ -1,3 +1,11 @@
+## 0.7.13 — 2026-10-21 — Avoid stale mandatory-subscription verification after reapproval (NOT DEPLOYED)
+
+- Closed a time-of-check/time-of-use gap in `SubscriptionGate.configure`: owner configuration can await third-party channel verification while group/channel approvals change. Configuration now compares the **exact saved policy revision** of the group and every required channel in the same transaction as the rule update. A revoke/reapprove cannot legitimize stale verification, even when the final scopes look identical.
+- Captured and compared the pre-check mandatory-subscription rule version, so a slow earlier external verification cannot overwrite a more recent owner configuration.
+- Hardened `verify`: membership results obtained during provider latency are discarded as `UNAVAILABLE` when the group or required channel policy epochs, mandatory-channel sequence or ALL/ANY rule changed. An externally reported MEMBER or NOT_MEMBER under an obsolete authorization is **not** treated as current evidence or justification for moderation.
+- Retained successful known MEMBER/NOT_MEMBER outcomes where both policy and rules remained unchanged, and isolated unrelated group policy edits.
+- Added RED-first JSON+SQLite delayed-promise tests for group/channel revoke+reapprove, concurrent owner changes, stale external membership checks, unchanged success and unrelated scope updates. No live Telegram calls were performed.
+
 ## 0.7.12 — 2026-10-21 — Fail-closed mandatory-channel verification on provider errors (NOT DEPLOYED)
 
 - Hardened the core mandatory-channel `SubscriptionGate` against Telegram membership verification provider timeouts/rejections. A failed `canVerifyChannel` call yields `UNAVAILABLE` for student checks, and a static `CHANNEL_UNVERIFIABLE` error during owner configuration; provider exception details are never propagated into stored audit or user replies.
