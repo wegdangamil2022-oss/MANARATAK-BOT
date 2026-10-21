@@ -189,18 +189,18 @@ export class BotStore {
           const id=/^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/u;
           const sha=/^[a-f0-9]{64}$/u;
           const safe=(v:unknown,max:number)=>typeof v==='string'&&v.length>0&&
-            v.length<=max&&v.trim()===v&&!/[\\u0000-\\u001f\\u007f\\u202a-\\u202e\\u2066-\\u2069]/u.test(v);
+            v.length<=max&&v.trim()===v&&!/[\u0000-\u001f\u007f\u202a-\u202e\u2066-\u2069]/u.test(v);
           return typeof r.sourceId!=='string'||!id.test(r.sourceId)||
             typeof r.sourceRevision!=='number'||!Number.isSafeInteger(r.sourceRevision)||r.sourceRevision<1||
             !safe(r.title,160)||!safe(r.university,120)||!safe(r.cycle,32)||
             !safe(r.degree,64)||typeof r.digest!=='string'||!sha.test(r.digest)||
             !['UNVERIFIED_EXTERNAL','REVIEWED_METADATA_ONLY'].includes(String(r.status))||
-            typeof r.stagedBy!=='string'||!/^\\d{1,20}$/u.test(r.stagedBy)||
+            typeof r.stagedBy!=='string'||!/^\d{1,20}$/u.test(r.stagedBy)||
             typeof r.stagedAt!=='number'||!Number.isSafeInteger(r.stagedAt)||r.stagedAt<0||
             (r.status==='UNVERIFIED_EXTERNAL'&&
               (r.reviewedBy!==undefined||r.reviewedAt!==undefined))||
             (r.status==='REVIEWED_METADATA_ONLY'&&
-              (typeof r.reviewedBy!=='string'||!/^\\d{1,20}$/u.test(r.reviewedBy)||
+              (typeof r.reviewedBy!=='string'||!/^\d{1,20}$/u.test(r.reviewedBy)||
                 typeof r.reviewedAt!=='number'||!Number.isSafeInteger(r.reviewedAt)||r.reviewedAt<0));
         })||
         new Set(previous.platformReviewQueue.map((e:PlatformReviewQueueEntry)=>e.sourceId)).size!==previous.platformReviewQueue.length
