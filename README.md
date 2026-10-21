@@ -1,3 +1,7 @@
+## B3 v0.7.31 — improved Arabic search for published scholarships (offline)
+
+The student `/search` route now uses the same Arabic-friendly keyword normalization as the approved FAQ search. For example, `/search منحة الصين 2027` can locate an authorized published title written `مِنْحَة الصِّين ٢٠٢٧`, and `/search جامعة اندونيسيا` can match a verified owner's university field containing `جَامِعَة إندونيسيا`. Academic cycle and degree metadata also participate. Search results remain confined to published private resources with currently enabled categories and current source checks on tapping; no group leakage, autonomous publishing, external AI or live Telegram activation.
+
 ## B3 v0.7.30 — Telegram-safe Arabic catalogue pages (offline)
 
 Student FAQ, scholarship/resource search and category browsing now shorten only **displayed list snippets** so ten owner-reviewed HTML-heavy or Arabic titles cannot overrun a Telegram message. Resource/category buttons also fit Telegram's UTF-8 and codepoint limits. The saved source is unchanged, and a button still requires a freshly authorized published item on every selection. Tested on the JSON/SQLite offline adapters with Node 22; no live Telegram send, publishing, AI, or data migration is enabled.
