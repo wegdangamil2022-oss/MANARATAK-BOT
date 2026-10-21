@@ -224,6 +224,7 @@ export class OwnerTelegramMenu{
      +'تعذر قراءة السجلات الخارجية بشكل آمن حاليًا.\n'
      +'لم يتم استيراد أو نشر أي مورد.',
      [ownerMenuLabels.settings]);
+   if(inspected.status!=='PREVIEW')return reject();
    if(inspected.records.length===0)return screen(
     '<b>معاينة بيانات منارتك 🔎</b>\n'
     +'لا توجد سجلات منشورة في هذه الصفحة بحسب المصدر.\n'
