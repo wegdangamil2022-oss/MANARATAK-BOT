@@ -509,7 +509,9 @@ export class TelegramUpdateApplication {
     }
     if(cmd==='/resource'&&kind==='private'){
       if(words.length!==2)return {status:'DENIED',reason:'INVALID_RESOURCE_REF'};
-      const opened=await this.opts.links.resolve(words[1]!,actorId,this.opts.membership);
+      const subscription=this.opts.subscription;
+      const opened=await this.opts.links.resolve(words[1]!,actorId,this.opts.membership,
+        subscription?async (scope,user)=>(await subscription.verify(scope,user)).status:undefined);
       if(opened.status!=='FOUND')return {status:'DENIED',reason:'RESOURCE_DENIED'};
       return result(`<b>مورد تعليمي</b>\n${escapeTelegramHtml(opened.resource.title)}\n${escapeTelegramHtml(opened.resource.university)}`);
     }
