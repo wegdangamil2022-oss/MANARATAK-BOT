@@ -1,3 +1,10 @@
+## 0.7.18 — 2026-10-21 — Student Arabic search orthography improvements (NOT DEPLOYED)
+
+- Enhanced the genuine private Telegram student `/search` resource query: students no longer need to type the exact Arabic harakat, kashida, hamza/alif, alif maqsura/ya or common final ta marbuta form present in a scholarship title. Arabic-Indic, Eastern Arabic-Indic and Latin decimal digits search interchangeably, with conservative Persian/Kurdish letter variants normalized for matching.
+- Telegram command validation now accepts bounded **Arabic** combining harakat in the query, while retaining its established 2–32 Unicode codepoint bound and rejection of HTML delimiters, bidi controls, colon injection, extra whitespace, newline and oversized paging commands. Normalized one-letter or empty terms never initiate broad matching.
+- Matching remains solely over published, enabled, currently accessible **private student** educational resources. Group/channel-scoped, disabled and archived records are not included, nor are reviewer, import or audit metadata.
+- New RED-first JSON+SQLite tests cover diacritized title versus unaccented search, cross-script years, Telegram query and paginated button parsing, forbidden inputs and access isolation. All Telegram network operations remain off by default.
+
 ## 0.7.17 — 2026-10-21 — Owner-reviewed educational section visibility (NOT DEPLOYED)
 
 - Added a true **🗂️ إدارة الأقسام** entry to the verified private Telegram owner dashboard. Owner can browse all saved, currently authorized educational sections in 10-item pages, open sanitized details and explicitly review/confirm disabling or enabling their local visibility.
