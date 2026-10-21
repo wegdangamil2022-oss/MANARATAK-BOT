@@ -43,18 +43,33 @@ export function mainMenuKeyboard(owner:boolean):TelegramReplyKeyboard{
 export function backMenuKeyboard():TelegramReplyKeyboard{
  return keyboard([[menuLabels.back,menuLabels.home]]);
 }
-const trimTitle=(title:string,max:number):string=>title
- .replace(/[\u0000-\u001f\u007f\u202a-\u202e\u2066-\u2069]/gu,' ')
- .trim().slice(0,Math.max(1,max));
+/** A reply-keyboard label must fit both Telegram's 256 UTF-8 bytes
+ * and 96 visible codepoints even when a title contains four-byte emoji.
+ * Keep the same deterministic shortening for selection re-authorization.
+ */
+function boundedItemButton(prefix:string,title:string,id:string):string{
+ const suffix=' · '+id;
+ const maxChars=Math.min(Math.max(1,74-id.length),
+  96-Array.from(prefix+suffix).length);
+ const maxBytes=256-Buffer.byteLength(prefix+suffix,'utf8');
+ const clean=title.replace(/[\u0000-\u001f\u007f\u202a-\u202e\u2066-\u2069]/gu,' ').trim();
+ let selected='',bytes=0,chars=0;
+ for(const cp of clean){
+  const width=Buffer.byteLength(cp,'utf8');
+  if(chars>=maxChars||bytes+width>maxBytes)break;
+  selected+=cp;bytes+=width;chars++;
+ }
+ return prefix+(selected.trim()||'—')+suffix;
+}
 /** Stable category/resource token travels in Telegram-sent text. It is never
  * an authorization grant; the application must compare the exact label to
  * the currently visible entity before returning private content.
  */
 export function categoryButton(category:EducationCategory):string{
- return '📁 '+trimTitle(category.title,Math.max(1,74-category.id.length))+' · '+category.id;
+ return boundedItemButton('📁 ',category.title,category.id);
 }
 export function resourceButton(resource:Pick<EducationResource,'id'|'title'>):string{
- return '🔎 '+trimTitle(resource.title,Math.max(1,74-resource.id.length))+' · '+resource.id;
+ return boundedItemButton('🔎 ',resource.title,resource.id);
 }
 /** A page marker is only an untrusted navigation *request*, never a grant
  * or a durable cursor. Every selection must rerun the library's auth checks.

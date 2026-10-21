@@ -1,3 +1,10 @@
+## 0.7.30 — 2026-10-22 — Bounded Telegram student catalogue previews and UTF-8 buttons (NOT DEPLOYED)
+
+- Private FAQ browse/search, resource/category listings, search results, and group educational catalogues now escape owner-supplied titles **before** limiting their displayed UTF-8 byte lengths. Long HTML-heavy and Arabic text can no longer exceed the 4096-byte Telegram reply plan budget just by filling a page of authorized rows.
+- New `escapeTelegramListPreview` preserves complete HTML entities and Unicode codepoints, removes control/bidi override characters, clips only the presentation and appends an ellipsis when necessary. It never changes the underlying approved source, archived status, current authorization, FAQ answer, or row identity.
+- Category/resource reply keyboard buttons now independently fit Telegram's **256 UTF-8 bytes** and **96 Unicode codepoints** with stable deterministic shortening; selections still match the exact currently visible title/ID under the current policy.
+- 12 RED-first JSON/SQLite and pure unit tests cover worst-case HTML expansion, Arabic, four-byte emoji, 10-row pages, category paging, safe button clicks, stale renamed selections, malformed preview budgets and sanitization. All validation remains offline; no Telegram token, actual send or AI activation.
+
 ## 0.7.29 — 2026-10-22 — Arabic-friendly private FAQ discovery (NOT DEPLOYED)
 
 - Student `/faqsearch` now matches currently approved private FAQ titles and **owner-reviewed aliases** despite ordinary Arabic search variation: harakat/diacritics, alif/hamza spelling, alef maqsurah, tatweel, punctuation, multiple spaces, Arabic-Indic numerals and Persian numerals. NFKC and case-insensitive Latin matching remain available.
