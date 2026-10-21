@@ -5,11 +5,13 @@ import type {EducationService} from './education.js';
 import type {EducationAdminFacade,VerifiedAdminContext} from './education-admin.js';
 import {menuLabels,type TelegramReplyKeyboard} from './telegram-menu.js';
 import {OwnerTelegramGroupMenu,isOwnerGroupText} from './telegram-owner-groups.js';
+import {summarizeSubscriptionIntegrity} from './subscription-integrity.js';
 
 export const ownerMenuLabels={
  imports:'🧾 مراجعة الوارد',
  library:'📚 إدارة المكتبة',
  groups:'👥 المجموعات المعتمدة',
+ subscriptionHealth:'🛡 سلامة الاشتراكات',
  delivery:'📊 حالة الرسائل',
  settings:'⚙️ إعدادات التشغيل',
 } as const;
@@ -213,6 +215,26 @@ export class OwnerTelegramMenu{
     Object.values(ownerMenuLabels));
   }
   if(text===ownerMenuLabels.imports)return this.pagedImports(state,0);
+  if(text===ownerMenuLabels.subscriptionHealth){
+   // Owner UI is a read-only projection of current saved policy state, not
+   // a substitute for the protected SQLite host audit or Telegram rights.
+   const report=summarizeSubscriptionIntegrity(state);
+   return screen('<b>سلامة قواعد الاشتراك 🛡</b>\n'
+    +'النطاق: '+report.stage+'\n'
+    +'النتيجة المحلية: '+report.status+'\n'
+    +'القواعد المحفوظة: '+report.rules+'\n'
+    +'القواعد النشطة: '+report.activeRules+'\n'
+    +'القواعد المعلّقة/غير النشطة: '+report.inactiveRules+'\n'
+    +'القواعد غير السليمة: '+report.invalidRules+'\n'
+    +'مجموعات بلا تصريح تحقق: '+report.invalidGroups+'\n'
+    +'قنوات بلا تصريح تحقق: '+report.invalidChannels+'\n'
+    +'القنوات المطلوبة المكررة: '+report.duplicateChannels+'\n'
+    +'قواعد تتجاوز الحد: '+report.overLimitRules+'\n'
+    +(report.reasons.length?'أسباب التنبيه: '+report.reasons.join(', ')+'\n':'')
+    +'هذا فحص للحالة المحفوظة فقط، وليس تحققًا حيًا من Telegram.\n'
+    +'لا يمكن تفعيل البوت أو تعديل شروط الاشتراك من تقرير الفحص.',
+    [ownerMenuLabels.groups,ownerMenuLabels.settings]);
+  }
   if(text===ownerMenuLabels.library){
    const published=state.educationResources.filter(r=>r.status==='PUBLISHED').length;
    const archived=state.educationResources.filter(r=>r.status==='ARCHIVED').length;
