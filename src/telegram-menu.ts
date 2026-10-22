@@ -91,14 +91,27 @@ export function parseMenuPageCommand(text:string):MenuPageCommand|null{
  const direction=found[1]==='➡️ التالي'?'next':'previous';
  return {kind,id,page,direction};
 }
+/** Stateless student breadcrumbs. Never grants access; each tap must re-list
+ * freshly visible private categories and resources.
+ */
+export const catalogBackToCategories='↩️ جميع الأقسام';
+export const catalogBackToCategory=(id:string):string=>{
+ if(!/^[a-zA-Z0-9_-]{1,64}$/u.test(id))throw Error('INVALID_CATEGORY_BREADCRUMB');
+ return '↩️ موارد القسم · '+id;
+};
+export const parseCatalogBackToCategory=(text:string):string|null=>{
+ if(typeof text!=='string'||text.length>110)return null;
+ return /^↩️ موارد القسم · ([a-zA-Z0-9_-]{1,64})$/u.exec(text)?.[1]??null;
+};
 export function listingKeyboard(buttons:readonly string[],pageControls:{
  previous?:string|undefined;next?:string|undefined
-}={}):TelegramReplyKeyboard{
+}={},breadcrumb?:string):TelegramReplyKeyboard{
  const rows:string[][]=[];
  for(let i=0;i<Math.min(buttons.length,10);i+=2)
   rows.push(buttons.slice(i,i+2));
  const paging=[pageControls.previous,pageControls.next].filter((x):x is string=>Boolean(x));
  if(paging.length)rows.push(paging);
+ if(breadcrumb)rows.push([breadcrumb]);
  rows.push([menuLabels.back,menuLabels.home]);
  return keyboard(rows);
 }
