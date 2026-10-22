@@ -1,3 +1,10 @@
+## 0.7.46 — 2026-10-22 — B6 verified-update HMAC keys and durable-only fake admission (OFFLINE)
+
+- Introduces the proposed `B6TelegramIntentKeys` boundary: HMAC-SHA256 of a distinct v1 domain and strictly validated bot ID / Telegram update number. Uses an explicitly supplied 64-hex-character (32-byte) secret; no actor IDs, student messages, session tokens, bot IDs or secrets are persisted in the B6 ledger. No key derivation from timestamps or retries.
+- Adds a separate `B6TelegramDraftEntrypoint` and durable-only `B6GenerationDraftService.prepareDurableDraft`. Absent a durable reservation ledger, the new entrypoint returns `UNAVAILABLE` without calling even the fake model. Same verified update is rejected as `DUPLICATE` after reconstruction, independent of its subsequent delivery attempt. Bot/domain isolation and existing source/permission rechecks remain enforced.
+- TDD: 16 new tests, 14 failing on the deliberately nonfunctional RED implementation; GREEN head passed **1,065/1,065** tests, typecheck and all offline demos in GitHub Actions. Final docs-head CI must pass before merge.
+- Scope limitation: this module only accepts caller-supplied metadata claimed to be Telegram-verified. The existing live webhook application is not connected to the fake-generation entrypoint. HMAC key rotation requires a separate reviewed plan to retain replay-denial history. Phase 17 external provider and billing contracts are still absent; real AI and Telegram student sends remain disabled.
+
 ## 0.7.45 — 2026-10-22 — B6 bounded fake-call deadline and rollback-safe ephemeral admission (OFFLINE)
 
 - Introduces strict optional `B6DraftConfig.maxDurationMs` (20–900,000 ms, default 30,000) for offline fake generation. A stalled fake-port promise resolves the service with `UNAVAILABLE` after the deadline; late text cannot be published or delivered. The local slot is released and an existing durable reservation becomes `UNKNOWN_OUTCOME` without refund or automatic replay.
