@@ -4,6 +4,7 @@
 
 | المتطلب أو الاختبار | التطبيق | الحالة | الإثبات |
 |---|---|---|---|
+| B6 v0.7.47؛ ثبات سر HMAC ومنع تبديله بلا هجرة | store.ts + b6-durable-budget.ts + b6-telegram-intent.ts + b6-telegram-intent.test.ts | TESTED_MOCK | 14 اختبار JSON/SQLite: تثبيت بصمة سر مبهمة داخل الحجز، رفض التبديل/السباق/restart، منع ترقية دفتر قديم بلا إثبات، وتحقق schema؛ Phase17 غير متصل |
 | B6 v0.7.46؛ T12-06/20 + S121-01 محاكاة هوية طلب Telegram | b6-telegram-intent.ts + b6-generation-draft.ts + b6-telegram-intent.test.ts | TESTED_MOCK | 16 اختبارًا؛ HMAC ثابت سرّي، منع إعادة الطلب بعد restart، رفض التهيئة الناقصة، صلاحيات private، JSON/SQLite؛ لم يُربط مع Telegram أو Phase17 |
 | B6 v0.7.45؛ T12-06/20 حدود الاستدعاء الوهمي | b6-generation-draft.ts + b6-generation-draft.test.ts | TESTED_MOCK | 7 اختبارات جديدة: مهلة انتظار، محاولات UNKNOWN لا تعاد، عدم عرض الرد المتأخر، قفل الميزانية عند تراجع/خلل الساعة؛ Phase17 غير متصل |
 | B0 جرد وفرع مستقل | docs/DECISIONS.md | IMPLEMENTED | جرد الفرعين وAGENTS |
