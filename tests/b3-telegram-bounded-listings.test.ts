@@ -12,6 +12,7 @@ import {ApprovedAnswerService,ResourceLinkService} from '../src/education-intera
 import {TelegramUpdateApplication} from '../src/telegram-transport.js';
 import {menuLabels,categoryButton,resourceButton,isValidTelegramReplyKeyboard} from '../src/telegram-menu.js';
 import {privateFAQBrowseLabel} from '../src/telegram-private-faq.js';
+import {parseSearchResourceSelection} from '../src/telegram-search.js';
 
 const OWNER='100',STUDENT=300,GROUP='-100555';
 const message=(updateId:number,text:string,group=false)=>({
@@ -120,7 +121,7 @@ test('B3 stale/reworded student resource button is never an authority even if ti
   const search=await f.app().handle(message(40,'/search Grant'));
   expectTelegramPlan(search);
   const button=keys(search).find(x=>x.startsWith('🔎 '))!;
-  const id=button.split(' · ').at(-1)!;
+  const id=parseSearchResourceSelection(button)?.resourceId??button.split(' · ').at(-1)!;
   await f.store.transaction(s=>{s.educationResources.find(r=>r.id===id)!.title='A different reviewed title';});
   const stale=await f.app().handle(message(41,button));
   assert.equal(stale.status,'DENIED');assert.equal(stale.plan,undefined);
