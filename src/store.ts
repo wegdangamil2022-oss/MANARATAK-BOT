@@ -85,6 +85,8 @@ export interface TelegramReplyJob {
  status:'QUEUED'|'SENDING'|'SENT'|'FAILED_CONFIRMED'|'UNKNOWN_OUTCOME';
  attemptId?:string;startedAt?:number;messageId?:number;
  queuedAt?:number;redactedAt?:number;
+ /** Queued B6 group FAQ only. Brief private membership recheck metadata, removed at dispatch. */
+ groupQuestionAccess?:{actorId:string;epoch:string;expiresAt:number};
  /** Immutable operator acknowledgement; it NEVER proves delivery or permits retry. */
  manualReview?:{decision:'ACKNOWLEDGED_UNRESOLVED'|'ESCALATED';
   reviewedBy:string;reviewedAt:number;attemptId:string};
@@ -291,7 +293,24 @@ export class BotStore {
         })||
         new Set(previous.platformReviewQueue.map((e:PlatformReviewQueueEntry)=>e.sourceId)).size!==previous.platformReviewQueue.length
       )) ||
-      (previous.telegramReplyJobs!==undefined&&!Array.isArray(previous.telegramReplyJobs)) ||
+      (previous.telegramReplyJobs!==undefined&&(
+       !Array.isArray(previous.telegramReplyJobs)||
+       previous.telegramReplyJobs.some((raw:unknown)=>{
+        if(!raw||typeof raw!=='object'||Array.isArray(raw))return true;
+        const job=raw as Record<string,unknown>;
+        if(job.groupQuestionAccess===undefined)return false;
+        const g=job.groupQuestionAccess;
+        if(!g||typeof g!=='object'||Array.isArray(g))return true;
+        const v=g as Record<string,unknown>;
+        const plan=job.plan as Record<string,unknown>|undefined;
+        return job.status!=='QUEUED'||Object.keys(v).length!==3||
+         typeof v.actorId!=='string'||!/^[1-9]\d{0,19}$/u.test(v.actorId)||
+         typeof v.epoch!=='string'||!/^[a-f0-9]{64}$/u.test(v.epoch)||
+         typeof v.expiresAt!=='number'||!Number.isSafeInteger(v.expiresAt)||
+         v.expiresAt<0||v.expiresAt>8_640_000_000_000_000||
+         !plan||typeof plan.chatId!=='string'||!plan.chatId.startsWith('-');
+       })
+      )) ||
       !Array.isArray(previous.historicalPublications) || !Array.isArray(previous.campaigns) ||
       !Array.isArray(previous.deliveries) || !Array.isArray(previous.faqEntries) ||
       !Array.isArray(previous.resourceLinks) || !Array.isArray(previous.moderationReasons) ||
@@ -574,7 +593,8 @@ export class BotStore {
   async cancelIntent(id: string): Promise<void> {
     await this.transaction(s => { const op = s.operations.find(x => x.id === id); if (!op || op.status !== 'INTENT') throw new Error('Cannot cancel started operation'); op.status = 'CANCELLED'; });
   }
-  async finish(key: string, decision: AuditRecord, reply?: TelegramReplyJob['plan']): Promise<void> {
+  async finish(key: string, decision: AuditRecord, reply?: TelegramReplyJob['plan'],
+    groupQuestionAccess?:TelegramReplyJob['groupQuestionAccess']): Promise<void> {
     await this.transaction(s => {
       const update = s.updates.find(x => x.key === key);
       if (!update || update.status !== 'CLAIMED') throw new Error('Update not claimed');
@@ -584,7 +604,8 @@ export class BotStore {
       if(reply && update.status==='DONE') {
         s.telegramReplyJobs??=[];
         if(!s.telegramReplyJobs.some(j=>j.updateKey===key))
-         s.telegramReplyJobs.push({updateKey:key,plan:structuredClone(reply),status:'QUEUED',queuedAt:decision.at});
+         s.telegramReplyJobs.push({updateKey:key,plan:structuredClone(reply),status:'QUEUED',queuedAt:decision.at,
+          ...(groupQuestionAccess?{groupQuestionAccess:structuredClone(groupQuestionAccess)}:{})});
       }
     });
   }

@@ -11,6 +11,7 @@ import {EducationAdminFacade} from '../src/education-admin.js';
 import {ApprovedAnswerService,ResourceLinkService} from '../src/education-interactions.js';
 import {LocalFAQKnowledgeSource,B6AnswerPreflight,type KnowledgeSourcePort} from '../src/b6-approved-answer-preflight.js';
 import {TelegramUpdateApplication} from '../src/telegram-transport.js';
+import {TelegramReplyDispatcher} from '../src/telegram-replies.js';
 import {SubscriptionGate,FakeMembershipGateway} from '../src/subscription.js';
 import {ModerationService,FakeModerationGateway} from '../src/moderation.js';
 const OWNER='100',STUDENT=300,GROUP='-100555',CHANNEL='-100556';
@@ -502,6 +503,135 @@ for(const engine of ['json','sqlite'] as const){
     '/ask@ManaratakBot '+QUESTION,true));
    assert.equal(denied.status,'DENIED');
    assert.equal(denied.plan,undefined);
+  }finally{await f.close();}
+ });
+}
+
+
+for(const engine of ['json','sqlite'] as const){
+ const gate=async(f:Awaited<ReturnType<typeof setup>>,id:number,hasRule=true)=>{
+  if(hasRule)await f.subscription.configure(OWNER,GROUP,[CHANNEL],'ALL');
+  f.membership.set(CHANNEL,String(STUDENT),'MEMBER');
+  const accepted=await f.app(true,undefined,true).handle(msg(id,STUDENT,
+    '/ask@ManaratakBot '+QUESTION,true));
+  assert.equal(accepted.status,'APPLIED');
+  assert.ok(accepted.deliveryKey);
+  return accepted.deliveryKey!;
+ };
+ const dispatch=(f:Awaited<ReturnType<typeof setup>>,sent:string[],
+  includeSubscription=true,now=Date.now())=>
+  new TelegramReplyDispatcher(f.store,f.policy,{send:async plan=>{
+   sent.push(plan.text);return {status:'CONFIRMED' as const,messageId:777};
+  }},()=>now,undefined,includeSubscription?f.subscription:undefined);
+
+ test('B6 '+engine+': queued group FAQ includes a short-lived authorization witness removed after confirmed send',async()=>{
+  const f=await setup(engine);try{
+   const key=await gate(f,800);
+   const job=(await f.store.snapshot()).telegramReplyJobs?.find(j=>j.updateKey===key);
+   assert.equal(job?.status,'QUEUED');
+   assert.match(job?.groupQuestionAccess?.epoch??'',/^[a-f0-9]{64}$/u);
+   assert.equal(job?.groupQuestionAccess?.actorId,String(STUDENT));
+   assert.equal(JSON.stringify(job).includes(QUESTION),false);
+   const sent:string[]=[];
+   assert.equal((await dispatch(f,sent).dispatch(key)).status,'CONFIRMED');
+   assert.equal(sent.length,1);
+   const done=(await f.store.snapshot()).telegramReplyJobs?.find(j=>j.updateKey===key);
+   assert.equal(done?.status,'SENT');
+   assert.equal(done?.groupQuestionAccess,undefined);
+   assert.equal(done?.plan,undefined);
+  }finally{await f.close();}
+ });
+ test('B6 '+engine+': membership lost after approved FAQ was queued denies outbound Telegram send',async()=>{
+  const f=await setup(engine);try{
+   const key=await gate(f,801);
+   f.membership.set(CHANNEL,String(STUDENT),'NOT_MEMBER');
+   const sent:string[]=[];
+   assert.equal((await dispatch(f,sent).dispatch(key)).status,'FAILED_CONFIRMED');
+   assert.equal(sent.length,0);
+   const done=(await f.store.snapshot()).telegramReplyJobs?.[0];
+   assert.equal(done?.groupQuestionAccess,undefined);
+   assert.equal(done?.plan,undefined);
+   assert.equal(done?.status,'FAILED_CONFIRMED');
+   assert.equal((await dispatch(f,sent).dispatch(key)).status,'FAILED_CONFIRMED');
+  }finally{await f.close();}
+ });
+ test('B6 '+engine+': adding an active subscription after an initially unrestricted reply blocks send even if now a member',async()=>{
+  const f=await setup(engine);try{
+   const key=await gate(f,802,false);
+   await f.subscription.configure(OWNER,GROUP,[CHANNEL],'ALL');
+   const sent:string[]=[];
+   assert.equal((await dispatch(f,sent).dispatch(key)).status,'FAILED_CONFIRMED');
+   assert.equal(sent.length,0);
+  }finally{await f.close();}
+ });
+ test('B6 '+engine+': paused or modified rules invalidate queued FAQ group responses',async()=>{
+  const f=await setup(engine);try{
+   const key=await gate(f,803);
+   await f.subscription.configure(OWNER,GROUP,[],'ALL');
+   const sent:string[]=[];
+   assert.equal((await dispatch(f,sent).dispatch(key)).status,'FAILED_CONFIRMED');
+   assert.equal(sent.length,0);
+  }finally{await f.close();}
+ });
+ test('B6 '+engine+': changing group AI policy or revoking group before dispatch blocks the send',async()=>{
+  const f=await setup(engine);try{
+   const key=await gate(f,804);
+   await f.policy.configureGroupAI(OWNER,GROUP,'OFF');
+   const sent:string[]=[];
+   assert.equal((await dispatch(f,sent).dispatch(key)).status,'FAILED_CONFIRMED');
+   assert.equal(sent.length,0);
+  }finally{await f.close();}
+ });
+ test('B6 '+engine+': a stale queued group FAQ is never sent after the short witness expires',async()=>{
+  const f=await setup(engine);try{
+   const key=await gate(f,805);
+   const expires=(await f.store.snapshot()).telegramReplyJobs?.[0]?.groupQuestionAccess?.expiresAt;
+   assert.equal(typeof expires,'number');
+   const sent:string[]=[];
+   assert.equal((await dispatch(f,sent,true,expires!+1).dispatch(key)).status,'FAILED_CONFIRMED');
+   assert.equal(sent.length,0);
+  }finally{await f.close();}
+ });
+ test('B6 '+engine+': fail closed without provider verifier, or with unknown membership',async()=>{
+  const f=await setup(engine);try{
+   const key=await gate(f,806);
+   const sent:string[]=[];
+   assert.equal((await dispatch(f,sent,false).dispatch(key)).status,'FAILED_CONFIRMED');
+   assert.equal(sent.length,0);
+   const next=await gate(f,807);
+   f.membership.set(CHANNEL,String(STUDENT),'UNKNOWN');
+   assert.equal((await dispatch(f,sent,true).dispatch(next)).status,'FAILED_CONFIRMED');
+   assert.equal(sent.length,0);
+  }finally{await f.close();}
+ });
+ test('B6 '+engine+': membership proof racing with changed subscription rules cannot dispatch',async()=>{
+  const f=await setup(engine);try{
+   const key=await gate(f,808);
+   const real=f.membership.getMember.bind(f.membership);
+   let entered!:()=>void,release!:()=>void;
+   const started=new Promise<void>(r=>entered=r),held=new Promise<void>(r=>release=r);
+   f.membership.getMember=async(channel,user)=>{
+    entered();await held;return real(channel,user);
+   };
+   const sent:string[]=[];
+   const pending=dispatch(f,sent).dispatch(key);
+   await started;
+   await f.subscription.configure(OWNER,GROUP,[CHANNEL],'ANY');
+   release();
+   assert.equal((await pending).status,'FAILED_CONFIRMED');
+   assert.equal(sent.length,0);
+  }finally{await f.close();}
+ });
+ test('B6 '+engine+': invalid queued guard metadata is rejected and never sent',async()=>{
+  const f=await setup(engine);try{
+   const key=await gate(f,809);
+   await assert.rejects(f.store.transaction(s=>{
+    const row=s.telegramReplyJobs?.[0];if(row)
+     (row.groupQuestionAccess as unknown as {epoch:string}).epoch='invalid';
+   }),/Unsupported state schema|INVALID_REPLY_JOB/);
+   const sent:string[]=[];
+   assert.equal((await dispatch(f,sent).dispatch(key)).status,'CONFIRMED');
+   assert.equal(sent.length,1);
   }finally{await f.close();}
  });
 }

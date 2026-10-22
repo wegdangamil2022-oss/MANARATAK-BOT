@@ -1,6 +1,7 @@
-import { timingSafeEqual } from 'node:crypto';
+import { timingSafeEqual,createHash } from 'node:crypto';
 import type { IncomingMessage, RequestListener, ServerResponse } from 'node:http';
-import { BotStore, type AuditRecord, type BotState } from './store.js';
+import { BotStore, type AuditRecord, type BotState, type TelegramReplyJob } from './store.js';
+import {groupQuestionSubscriptionEpoch} from './telegram-group-access.js';
 import { Policy } from './policy.js';
 import { EducationService } from './education.js';
 import { EducationAdminFacade, type VerifiedAdminContext } from './education-admin.js';
@@ -48,6 +49,8 @@ interface IncomingDocument {
 export interface TelegramReplyPlan { chatId: string; parseMode: 'HTML'; text: string;
  replyMarkup?:TelegramReplyKeyboard; }
 export interface TelegramResult { status: 'APPLIED' | 'DUPLICATE' | 'DENIED' | 'IGNORED' | 'UNKNOWN'; reason: string; plan?: TelegramReplyPlan; deliveryKey?: string; }
+type ProcessedReply={status:TelegramResult['status'];reason:string;plan?:TelegramReplyPlan;
+ groupQuestionAccess?:TelegramReplyJob['groupQuestionAccess']};
 export interface TelegramApplicationOptions {
   store: BotStore; policy: Policy; education: EducationService; admin: EducationAdminFacade;
   faq: ApprovedAnswerService; links: ResourceLinkService; membership: MembershipPort;
@@ -103,18 +106,6 @@ function eventFrom(value:unknown):{event?:Event;reason:string} {
  * group + subscription + required-channel state again after that lookup,
  * including when the first state had no required-channel rule.
  */
-function groupQuestionSubscriptionEpoch(s:BotState,groupId:string):string {
- const rules=s.subscriptionRequirements.filter(r=>r?.chatId===groupId);
- const ids=new Set<string>([groupId]);
- for(const rule of rules)
-  if(Array.isArray(rule?.channelIds))
-   for(const id of rule.channelIds)
-    if(typeof id==='string')ids.add(id);
- const approvals=[...ids].sort().map(id=>
-  [id,s.chats.filter(c=>c?.id===id).map(c=>
-   [c.approved,c.present,c.version,c.scopes,c.groupAI])]);
- return JSON.stringify([subscriptionRequirementMode(s,groupId),rules,approvals]);
-}
 const isScope=(scope:string):boolean=>scope==='private'||/^-[1-9]\d{0,18}$/.test(scope);
 const isId=(value:string):boolean=>/^[a-zA-Z0-9_-]{1,64}$/.test(value);
 const asNumber=(value:string):number|null=>/^\d{1,8}$/.test(value)&&Number.isSafeInteger(Number(value))?Number(value):null;
@@ -231,7 +222,7 @@ export class TelegramUpdateApplication {
     return {status:'APPLIED',reason:'RESPONSE_PLANNED_ONLY',plan:this.plan(chatId,
       `<b>تقرير استيراد ملف Telegram تجريبي</b>\nالمعرف: <code>${escapeTelegramHtml(run.id)}</code>\nالأقسام: ${report.sections}\nالجامعات: ${report.universities}\nفرص مرشحة: ${report.opportunities}\nيتطلب المراجعة قبل الاعتماد والنشر المحلي.`)};
   }
-  private async process(event:Event):Promise<{status:TelegramResult['status'];reason:string;plan?:TelegramReplyPlan}> {
+  private async process(event:Event):Promise<ProcessedReply> {
     if(event.document)return this.handleDocument(event);
     const {actorId,chatId,kind,text}=event;
     if(kind==='group'&&!this.opts.policy.canUseChat(await this.opts.store.snapshot(),chatId,'navigation'))return {status:'DENIED',reason:'CHAT_NOT_AUTHORIZED'};
@@ -249,12 +240,12 @@ export class TelegramUpdateApplication {
      ?(mention.status==='MATCH'?mention.question:
        text.startsWith(commandPrefix)?text.slice(commandPrefix.length):null)
      :null;
-    let groupAnswerSubscriptionEpoch:string|undefined;
+    let groupAnswerSubscriptionEpochValue:string|undefined;
     if(kind==='group'&&(cmd==='/categories'||cmd==='/resources'||
       cmd===`/ask@${this.opts.botUsername}`||groupQuestion!==null)) {
       const snapshot=await this.opts.store.snapshot();
       if(groupQuestion!==null)
-       groupAnswerSubscriptionEpoch=groupQuestionSubscriptionEpoch(snapshot,chatId);
+       groupAnswerSubscriptionEpochValue=groupQuestionSubscriptionEpoch(snapshot,chatId);
       const requirement=subscriptionRequirementMode(snapshot,chatId);
       if(requirement==='INVALID')
         return {status:'DENIED',reason:'SUBSCRIPTION_UNAVAILABLE'};
@@ -275,8 +266,22 @@ export class TelegramUpdateApplication {
           return {status:'DENIED',reason:'SUBSCRIPTION_UNAVAILABLE'};
       }
     }
-    const result=(message:string,replyMarkup?:TelegramReplyKeyboard):TelegramResult=>({
-      status:'APPLIED',reason:'RESPONSE_PLANNED_ONLY',plan:this.plan(chatId,message,replyMarkup)});
+    const result=(message:string,replyMarkup?:TelegramReplyKeyboard,
+      groupQuestionAccess?:TelegramReplyJob['groupQuestionAccess']):ProcessedReply=>({
+      status:'APPLIED',reason:'RESPONSE_PLANNED_ONLY',plan:this.plan(chatId,message,replyMarkup),
+      ...(groupQuestionAccess?{groupQuestionAccess}:{})});
+    const groupAnswerAccess=():TelegramReplyJob['groupQuestionAccess']=>{
+      const epoch=groupAnswerSubscriptionEpochValue;
+      if(epoch===undefined)throw Error('B6_GROUP_EPOCH_MISSING');
+      const at=this.clock();
+      if(!Number.isSafeInteger(at)||at<0||at>8_640_000_000_000_000-120_000)
+       throw Error('B6_GROUP_CLOCK_INVALID');
+      return {
+       actorId,epoch:createHash('sha256')
+        .update('MANARATAK:B6:GROUP-FAQ:DISPATCH:v1:')
+        .update(epoch).digest('hex'),expiresAt:at+120_000
+      };
+    };
     // The real Telegram reply keyboard uses verified ordinary message texts,
     // not callback claims. Every selection is re-authorized on every tap.
     if(kind==='private'){
@@ -651,17 +656,17 @@ export class TelegramUpdateApplication {
        });
        if(plan.status!=='APPROVED_ANSWER')
         return {status:'DENIED',reason:'B6_'+plan.status};
-       const fence=await this.finalGroupAnswerGate(chatId,actorId,groupAnswerSubscriptionEpoch);
+       const fence=await this.finalGroupAnswerGate(chatId,actorId,groupAnswerSubscriptionEpochValue);
        if(fence)return {status:'DENIED',reason:fence};
        return result('<b>إجابة من موارد منارتك المعتمدة</b>\n'
         +escapeTelegramHtml(plan.answer)+'\n'
-        +'جواب محفوظ ومعتمد، لا AI توليدي.');
+        +'جواب محفوظ ومعتمد، لا AI توليدي.',undefined,groupAnswerAccess());
       }
       const ans=await this.opts.faq.answerGroup(actorId,chatId,question,true);
       if(ans.status!=='ANSWER')return {status:'DENIED',reason:`FAQ_${ans.status}`};
-      const fence=await this.finalGroupAnswerGate(chatId,actorId,groupAnswerSubscriptionEpoch);
+      const fence=await this.finalGroupAnswerGate(chatId,actorId,groupAnswerSubscriptionEpochValue);
       if(fence)return {status:'DENIED',reason:fence};
-      return result(`<b>إجابة من موارد منارتك المعتمدة</b>\n${escapeTelegramHtml(ans.answer)}`);
+      return result(`<b>إجابة من موارد منارتك المعتمدة</b>\n${escapeTelegramHtml(ans.answer)}`,undefined,groupAnswerAccess());
     }
     // No admin command may be executed in groups; no AI or subscription bypass.
     return {status:'IGNORED',reason:'UNSUPPORTED_COMMAND'};
@@ -673,13 +678,15 @@ export class TelegramUpdateApplication {
     const key=`b3-webhook:${this.opts.botId}:${event.updateId}`;
     const claim=await this.opts.store.claim(key,this.clock());
     if(claim!=='CLAIMED')return {status:claim==='UNKNOWN'?'UNKNOWN':'DUPLICATE',reason:'REPLAY_OR_UNRESOLVED'};
-    let handled:{status:TelegramResult['status'];reason:string;plan?:TelegramReplyPlan};
+    let handled:ProcessedReply;
     try{handled=await this.process(event);}catch(err){handled={status:'DENIED',reason:safeError(err)};}
     const audit:AuditRecord={updateKey:key,decision:handled.status==='APPLIED'?'ALLOW':handled.status==='DENIED'?'DENY':'NOOP',reason:handled.reason,policyVersion:0,at:this.clock()};
     // Commit the decision and outbound reply intent in one durable transaction.
     // No external call occurs before the outbox row exists.
-    await this.opts.store.finish(key,audit,handled.plan);
-    return handled.plan?{...handled,deliveryKey:key}:handled;
+    await this.opts.store.finish(key,audit,handled.plan,handled.groupQuestionAccess);
+    // Actor ID and short-lived verification metadata never escape in results.
+    const {groupQuestionAccess:_,...publicResult}=handled;
+    return publicResult.plan?{...publicResult,deliveryKey:key}:publicResult;
   }
 }
 
