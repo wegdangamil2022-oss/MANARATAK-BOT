@@ -132,7 +132,7 @@ test('live webhook checks actual membership for private group catalog, sends rep
   const first=await call();
   assert.deepEqual(await first.json(),{ok:true,status:'APPLIED'});
   assert.equal(first.status,200);
-  assert.deepEqual(calls.map(c=>c.url.split('/').at(-1)),['getChatMember','getChatMember','sendMessage']);
+  assert.deepEqual(calls.map(c=>c.url.split('/').at(-1)),['getChatMember','getChatMember','getChatMember','getChatMember','sendMessage']);
   assert.equal(calls[2]?.body.chat_id,'300');
   assert.match(String(calls[2]?.body.text),/Approved scholarships/);
   assert.equal((await call()).status,200);

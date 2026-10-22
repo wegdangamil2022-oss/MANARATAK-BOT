@@ -30,6 +30,12 @@ async function fixture(engine:'json'|'sqlite'){
  await policy.approveChat(OWNER,CHANNEL,['verification']);
  await education.createCategory(OWNER,{id:'grants',scope:GROUP,title:'Group Secret Scholarship',order:1});
  await education.createCategory(OWNER,{id:'private-grants',scope:'private',title:'Public Private Navigation',order:1});
+ await store.transaction(s=>{
+  s.educationResources.push({id:'group_resource',scope:GROUP,categoryId:'grants',
+   title:'Approved Group Resource',university:'University',cycle:'2027',
+   degree:'Bachelor',seats:null,sourceImportId:'local_verified',
+   sourceLocator:'fixture',reviewedBy:OWNER,status:'PUBLISHED'});
+ });
  let member:MembershipStatus='VERIFIED';
  let lookup:()=>Promise<MembershipStatus>=async()=>member;
  const membership=async()=>lookup();
