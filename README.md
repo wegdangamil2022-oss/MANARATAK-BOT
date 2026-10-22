@@ -1,3 +1,11 @@
+## B6 v0.7.43 — persistent fake-generation reservations (OFFLINE; not a money budget)
+
+`B6DurableBudget` adds conservative reservations to the bot's schema-8 JSON/SQLite storage: an opaque request key, unique attempt ID, UTC day, upper-bound reserved units, lease and final state. SQLite uses serialized write transactions, so two bot processes cannot independently admit over the same local SQLite budget. JSON is only a single-process simulation. A duplicate request key is rejected after restart; an expired in-flight attempt is quarantined `UNKNOWN_OUTCOME` and never retried/refunded automatically. Malformed stored state or a full bounded ledger fails closed without wiping past attempts.
+
+When **explicitly injected** into `B6GenerationDraftService`, a stable request key gates the fake-only model call; absence, duplicates, exhausted quota or an expired lease cannot yield a draft. Source review and authorization still run before and after waiting for the fake provider. The service is OFF by default, generates no student-facing messages and does not enable Telegram live sending.
+
+**Important:** the fixed 8192-unit fake attempt reservation is not verified token usage or monetary cost. This is not a replacement for the future central Phase 17 billing/receipt/reconciliation contract, authenticated provider, global budget, reviewed release decisions or deployment acceptance.
+
 ## B6 v0.7.42 — fake-only generation drafts, owner review required (OFFLINE)
 
 A new `AnswerGenerationPort` interface and `B6GenerationDraftService` can prepare an **unpublished review draft** from a trusted approved FAQ after explicit injection of a **fake** provider and an enable flag. The source and permission policy are checked again after awaiting the fake response. A draft includes validated provenance, bounded token counters, and a separately escaped HTML preview; it is **not an approved answer** and is never displayed to a student or sent to Telegram. There are no API credentials, external AI requests, production model calls, or automatic fallback.

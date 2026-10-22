@@ -8,6 +8,7 @@ import {BotStore} from '../src/store.js';
 import {Policy} from '../src/policy.js';
 import {ApprovedAnswerService} from '../src/education-interactions.js';
 import {LocalFAQKnowledgeSource,B6AnswerPreflight} from '../src/b6-approved-answer-preflight.js';
+import {B6DurableBudget} from '../src/b6-durable-budget.js';
 import {B6EphemeralCallBudget,B6GenerationDraftService,
  type AnswerGenerationPort} from '../src/b6-generation-draft.js';
 
@@ -221,3 +222,83 @@ test('B6 ephemeral budget rejects malformed settings and does not masquerade as 
  assert.equal(budget.summary().durable,false);
  assert.equal(budget.summary().attemptsToday,0);
 });
+
+for(const engine of ['json','sqlite'] as const){
+ test('B6 '+engine+': durable fake generation needs a stable request key and blocks replay after recreating services',async()=>{
+  const f=await fixture(engine);try{
+   const mk=(store=f.store)=>new B6DurableBudget(store,{
+    maxDailyAttempts:2,maxDailyReservedTokens:16384,maxConcurrent:1,leaseMs:60000},()=>NOW);
+   // A real fake port is explicitly supplied; absence of a key is denied BEFORE provider.
+   const fake:AnswerGenerationPort={generate:async input=>draft(input.sourceId)};
+   const s=new B6GenerationDraftService(
+    new B6AnswerPreflight(f.store,f.policy,f.faq,new LocalFAQKnowledgeSource(f.store)),
+    fake,f.budget(),{enabled:true},mk());
+   assert.deepEqual(await s.prepareDraft(f.request),{status:'INVALID_REQUEST'});
+   const made=await s.prepareDraft(f.request,'draft-request-0001');
+   assert.equal(made.status,'DRAFT');
+   const recreatedStore=new BotStore(f.store.file,{engine});
+   const service=new B6GenerationDraftService(
+    new B6AnswerPreflight(recreatedStore,f.policy,f.faq,new LocalFAQKnowledgeSource(recreatedStore)),
+    fake,f.budget(),{enabled:true},mk(recreatedStore));
+   assert.deepEqual(await service.prepareDraft(f.request,'draft-request-0001'),{status:'DUPLICATE'});
+   assert.equal((await mk().inspect()).attemptsToday,1);
+  }finally{await f.close();}
+ });
+ test('B6 '+engine+': thrown fake provider retains full reserved charge as UNKNOWN and denies repeat',async()=>{
+  const f=await fixture(engine);try{
+   let calls=0;
+   const stable=new B6DurableBudget(f.store,{
+    maxDailyAttempts:1,maxDailyReservedTokens:8192,maxConcurrent:1,leaseMs:60000},()=>NOW);
+   const failing:AnswerGenerationPort={generate:async()=>{calls++;throw Error('untrusted provider issue');}};
+   const service=new B6GenerationDraftService(
+    new B6AnswerPreflight(f.store,f.policy,f.faq,new LocalFAQKnowledgeSource(f.store)),
+    failing,f.budget(),{enabled:true},stable);
+   assert.deepEqual(await service.prepareDraft(f.request,'draft-request-0002'),{status:'UNAVAILABLE'});
+   assert.deepEqual(await service.prepareDraft(f.request,'draft-request-0002'),{status:'DUPLICATE'});
+   assert.equal(calls,1);
+   const totals=await stable.inspect();
+   assert.equal(totals.unknownCount,1);
+   assert.equal(totals.reservedTokensToday,8192);
+   assert.equal(totals.active,0);
+  }finally{await f.close();}
+ });
+ test('B6 '+engine+': fake provider response after expired durable lease cannot yield a draft',async()=>{
+  const f=await fixture(engine);try{
+   let release!:()=>void,entered!:()=>void;
+   const waiting=new Promise<void>(r=>release=r);
+   const started=new Promise<void>(r=>entered=r);
+   let now=NOW;
+   const ledger=new B6DurableBudget(f.store,{
+    maxDailyAttempts:1,maxDailyReservedTokens:8192,maxConcurrent:1,leaseMs:1000},()=>now);
+   const generation:AnswerGenerationPort={generate:async q=>{
+    entered();await waiting;return draft(q.sourceId);
+   }};
+   const service=new B6GenerationDraftService(
+    new B6AnswerPreflight(f.store,f.policy,f.faq,new LocalFAQKnowledgeSource(f.store)),
+    generation,f.budget(),{enabled:true},ledger);
+   const pending=service.prepareDraft(f.request,'draft-request-0003');
+   await started;
+   now+=1001;release();
+   assert.deepEqual(await pending,{status:'UNAVAILABLE'});
+   assert.equal(await ledger.recoverExpired(),1);
+   assert.equal((await ledger.inspect()).unknownCount,1);
+  }finally{await f.close();}
+ });
+ test('B6 '+engine+': revoked source during fake generation still consumes durable attempt and hides draft',async()=>{
+  const f=await fixture(engine);try{
+   let entered!:()=>void,release!:()=>void;
+   const started=new Promise<void>(r=>entered=r),waiting=new Promise<void>(r=>release=r);
+   const ledger=new B6DurableBudget(f.store,{
+    maxDailyAttempts:1,maxDailyReservedTokens:8192,maxConcurrent:1,leaseMs:60000},()=>NOW);
+   const generation:AnswerGenerationPort={generate:async q=>{entered();await waiting;return draft(q.sourceId);}};
+   const service=new B6GenerationDraftService(
+    new B6AnswerPreflight(f.store,f.policy,f.faq,new LocalFAQKnowledgeSource(f.store)),
+    generation,f.budget(),{enabled:true},ledger);
+   const pending=service.prepareDraft(f.request,'draft-request-0004');
+   await started;await f.faq.archive(OWNER,f.privateFaq.id);release();
+   assert.deepEqual(await pending,{status:'STALE'});
+   assert.equal((await ledger.inspect()).attemptsToday,1);
+   assert.equal((await ledger.inspect()).active,0);
+  }finally{await f.close();}
+ });
+}
