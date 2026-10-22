@@ -288,3 +288,9 @@
 - Avoid a single-click import: the Telegram mock owner menu must offer a category selection, then a separate owner approval, then a local publication preview, followed by a separate publication confirmation. None grants an outbound channel send or starts a campaign.
 - Reply-keyboard labels must satisfy BOTH 96 Unicode codepoints and 256 UTF-8 bytes. Use short deterministic selectors only as untrusted UI references, resolve a unique saved full digest and category/source ID, and revalidate source, owner and category inside the transaction. Any ambiguous or stale selector is rejected.
 - This capability remains opt-in behind an independently supplied B5 read-only platform reader; it is not a verified production platform API, real Telegram deployment, or external AI integration.
+
+## B5 v0.7.38 — source integrity reports never justify automatic deletion (22 October 2026)
+
+- External provider pages and pagination are untrusted. A missing item from its original cursor page may reflect pagination reordering or timeout, not grant withdrawal. Surface `NOT_ON_PAGE` as uncertainty, and provider errors as `UNAVAILABLE`, not a negative fact.
+- The immutable owner alone may view the published-source integrity inventory in the optional B5 Telegram menu; no staff/student delegated access, stale or ambiguous button replay, student content mutation or outbound channel sends. Locally linked education resource metadata and review provenance must be internally consistent before comparison, with a second check after remote I/O.
+- Changing external source revision does not silently overwrite an owner-published resource or auto-archive it. A future explicit owner archival decision requires separate authorization and a reviewed local resource fingerprint. This version remains mock/read-only without a verified production Manaratak API contract.
