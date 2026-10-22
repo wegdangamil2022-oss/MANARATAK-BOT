@@ -1,3 +1,10 @@
+## 0.7.49 — 2026-10-22 — B6 owner-only direct replied-to question (OFFLINE approved knowledge)
+
+- Recognize the explicit owner command `@BotUsername أجب عن هذا السؤال` or `/ask@BotUsername أجب عن هذا السؤال` only within approved group settings. Resolve the student question solely from the direct `reply_to_message` carried by that Telegram update, never from chat history or forwarded/quoted messages.
+- Require a trusted owner identity; verify the direct reply target's message ID, current group, non-bot different sender, clean bounded text, no nested replies or forwarded/channel/bot provenance. Reject forged, malformed and cross-group targets. A missing target prompts reattachment without a guessed answer.
+- Preserve existing Telegram subscription checks and B3/optional B6 reviewed FAQ permissions and post-await revocation; unrelated private FAQ and existing `/ask` continue unaffected. No model generation, central Phase17 provider connection, monetary billing or unreviewed student answers.
+- TDD: 20 new cases over JSON/SQLite and pure target validation. RED had 9 failing behavior tests before implementation; subsequent corrected test fixture ensures future message IDs truly exceed current IDs. CI typecheck + 1120 tests + five offline demos are required before merge.
+
 ## 0.7.48 — 2026-10-22 — B6 Telegram UTF-16 explicit mention support, reviewed FAQ only
 
 - Add `parseB6ExplicitMention` for current-message Telegram `MessageEntity` bot-prefix mention only. Validate bot username, exact mention span, UTF-16 entity offsets, bounded question, malformed/overlapping mention metadata, quotes and other-bot mentions. Text substrings without a matching Telegram entity never activate the assistant.
