@@ -119,10 +119,12 @@ export class B6GenerationDraftService {
   private readonly port:AnswerGenerationPort,
   private readonly budget:B6EphemeralCallBudget,
   config:B6DraftConfig={}){
-  if(!obj(config)||Object.keys(config).some(k=>k!=='enabled'&&k!=='maxOutputChars')||
+  if(config===null||typeof config!=='object'||Array.isArray(config)||
+    Object.keys(config).some(k=>k!=='enabled'&&k!=='maxOutputChars')||
     (config.enabled!==undefined&&typeof config.enabled!=='boolean')||
     (config.maxOutputChars!==undefined&&
-     (!Number.isSafeInteger(config.maxOutputChars)||
+     (typeof config.maxOutputChars!=='number'||
+      !Number.isSafeInteger(config.maxOutputChars)||
       config.maxOutputChars<1||config.maxOutputChars>800)))
    throw Error('INVALID_B6_DRAFT_CONFIG');
   this.enabled=config.enabled===true;
@@ -133,8 +135,7 @@ export class B6GenerationDraftService {
   const initial=await this.preflight.prepare(input);
   if(initial.status!=='APPROVED_ANSWER')return {status:initial.status};
   const admission=this.budget.begin();
-  if(admission.status==='BUSY')return {status:'BUSY'};
-  if(admission.status==='BUDGET_EXHAUSTED')return {status:'BUDGET_EXHAUSTED'};
+  if(admission.status!=='ADMITTED')return {status:admission.status};
   let returned:unknown;
   try{
    returned=await this.port.generate({
