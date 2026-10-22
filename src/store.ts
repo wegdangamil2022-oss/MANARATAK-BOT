@@ -106,6 +106,12 @@ export interface PlatformReviewQueueEntry{
  /** Source page from which the owner reviewed this entry, never authorization. */
  pageCursor?:string;
 }
+/** B6 opaque conservative attempt reservation, with NO student prompt/user ID, generated text or provider secret. */
+export interface B6BudgetAttempt {
+  requestKey:string;attemptId:string;day:string;reservedTokens:number;
+  reservedAt:number;leaseUntil:number;
+  status:'RESERVED'|'COMPLETED'|'UNKNOWN_OUTCOME';
+}
 export interface BotState {
   schemaVersion: 8;
   chats: Chat[];
@@ -133,6 +139,10 @@ export interface BotState {
   purgeJobs: PurgeJob[];
   purgeRetentionReview?: PurgeRetentionReviewControl;
   telegramReplyJobs?: TelegramReplyJob[];
+  /** Optional additive B6 durable request ledger; no plaintext questions, IDs, tokens or answers. */
+  b6BudgetAttempts?:B6BudgetAttempt[];
+  /** Monotonic clock high-water mark rejects rollback of daily budget boundaries. */
+  b6BudgetClock?:number;
   /** Optional additive B5 owner review queue; absent on old schema-8 files. */
   platformReviewQueue?: PlatformReviewQueueEntry[];
 }
@@ -181,6 +191,41 @@ export class BotStore {
     }
     if (previous.schemaVersion !== 8 ||
       !Array.isArray(previous.rollingMessageMeta) || !Array.isArray(previous.purgeJobs) ||
+      (previous.b6BudgetClock!==undefined&&
+        (typeof previous.b6BudgetClock!=='number'||
+         !Number.isSafeInteger(previous.b6BudgetClock)||
+         previous.b6BudgetClock<0||previous.b6BudgetClock>8_640_000_000_000_000))||
+      (previous.b6BudgetAttempts!==undefined&&(
+        !Array.isArray(previous.b6BudgetAttempts)||
+        previous.b6BudgetAttempts.length>2000||
+        previous.b6BudgetAttempts.some((row:unknown)=>{
+          if(!row||typeof row!=='object'||Array.isArray(row))return true;
+          const a=row as Record<string,unknown>;
+          const expected=['requestKey','attemptId','day','reservedTokens',
+            'reservedAt','leaseUntil','status'];
+          const goodId=/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/u;
+          const goodDay=/^\d{4}-\d{2}-\d{2}$/u;
+          if(Object.keys(a).length!==expected.length||
+             expected.some(k=>!Object.prototype.hasOwnProperty.call(a,k)))return true;
+          return typeof a.requestKey!=='string'||
+            !/^[A-Za-z0-9_-]{8,96}$/u.test(a.requestKey)||
+            typeof a.attemptId!=='string'||!goodId.test(a.attemptId)||
+            typeof a.day!=='string'||!goodDay.test(a.day)||
+            typeof a.reservedTokens!=='number'||
+            !Number.isSafeInteger(a.reservedTokens)||
+            a.reservedTokens<1||a.reservedTokens>8192||
+            typeof a.reservedAt!=='number'||!Number.isSafeInteger(a.reservedAt)||
+            a.reservedAt<0||
+            new Date(a.reservedAt).toISOString().slice(0,10)!==a.day||
+            typeof a.leaseUntil!=='number'||!Number.isSafeInteger(a.leaseUntil)||
+            a.leaseUntil<=a.reservedAt||a.leaseUntil>a.reservedAt+900_000||
+            !['RESERVED','COMPLETED','UNKNOWN_OUTCOME'].includes(String(a.status));
+        })||
+        new Set(previous.b6BudgetAttempts.map((a:B6BudgetAttempt)=>a.requestKey)).size!==
+          previous.b6BudgetAttempts.length||
+        new Set(previous.b6BudgetAttempts.map((a:B6BudgetAttempt)=>a.attemptId)).size!==
+          previous.b6BudgetAttempts.length
+      ))||
       (previous.platformReviewQueue!==undefined&&(
         !Array.isArray(previous.platformReviewQueue)||
         previous.platformReviewQueue.length>200||
