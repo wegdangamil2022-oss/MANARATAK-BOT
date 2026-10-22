@@ -21,6 +21,8 @@ export interface AnswerGenerationPort {
 export interface B6DraftConfig {
  readonly enabled?:boolean;
  readonly maxOutputChars?:number;
+ /** Offline fake-call wall-clock deadline; timeout is UNKNOWN, not a retry entitlement. */
+ readonly maxDurationMs?:number;
 }
 export interface B6AttemptLimits {
  readonly maxCallsPerUtcDay:number;
@@ -43,6 +45,7 @@ export class B6EphemeralCallBudget {
  private active=0;
  private day='';
  private count=0;
+ private highwater:number|undefined;
  constructor(private readonly limits:B6AttemptLimits,
   private readonly clock:()=>number=Date.now){
   if(!limits||typeof limits!=='object'||Array.isArray(limits)||
@@ -53,19 +56,27 @@ export class B6EphemeralCallBudget {
     limits.maxConcurrent<1||limits.maxConcurrent>32)
    throw Error('INVALID_B6_OFFLINE_LIMITS');
  }
- private syncDay():void{
-  const now=this.clock();
+ private syncDay():'OK'|'CLOCK_ROLLBACK'|'UNAVAILABLE'{
+  let now:number;
+  try{now=this.clock();}catch{return 'UNAVAILABLE';}
   if(!Number.isSafeInteger(now)||now<0||now>8_640_000_000_000_000)
-   throw Error('INVALID_B6_CLOCK');
+   return 'UNAVAILABLE';
+  // An old UTC day must never reopen spent fake calls after a clock reset.
+  if(this.highwater!==undefined&&now<this.highwater)return 'CLOCK_ROLLBACK';
+  this.highwater=now;
   const current=new Date(now).toISOString().slice(0,10);
   if(current!==this.day){this.day=current;this.count=0;}
+  return 'OK';
  }
  summary():{durable:false;attemptsToday:number;active:number}{
-  this.syncDay();
+  const sync=this.syncDay();
+  if(sync!=='OK')throw Error(sync==='CLOCK_ROLLBACK'?'B6_CLOCK_ROLLBACK':'INVALID_B6_CLOCK');
   return {durable:false,attemptsToday:this.count,active:this.active};
  }
- begin():{status:'ADMITTED';finish:()=>void}|{status:'BUSY'|'BUDGET_EXHAUSTED'}{
-  this.syncDay();
+ begin():{status:'ADMITTED';finish:()=>void}|
+  {status:'BUSY'|'BUDGET_EXHAUSTED'|'CLOCK_ROLLBACK'|'UNAVAILABLE'}{
+  const sync=this.syncDay();
+  if(sync!=='OK')return {status:sync};
   if(this.active>=this.limits.maxConcurrent)return {status:'BUSY'};
   if(this.count>=this.limits.maxCallsPerUtcDay)return {status:'BUDGET_EXHAUSTED'};
   this.count++;this.active++;
@@ -116,6 +127,7 @@ function reviewDraft(raw:unknown,sourceId:string,maxOutputChars:number):
 export class B6GenerationDraftService {
  private readonly enabled:boolean;
  private readonly maxOutputChars:number;
+ private readonly maxDurationMs:number;
  constructor(
   private readonly preflight:B6AnswerPreflight,
   private readonly port:AnswerGenerationPort,
@@ -124,15 +136,20 @@ export class B6GenerationDraftService {
   /** OFFLINE persisted conservative tokens/attempt gate; never grants real-provider billing permission. */
   private readonly durableBudget?:B6DurableBudget){
   if(config===null||typeof config!=='object'||Array.isArray(config)||
-    Object.keys(config).some(k=>k!=='enabled'&&k!=='maxOutputChars')||
+    Object.keys(config).some(k=>k!=='enabled'&&k!=='maxOutputChars'&&k!=='maxDurationMs')||
     (config.enabled!==undefined&&typeof config.enabled!=='boolean')||
     (config.maxOutputChars!==undefined&&
      (typeof config.maxOutputChars!=='number'||
       !Number.isSafeInteger(config.maxOutputChars)||
-      config.maxOutputChars<1||config.maxOutputChars>800)))
+      config.maxOutputChars<1||config.maxOutputChars>800))||
+    (config.maxDurationMs!==undefined&&
+     (typeof config.maxDurationMs!=='number'||
+      !Number.isSafeInteger(config.maxDurationMs)||
+      config.maxDurationMs<20||config.maxDurationMs>900_000)))
    throw Error('INVALID_B6_DRAFT_CONFIG');
   this.enabled=config.enabled===true;
   this.maxOutputChars=config.maxOutputChars??400;
+  this.maxDurationMs=config.maxDurationMs??30_000;
  }
  async prepareDraft(input:B6AnswerRequest,requestKey?:string):Promise<B6DraftResult>{
   if(!this.enabled)return {status:'DISABLED'};
@@ -157,18 +174,30 @@ export class B6GenerationDraftService {
    attemptId=reserved.attemptId;
   }
   let returned:unknown;
+  let deadline:ReturnType<typeof setTimeout>|undefined;
   try{
-   returned=await this.port.generate({
-    schema:'b6-reviewed-draft-v1',
-    scope:input.scope,question:input.question,
-    approvedAnswer:initial.answer,sourceId:initial.sourceId,
-    maxOutputChars:this.maxOutputChars
-   });
+   // The fake port can hang indefinitely. Release the local slot after a
+   // bounded time, quarantine an ambiguous durable result, and discard any
+   // late draft without retrying, publishing or leaking provider errors.
+   returned=await Promise.race([
+    Promise.resolve().then(()=>this.port.generate({
+     schema:'b6-reviewed-draft-v1',
+     scope:input.scope,question:input.question,
+     approvedAnswer:initial.answer,sourceId:initial.sourceId,
+     maxOutputChars:this.maxOutputChars
+    })),
+    new Promise<never>((_,reject)=>{
+     deadline=setTimeout(()=>reject(Error('B6_FAKE_DRAFT_TIMEOUT')),this.maxDurationMs);
+    })
+   ]);
   }catch{
    if(this.durableBudget&&attemptId)
     await this.durableBudget.finish(requestKey!,attemptId,'UNKNOWN_OUTCOME');
    return {status:'UNAVAILABLE'};
-  }finally{admission.finish();}
+  }finally{
+   if(deadline!==undefined)clearTimeout(deadline);
+   admission.finish();
+  }
   // Never expose a result if the reservation was lost/expired while external
   // processing was in flight, regardless of whether it returned a valid draft.
   if(this.durableBudget&&attemptId&&
