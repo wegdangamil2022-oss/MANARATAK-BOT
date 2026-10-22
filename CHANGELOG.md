@@ -1,3 +1,12 @@
+## 0.7.57 — 2026-10-23 — B6 owner-only privacy-safe Telegram outbox denial counters
+
+- Record a strict optional `accessDenialCode` on durable `FAILED_CONFIRMED` Telegram reply jobs that the local dispatcher rejects *before* attempting any Bot API call. Three bounded categories: `LEGACY_UNVERIFIABLE`, `ACCESS_RECHECK_FAILED`, and `GROUP_UNAVAILABLE`. Do not persist raw reply text, user/chat/update IDs, provider error descriptions or tokens in the code field. Reject invalid values, including array-to-string coercion, in JSON and SQLite state decoders and runtime validators.
+- Add read-only `summarizeOutboxAccessDenials`, requiring verified owner identity and enabled owner dashboard, with aggregate counts of failed jobs by local category and remaining unclassified/provider-confirmed failures. It never mutates state or retries a Telegram message and does not infer a precise external membership failure from a generic failed check.
+- Extend the existing **📊 حالة الرسائل** trusted owner-private view with those five counts. No student-scoped identifiers, timestamps, individual jobs, source names, Telegram tokens or text are included. Disabled owner dashboard and malformed queue records fail closed.
+- Preserve all prior outbox semantics: `SENDING` and `UNKNOWN_OUTCOME` are not replayed; prior failed jobs without new classification remain counted as OTHER and are not silently relabeled. This is a cumulative ledger report, not an actual Telegram delivery audit or privacy purge.
+- TDD: 12 new JSON/SQLite regression tests. RED initially failed on absent source field; GREEN revealed four issues including a real coercion defect in schema validation, all fixed. Strict TS, **1,250/1,250** tests and five offline demos must pass before merge.
+- Real Phase 17 generation, external AI billing and automatic student model responses remain OFF.
+
 ## 0.7.56 — 2026-10-23 — B6 block unverifiable legacy private Telegram queued replies
 
 - Close the v0.7.55 upgrade gap: pre-upgrade private QUEUED replies could include group resources but had no reliable record of their scope, and the last-mile checker treated their private destination as sufficient authorization. Such unclassified jobs now fail closed when dispatched and have their queued text permanently redacted, without calling Telegram or creating an outbound attempt.
