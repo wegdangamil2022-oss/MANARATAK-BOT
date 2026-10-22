@@ -71,6 +71,14 @@ export type PlatformApproveResult=
 export type PlatformLocalPublishResult=
  |{status:'DENIED'|'STALE'|'UNAVAILABLE'}
  |{status:'PUBLISHED';resource:EducationResource};
+/** Advisory owner-only read of a published local copy. A missing cursor-page
+ * record is NOT evidence that a scholarship has been withdrawn or closed.
+ */
+export type PlatformPublishedIntegrityResult=
+ |{status:'DENIED'|'STALE'|'UNAVAILABLE'|'SOURCE_CHANGED'|
+    'NOT_ON_PAGE'|'LOCAL_ARCHIVED'|'LOCAL_INCONSISTENT'}
+ |{status:'CURRENT';sourceId:string;resourceId:string};
+
 /** A category's entire private parent chain must remain visible. Fail closed
  * on missing/cyclic parents, including old or malicious stored state.
  */
@@ -334,6 +342,59 @@ export class PlatformCatalogPreviewService{
      return {status:'PUBLISHED',resource:structuredClone(resource)};
     });
    }catch{return {status:'UNAVAILABLE'};}
+  }
+
+  /**
+   * Read-only owner inspection of a previously locally published candidate.
+   * This does NOT refresh, archive or republish resources. No unknown external
+   * provider status is interpreted as proof that an application has closed.
+   * The local association is revalidated after the awaited upstream read.
+   */
+  async inspectPublished(actor:string,sourceId:string,expectedDigest:string):
+    Promise<PlatformPublishedIntegrityResult>{
+    if(!this.policy.isOwner(actor))return {status:'DENIED'};
+    if(typeof sourceId!=='string'||!validId.test(sourceId)||
+       typeof expectedDigest!=='string'||!strictDigest.test(expectedDigest))
+      return {status:'UNAVAILABLE'};
+    const inspectLocal=(s:BotState):{
+      status:'DENIED'|'STALE'|'LOCAL_ARCHIVED'|'LOCAL_INCONSISTENT'|'READY';
+      entry?:PlatformReviewQueueEntry;resource?:EducationResource
+    }=>{
+      if(!this.policy.privateFeature(s,'owner.dashboard',actor))return {status:'DENIED'};
+      const entry=s.platformReviewQueue?.find(q=>q.sourceId===sourceId);
+      if(!entry||entry.digest!==expectedDigest||entry.status!=='PUBLISHED_LOCALLY'||
+         !entry.publishedResourceId||!entry.approvedCategoryId)return {status:'STALE'};
+      const related=s.educationResources.filter(r=>r.scope==='private'&&
+       r.sourceImportId===PLATFORM_IMPORT_SOURCE&&r.sourceLocator===sourceId);
+      if(related.length!==1)return {status:'LOCAL_INCONSISTENT'};
+      const local=related[0]!;
+      if(local.id!==entry.publishedResourceId||
+        local.categoryId!==entry.approvedCategoryId||
+        local.title!==entry.title||local.university!==entry.university||
+        local.cycle!==entry.cycle||local.degree!==entry.degree||
+        local.seats!==null)return {status:'LOCAL_INCONSISTENT'};
+      if(local.status==='ARCHIVED')return {status:'LOCAL_ARCHIVED'};
+      if(local.status!=='PUBLISHED')return {status:'LOCAL_INCONSISTENT'};
+      return {status:'READY',entry,resource:local};
+    };
+    let before:ReturnType<typeof inspectLocal>;
+    try{before=inspectLocal(await this.store.snapshot());}
+    catch{return {status:'UNAVAILABLE'};}
+    if(before.status!=='READY')return {status:before.status};
+    const page=await this.preview(actor,{cursor:before.entry!.pageCursor??null});
+    if(page.status!=='PREVIEW')return page;
+    let after:ReturnType<typeof inspectLocal>;
+    try{after=inspectLocal(await this.store.snapshot());}
+    catch{return {status:'UNAVAILABLE'};}
+    if(after.status!=='READY')return {status:after.status};
+    // Fail closed on any concurrent local edit between snapshots.
+    if(JSON.stringify(before.entry)!==JSON.stringify(after.entry)||
+       JSON.stringify(before.resource)!==JSON.stringify(after.resource))
+      return {status:'STALE'};
+    const rows=page.records.filter(r=>r.id===sourceId);
+    if(rows.length!==1)return {status:'NOT_ON_PAGE'};
+    if(platformCandidateDigest(rows[0]!)!==expectedDigest)return {status:'SOURCE_CHANGED'};
+    return {status:'CURRENT',sourceId,resourceId:after.resource!.id};
   }
 
 }

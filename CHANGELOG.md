@@ -1,3 +1,11 @@
+## 0.7.38 — 2026-10-22 — B5 owner read-only published-source integrity inspection (OFFLINE)
+
+- **Published-resource source reconciliation is explicitly read-only.** The independent B5 inspector `inspectPublished(actor,sourceId,expectedDigest)` verifies the configured owner and dashboard, a unique local publication link, saved metadata/provenance and the currently read external cursor page. It checks both local state and owner permissions AGAIN after the source read, rejecting a stale or concurrently modified local record.
+- Safe distinct diagnostics: `CURRENT` (matching source digest), `SOURCE_CHANGED` (updated revision/metadata), `NOT_ON_PAGE` (record missing from originally saved cursor page; this does NOT prove closure or removal), `UNAVAILABLE` (provider error, malformed page, no trusted conclusion), `LOCAL_ARCHIVED`, `LOCAL_INCONSISTENT`, `DENIED`, or `STALE`.
+- Owner Telegram optional **🔬 سلامة المصادر الخارجية** menu lists currently linked locally published B5 records, eight per page, and offers a single-resource **🔬 فحص مصدر** action. Unverified source data is never exposed to students; button selectors are bounded and resolved uniquely to the full SHA-256 digest from authorized owner state.
+- **No auto-update, auto-archive, auto-publish, source repair or Telegram channel announcement.** This is an advisory owner integrity signal only. The real Manaratak API still needs an independently verified authenticated reader contract and staging tests.
+- 28 new RED-first tests: JSON/SQLite source drift, missing/invalid/unavailable, archived and locally tampered resources, owner authorization, read-only state guarantees, Telegram owner inventory, pagination, copied forged buttons, dashboard revocation, and no outbound effects. **898/898 CI tests passed**, including offline demos.
+
 ## 0.7.37 — 2026-10-22 — B5 owner confirmation screens for source-reviewed local publication (OFFLINE)
 
 - An owner with the optional B5 reader can move from external metadata review to an explicit **private category picker**, a separate owner **category approval confirmation**, then a distinct **local visibility preview** and **local publication confirmation**. Selection and approval do not publish to students; the final confirmation can create a private published resource only through the already guarded v0.7.36 backend.
