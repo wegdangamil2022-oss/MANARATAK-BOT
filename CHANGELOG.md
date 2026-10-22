@@ -1,3 +1,9 @@
+## 0.7.39 — 2026-10-22 — Explicit owner-confirmed B5 local archival (offline)
+
+- Owner may inspect an externally sourced, locally published resource, preview archival, then separately confirm archival. No source-driven automatic archive, no claim that application periods have closed, and no messages to Telegram channels.
+- The state transition validates owner dashboard and publication rights, exact B5 source-to-resource linkage, and the resource's current fingerprint in one JSON or SQLite transaction. Obsolete confirmations cannot archive a modified resource.
+- 14 JSON/SQLite regression tests cover the Telegram confirmation path, forged or copied buttons, unavailable providers, competing clicks, updated publication text, and student-library visibility.
+
 ## 0.7.38 — 2026-10-22 — B5 owner read-only published-source integrity inspection (OFFLINE)
 
 - **Published-resource source reconciliation is explicitly read-only.** The independent B5 inspector `inspectPublished(actor,sourceId,expectedDigest)` verifies the configured owner and dashboard, a unique local publication link, saved metadata/provenance and the currently read external cursor page. It checks both local state and owner permissions AGAIN after the source read, rejecting a stale or concurrently modified local record.

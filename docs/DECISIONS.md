@@ -294,3 +294,7 @@
 - External provider pages and pagination are untrusted. A missing item from its original cursor page may reflect pagination reordering or timeout, not grant withdrawal. Surface `NOT_ON_PAGE` as uncertainty, and provider errors as `UNAVAILABLE`, not a negative fact.
 - The immutable owner alone may view the published-source integrity inventory in the optional B5 Telegram menu; no staff/student delegated access, stale or ambiguous button replay, student content mutation or outbound channel sends. Locally linked education resource metadata and review provenance must be internally consistent before comparison, with a second check after remote I/O.
 - Changing external source revision does not silently overwrite an owner-published resource or auto-archive it. A future explicit owner archival decision requires separate authorization and a reviewed local resource fingerprint. This version remains mock/read-only without a verified production Manaratak API contract.
+
+## B5 v0.7.39 — Archival requires a separate verified human choice
+
+A changed, missing or unavailable external source is never proof of scholarship closure and never archives local resources automatically. A verified Telegram-private owner must preview and confirm local archival, and the transaction must recheck owner dashboard rights, B5 source association and the exact current resource fingerprint. The source review queue retains historical provenance, while the archived local resource is hidden from student search. No Telegram outbound send or live API integration is added.

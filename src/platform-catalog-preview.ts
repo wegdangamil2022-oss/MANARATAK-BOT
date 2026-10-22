@@ -2,6 +2,7 @@ import {createHash,randomUUID} from 'node:crypto';
 import type {PlatformReviewQueueEntry,EducationResource,BotState,EducationCategory} from './store.js';
 import {BotStore} from './store.js';
 import {Policy} from './policy.js';
+import {resourceArchiveFingerprint} from './education-archive.js';
 
 /** B5's proposed read-only adapter boundary. An independently reviewed
  * adapter may later map a real platform API into this contract. It MUST be
@@ -74,6 +75,9 @@ export type PlatformLocalPublishResult=
 /** Advisory owner-only read of a published local copy. A missing cursor-page
  * record is NOT evidence that a scholarship has been withdrawn or closed.
  */
+export type PlatformLocalArchiveResult=
+ |{status:'DENIED'|'STALE'|'UNAVAILABLE'}
+ |{status:'ARCHIVED';resourceId:string};
 export type PlatformPublishedIntegrityResult=
  |{status:'DENIED'|'STALE'|'UNAVAILABLE'|'SOURCE_CHANGED'|
     'NOT_ON_PAGE'|'LOCAL_ARCHIVED'|'LOCAL_INCONSISTENT'}
@@ -94,7 +98,7 @@ function activePrivateCategory(state:BotState,id:string):EducationCategory|null{
  }
  return null;
 }
-const PLATFORM_IMPORT_SOURCE='b5-external-catalog-v1';
+export const PLATFORM_IMPORT_SOURCE='b5-external-catalog-v1';
 const strictDigest=/^[a-f0-9]{64}$/u;
 export function platformCandidateDigest(record:PlatformReviewCandidate):string{
  return createHash('sha256').update(JSON.stringify([
@@ -395,6 +399,49 @@ export class PlatformCatalogPreviewService{
     if(rows.length!==1)return {status:'NOT_ON_PAGE'};
     if(platformCandidateDigest(rows[0]!)!==expectedDigest)return {status:'SOURCE_CHANGED'};
     return {status:'CURRENT',sourceId,resourceId:after.resource!.id};
+  }
+
+  /**
+   * A separate owner-confirmed LOCAL archival operation. The external source
+   * is intentionally not consulted: changed/missing/offline pages are not
+   * authority to archive, and an owner may archive an inaccurate local item
+   * even if the provider is unreachable. A reviewed local resource fingerprint
+   * is revalidated in the same transaction as the status mutation.
+   */
+  async archiveLocal(actor:string,sourceId:string,expectedDigest:string,
+   resourceProof:string):Promise<PlatformLocalArchiveResult>{
+   if(!this.policy.isOwner(actor))return {status:'DENIED'};
+   if(typeof sourceId!=='string'||!validId.test(sourceId)||
+     typeof expectedDigest!=='string'||!strictDigest.test(expectedDigest)||
+     typeof resourceProof!=='string'||!/^~[a-f0-9]{16}$/u.test(resourceProof))
+    return {status:'UNAVAILABLE'};
+   try{
+    return await this.store.transaction<PlatformLocalArchiveResult>(s=>{
+     if(!this.policy.privateFeature(s,'owner.dashboard',actor)||
+       !this.policy.has(s,actor,'content.publish','private'))
+      return {status:'DENIED'};
+     const entry=s.platformReviewQueue?.find(x=>x.sourceId===sourceId);
+     if(!entry||entry.status!=='PUBLISHED_LOCALLY'||
+       entry.digest!==expectedDigest||!entry.publishedResourceId||
+       !entry.approvedCategoryId)return {status:'STALE'};
+     const matches=s.educationResources.filter(x=>
+      x.scope==='private'&&x.sourceImportId===PLATFORM_IMPORT_SOURCE&&
+      x.sourceLocator===sourceId);
+     if(matches.length!==1)return {status:'STALE'};
+     const resource=matches[0]!;
+     if(resource.id!==entry.publishedResourceId||
+       resource.categoryId!==entry.approvedCategoryId||
+       resource.title!==entry.title||resource.university!==entry.university||
+       resource.cycle!==entry.cycle||resource.degree!==entry.degree||
+       resource.seats!==null||resource.status!=='PUBLISHED'||
+       resourceArchiveFingerprint(resource)!==resourceProof)return {status:'STALE'};
+     resource.status='ARCHIVED';
+     s.audit.push({updateKey:'b5:archive-local:'+sourceId+':'+resource.id,
+      decision:'ALLOW',reason:'B5_EXTERNAL_RESOURCE_ARCHIVED_LOCALLY',
+      policyVersion:0,at:Date.now()});
+     return {status:'ARCHIVED',resourceId:resource.id};
+    });
+   }catch{return {status:'UNAVAILABLE'};}
   }
 
 }
