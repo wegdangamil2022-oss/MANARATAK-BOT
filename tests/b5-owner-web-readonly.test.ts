@@ -135,7 +135,16 @@ for(const engine of ['json','sqlite'] as const){
      'x-telegram-init-data':sign(100)},body:'{"limit":2,"limit":3}'
    });
    assert.equal(duplicate.status,400);
-   assert.equal(f.getCalls(),0);
+   // JSON escape spellings must not allow the same key twice.
+   const escapedDuplicate=await fetch(url+'/admin/platform/preview',{
+    method:'POST',headers:{'content-type':'application/json',
+     'x-telegram-init-data':sign(100)},body:'{"lim\\u0069t":2,"limit":3}'.replace('\\\\','\\')
+   });
+   assert.equal(escapedDuplicate.status,400);
+   // A JSON string VALUE mentioning a property name is not a duplicate key.
+   const legitimate=await post(url,'/admin/platform/preview',{cursor:'next_limit',limit:1});
+   assert.equal(legitimate.status,200);
+   assert.equal(f.getCalls(),1);
   });}finally{await f.close();}
  });
  test('B5 '+engine+': web route is absent without explicitly injecting platform reader',async()=>{
