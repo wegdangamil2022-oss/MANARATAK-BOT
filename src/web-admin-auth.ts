@@ -63,6 +63,42 @@ function requestInitData(req:IncomingMessage):string|null {
   const header=req.headers[AUTH_HEADER];
   return count===1&&typeof header==='string'&&header.length<=MAX_INIT_LENGTH?header:null;
 }
+/**
+ * For the flat, bounded owner-only B5 payloads, reject duplicate top-level
+ * keys even when they use equivalent JSON escape spellings. JSON.parse keeps
+ * the last of duplicate keys by default, which obscures the owner's request.
+ * This scan is NOT a replacement for strict JSON parsing, and never evaluates
+ * user input as code. Nested values are rejected by route schema validation.
+ */
+function uniquePlatformPayloadKeys(chunks:readonly Buffer[]):boolean{
+ const body=Buffer.concat(chunks).toString('utf8');
+ const keys=new Set<string>();
+ let depth=0;
+ for(let i=0;i<body.length;i++){
+  const c=body[i]!;
+  if(c==='"'){
+   const start=i++;
+   while(i<body.length){
+    if(body[i]==='\\'){i+=2;continue;}
+    if(body[i]==='"')break;
+    i++;
+   }
+   if(i>=body.length)return false;
+   let next=i+1;
+   while(next<body.length&&/\s/u.test(body[next]!))next++;
+   if(depth===1&&body[next]===':'){
+    const key=JSON.parse(body.slice(start,i+1)) as string;
+    if(keys.has(key))return false;
+    keys.add(key);
+   }
+   continue;
+  }
+  if(c==='{'||c==='[')depth++;
+  else if(c==='}'||c===']')depth--;
+ }
+ return true;
+}
+
 function payloadError(err:unknown):number {
   if(err instanceof Error && ['UPLOAD_DENIED','PUBLISH_DENIED','UNTRUSTED_ADMIN_CONTEXT','OWNER_ONLY','SCOPE_DENIED'].includes(err.message))return 403;
   if(err instanceof Error && ['INVALID_FORMAT','INVALID_FILENAME','DOCUMENT_TOO_LARGE','FILE_TOO_LARGE','UNSUPPORTED_FORMAT','INVALID_CSV','INVALID_JSON','INVALID_HEADERS','INVALID_RECORD','NEEDS_REVIEW','DUPLICATE_CANDIDATE','NOT_APPROVED','CATEGORY_DISABLED_OR_MISSING','CANDIDATE_NOT_FOUND','CATEGORY_SCOPE_MISMATCH'].includes(err.message))return 422;
@@ -124,6 +160,9 @@ export function telegramAdminWebListener(auth:TelegramMiniAppAuth, admin:Educati
       try{payload=decodeStrictJsonBytes(chunks);}
       catch{reply(res,400,{ok:false});return;}
       if(!isObject(payload)){reply(res,422,{ok:false});return;}
+      if(platformRoute&&!uniquePlatformPayloadKeys(chunks)){
+        reply(res,400,{ok:false});return;
+      }
       try{
         if(platformRoute){
           // HMAC provides identity, but never bypasses local owner-dashboard
