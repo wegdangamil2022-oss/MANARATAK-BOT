@@ -25,6 +25,7 @@ import {privateFAQSearchLabel,parsePrivateFAQSearchQuery,parsePrivateFAQSearchPa
  privateFAQSearchPageLabel,isPrivateFAQSearchText} from './telegram-private-faq-search.js';
 import {escapeTelegramListPreview} from './telegram-preview.js';
 import {parseB6ExplicitMention} from './b6-telegram-mention.js';
+import {parseB6OwnerReplyTarget} from './b6-telegram-owner-reply.js';
 
 /** Inbound-only boundary. A test double may supply bytes; there is intentionally no live HTTP implementation. */
 export interface TelegramDocumentPort {
@@ -57,7 +58,7 @@ export interface TelegramApplicationOptions {
   answerPreflight?:B6AnswerPreflight;
 }
 
-type Event = {updateId: number; actorId: string; chatId: string; kind: 'private' | 'group'; text: string; entities?:unknown; document?: IncomingDocument};
+type Event = {updateId: number; actorId: string; chatId: string; kind: 'private' | 'group'; text: string; entities?:unknown; messageId?:number; replyTo?:unknown; document?: IncomingDocument};
 const isObject=(x:unknown):x is Record<string,unknown>=>Boolean(x)&&typeof x==='object'&&!Array.isArray(x);
 const positiveId=(x:unknown): x is number=>typeof x==='number'&&Number.isSafeInteger(x)&&x>0;
 const chatId=(x:unknown): x is number=>typeof x==='number'&&Number.isSafeInteger(x)&&x!==0;
@@ -92,7 +93,9 @@ function eventFrom(value:unknown):{event?:Event;reason:string} {
   if(typeof msg.text!=='string'||msg.text.length<1||msg.text.length>4096)return {reason:'UNSUPPORTED_MESSAGE'};
   if(/\u0000/u.test(msg.text))return {reason:'INVALID_TEXT'};
   return {event:{updateId:value.update_id as number,actorId:String(msg.from.id),chatId:String(msg.chat.id),kind,text:msg.text,
-   ...(msg.entities!==undefined?{entities:msg.entities}:{})},reason:'VALID'};
+   ...(msg.entities!==undefined?{entities:msg.entities}:{}),
+   ...(msg.message_id!==undefined?{messageId:msg.message_id as number}:{}),
+   ...(msg.reply_to_message!==undefined?{replyTo:msg.reply_to_message}:{})},reason:'VALID'};
 }
 
 const isScope=(scope:string):boolean=>scope==='private'||/^-[1-9]\d{0,18}$/.test(scope);
@@ -578,7 +581,20 @@ export class TelegramUpdateApplication {
       return result(`<b>مورد تعليمي</b>\n${escapeTelegramHtml(opened.resource.title)}\n${escapeTelegramHtml(opened.resource.university)}`);
     }
     if(kind==='group'&&groupQuestion!==null){
-      const question=groupQuestion;
+      let question=groupQuestion;
+      // Owner's explicit reply-to invocation is NOT an arbitrary AI prompt:
+      // the sole question source is the direct reply_to_message in this update.
+      // Never attempt to fetch earlier Telegram conversation history.
+      if(question==='أجب عن هذا السؤال'){
+       if(!this.opts.policy.isOwner(actorId))
+        return {status:'DENIED',reason:'OWNER_ONLY'};
+       const target=parseB6OwnerReplyTarget(event.replyTo,chatId,event.messageId,actorId);
+       if(target.status==='MISSING_REPLY')
+        return result('يرجى استخدام المنشن بالرد على رسالة السؤال نفسها، أو أعد إرفاق السؤال.');
+       if(target.status!=='QUESTION')
+        return {status:'DENIED',reason:'INVALID_REPLY_TARGET'};
+       question=target.question;
+      }
       if(this.opts.answerPreflight){
        const plan=await this.opts.answerPreflight.prepare({
         actor:actorId,scope:chatId,question,explicitMention:true

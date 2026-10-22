@@ -245,3 +245,108 @@ for(const engine of ['json','sqlite'] as const){
   }finally{await f.close();}
  });
 }
+
+
+const ownerReply=(updateId:number,actor:number,reply:unknown,asCommand=false)=> {
+ const text=asCommand?'/ask@ManaratakBot أجب عن هذا السؤال':'@ManaratakBot أجب عن هذا السؤال';
+ const base=msg(updateId,actor,text,true);
+ return {...base,message:{...base.message,
+  ...(asCommand?{}:{entities:[{type:'mention',offset:0,length:13}]}),
+  ...(reply===undefined?{}:{reply_to_message:reply})}};
+};
+const studentQuestion=(id:number,text=QUESTION)=>({
+ message_id:id,from:{id:STUDENT,is_bot:false},
+ chat:{id:Number(GROUP),type:'supergroup'},text
+});
+
+for(const engine of ['json','sqlite'] as const){
+ test('B6 '+engine+': owner reply-to invocation answers exactly the targeted reviewed student question',async()=>{
+  const f=await setup(engine);try{
+   const r=await f.app(true).handle(ownerReply(400,Number(OWNER),studentQuestion(399)));
+   assert.equal(r.status,'APPLIED');
+   assert.match(r.plan?.text??'',/جواب المجموعة فقط/);
+   assert.doesNotMatch(r.plan?.text??'',/شروط معتمدة|أجب عن هذا السؤال/);
+   assert.equal((await f.store.snapshot()).deliveries.length,0);
+  }finally{await f.close();}
+ });
+ test('B6 '+engine+': owner slash command reply uses only quoted question in absence of a generating adapter',async()=>{
+  const f=await setup(engine);try{
+   const r=await f.app(false).handle(ownerReply(410,Number(OWNER),studentQuestion(409),true));
+   assert.equal(r.status,'APPLIED');
+   assert.match(r.plan?.text??'',/جواب المجموعة فقط/);
+  }finally{await f.close();}
+ });
+ test('B6 '+engine+': missing referenced Telegram message prompts owner to reattach instead of guessing',async()=>{
+  const f=await setup(engine);try{
+   const r=await f.app(true).handle(ownerReply(420,Number(OWNER),undefined));
+   assert.equal(r.status,'APPLIED');
+   assert.match(r.plan?.text??'',/بالرد|رد|أعد/);
+   assert.doesNotMatch(r.plan?.text??'',/جواب المجموعة فقط|شروط معتمدة/);
+  }finally{await f.close();}
+ });
+ test('B6 '+engine+': student cannot invoke privileged reply-to question even with an actual mention',async()=>{
+  const f=await setup(engine);try{
+   const r=await f.app(true).handle(ownerReply(430,STUDENT,studentQuestion(429)));
+   assert.equal(r.status,'DENIED');
+   assert.equal(r.plan,undefined);
+  }finally{await f.close();}
+ });
+ test('B6 '+engine+': forged or forwarded replied-to message never becomes a question',async()=>{
+  const f=await setup(engine);try{
+   const cases:unknown[]=[
+    studentQuestion(439,'\n'+QUESTION),
+    {...studentQuestion(439),forward_date:1720000000},
+    {...studentQuestion(439),forward_origin:{type:'user'}},
+    {...studentQuestion(439),sender_chat:{id:Number(GROUP)}},
+    {...studentQuestion(439),via_bot:{id:999}},
+    {...studentQuestion(439),from:{id:STUDENT,is_bot:true}},
+    {...studentQuestion(439),chat:{id:-100998,type:'supergroup'}},
+    {...studentQuestion(439),message_id:9999},
+    {...studentQuestion(439),text:''},
+    {...studentQuestion(439),text:QUESTION,caption:'untrusted'},
+    {...studentQuestion(439),text:QUESTION,reply_to_message:studentQuestion(1)},
+    {message_id:439,chat:{id:Number(GROUP),type:'supergroup'},text:QUESTION},
+    null,[],{message_id:439,text:QUESTION}
+   ];
+   for(let i=0;i<cases.length;i++){
+    const r=await f.app(true).handle(ownerReply(440+i,Number(OWNER),cases[i]));
+    assert.equal(r.status,'DENIED',String(i));
+    assert.equal(r.plan,undefined,String(i));
+   }
+  }finally{await f.close();}
+ });
+ test('B6 '+engine+': unrelated question in the owner reply does not scrape past chat or provide a fallback',async()=>{
+  const f=await setup(engine);try{
+   const r=await f.app(true).handle(ownerReply(480,Number(OWNER),
+    studentQuestion(479,'سؤال غير معتمد داخل هذه المجموعة')));
+   assert.equal(r.status,'DENIED');
+   assert.equal(r.reason,'B6_NO_APPROVED_SOURCE');
+   assert.equal(r.plan,undefined);
+  }finally{await f.close();}
+ });
+ test('B6 '+engine+': group AI OFF denies owner reply invocation without affecting private FAQ',async()=>{
+  const f=await setup(engine);try{
+   await f.policy.configureGroupAI(OWNER,GROUP,'OFF');
+   const r=await f.app(true).handle(ownerReply(490,Number(OWNER),studentQuestion(489)));
+   assert.equal(r.status,'DENIED');
+   assert.equal(r.plan,undefined);
+   const faq=await f.app(true).handle(msg(491,STUDENT,'/faq '+QUESTION));
+   assert.equal(faq.status,'APPLIED');
+  }finally{await f.close();}
+ });
+ test('B6 '+engine+': revocation during owner reply lookup cannot return stale reviewed answer',async()=>{
+  const f=await setup(engine);try{
+   let entered!:()=>void,release!:()=>void;
+   const started=new Promise<void>(r=>entered=r);
+   const waiting=new Promise<void>(r=>release=r);
+   const source:KnowledgeSourcePort={lookup:async query=>{
+    const out=await f.knowledge.lookup(query);entered();await waiting;return out;
+   }};
+   const pending=f.app(true,source).handle(ownerReply(500,Number(OWNER),studentQuestion(499)));
+   await started;await f.policy.revokeChat(OWNER,GROUP);release();
+   const r=await pending;
+   assert.equal(r.status,'DENIED');
+   assert.equal(r.plan,undefined);
+  }finally{await f.close();}
+ });
+}
