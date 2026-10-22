@@ -1,3 +1,10 @@
+## 0.7.58 — 2026-10-23 — B3 actionable student Telegram navigation breadcrumbs
+
+- Improve actual Telegram student UI: resource details now include a verified category-return choice plus all-categories return, instead of offering only a generic back button that jumped to the home screen. Group/resources pages, including empty and multi-page listings, include an all-categories return while preserving the existing pagination, home and back buttons.
+- Breadcrumb labels are bounded, stateless and parsed strictly. Re-use existing private category/resource B3 authorization on each click rather than trusting old button labels, showing retired resources, or storing student browsing trails. Forged labels or other-group categories cannot expose content.
+- Add 10 JSON/SQLite navigation tests covering end-to-end selection, 10-item paging, return to reviewed categories, disabled/archived categories, malformed IDs, cross-group content isolation and valid Telegram keyboard constraints.
+- TDD RED: 10 new regressions failed against v0.7.57; GREEN: strict TypeScript, 1,260/1,260 tests and five offline demos passed. No real Phase17 generative AI has been activated.
+
 ## 0.7.57 — 2026-10-23 — B6 owner-only privacy-safe Telegram outbox denial counters
 
 - Record a strict optional `accessDenialCode` on durable `FAILED_CONFIRMED` Telegram reply jobs that the local dispatcher rejects *before* attempting any Bot API call. Three bounded categories: `LEGACY_UNVERIFIABLE`, `ACCESS_RECHECK_FAILED`, and `GROUP_UNAVAILABLE`. Do not persist raw reply text, user/chat/update IDs, provider error descriptions or tokens in the code field. Reject invalid values, including array-to-string coercion, in JSON and SQLite state decoders and runtime validators.

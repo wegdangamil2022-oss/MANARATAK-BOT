@@ -1,3 +1,13 @@
+## B3 v0.7.58 — functional student navigation breadcrumbs in Telegram
+
+Telegram's persistent student keyboard previously had working educational category and resource pages, but opening a resource detail left only the generic `↩️ رجوع` action, which returned to the home menu instead of the resource list. This release adds explicit, **working** navigation breadcrumbs to the actual approved private-library reply keyboards:
+
+- On a reviewed published resource detail, `↩️ موارد القسم · <categoryId>` returns to the current, authorized first page of that resource's category; `↩️ جميع الأقسام` returns to the current, authorized private educational categories.
+- Each category resource-list page (including an empty category and a paginated page of 10 resources) also offers `↩️ جميع الأقسام`, without sacrificing its previous/next pagination controls, `↩️ رجوع` or `🏠 الرئيسية`.
+- Breadcrumbs are **untrusted Telegram message text**, not sessions, access grants or private data pointers. Each click reruns the existing B3 `education.listCategories` and `education.listResources` authorization, approval and publication checks; a deleted/disabled category, other-group category, altered ID or malformed button fails closed. Group chat inputs cannot use private navigation. No student identity or browsing history is stored to implement the feature.
+
+Ten new JSON/SQLite end-to-end keyboard regressions test drill-down and return, all-categories navigation, 10/14-item pagination, disabled category, unapproved group content isolation and forged button texts. The RED branch failed all 10 cases while the existing 1,250 passed. The GREEN branch passed strict TypeScript, **1,260/1,260 tests** and five offline demos. The button route is local B3 approved educational content only: it does not imply a real AI answer or public platform/Phase17 integration.
+
 ## B6 v0.7.57 — owner-only aggregate Telegram outbox access-denial audit
 
 Owners can already open **📊 حالة الرسائل** in the trusted, verified Telegram private owner dashboard. This release extends the existing view with an aggregate-only breakdown of **locally denied, never-sent** queued replies. The durable job now optionally stores exactly one `accessDenialCode` for a `FAILED_CONFIRMED` item rejected before any external Telegram call: `LEGACY_UNVERIFIABLE` (old group or private reply lacking origin proof), `ACCESS_RECHECK_FAILED` (membership, time-bound proof, subscription, group AI or approved content could not be established as current), or `GROUP_UNAVAILABLE` (group navigation authorization revoked). This field is from an exact finite enum, is not read from Telegram text or source content, and never contains actor/group IDs, tokens, reply bodies, timestamps or evidence IDs.
