@@ -18,7 +18,7 @@ export const isOwnerB6BudgetText=(text:string):boolean=>
  text.startsWith('➡️ التالي · b6b:')||
  text.startsWith('⬅️ السابق · b6b:');
 
-const screen=(text:string,buttons:readonly string[]=[],paging:{previous?:string;next?:string}={})=>{
+const screen=(text:string,buttons:readonly string[]=[],paging:{previous?:string|undefined;next?:string|undefined}={})=>{
  const rows:{text:string}[][]=[];
  for(let i=0;i<buttons.length;i+=2)
   rows.push(buttons.slice(i,i+2).map(x=>({text:x})));
