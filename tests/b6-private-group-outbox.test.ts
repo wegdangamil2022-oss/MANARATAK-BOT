@@ -195,3 +195,70 @@ for(const engine of ['json','sqlite'] as const){
   }finally{await f.close();}
  });
 }
+
+
+// Compatibility with v0.7.55 protected DM group answers: old witness is
+// sufficient for a fresh recheck even without the v0.7.56 origin discriminator.
+for(const engine of ['json','sqlite'] as const){
+ test('B6 '+engine+': private group resource jobs have explicit GROUP_SCOPED origin',async()=>{
+  const f=await fixture(engine);try{
+   const r=await f.app.handle(update(2320,'/categories '+GROUP));
+   assert.equal(r.status,'APPLIED');
+   const row=(await f.store.snapshot()).telegramReplyJobs?.[0];
+   assert.equal(Reflect.get(row!,'privateReplyKind'),'GROUP_SCOPED');
+   assert.ok(row?.privateGroupAccess);
+   assert.equal((await f.dispatch().dispatch(r.deliveryKey!)).status,'CONFIRMED');
+   assert.equal(f.sent.length,1);
+   assert.equal(Reflect.get((await f.store.snapshot()).telegramReplyJobs?.[0]!,
+    'privateReplyKind'),undefined);
+  }finally{await f.close();}
+ });
+ test('B6 '+engine+': old group-scoped DM with v0.7.55 witness still requires fresh membership after upgrade',async()=>{
+  const f=await fixture(engine);try{
+   const r=await f.app.handle(update(2321,'/categories '+GROUP));
+   assert.equal(r.status,'APPLIED');
+   await f.store.transaction(s=>{
+    Reflect.deleteProperty(s.telegramReplyJobs![0]!,'privateReplyKind');
+   });
+   assert.ok((await f.store.snapshot()).telegramReplyJobs?.[0]?.privateGroupAccess);
+   f.setMember('NOT_MEMBER');
+   assert.equal((await f.dispatch().dispatch(r.deliveryKey!)).status,'FAILED_CONFIRMED');
+   assert.equal(f.sent.length,0);
+  }finally{await f.close();}
+ });
+ test('B6 '+engine+': valid old group-scoped DM with v0.7.55 witness can still dispatch',async()=>{
+  const f=await fixture(engine);try{
+   const r=await f.app.handle(update(2322,'/categories '+GROUP));
+   assert.equal(r.status,'APPLIED');
+   await f.store.transaction(s=>{
+    Reflect.deleteProperty(s.telegramReplyJobs![0]!,'privateReplyKind');
+   });
+   assert.equal((await f.dispatch().dispatch(r.deliveryKey!)).status,'CONFIRMED');
+   assert.equal(f.sent.length,1);
+  }finally{await f.close();}
+ });
+ test('B6 '+engine+': tampered local tag cannot disguise a group-scoped DM with existing proof',async()=>{
+  const f=await fixture(engine);try{
+   const r=await f.app.handle(update(2323,'/categories '+GROUP));
+   assert.equal(r.status,'APPLIED');
+   const original=await f.store.snapshot();
+   for(const tag of ['LOCAL','GROUP_SCOPED ',null,1]){
+    await assert.rejects(f.store.transaction(s=>{
+     Reflect.set(s.telegramReplyJobs![0]!,'privateReplyKind',tag);
+    }),/Unsupported state schema/);
+    assert.deepEqual(await f.store.snapshot(),original);
+   }
+  }finally{await f.close();}
+ });
+ test('B6 '+engine+': incomplete protected origin cannot be used to send a queued group-sourced DM',async()=>{
+  const f=await fixture(engine);try{
+   const r=await f.app.handle(update(2324,'/categories '+GROUP));
+   assert.equal(r.status,'APPLIED');
+   const original=await f.store.snapshot();
+   await assert.rejects(f.store.transaction(s=>{
+    delete s.telegramReplyJobs![0]!.privateGroupAccess;
+   }),/Unsupported state schema/);
+   assert.deepEqual(await f.store.snapshot(),original);
+  }finally{await f.close();}
+ });
+}

@@ -117,24 +117,35 @@ export function validTelegramReplyJob(v:unknown):v is TelegramReplyJob{
   (j.groupReplyKind===undefined||
    (j.status==='QUEUED'&&validPlan(j.plan)&&j.plan.chatId.startsWith('-')&&
     (j.groupReplyKind==='GENERAL'||j.groupReplyKind==='REVIEWED_FAQ')&&
+    j.privateReplyKind===undefined&&j.privateGroupAccess===undefined&&
     ((j.groupReplyKind==='GENERAL'&&j.groupQuestionAccess===undefined&&
-      (j.privateGroupAccess===undefined||(
-    j.status==='QUEUED'&&validPlan(j.plan)&&
-    j.plan.chatId===(j.privateGroupAccess as {actorId?:string}).actorId&&
-    j.groupReplyKind===undefined&&j.groupMenuAccess===undefined&&
-    j.groupQuestionAccess===undefined&&
-    validPrivateGroupAccess(j.privateGroupAccess)
-  ))&&
-  (j.groupMenuAccess===undefined||validGroupReplyAccess(j.groupMenuAccess)))||
+      (j.groupMenuAccess===undefined||validGroupReplyAccess(j.groupMenuAccess)))||
      (j.groupReplyKind==='REVIEWED_FAQ'&&validGroupReplyAccess(j.groupQuestionAccess)&&
       j.groupMenuAccess===undefined))))&&
+  (j.privateReplyKind===undefined||
+   (j.status==='QUEUED'&&validPlan(j.plan)&&
+    !j.plan.chatId.startsWith('-')&&
+    (j.privateReplyKind==='LOCAL'||j.privateReplyKind==='GROUP_SCOPED')&&
+    j.groupReplyKind===undefined&&j.groupQuestionAccess===undefined&&
+    j.groupMenuAccess===undefined&&
+    ((j.privateReplyKind==='LOCAL'&&j.privateGroupAccess===undefined)||
+     (j.privateReplyKind==='GROUP_SCOPED'&&
+      validPrivateGroupAccess(j.privateGroupAccess)&&
+      j.plan.chatId===j.privateGroupAccess.actorId))))&&
+  (j.privateGroupAccess===undefined||
+   (j.status==='QUEUED'&&validPlan(j.plan)&&
+    validPrivateGroupAccess(j.privateGroupAccess)&&
+    j.plan.chatId===j.privateGroupAccess.actorId&&
+    !j.plan.chatId.startsWith('-')&&
+    j.groupReplyKind===undefined&&
+    j.groupQuestionAccess===undefined&&j.groupMenuAccess===undefined))&&
   (j.groupMenuAccess===undefined||
-    (j.groupReplyKind==='GENERAL'&&j.status==='QUEUED'&&
-     validPlan(j.plan)&&j.plan.chatId.startsWith('-')&&
-     validGroupReplyAccess(j.groupMenuAccess)))&&
+   (j.status==='QUEUED'&&validPlan(j.plan)&&j.plan.chatId.startsWith('-')&&
+    j.groupReplyKind==='GENERAL'&&
+    j.groupQuestionAccess===undefined&&validGroupReplyAccess(j.groupMenuAccess)))&&
   (j.groupQuestionAccess===undefined||
    (j.status==='QUEUED'&&validPlan(j.plan)&&j.plan.chatId.startsWith('-')&&
-    validGroupReplyAccess(j.groupQuestionAccess)))&&
+    j.groupMenuAccess===undefined&&validGroupReplyAccess(j.groupQuestionAccess)))&&
   (j.manualReview===undefined||(
    validManualReview(j.manualReview)&&
    (j.status==='SENDING'||j.status==='UNKNOWN_OUTCOME')&&
@@ -222,7 +233,12 @@ export class TelegramReplyDispatcher {
    // Unknown legacy group origins, plus GENERAL plans created before the
    // menu witness existed, cannot prove original actor/subscription authority.
    const noGroupProof=plan.chatId.startsWith('-')&&!access;
-   const forbidden=noGroupProof||(!!access&&(
+   // Old DM replies could contain a group's private resource titles.
+   // Without a scoped B6 witness or a new trusted LOCAL origin tag, their
+   // origin cannot be established from the destination or HTML body.
+   const noPrivateProvenance=!plan.chatId.startsWith('-')&&
+    job.privateReplyKind===undefined&&!dm;
+   const forbidden=noGroupProof||noPrivateProvenance||(!!access&&(
     !groupPrecheck?.allowed||
     groupPrecheck.kind!==accessKind||
     groupPrecheck.access.actorId!==access.actorId||
@@ -236,7 +252,7 @@ export class TelegramReplyDispatcher {
       privateGroupEpochDigest(s,accessScope))!==access.epoch));
    if(forbidden||(plan.chatId.startsWith('-')&&!this.policy.canUseChat(s,plan.chatId,'navigation'))){
     job.status='FAILED_CONFIRMED';
-    delete job.plan;delete job.groupQuestionAccess;delete job.groupMenuAccess;delete job.privateGroupAccess;delete job.groupReplyKind;job.redactedAt=this.clock();
+    delete job.plan;delete job.groupQuestionAccess;delete job.groupMenuAccess;delete job.privateGroupAccess;delete job.privateReplyKind;delete job.groupReplyKind;job.redactedAt=this.clock();
     return {status:'FAILED_CONFIRMED' as const};
    }
    const attemptId=randomUUID();
@@ -244,7 +260,7 @@ export class TelegramReplyDispatcher {
    job.status='SENDING';job.attemptId=attemptId;job.startedAt=at;
    // Remove the durable body *before* the external call. The immediate local
    // copy goes to the sender, but a crash leaves no replayable payload.
-   delete job.plan;delete job.groupQuestionAccess;delete job.groupMenuAccess;delete job.privateGroupAccess;delete job.groupReplyKind;job.redactedAt=at;
+   delete job.plan;delete job.groupQuestionAccess;delete job.groupMenuAccess;delete job.privateGroupAccess;delete job.privateReplyKind;delete job.groupReplyKind;job.redactedAt=at;
    return {status:'SEND' as const,attemptId,plan};
   });
   if(claim.status!=='SEND')return {status:claim.status};

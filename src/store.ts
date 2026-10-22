@@ -98,6 +98,10 @@ export interface TelegramReplyJob {
  groupMenuAccess?:{actorId:string;epoch:string;expiresAt:number};
  /** Temporary source scope + actor used to recheck DM group browsing at send. */
  privateGroupAccess?:{actorId:string;scope:string;epoch:string;expiresAt:number};
+ /** New private replies declare origin; pre-v0.7.56 private QUEUED rows
+  * without either this or privateGroupAccess are quarantine-only on dispatch.
+  */
+ privateReplyKind?:'LOCAL'|'GROUP_SCOPED';
  /** Immutable operator acknowledgement; it NEVER proves delivery or permits retry. */
  manualReview?:{decision:'ACKNOWLEDGED_UNRESOLVED'|'ESCALATED';
   reviewedBy:string;reviewedAt:number;attemptId:string};
@@ -330,6 +334,17 @@ export class BotStore {
             typeof m.epoch!=='string'||!/^[a-f0-9]{64}$/u.test(m.epoch)||
             typeof m.expiresAt!=='number'||!Number.isSafeInteger(m.expiresAt)||
             m.expiresAt<0||m.expiresAt>8_640_000_000_000_000)return true;
+        }
+        if(job.privateReplyKind!==undefined){
+         if(job.status!=='QUEUED'||!plan||typeof plan.chatId!=='string'||
+            !/^[1-9]\d{0,15}$/u.test(plan.chatId)||
+            !Number.isSafeInteger(Number(plan.chatId))||
+            job.groupReplyKind!==undefined||
+            job.groupMenuAccess!==undefined||job.groupQuestionAccess!==undefined||
+            (job.privateReplyKind!=='LOCAL'&&job.privateReplyKind!=='GROUP_SCOPED')||
+            (job.privateReplyKind==='LOCAL'&&job.privateGroupAccess!==undefined)||
+            (job.privateReplyKind==='GROUP_SCOPED'&&job.privateGroupAccess===undefined))
+          return true;
         }
         if(job.privateGroupAccess!==undefined){
          const v=job.privateGroupAccess;
@@ -654,7 +669,9 @@ export class BotStore {
         s.telegramReplyJobs??=[];
         if(!s.telegramReplyJobs.some(j=>j.updateKey===key))
          s.telegramReplyJobs.push({updateKey:key,plan:structuredClone(reply),status:'QUEUED',queuedAt:decision.at,
-          ...(reply.chatId.startsWith('-')?{groupReplyKind:groupQuestionAccess?'REVIEWED_FAQ' as const:'GENERAL' as const}:{}),
+          ...(reply.chatId.startsWith('-')
+           ?{groupReplyKind:groupQuestionAccess?'REVIEWED_FAQ' as const:'GENERAL' as const}
+           :{privateReplyKind:privateGroupAccess?'GROUP_SCOPED' as const:'LOCAL' as const}),
           ...(groupQuestionAccess?{groupQuestionAccess:structuredClone(groupQuestionAccess)}:{}),
           ...(groupMenuAccess?{groupMenuAccess:structuredClone(groupMenuAccess)}:{}),
           ...(privateGroupAccess?{privateGroupAccess:structuredClone(privateGroupAccess)}:{})});

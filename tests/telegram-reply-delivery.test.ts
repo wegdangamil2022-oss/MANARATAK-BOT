@@ -294,3 +294,71 @@ for(const engine of ['json','sqlite'] as const){
   }finally{await f.close();}
  });
 }
+
+
+// B6 v0.7.56: pre-upgrade private reply bodies cannot prove their origin.
+// A private text plan could include group-scoped resources; never infer its
+// provenance from its HTML or from private destination alone.
+for(const engine of ['json','sqlite'] as const){
+ test('B6 '+engine+': legacy private QUEUED job with no origin or group proof is quarantined without Telegram send',async()=>{
+  const f=await fixture(engine);try{
+   const r=await f.app().handle(incoming(2300));
+   assert.equal(r.status,'APPLIED');
+   const newRow=(await f.store.snapshot()).telegramReplyJobs?.[0];
+   assert.equal(Reflect.get(newRow!,'privateReplyKind'),'LOCAL');
+   await f.store.transaction(s=>{
+    const j=s.telegramReplyJobs?.[0];if(j)Reflect.deleteProperty(j,'privateReplyKind');
+   });
+   const result=await f.dispatcher().dispatch(r.deliveryKey!);
+   assert.equal(result.status,'FAILED_CONFIRMED');
+   assert.equal(f.sent.length,0);
+   const job=(await f.store.snapshot()).telegramReplyJobs?.[0];
+   assert.equal(job?.status,'FAILED_CONFIRMED');
+   assert.equal(job?.plan,undefined);
+   assert.equal(job?.attemptId,undefined);
+   assert.equal(Reflect.get(job!,'privateReplyKind'),undefined);
+   assert.ok(job?.redactedAt!==undefined);
+   assert.equal((await f.dispatcher().dispatch(r.deliveryKey!)).status,'FAILED_CONFIRMED');
+   assert.equal(f.sent.length,0);
+  }finally{await f.close();}
+ });
+ test('B6 '+engine+': new local private navigation is clearly tagged and remains sendable',async()=>{
+  const f=await fixture(engine);try{
+   const r=await f.app().handle(incoming(2301));
+   assert.equal(r.status,'APPLIED');
+   assert.equal(Reflect.get((await f.store.snapshot()).telegramReplyJobs?.[0]!,
+    'privateReplyKind'),'LOCAL');
+   assert.equal((await f.dispatcher().dispatch(r.deliveryKey!)).status,'CONFIRMED');
+   assert.equal(f.sent.length,1);
+   const job=(await f.store.snapshot()).telegramReplyJobs?.[0];
+   assert.equal(job?.status,'SENT');
+   assert.equal(Reflect.get(job!,'privateReplyKind'),undefined);
+  }finally{await f.close();}
+ });
+ test('B6 '+engine+': persisted private marker must be strict, consistent with recipient and proof, and transient',async()=>{
+  const f=await fixture(engine);try{
+   const r=await f.app().handle(incoming(2302));
+   assert.equal(r.status,'APPLIED');
+   const original=await f.store.snapshot();
+   for(const invalid of ['', 'GROUP_SCOPED', 'LOCAL ', 1, null, {}, ['LOCAL']]){
+    await assert.rejects(f.store.transaction(s=>{
+     Reflect.set(s.telegramReplyJobs![0]!,'privateReplyKind',invalid);
+    }),/Unsupported state schema/);
+    assert.deepEqual(await f.store.snapshot(),original);
+   }
+  }finally{await f.close();}
+ });
+ test('B6 '+engine+': started and unknown old private sends are not resent after upgrade',async()=>{
+  const f=await fixture(engine);try{
+   await f.store.transaction(s=>{
+    s.telegramReplyJobs=[
+     {updateKey:'b3-webhook:bot-main:2303',status:'SENDING',attemptId:'old',startedAt:100},
+     {updateKey:'b3-webhook:bot-main:2304',status:'UNKNOWN_OUTCOME',attemptId:'old',startedAt:100}
+    ];
+   });
+   assert.equal((await f.dispatcher().dispatch('b3-webhook:bot-main:2303')).status,'UNKNOWN_OUTCOME');
+   assert.equal((await f.dispatcher().dispatch('b3-webhook:bot-main:2304')).status,'UNKNOWN_OUTCOME');
+   assert.equal(f.sent.length,0);
+  }finally{await f.close();}
+ });
+}
