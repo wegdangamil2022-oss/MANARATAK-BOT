@@ -1,3 +1,11 @@
+## 0.7.60 — 2026-10-23 — B3 actionable FAQ browse and search-result return buttons
+
+- Preserve current approved FAQ browse page when opening a numbered reviewed question: answer keyboard gets `↩️ صفحة الأسئلة · pf:<page>` and original catalogue entry. On every return reread the current private reviewed FAQ catalogue; stale/out-of-range, disabled or group-only content cannot be recovered through old buttons.
+- Preserve approved private FAQ search term, global visible ordinal and result page in bounded stateless selection labels, with a search-results return button in the resulting answer. Both selection and return require fresh approved search membership, source/category review and navigation feature permission. Do not store search sessions, aliases or student history in a database cursor.
+- Keep old numbered/opaque FAQ selectors valid and preserve their existing current-source reauthorization; when a new contextual selector cannot fit keyboard limits, fall back to the original safe numbered button rather than returning malformed Telegram markup.
+- Tests: 16 new JSON/SQLite regressions for browse page 2, keyword search pages 1 and 2, original/current publication checks, tampered ID/query/page, feature disable, malformed controls and group separation. RED proved 16 new failures against 1,276 previous green tests. Final CI strict TypeScript, full tests and five offline demos required.
+- No real Phase17 AI, unreviewed search corpus, group bypass, or automatic generative answer publication enabled.
+
 ## 0.7.59 — 2026-10-23 — B3 contextual search results return in student Telegram UI
 
 - Preserve the original search term and page in bounded, stateless Telegram search result button labels. After opening a reviewed private resource, students can tap `↩️ نتائج البحث` to return to the current authorized version of the same search page, alongside the existing category/all-categories navigation.
