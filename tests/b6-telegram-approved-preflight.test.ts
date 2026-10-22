@@ -11,7 +11,9 @@ import {EducationAdminFacade} from '../src/education-admin.js';
 import {ApprovedAnswerService,ResourceLinkService} from '../src/education-interactions.js';
 import {LocalFAQKnowledgeSource,B6AnswerPreflight,type KnowledgeSourcePort} from '../src/b6-approved-answer-preflight.js';
 import {TelegramUpdateApplication} from '../src/telegram-transport.js';
-const OWNER='100',STUDENT=300,GROUP='-100555';
+import {SubscriptionGate,FakeMembershipGateway} from '../src/subscription.js';
+import {ModerationService,FakeModerationGateway} from '../src/moderation.js';
+const OWNER='100',STUDENT=300,GROUP='-100555',CHANNEL='-100556';
 const QUESTION='ما شروط المنحة؟',ANSWER='شروط معتمدة <راجعتها> & موثقة';
 const msg=(updateId:number,actor:number,text:string,group=false)=>({
  update_id:updateId,message:{message_id:updateId,from:{id:actor,is_bot:false},
@@ -23,7 +25,8 @@ async function setup(engine:'json'|'sqlite'){
  const policy=new Policy(store,OWNER),education=new EducationService(store,policy);
  const admin=new EducationAdminFacade(store,policy,education);
  const faq=new ApprovedAnswerService(store,policy),links=new ResourceLinkService(store,policy);
- await policy.approveChat(OWNER,GROUP,['navigation','assistant']);
+ await policy.approveChat(OWNER,GROUP,['navigation','assistant','verification']);
+ await policy.approveChat(OWNER,CHANNEL,['verification']);
  await policy.configureGroupAI(OWNER,GROUP,'ALL_MENTION');
  await policy.configurePrivateAI(OWNER,'ALL_OPT_IN');
  const resourceId=randomUUID(),groupResourceId=randomUUID();
@@ -43,11 +46,15 @@ async function setup(engine:'json'|'sqlite'){
  await faq.approve(OWNER,a.id);await faq.approve(OWNER,b.id);
  const knowledge=new LocalFAQKnowledgeSource(store);
  const planner=(source:KnowledgeSourcePort=knowledge)=>new B6AnswerPreflight(store,policy,faq,source);
- const app=(withB6:boolean,source?:KnowledgeSourcePort)=>new TelegramUpdateApplication({
+ const membership=new FakeMembershipGateway();
+ const subscription=new SubscriptionGate(store,policy,membership,
+  new ModerationService(store,policy,new FakeModerationGateway()));
+ const app=(withB6:boolean,source?:KnowledgeSourcePort,checkSubscription=false)=>new TelegramUpdateApplication({
   store,policy,education,admin,faq,links,botId:'main',botUsername:'ManaratakBot',
-  membership:async()=> 'UNKNOWN',...(withB6?{answerPreflight:planner(source)}:{})
+  membership:async()=> 'UNKNOWN',...(withB6?{answerPreflight:planner(source)}:{}),
+  ...(checkSubscription?{subscription}:{})
  });
- return {store,policy,education,faq,knowledge,planner,app,resourceId,groupResourceId,
+ return {store,policy,education,faq,knowledge,planner,app,subscription,membership,resourceId,groupResourceId,
   close:()=>rm(dir,{recursive:true,force:true})};
 }
 for(const engine of ['json','sqlite'] as const){
@@ -347,6 +354,93 @@ for(const engine of ['json','sqlite'] as const){
    const r=await pending;
    assert.equal(r.status,'DENIED');
    assert.equal(r.plan,undefined);
+  }finally{await f.close();}
+ });
+}
+
+
+for(const engine of ['json','sqlite'] as const){
+ test('B6 '+engine+': new required subscription during FAQ wait denies stale no-rule permission',async()=>{
+  const f=await setup(engine);try{
+   let entered!:()=>void,release!:()=>void;
+   const started=new Promise<void>(r=>entered=r);
+   const suspended=new Promise<void>(r=>release=r);
+   const source:KnowledgeSourcePort={lookup:async input=>{
+    const value=await f.knowledge.lookup(input);entered();await suspended;return value;
+   }};
+   const pending=f.app(true,source,true).handle(msg(700,STUDENT,'/ask@ManaratakBot '+QUESTION,true));
+   await started;
+   await f.subscription.configure(OWNER,GROUP,[CHANNEL],'ALL');
+   f.membership.set(CHANNEL,String(STUDENT),'MEMBER');
+   release();
+   const outcome=await pending;
+   assert.equal(outcome.status,'DENIED');
+   assert.equal(outcome.plan,undefined);
+  }finally{await f.close();}
+ });
+ test('B6 '+engine+': newly introduced rule denies stale group FAQ even without subscription adapter',async()=>{
+  const f=await setup(engine);try{
+   let entered!:()=>void,release!:()=>void;
+   const started=new Promise<void>(r=>entered=r),held=new Promise<void>(r=>release=r);
+   const source:KnowledgeSourcePort={lookup:async q=>{
+    const value=await f.knowledge.lookup(q);entered();await held;return value;
+   }};
+   const pending=f.app(true,source,false).handle(msg(701,STUDENT,
+    '/ask@ManaratakBot '+QUESTION,true));
+   await started;
+   await f.subscription.configure(OWNER,GROUP,[CHANNEL],'ALL');
+   release();
+   const outcome=await pending;
+   assert.equal(outcome.status,'DENIED');
+   assert.equal(outcome.plan,undefined);
+  }finally{await f.close();}
+ });
+ test('B6 '+engine+': owner pausing required subscription during approved FAQ lookup voids old proof',async()=>{
+  const f=await setup(engine);try{
+   await f.subscription.configure(OWNER,GROUP,[CHANNEL],'ALL');
+   f.membership.set(CHANNEL,String(STUDENT),'MEMBER');
+   let entered!:()=>void,release!:()=>void;
+   const started=new Promise<void>(r=>entered=r),held=new Promise<void>(r=>release=r);
+   const source:KnowledgeSourcePort={lookup:async q=>{
+    const value=await f.knowledge.lookup(q);entered();await held;return value;
+   }};
+   const pending=f.app(true,source,true).handle(msg(702,STUDENT,
+    '/ask@ManaratakBot '+QUESTION,true));
+   await started;
+   await f.subscription.configure(OWNER,GROUP,[],'ALL');
+   release();
+   const outcome=await pending;
+   assert.equal(outcome.status,'DENIED');
+   assert.equal(outcome.plan,undefined);
+  }finally{await f.close();}
+ });
+ test('B6 '+engine+': membership lost during FAQ lookup prevents a stale approved answer',async()=>{
+  const f=await setup(engine);try{
+   await f.subscription.configure(OWNER,GROUP,[CHANNEL],'ALL');
+   f.membership.set(CHANNEL,String(STUDENT),'MEMBER');
+   let entered!:()=>void,release!:()=>void;
+   const started=new Promise<void>(r=>entered=r),held=new Promise<void>(r=>release=r);
+   const source:KnowledgeSourcePort={lookup:async q=>{
+    const value=await f.knowledge.lookup(q);entered();await held;return value;
+   }};
+   const pending=f.app(true,source,true).handle(msg(703,STUDENT,
+    '/ask@ManaratakBot '+QUESTION,true));
+   await started;
+   f.membership.set(CHANNEL,String(STUDENT),'NOT_MEMBER');
+   release();
+   const outcome=await pending;
+   assert.equal(outcome.status,'DENIED');
+   assert.equal(outcome.plan,undefined);
+  }finally{await f.close();}
+ });
+ test('B6 '+engine+': unchanged required membership allows a group reviewed FAQ response',async()=>{
+  const f=await setup(engine);try{
+   await f.subscription.configure(OWNER,GROUP,[CHANNEL],'ALL');
+   f.membership.set(CHANNEL,String(STUDENT),'MEMBER');
+   const outcome=await f.app(true,undefined,true).handle(msg(704,STUDENT,
+    '/ask@ManaratakBot '+QUESTION,true));
+   assert.equal(outcome.status,'APPLIED');
+   assert.match(outcome.plan?.text??'',/جواب المجموعة فقط/);
   }finally{await f.close();}
  });
 }
