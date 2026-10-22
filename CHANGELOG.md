@@ -1,3 +1,11 @@
+## 0.7.56 — 2026-10-23 — B6 block unverifiable legacy private Telegram queued replies
+
+- Close the v0.7.55 upgrade gap: pre-upgrade private QUEUED replies could include group resources but had no reliable record of their scope, and the last-mile checker treated their private destination as sufficient authorization. Such unclassified jobs now fail closed when dispatched and have their queued text permanently redacted, without calling Telegram or creating an outbound attempt.
+- Add an explicit, strictly validated `privateReplyKind` discriminator, set only when the trusted update is durably queued: `LOCAL` for non-group private replies; `GROUP_SCOPED` for private replies carrying group-backed `privateGroupAccess`. Remove this discriminator when the reply is claimed or rejected.
+- Preserve previously queued v0.7.55 group-sourced private replies with an authentic `privateGroupAccess` even if the newer discriminator is absent; require their existing fresh membership, subscription, scoped content and 120-second expiration checks. New private-only LOCAL navigation is unaffected. Inconsistent source tag/proof pairs are rejected in both JSON/SQLite state validation and dispatch-time shape checks.
+- Do not attempt to reclassify historical private replies from text or metadata. Quarantine unstarted legacy private items only. Already started or UNKNOWN Telegram attempts are not replayed. Some benign old private replies will be intentionally dropped and should be re-requested.
+- TDD: 18 new JSON/SQLite tests. RED confirmed 12 previously failing cases; GREEN requires strict TS, 1,238 automated tests and all five offline demos before merge. Real Phase 17 AI remains disabled.
+
 ## 0.7.55 — 2026-10-23 — B6 private group-scope Telegram queued resource reauthorization
 
 - Close the gap between admission and queued Telegram delivery when a student requests *group-scoped* published resources in private chat. Persist a `privateGroupAccess` source/recipient witness with actor, group scope, SHA-256 domain-separated content+subscription+policy epoch and 120-second expiry. Do not copy source text into authorization metadata.
