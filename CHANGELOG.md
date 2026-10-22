@@ -1,3 +1,11 @@
+## 0.7.41 — 2026-10-22 — B6 knowledge-first answer planner, no generative AI (OFFLINE)
+
+- Adds the first B6 `KnowledgeSourcePort` (minimal query scope + question, no Telegram actor ID, credentials, identity/session linkage or chat history), local approved FAQ lookup, and a `B6AnswerPreflight` that enforces the bot's existing private opt-in and explicit group-mention policies BEFORE calling a source.
+- A returned source hint never authorizes an answer. After awaited source work, the planner checks the current chat policy/epoch and the trusted B3 FAQ publication, reviewer and category visibility again. Only exact matching, currently reviewed and published source-backed answers may be returned; revoked scope, archived/hidden sources, mismatched provider output and conflicting answers fail closed.
+- Opt-in Telegram simulation integration: `/ask QUESTION` in a permitted opted-in private chat, and `/ask@BOT QUESTION` in approved groups, can use the planner only when explicitly injected into `TelegramUpdateApplication`. Without it, the previous group FAQ route remains unchanged and `/ask` private is not exposed. `/faq` always remains independent of AI mode.
+- No external AI model, Phase 17 connection, prompt execution, source-web search, saved raw questions, platform provider, Telegram network dispatch or hidden fallback is implemented. Responses are labelled as reviewed saved FAQ, never AI-generated; no answer means no fabricated answer.
+- 35 RED-first JSON/SQLite and Telegram integration tests covering strict scope, no history/actor passing to the port, opt-in/mention gating, forged hints, ambiguity, source edits and group revocation midflight, HTML-safe output and default-route backward compatibility. **969/969 CI tests passed** with all offline demos.
+
 ## 0.7.40 — 2026-10-22 — B5 signed owner Mini App external-source preview and integrity (OFFLINE)
 
 - Adds two strictly opt-in **read-only** routes to the existing Telegram Mini App HMAC-protected administrative listener: `POST /admin/platform/preview` and `POST /admin/platform/integrity`. They exist only when a trusted B5 `PlatformCatalogPreviewService` is injected explicitly. The real Manaratak API, source URLs and service credentials are neither assumed nor connected.
