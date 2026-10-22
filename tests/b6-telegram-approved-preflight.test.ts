@@ -159,8 +159,9 @@ for(const engine of ['json','sqlite'] as const){
  test('B6 '+engine+': raw lookalike mention with no Telegram entity is ignored',async()=>{
   const f=await setup(engine);try{
    const text='@ManaratakBot '+QUESTION;
+   let id=210;
    for(const entities of [undefined,[],[{type:'bold',offset:0,length:13}]]){
-    const r=await f.app(true).handle(mentionUpdate(210+(entities?.length??0),text,entities));
+    const r=await f.app(true).handle(mentionUpdate(id++,text,entities));
     assert.equal(r.status,'IGNORED');
     assert.equal(r.plan,undefined);
    }
