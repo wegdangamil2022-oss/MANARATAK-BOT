@@ -330,3 +330,10 @@ A changed, missing or unavailable external source is never proof of scholarship 
 - An owner may read conservative fake-model reservation counts from current saved state, but a READ screen must not silently mutate expired attempts or claim that a provider did not charge. Only an explicit owner step can mark expired leases `UNKNOWN_OUTCOME`; no model call or token refund follows.
 - An owner may separately inspect and acknowledge **awareness** of a quarantined attempt through Telegram private-owner buttons. Each confirmation must recheck owner identity, active dashboard and exact attempt status inside a persistent transaction. The status and full reserved units remain unchanged; acknowledgment is historical evidence and cannot authorize a replay, new reservation, free retry or provider success claim.
 - Budget reports are limited to the owner and display only attempt identifiers (shortened on read-only summary). They never display the opaque request key, student content, identity, raw prompts, model output or service credentials. Strong strict decoder validation prevents forged saved review records. The flow is offline/mock, not an actual provider receipt reconciliation or monetary cost ledger.
+
+## قرار B6 v0.7.45 — حدود انتظار التوليد التجريبي وساعة الميزانية
+
+- كل استدعاء مولد تجريبي يحتاج مهلة جدارية بين 20 و900000 مللي ثانية (الافتراضي 30000). انتهاؤها لا يثبت إيقاف عمل المنفذ الخارجي؛ لذلك لا إعادة محاولة ولا استرداد وحدات الحجز، والنص المتأخر لا يعود إلى المستدعي ولا ينشر.
+- تبقى محاولات `UNKNOWN_OUTCOME` محجوزة بالكامل ويمنع تكرار مفتاحها الثابت. إقرار المالك لا يثبت فاتورة مزود خارجي.
+- ساعة ميزانية المحاكاة داخل العملية لا تعيد تصفير العدادات إذا تراجعت، والخطأ أو الرمي من الساعة يمنع قبول الاستدعاء. هذا ليس ضمانًا موزعًا؛ محاسبة Phase 17 الحقيقية منفصلة.
+- سبعة اختبارات انحدار مضافة، بمحاكاة JSON وSQLite وقبول محلي؛ لا توصيل AI فعلي ولا إرسال إجابات طلابية.

@@ -1,3 +1,11 @@
+## B6 v0.7.45 — bounded fake-generation deadline and monotonic admission (OFFLINE)
+
+The explicitly injected fake-only `B6GenerationDraftService` now applies a wall-clock maximum to each generation attempt (`B6DraftConfig.maxDurationMs`, default 30,000 ms; allowed 20–900,000). When the fake port hangs or rejects, the service returns `UNAVAILABLE`, releases its local concurrency slot, marks an active durable attempt `UNKNOWN_OUTCOME`, retains all conservatively reserved units and rejects a replay of the same stable request key. Late fake-provider text is discarded, not sent or published, and provider error strings are never exposed.
+
+The in-memory `B6EphemeralCallBudget` also rejects backwards clock jumps as `CLOCK_ROLLBACK`, and treats invalid or throwing clocks as `UNAVAILABLE` instead of throwing from `begin()`. Its per-process high-water mark preserves earlier spent fake-call quota after a clock rollback; it is **not** a persistent provider billing mechanism. A read-only `summary()` signals clock errors by throwing. The existing JSON/SQLite durable budget and owner-only unknown-outcome dashboard are independent.
+
+Seven new focused regression cases cover time rollback, broken clocks, bounded hangs, late responses, durable UNKNOWN persistence, fake-provider errors and malformed deadline settings. Full TypeScript/test/demo CI is the release gate; **1049 tests** expected. This does not connect real Phase 17 AI, bill a provider, activate student-facing generation or enable outbound sends.
+
 ## B6 v0.7.44 — owner Telegram fake-AI reservation monitoring (OFFLINE)
 
 The optional local owner menu now includes **🧮 ميزانية المساعد التجريبية**. It displays an eight-attempts-per-page privacy-redacted report of daily attempt counts, reserved conservative units, active leases, expired leases and unknown outcomes. An expired lease is **only reported** on a read; the owner can separately choose **🧯 عزل المحاولات المنتهية** to quarantine it as `UNKNOWN_OUTCOME`. A distinct **⚠️ مراجعة محاولة** and **✅ إقرار المراجعة** workflow records that the owner saw the warning, without changing that unknown outcome, refunding units, reissuing the original request or proving anything about the upstream AI provider.

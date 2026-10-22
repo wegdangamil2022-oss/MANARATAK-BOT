@@ -10,7 +10,7 @@ import {ApprovedAnswerService} from '../src/education-interactions.js';
 import {LocalFAQKnowledgeSource,B6AnswerPreflight} from '../src/b6-approved-answer-preflight.js';
 import {B6DurableBudget} from '../src/b6-durable-budget.js';
 import {B6EphemeralCallBudget,B6GenerationDraftService,
- type AnswerGenerationPort} from '../src/b6-generation-draft.js';
+ type AnswerGenerationPort,type B6DraftConfig} from '../src/b6-generation-draft.js';
 
 const OWNER='100',ACTOR='300',GROUP='-100777';
 const QUESTION='ما شروط المنحة؟';
@@ -302,3 +302,95 @@ for(const engine of ['json','sqlite'] as const){
   }finally{await f.close();}
  });
 }
+
+
+test('B6 ephemeral day budget rejects backwards clock and preserves the newer day spent allowance',()=>{
+ let now=NOW;
+ const b=new B6EphemeralCallBudget({maxCallsPerUtcDay:1,maxConcurrent:1},()=>now);
+ const first=b.begin();
+ assert.equal(first.status,'ADMITTED');
+ if(first.status==='ADMITTED')first.finish();
+ now+=86_400_000;
+ const second=b.begin();
+ assert.equal(second.status,'ADMITTED');
+ if(second.status==='ADMITTED')second.finish();
+ now=NOW;
+ assert.deepEqual(b.begin(),{status:'CLOCK_ROLLBACK'});
+ assert.throws(()=>b.summary(),/B6_CLOCK_ROLLBACK/);
+ now=NOW+86_400_000;
+ assert.deepEqual(b.begin(),{status:'BUDGET_EXHAUSTED'});
+ assert.equal(b.summary().attemptsToday,1);
+});
+
+test('B6 ephemeral invalid or throwing clock fails closed instead of escaping the admission API',()=>{
+ let current:number=NOW,throwClock=false;
+ const b=new B6EphemeralCallBudget({maxCallsPerUtcDay:1,maxConcurrent:1},()=>{
+  if(throwClock)throw Error('secret clock failure');
+  return current;
+ });
+ current=Number.NaN;
+ assert.deepEqual(b.begin(),{status:'UNAVAILABLE'});
+ throwClock=true;
+ assert.deepEqual(b.begin(),{status:'UNAVAILABLE'});
+ throwClock=false;current=NOW;
+ const ok=b.begin();
+ assert.equal(ok.status,'ADMITTED');
+ if(ok.status==='ADMITTED')ok.finish();
+ assert.deepEqual(b.begin(),{status:'BUDGET_EXHAUSTED'});
+});
+
+for(const engine of ['json','sqlite'] as const){
+ test('B6 '+engine+': pending fake port times out, remains charged UNKNOWN, and late response cannot become draft',async()=>{
+  const f=await fixture(engine);
+  let release!:()=>void,entered!:()=>void;
+  const waiting=new Promise<void>(r=>release=r);
+  const started=new Promise<void>(r=>entered=r);
+  try{
+   const ledger=new B6DurableBudget(f.store,{
+    maxDailyAttempts:2,maxDailyReservedTokens:16384,maxConcurrent:1,leaseMs:60000},()=>NOW);
+   const port:AnswerGenerationPort={generate:async q=>{
+    entered();await waiting;return draft(q.sourceId,'LATE_UNREVIEWED_SECRET');
+   }};
+   const svc=new B6GenerationDraftService(
+    new B6AnswerPreflight(f.store,f.policy,f.faq,new LocalFAQKnowledgeSource(f.store)),
+    port,f.budget(2,1),{enabled:true,maxDurationMs:25} as B6DraftConfig,ledger);
+   const pending=svc.prepareDraft(f.request,'timeout-draft-request-0001');
+   await started;
+   assert.deepEqual(await pending,{status:'UNAVAILABLE'});
+   assert.deepEqual(await ledger.reserve('timeout-draft-request-0001',10),{status:'DUPLICATE'});
+   assert.deepEqual(await ledger.inspect(),{
+    durable:true,day:new Date(NOW).toISOString().slice(0,10),
+    attemptsToday:1,reservedTokensToday:8192,active:0,unknownCount:1
+   });
+   release();
+   await Promise.resolve();await Promise.resolve();
+   assert.equal((await ledger.inspect()).unknownCount,1);
+  }finally{
+   if(release)release();
+   await f.close();
+  }
+ });
+ test('B6 '+engine+': fake provider rejection before deadline retains unknown reservation and hides error',async()=>{
+  const f=await fixture(engine);try{
+   const ledger=new B6DurableBudget(f.store,{
+    maxDailyAttempts:1,maxDailyReservedTokens:8192,maxConcurrent:1,leaseMs:60000},()=>NOW);
+   const svc=new B6GenerationDraftService(
+    new B6AnswerPreflight(f.store,f.policy,f.faq,new LocalFAQKnowledgeSource(f.store)),
+    {generate:async()=>{throw Error('secret credentials should never leak');}},
+    f.budget(),{enabled:true,maxDurationMs:100} as B6DraftConfig,ledger);
+   assert.deepEqual(await svc.prepareDraft(f.request,'timeout-draft-request-0002'),
+    {status:'UNAVAILABLE'});
+   assert.equal((await ledger.inspect()).unknownCount,1);
+  }finally{await f.close();}
+ });
+}
+
+test('B6 timeout configuration rejects nonpositive or excessive deadlines',async()=>{
+ const f=await fixture('json');try{
+  const pre=new B6AnswerPreflight(f.store,f.policy,f.faq,new LocalFAQKnowledgeSource(f.store));
+  for(const duration of [0,-1,19,900001,NaN,1.5]){
+   assert.throws(()=>new B6GenerationDraftService(pre,{generate:async()=>null},
+    f.budget(),{enabled:true,maxDurationMs:duration} as B6DraftConfig),/INVALID_B6_DRAFT_CONFIG/);
+  }
+ }finally{await f.close();}
+});
