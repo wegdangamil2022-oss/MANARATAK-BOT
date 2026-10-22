@@ -1,3 +1,7 @@
+## B5 v0.7.39 — Explicit local archival of reviewed external resources (offline)
+
+The optional owner-only external source integrity report can display an archive preview and an independent final confirmation for a published local scholarship. A stale local resource fingerprint, copied student button, revoked owner dashboard or conflicting concurrent click is rejected. This action changes only the local student catalogue, never the upstream website, and does not claim the scholarship has closed. No Telegram channel announcement or production external API is enabled.
+
 ## B5 v0.7.38 — recheck an external source after a grant has been locally published
 
 The optional owner-only **🔬 سلامة المصادر الخارجية** Telegram menu displays locally published external education records with bounded pagination and an explicit **🔬 فحص مصدر** option. This is an advisory **read-only** integrity check: it can say the current metadata matches, the source changed, the record is missing from the saved cursor page (not proof of closure), the provider is unavailable, or the local resource was archived or altered. It never updates or archives the student library automatically, sends channel messages, or claims a scholarship is definitively closed. The external API remains a mock adapter unless independently authenticated and verified. B5 approval/publication remain separate owner-confirmed operations.
