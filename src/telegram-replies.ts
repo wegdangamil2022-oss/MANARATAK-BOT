@@ -85,6 +85,15 @@ const validManualReview=(v:unknown):boolean=>{
   typeof r.reviewedAt==='number'&&Number.isSafeInteger(r.reviewedAt)&&r.reviewedAt>=0;
 };
 
+const validGroupReplyAccess=(v:unknown):v is NonNullable<TelegramReplyJob['groupQuestionAccess']>=>{
+ if(!v||typeof v!=='object'||Array.isArray(v))return false;
+ const r=v as Record<string,unknown>;
+ return Object.keys(r).length===3&&
+  typeof r.actorId==='string'&&/^[1-9]\d{0,19}$/u.test(r.actorId)&&
+  typeof r.epoch==='string'&&/^[a-f0-9]{64}$/u.test(r.epoch)&&
+  typeof r.expiresAt==='number'&&Number.isSafeInteger(r.expiresAt)&&
+  r.expiresAt>=0&&r.expiresAt<=8_640_000_000_000_000;
+};
 export function validTelegramReplyJob(v:unknown):v is TelegramReplyJob{
  if(!v||typeof v!=='object'||Array.isArray(v))return false;
  const j=v as Record<string,unknown>;
@@ -94,16 +103,9 @@ export function validTelegramReplyJob(v:unknown):v is TelegramReplyJob{
   (j.queuedAt===undefined||(typeof j.queuedAt==='number'&&Number.isSafeInteger(j.queuedAt)&&j.queuedAt>=0))&&
   (j.startedAt===undefined||(typeof j.startedAt==='number'&&Number.isSafeInteger(j.startedAt)&&j.startedAt>=0))&&
   (j.redactedAt===undefined||(typeof j.redactedAt==='number'&&Number.isSafeInteger(j.redactedAt)&&j.redactedAt>=0))&&
-  (j.groupQuestionAccess===undefined||(
-   j.status==='QUEUED'&&!!j.plan&&j.plan.chatId.startsWith('-')&&
-   Object.keys(j.groupQuestionAccess as object).length===3&&
-   typeof j.groupQuestionAccess.actorId==='string'&&
-   /^[1-9]\d{0,19}$/u.test(j.groupQuestionAccess.actorId)&&
-   typeof j.groupQuestionAccess.epoch==='string'&&
-   /^[a-f0-9]{64}$/u.test(j.groupQuestionAccess.epoch)&&
-   typeof j.groupQuestionAccess.expiresAt==='number'&&
-   Number.isSafeInteger(j.groupQuestionAccess.expiresAt)&&j.groupQuestionAccess.expiresAt>=0
-  ))&&
+  (j.groupQuestionAccess===undefined||
+   (j.status==='QUEUED'&&validPlan(j.plan)&&j.plan.chatId.startsWith('-')&&
+    validGroupReplyAccess(j.groupQuestionAccess)))&&
   (j.manualReview===undefined||(
    validManualReview(j.manualReview)&&
    (j.status==='SENDING'||j.status==='UNKNOWN_OUTCOME')&&

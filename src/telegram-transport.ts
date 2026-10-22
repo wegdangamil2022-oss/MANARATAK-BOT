@@ -278,7 +278,7 @@ export class TelegramUpdateApplication {
        throw Error('B6_GROUP_CLOCK_INVALID');
       return {
        actorId,epoch:createHash('sha256')
-        .update('MANARATAK:B6:GROUP-FAQ:DISPATCH:v1\0')
+        .update('MANARATAK:B6:GROUP-FAQ:DISPATCH:v1:')
         .update(epoch).digest('hex'),expiresAt:at+120_000
       };
     };

@@ -19,6 +19,6 @@ export function groupQuestionSubscriptionEpoch(s:BotState,groupId:string):string
  return JSON.stringify([subscriptionRequirementMode(s,groupId),rules,approvals]);
 }
 export function groupQuestionEpochDigest(state:BotState,groupId:string):string{
- return createHash('sha256').update('MANARATAK:B6:GROUP-FAQ:DISPATCH:v1\\0')
+ return createHash('sha256').update('MANARATAK:B6:GROUP-FAQ:DISPATCH:v1:')
   .update(groupQuestionSubscriptionEpoch(state,groupId)).digest('hex');
 }
