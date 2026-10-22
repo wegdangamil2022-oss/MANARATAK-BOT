@@ -1,3 +1,11 @@
+## 0.7.53 — 2026-10-22 — B6 guarded group navigation outbox membership, no real AI
+
+- Close remaining pre-dispatch group resource-list leak: newly queued Telegram `/categories` and `/resources` replies now carry a 120-second, actor-scoped `groupMenuAccess` witness derived from the exact local group and subscription epoch. A queued GENERAL response with no such witness is denied/redacted as legacy, even if v0.7.52 supplied the GENERAL tag.
+- Recheck the current group navigation policy and required-channel membership after message planning, just before claim, and fence changes during the external membership verification using an exclusive transaction comparing the original policy epoch. Expired, unknown and absent membership proof denies; stable permission still sends.
+- Strict JSON/SQLite decoder and dispatcher validation of menu actor ID, digest, expiry, GENERAL origin and no simultaneous FAQ witness. Remove temporary actor IDs, reply bodies and origin tags on send claim or rejection. Private queued replies and v0.7.51+ protected FAQ are unaffected.
+- 14 new JSON/SQLite regression cases; TDD RED recorded fourteen failures, then verified the fix with strict TS, all 1,182 automated tests and five offline demos on the final merge candidate.
+- Constraint: Telegram does not give atomic membership-check/send; this is a last-local-claim fence rather than perfect prevention of external changes. Phase17 generative AI remains disconnected.
+
 ## 0.7.52 — 2026-10-22 — B6 block unclassified legacy queued Telegram group replies
 
 - Introduce a strict optional `groupReplyKind` origin discriminator for newly queued group replies: `GENERAL` for ordinary group UI, `REVIEWED_FAQ` for replies with a short-lived B6 group-question witness. Save it when the trusted update is finished; remove it when the queue item is claimed or rejected.
