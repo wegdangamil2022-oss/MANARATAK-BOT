@@ -19,8 +19,10 @@ async function fixture(engine:'json'|'sqlite'){
  const close=async()=>rm(dir,{recursive:true,force:true});
  return {dir,store,same,insert,close};
 }
+// Explicit LOCAL on the synthetic queued row: provenance is part of dispatch admission;
+// older unclassified queues are tested separately in the B6 upgrade suite.
 const populated:TelegramReplyJob[]=[
- {updateKey:key(1),status:'QUEUED',plan:plan('queued and MUST NOT disappear'),queuedAt:120_000},
+ {updateKey:key(1),status:'QUEUED',plan:plan('queued and MUST NOT disappear'),privateReplyKind:'LOCAL',queuedAt:120_000},
  {updateKey:key(2),status:'SENDING',plan:plan('old in-flight body'),startedAt:101_000,attemptId:'attempt-sending'},
  {updateKey:key(3),status:'SENT',plan:plan('sent private body'),startedAt:99_000,messageId:77,attemptId:'attempt-sent'},
  {updateKey:key(4),status:'FAILED_CONFIRMED',plan:plan('failed delivery body'),startedAt:95_000,attemptId:'attempt-failed'},
@@ -81,7 +83,7 @@ for(const engine of ['json','sqlite'] as const){
  });
  test(`B3 reply privacy ${engine}: dispatcher clears queued payload atomically before outbound network effect`,async()=>{
   const f=await fixture(engine);try{
-   await f.insert([{updateKey:key(9),status:'QUEUED',queuedAt:120_000,plan:plan('super secret student reply')}]);
+   await f.insert([{updateKey:key(9),status:'QUEUED',privateReplyKind:'LOCAL',queuedAt:120_000,plan:plan('super secret student reply')}]);
    const sender:TelegramReplySender={send:async(savedPlan)=>{
     assert.equal(savedPlan.text,'super secret student reply');
     const live=(await f.same().snapshot()).telegramReplyJobs?.[0];

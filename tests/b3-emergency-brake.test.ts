@@ -87,10 +87,11 @@ test('live config and preflight require protected existing safety switch even fo
   assert.equal((await preflightLiveTelegram(f.env)).ready,true);
  }finally{await f.close();}
 });
+// This fixture simulates a new, trustworthy LOCAL private reply rather than an old unclassified job.
 test('paused safety gate blocks QUEUED dispatch without attempt, sender or receipt',async()=>{
  const f=await fixture();let calls=0;try{
   await f.store.transaction(s=>{s.telegramReplyJobs=[{
-   updateKey:'b3-webhook:bot-main:44',status:'QUEUED',queuedAt:Date.now()-200,
+   updateKey:'b3-webhook:bot-main:44',status:'QUEUED',privateReplyKind:'LOCAL',queuedAt:Date.now()-200,
    plan:{chatId:'300',parseMode:'HTML',text:'Sensitive text'}
   }];});
   const sender:TelegramReplySender={send:async()=>{calls++;return {status:'CONFIRMED',messageId:99};}};
@@ -114,7 +115,7 @@ test('paused safety gate blocks QUEUED dispatch without attempt, sender or recei
 test('a rejecting safety gate fails closed without altering a queued intent',async()=>{
  const f=await fixture();let calls=0;try{
   await f.store.transaction(s=>{s.telegramReplyJobs=[{
-   updateKey:'b3-webhook:bot-main:55',status:'QUEUED',queuedAt:Date.now(),
+   updateKey:'b3-webhook:bot-main:55',status:'QUEUED',privateReplyKind:'LOCAL',queuedAt:Date.now(),
    plan:{chatId:'300',parseMode:'HTML',text:'Restricted student text'}
   }];});
   const sender:TelegramReplySender={send:async()=>{calls++;return {status:'CONFIRMED',messageId:1};}};
