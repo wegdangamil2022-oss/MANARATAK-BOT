@@ -1,3 +1,11 @@
+## 0.7.59 — 2026-10-23 — B3 contextual search results return in student Telegram UI
+
+- Preserve the original search term and page in bounded, stateless Telegram search result button labels. After opening a reviewed private resource, students can tap `↩️ نتائج البحث` to return to the current authorized version of the same search page, alongside the existing category/all-categories navigation.
+- Verify the exact current resource button representation, page membership, text/title and private category publication rights again for every selection. Strictly reject stale/archived resources, forged query/page/ID combinations, disabled private search and malformed Unicode or pagination controls; no new authorization route or stored student search session.
+- Keep keyboard limits and backward compatibility: overflow on a very long ID/query falls back to the ordinary validated resource button, retaining category navigation rather than emitting malformed Telegram markup.
+- TDD: 16 new JSON/SQLite navigation and revocation tests. 12 failed before implementation; after implementation, corrected a previous bounded-keyboard test which read the last segment as a resource ID without accounting for the new search suffix. GREEN passed strict TypeScript, **1,276/1,276** tests and five offline demos.
+- This is an approved B3 local library navigation improvement. No Phase17 generative AI, external platform write or paid provider calls enabled.
+
 ## 0.7.58 — 2026-10-23 — B3 actionable student Telegram navigation breadcrumbs
 
 - Improve actual Telegram student UI: resource details now include a verified category-return choice plus all-categories return, instead of offering only a generic back button that jumped to the home screen. Group/resources pages, including empty and multi-page listings, include an all-categories return while preserving the existing pagination, home and back buttons.
