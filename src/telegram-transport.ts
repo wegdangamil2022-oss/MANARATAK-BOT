@@ -275,7 +275,7 @@ export class TelegramUpdateApplication {
        if(epoch===undefined||!Number.isSafeInteger(at)||at<0||
           at>8_640_000_000_000_000-120_000)throw Error('B6_MENU_EPOCH_INVALID');
        groupMenuAccess={actorId,epoch:createHash('sha256')
-        .update('MANARATAK:B6:GROUP-MENU:DISPATCH:v1:').update(epoch).digest('hex'),
+        .update('MANARATAK:B6:GROUP-MENU:DISPATCH:v2:').update(epoch).digest('hex'),
         expiresAt:at+120_000};
       }
       return {status:'APPLIED',reason:'RESPONSE_PLANNED_ONLY',
@@ -291,7 +291,7 @@ export class TelegramUpdateApplication {
        throw Error('B6_GROUP_CLOCK_INVALID');
       return {
        actorId,epoch:createHash('sha256')
-        .update('MANARATAK:B6:GROUP-FAQ:DISPATCH:v1:')
+        .update('MANARATAK:B6:GROUP-FAQ:DISPATCH:v2:')
         .update(epoch).digest('hex'),expiresAt:at+120_000
       };
     };
