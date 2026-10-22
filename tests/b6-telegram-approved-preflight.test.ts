@@ -124,3 +124,123 @@ for(const engine of ['json','sqlite'] as const){
   }finally{await f.close();}
  });
 }
+
+
+const mentionUpdate=(id:number,text:string,entities:unknown,extra:Record<string,unknown>={})=>{
+ const base=msg(id,STUDENT,text,true);
+ return {...base,message:{...base.message,entities,...extra}};
+};
+for(const engine of ['json','sqlite'] as const){
+ test('B6 '+engine+': genuine Telegram MessageEntity mention gives the group approved answer',async()=>{
+  const f=await setup(engine);try{
+   const text='@ManaratakBot '+QUESTION;
+   const result=await f.app(true).handle(mentionUpdate(200,text,[
+    {type:'mention',offset:0,length:'@ManaratakBot'.length}
+   ]));
+   assert.equal(result.status,'APPLIED');
+   assert.match(result.plan?.text??'',/جواب المجموعة فقط/);
+   assert.doesNotMatch(result.plan?.text??'',/شروط معتمدة/);
+   assert.equal((await f.store.snapshot()).deliveries.length,0);
+  }finally{await f.close();}
+ });
+ test('B6 '+engine+': group mention is case insensitive and supports UTF-16 emoji inside question',async()=>{
+  const f=await setup(engine);try{
+   const text='@manaratakbot '+QUESTION+' 😀';
+   const result=await f.app(true).handle(mentionUpdate(201,text,[
+    {type:'mention',offset:0,length:13},
+    {type:'custom_emoji',offset:text.length-2,length:2,custom_emoji_id:'fake'}
+   ]));
+   // Valid explicit mention reaches approved-knowledge matching even when that
+   // extra emoji makes this question unmatched; it never generates a fallback.
+   assert.equal(result.status,'DENIED');
+   assert.equal(result.reason,'B6_NO_APPROVED_SOURCE');
+  }finally{await f.close();}
+ });
+ test('B6 '+engine+': raw lookalike mention with no Telegram entity is ignored',async()=>{
+  const f=await setup(engine);try{
+   const text='@ManaratakBot '+QUESTION;
+   for(const entities of [undefined,[],[{type:'bold',offset:0,length:13}]]){
+    const r=await f.app(true).handle(mentionUpdate(210+(entities?.length??0),text,entities));
+    assert.equal(r.status,'IGNORED');
+    assert.equal(r.plan,undefined);
+   }
+  }finally{await f.close();}
+ });
+ test('B6 '+engine+': other bot mention or quote cannot trigger the group assistant',async()=>{
+  const f=await setup(engine);try{
+   const other=await f.app(true).handle(mentionUpdate(220,'@AnotherBot '+QUESTION,[
+    {type:'mention',offset:0,length:11}
+   ]));
+   assert.equal(other.status,'IGNORED');
+   const text='سؤال مقتبس: @ManaratakBot '+QUESTION;
+   const quote=await f.app(true).handle(mentionUpdate(221,text,[
+    {type:'mention',offset:text.indexOf('@'),length:13}
+   ]));
+   assert.equal(quote.status,'IGNORED');
+   const forwarded=await f.app(true).handle(mentionUpdate(222,'@ManaratakBot '+QUESTION,[
+    {type:'mention',offset:0,length:13}
+   ],{forward_date:1670000000}));
+   assert.equal(forwarded.status,'DENIED');
+   assert.equal(forwarded.plan,undefined);
+  }finally{await f.close();}
+ });
+ test('B6 '+engine+': malformed UTF-16 or overlapping mention entity is denied without a plan',async()=>{
+  const f=await setup(engine);try{
+   const text='@ManaratakBot '+QUESTION;
+   const wrong=[
+    [{type:'mention',offset:0,length:12}],
+    [{type:'mention',offset:-1,length:13}],
+    [{type:'mention',offset:0,length:13},{type:'mention',offset:0,length:13}],
+    [{type:'mention',offset:0,length:13,actorId:'100'}],
+    [{type:'mention',offset:0,length:13},{type:'mention',offset:2,length:8}]
+   ];
+   for(let i=0;i<wrong.length;i++){
+    const r=await f.app(true).handle(mentionUpdate(230+i,text,wrong[i]));
+    assert.equal(r.status,'DENIED');
+    assert.equal(r.plan,undefined);
+   }
+  }finally{await f.close();}
+ });
+ test('B6 '+engine+': no B6 adapter can only answer an explicit mention using reviewed B3 FAQ',async()=>{
+  const f=await setup(engine);try{
+   const text='@ManaratakBot '+QUESTION;
+   const result=await f.app(false).handle(mentionUpdate(250,text,[
+    {type:'mention',offset:0,length:13}
+   ]));
+   assert.equal(result.status,'APPLIED');
+   assert.match(result.plan?.text??'',/جواب المجموعة فقط/);
+   assert.doesNotMatch(result.plan?.text??'',/شروط معتمدة/);
+  }finally{await f.close();}
+ });
+ test('B6 '+engine+': disabling group mention AI denies FAQ-backed mention; private FAQ stays independent',async()=>{
+  const f=await setup(engine);try{
+   await f.policy.configureGroupAI(OWNER,GROUP,'OFF');
+   const text='@ManaratakBot '+QUESTION;
+   const r=await f.app(true).handle(mentionUpdate(260,text,[
+    {type:'mention',offset:0,length:13}
+   ]));
+   assert.equal(r.status,'DENIED');
+   assert.equal(r.plan,undefined);
+   assert.equal((await f.app(true).handle(msg(261,STUDENT,'/faq '+QUESTION))).status,'APPLIED');
+  }finally{await f.close();}
+ });
+ test('B6 '+engine+': scope revocation during mention source lookup prevents sending stale text',async()=>{
+  const f=await setup(engine);try{
+   let enter!:()=>void,release!:()=>void;
+   const started=new Promise<void>(r=>enter=r);
+   const waiting=new Promise<void>(r=>release=r);
+   const source:KnowledgeSourcePort={lookup:async q=>{
+    const answer=await f.knowledge.lookup(q);enter();await waiting;return answer;
+   }};
+   const text='@ManaratakBot '+QUESTION;
+   const pending=f.app(true,source).handle(mentionUpdate(270,text,[
+    {type:'mention',offset:0,length:13}
+   ]));
+   await started;
+   await f.policy.revokeChat(OWNER,GROUP);release();
+   const r=await pending;
+   assert.equal(r.status,'DENIED');
+   assert.equal(r.plan,undefined);
+  }finally{await f.close();}
+ });
+}
