@@ -225,7 +225,7 @@ export class TelegramUpdateApplication {
         if(!owner)return {status:'DENIED',reason:'OWNER_ONLY'};
         const screen=await new OwnerTelegramMenu(
           this.opts.store,this.opts.policy,this.opts.education,this.opts.admin,
-          this.opts.platformCatalog
+          this.opts.platformCatalog,this.clock
         ).handle(text,adminCtx);
         if(!screen)return {status:'DENIED',reason:'OWNER_MENU_UNAVAILABLE'};
         return result(screen.text,screen.keyboard);
