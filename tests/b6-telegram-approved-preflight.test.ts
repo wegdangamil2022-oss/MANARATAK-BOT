@@ -635,3 +635,32 @@ for(const engine of ['json','sqlite'] as const){
   }finally{await f.close();}
  });
 }
+
+
+for(const engine of ['json','sqlite'] as const){
+ test('B6 '+engine+': pre-upgrade v0.7.51 guarded FAQ can still pass current proof without new origin tag',async()=>{
+  const f=await setup(engine);try{
+   await f.subscription.configure(OWNER,GROUP,[CHANNEL],'ALL');
+   f.membership.set(CHANNEL,String(STUDENT),'MEMBER');
+   const accepted=await f.app(true,undefined,true).handle(msg(930,STUDENT,
+    '/ask@ManaratakBot '+QUESTION,true));
+   assert.equal(accepted.status,'APPLIED');
+   const queued=(await f.store.snapshot()).telegramReplyJobs?.[0];
+   assert.equal(queued?.groupReplyKind,'REVIEWED_FAQ');
+   assert.ok(queued?.groupQuestionAccess);
+   // Represents a v0.7.51 queued answer with the original guarded metadata,
+   // before v0.7.52 started writing a separate group origin tag.
+   await f.store.transaction(s=>{delete s.telegramReplyJobs![0]!.groupReplyKind;});
+   let sends=0;
+   const d=new TelegramReplyDispatcher(f.store,f.policy,
+    {send:async()=>{sends++;return {status:'CONFIRMED',messageId:930};}},
+    Date.now,undefined,f.subscription);
+   assert.equal((await d.dispatch(accepted.deliveryKey!)).status,'CONFIRMED');
+   assert.equal(sends,1);
+   const job=(await f.store.snapshot()).telegramReplyJobs?.[0];
+   assert.equal(job?.status,'SENT');
+   assert.equal(job?.groupQuestionAccess,undefined);
+   assert.equal(job?.groupReplyKind,undefined);
+  }finally{await f.close();}
+ });
+}

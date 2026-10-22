@@ -103,6 +103,11 @@ export function validTelegramReplyJob(v:unknown):v is TelegramReplyJob{
   (j.queuedAt===undefined||(typeof j.queuedAt==='number'&&Number.isSafeInteger(j.queuedAt)&&j.queuedAt>=0))&&
   (j.startedAt===undefined||(typeof j.startedAt==='number'&&Number.isSafeInteger(j.startedAt)&&j.startedAt>=0))&&
   (j.redactedAt===undefined||(typeof j.redactedAt==='number'&&Number.isSafeInteger(j.redactedAt)&&j.redactedAt>=0))&&
+  (j.groupReplyKind===undefined||
+   (j.status==='QUEUED'&&validPlan(j.plan)&&j.plan.chatId.startsWith('-')&&
+    (j.groupReplyKind==='GENERAL'||j.groupReplyKind==='REVIEWED_FAQ')&&
+    ((j.groupReplyKind==='GENERAL'&&j.groupQuestionAccess===undefined)||
+     (j.groupReplyKind==='REVIEWED_FAQ'&&validGroupReplyAccess(j.groupQuestionAccess)))))&&
   (j.groupQuestionAccess===undefined||
    (j.status==='QUEUED'&&validPlan(j.plan)&&j.plan.chatId.startsWith('-')&&
     validGroupReplyAccess(j.groupQuestionAccess)))&&
@@ -172,16 +177,22 @@ export class TelegramReplyDispatcher {
    }
    const plan=structuredClone(job.plan!);
    const access=job.groupQuestionAccess;
-   const forbidden=!!access&&(
+   // v0.7.51 and earlier queued group rows have no origin discriminator.
+   // Some may be unguarded FAQ answers; their text cannot prove provenance.
+   // Permit previously guarded B6 FAQ rows (with the old access proof),
+   // but quarantine ALL unclassified, unguarded group rows on first dispatch.
+   const legacyUnclassified=plan.chatId.startsWith('-')&&
+    job.groupReplyKind===undefined&&access===undefined;
+   const forbidden=legacyUnclassified||(!!access&&(
     !groupPrecheck?.allowed||groupPrecheck.access.actorId!==access.actorId||
     groupPrecheck.access.epoch!==access.epoch||
     groupPrecheck.access.expiresAt!==access.expiresAt||
     this.clock()>=access.expiresAt||
     !this.policy.mayAskGroup(s,plan.chatId,access.actorId,true)||
-    groupQuestionEpochDigest(s,plan.chatId)!==access.epoch);
+    groupQuestionEpochDigest(s,plan.chatId)!==access.epoch));
    if(forbidden||(plan.chatId.startsWith('-')&&!this.policy.canUseChat(s,plan.chatId,'navigation'))){
     job.status='FAILED_CONFIRMED';
-    delete job.plan;delete job.groupQuestionAccess;job.redactedAt=this.clock();
+    delete job.plan;delete job.groupQuestionAccess;delete job.groupReplyKind;job.redactedAt=this.clock();
     return {status:'FAILED_CONFIRMED' as const};
    }
    const attemptId=randomUUID();
@@ -189,7 +200,7 @@ export class TelegramReplyDispatcher {
    job.status='SENDING';job.attemptId=attemptId;job.startedAt=at;
    // Remove the durable body *before* the external call. The immediate local
    // copy goes to the sender, but a crash leaves no replayable payload.
-   delete job.plan;delete job.groupQuestionAccess;job.redactedAt=at;
+   delete job.plan;delete job.groupQuestionAccess;delete job.groupReplyKind;job.redactedAt=at;
    return {status:'SEND' as const,attemptId,plan};
   });
   if(claim.status!=='SEND')return {status:claim.status};

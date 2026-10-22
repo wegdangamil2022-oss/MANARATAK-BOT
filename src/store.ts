@@ -85,6 +85,11 @@ export interface TelegramReplyJob {
  status:'QUEUED'|'SENDING'|'SENT'|'FAILED_CONFIRMED'|'UNKNOWN_OUTCOME';
  attemptId?:string;startedAt?:number;messageId?:number;
  queuedAt?:number;redactedAt?:number;
+ /** Added in B6 v0.7.52: new group jobs must declare their reviewed
+  * origin. Missing discriminator on a group QUEUED row indicates an older
+  * upgrade-ambiguous job; it must not bypass B6 membership guards.
+  */
+ groupReplyKind?:'GENERAL'|'REVIEWED_FAQ';
  /** Queued B6 group FAQ only. Brief private membership recheck metadata, removed at dispatch. */
  groupQuestionAccess?:{actorId:string;epoch:string;expiresAt:number};
  /** Immutable operator acknowledgement; it NEVER proves delivery or permits retry. */
@@ -298,11 +303,19 @@ export class BotStore {
        previous.telegramReplyJobs.some((raw:unknown)=>{
         if(!raw||typeof raw!=='object'||Array.isArray(raw))return true;
         const job=raw as Record<string,unknown>;
+        const plan=job.plan as Record<string,unknown>|undefined;
+        if(job.groupReplyKind!==undefined){
+         if(job.status!=='QUEUED'||!plan||typeof plan.chatId!=='string'||
+            !/^-[1-9]\d{0,18}$/u.test(plan.chatId)||
+            (job.groupReplyKind!=='GENERAL'&&job.groupReplyKind!=='REVIEWED_FAQ')||
+            (job.groupReplyKind==='REVIEWED_FAQ'&&job.groupQuestionAccess===undefined)||
+            (job.groupReplyKind==='GENERAL'&&job.groupQuestionAccess!==undefined))
+          return true;
+        }
         if(job.groupQuestionAccess===undefined)return false;
         const g=job.groupQuestionAccess;
         if(!g||typeof g!=='object'||Array.isArray(g))return true;
         const v=g as Record<string,unknown>;
-        const plan=job.plan as Record<string,unknown>|undefined;
         return job.status!=='QUEUED'||Object.keys(v).length!==3||
          typeof v.actorId!=='string'||!/^[1-9]\d{0,19}$/u.test(v.actorId)||
          typeof v.epoch!=='string'||!/^[a-f0-9]{64}$/u.test(v.epoch)||
@@ -605,6 +618,7 @@ export class BotStore {
         s.telegramReplyJobs??=[];
         if(!s.telegramReplyJobs.some(j=>j.updateKey===key))
          s.telegramReplyJobs.push({updateKey:key,plan:structuredClone(reply),status:'QUEUED',queuedAt:decision.at,
+          ...(reply.chatId.startsWith('-')?{groupReplyKind:groupQuestionAccess?'REVIEWED_FAQ' as const:'GENERAL' as const}:{}),
           ...(groupQuestionAccess?{groupQuestionAccess:structuredClone(groupQuestionAccess)}:{})});
       }
     });
