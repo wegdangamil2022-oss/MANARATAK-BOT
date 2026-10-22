@@ -1,3 +1,13 @@
+## B6 v0.7.47 — persistent HMAC-key continuity for offline Telegram attempts
+
+A new optional schema-8 `b6TelegramKeyBinding` stores a **keyed, domain-separated HMAC fingerprint** of the trusted Telegram fake-generation intent secret, not the secret itself. On the **first successful durable reservation** made with a Telegram-derived `b6tg1_` request key, the fingerprint is pinned atomically with the attempt. All subsequent Telegram reservations must use the same secret. A changed or incorrectly configured secret fails closed (`UNAVAILABLE`) before another model attempt; JSON single-process and SQLite transactional tests cover simultaneous different secrets, restarts and unchanged-key replay.
+
+**Legacy migration guard:** databases containing ANY previous B6 attempts but lacking the fingerprint cannot enroll an unverified new secret. Such Telegram requests return `UNAVAILABLE` until an independently reviewed migration verifies old intent evidence, rather than risking duplicated generation or lost reserved spending. No automatic key rotation or reset is performed. Unmodified historical JSON/SQLite stores can still be read; no destructive schema migration. The reserved units, unknown outcomes and request ledger remain intact.
+
+Malformed, all-zero, wrong-case, non-string or extra-length persisted fingerprints are rejected by the shared JSON/SQLite schema decoder. Direct callers cannot reserve a `b6tg1_` namespace key without supplying an associated binding; non-Telegram fake reservations remain offline-only. Disabled or denied requests do not enroll a secret. The gate is **not connected** to the live Telegram update handler or Phase 17 API, and the fingerprint is NOT tamper-proof against an attacker already authorized to rewrite the database. Protect both the trusted secret and state backups.
+
+Added 14 red/green JSON and SQLite tests; the project runs `npm run check` and offline demos in GitHub Actions. This does not turn on real AI, Telegram student delivery, production usage metering, billing, or Phase 17 integration.
+
 ## B6 v0.7.46 — stable HMAC keys for verified Telegram update intents (OFFLINE)
 
 `B6TelegramIntentKeys` derives an opaque, deterministic URL-safe `b6tg1_…` request key from an already-verified Telegram **bot ID + update ID**, with a distinct HMAC-SHA256 domain label. It takes an explicit 32-byte hex-encoded secret from trusted caller configuration, rejects malformed/missing/zero secrets and malformed event tuples, and never stores the Telegram actor, chat ID, question, bot name or HMAC secret in the persistent budget ledger. Recreating the service with the same stable secret gives the same key; distinct bots/updates/secrets produce different keys.

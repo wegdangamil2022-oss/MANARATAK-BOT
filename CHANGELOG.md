@@ -1,3 +1,11 @@
+## 0.7.47 — 2026-10-22 — B6 atomic offline Telegram HMAC secret continuity (no real AI)
+
+- Pin a domain-separated secret-verifier fingerprint (`b6TelegramKeyBinding`) together with the first successful `b6tg1_` durable attempt reservation in a JSON/SQLite state transaction. Reject changed secrets on repeat/restart/race **before** calling a fake model; no automatic key rotation or billing refund.
+- Fail closed for pre-v0.7.47 ledgers already containing attempts with no verifier: their original HMAC secret cannot be proven from an opaque request key, so enrollment requires future explicit, reviewed migration and cannot silently rewrite old idempotency evidence.
+- Strictly validate optional `b6TelegramKeyBinding` for both storage engines. Deny direct Telegram-namespace reservations without binding while preserving non-Telegram offline simulation. No actor identities, prompts, secrets or chat histories are written into the reservation ledger.
+- Fourteen regression tests added (JSON + SQLite). TDD first recorded 12 failing behavior tests on RED commit; source and final CI remain merge gates.
+- Limitations: persisted fingerprint is a continuity guard, not production secret attestation, HMAC rotation, model receipt verification, real financial metering or live Telegram sends; Phase 17 remains unconnected and off.
+
 ## 0.7.46 — 2026-10-22 — B6 verified-update HMAC keys and durable-only fake admission (OFFLINE)
 
 - Introduces the proposed `B6TelegramIntentKeys` boundary: HMAC-SHA256 of a distinct v1 domain and strictly validated bot ID / Telegram update number. Uses an explicitly supplied 64-hex-character (32-byte) secret; no actor IDs, student messages, session tokens, bot IDs or secrets are persisted in the B6 ledger. No key derivation from timestamps or retries.

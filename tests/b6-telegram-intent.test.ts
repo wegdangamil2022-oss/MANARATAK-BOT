@@ -166,3 +166,93 @@ for(const engine of ['json','sqlite'] as const){
   }finally{await f.close();}
  });
 }
+
+
+for(const engine of ['json','sqlite'] as const){
+ test('B6 '+engine+': changing Telegram HMAC secret after the first draft fails closed without new generation',async()=>{
+  const f=await fixture(engine);try{
+   const first=new B6TelegramDraftEntrypoint(keys(),f.service());
+   assert.equal((await first.prepare(f.request,verified)).status,'DRAFT');
+   const rotated=new B6TelegramDraftEntrypoint(
+    new B6TelegramIntentKeys(OTHER_SECRET),f.service());
+   assert.deepEqual(await rotated.prepare(f.request,verified),{status:'UNAVAILABLE'});
+   assert.deepEqual(await rotated.prepare(f.request,{...verified,updateId:verified.updateId+2}),{status:'UNAVAILABLE'});
+   assert.equal(f.calls(),1);
+   assert.equal((await f.store.snapshot()).b6BudgetAttempts?.length,1);
+   assert.deepEqual(await first.prepare(f.request,verified),{status:'DUPLICATE'});
+   assert.equal((await first.prepare(f.request,{...verified,updateId:verified.updateId+1})).status,'DRAFT');
+   assert.equal(f.calls(),2);
+  }finally{await f.close();}
+ });
+ test('B6 '+engine+': HMAC secret remains pinned after store reopening, rotation cannot create an alternate key',async()=>{
+  const f=await fixture(engine);try{
+   assert.equal((await new B6TelegramDraftEntrypoint(keys(),f.service()).prepare(f.request,verified)).status,'DRAFT');
+   const reopened=new BotStore(f.path,{engine});
+   const rotated=new B6TelegramDraftEntrypoint(new B6TelegramIntentKeys(OTHER_SECRET),f.service(reopened));
+   assert.deepEqual(await rotated.prepare(f.request,verified),{status:'UNAVAILABLE'});
+   const same=new B6TelegramDraftEntrypoint(keys(),f.service(reopened));
+   assert.deepEqual(await same.prepare(f.request,verified),{status:'DUPLICATE'});
+   assert.equal(f.calls(),1);
+  }finally{await f.close();}
+ });
+ test('B6 '+engine+': racing different secrets atomically pins one without a second fake provider call',async()=>{
+  const f=await fixture(engine);try{
+   const old=new B6TelegramDraftEntrypoint(keys(),f.service());
+   const newKey=new B6TelegramDraftEntrypoint(new B6TelegramIntentKeys(OTHER_SECRET),f.service());
+   const [a,b]=await Promise.all([
+    old.prepare(f.request,verified),
+    newKey.prepare(f.request,{...verified,updateId:verified.updateId+1})
+   ]);
+   assert.deepEqual([a.status,b.status].sort(),['DRAFT','UNAVAILABLE']);
+   assert.equal(f.calls(),1);
+   assert.equal((await f.store.snapshot()).b6BudgetAttempts?.length,1);
+  }finally{await f.close();}
+ });
+ test('B6 '+engine+': an existing legacy unbound attempt requires an explicit offline migration before HMAC enrollment',async()=>{
+  const f=await fixture(engine);try{
+   assert.equal((await f.service().prepareDurableDraft(f.request,'legacy-attempt-001')).status,'DRAFT');
+   const gate=new B6TelegramDraftEntrypoint(keys(),f.service());
+   assert.deepEqual(await gate.prepare(f.request,verified),{status:'UNAVAILABLE'});
+   assert.equal(f.calls(),1);
+   const state=await f.store.snapshot();
+   assert.equal(state.b6BudgetAttempts?.length,1);
+   assert.equal(Reflect.get(state,'b6TelegramKeyBinding'),undefined);
+  }finally{await f.close();}
+ });
+ test('B6 '+engine+': persisted secret verifier is opaque, strict, and a malformed edit is rejected atomically',async()=>{
+  const f=await fixture(engine);try{
+   const gate=new B6TelegramDraftEntrypoint(keys(),f.service());
+   assert.equal((await gate.prepare(f.request,verified)).status,'DRAFT');
+   const snapshot=await f.store.snapshot();
+   const fingerprint=Reflect.get(snapshot,'b6TelegramKeyBinding');
+   assert.match(fingerprint as string,/^[a-f0-9]{64}$/u);
+   assert.ok(!JSON.stringify(snapshot).includes(SECRET));
+   assert.ok(!JSON.stringify(snapshot).includes(OTHER_SECRET));
+   for(const invalid of ['bad','A'.repeat(64),'0'.repeat(64),null,{},77]){
+    await assert.rejects(f.store.transaction(s=>{
+     Reflect.set(s,'b6TelegramKeyBinding',invalid);
+    }),/Unsupported state schema/);
+    assert.equal(Reflect.get(await f.store.snapshot(),'b6TelegramKeyBinding'),fingerprint);
+   }
+  }finally{await f.close();}
+ });
+ test('B6 '+engine+': forbidden and malformed inputs never enroll a secret or reserve an attempt',async()=>{
+  const f=await fixture(engine);try{
+   const gate=new B6TelegramDraftEntrypoint(keys(),f.service());
+   assert.deepEqual(await gate.prepare({...f.request,optedIn:false},verified),{status:'DENIED'});
+   assert.deepEqual(await gate.prepare(f.request,{...verified,updateId:-1}),{status:'INVALID_REQUEST'});
+   const state=await f.store.snapshot();
+   assert.equal(Reflect.get(state,'b6TelegramKeyBinding'),undefined);
+   assert.equal(state.b6BudgetAttempts?.length??0,0);
+   assert.equal(f.calls(),0);
+  }finally{await f.close();}
+ });
+ test('B6 '+engine+': direct reserve of Telegram key namespace without binding is denied',async()=>{
+  const f=await fixture(engine);try{
+   const budget=new B6DurableBudget(f.store,{
+    maxDailyAttempts:5,maxDailyReservedTokens:40960,maxConcurrent:2,leaseMs:60000},()=>NOW);
+   assert.deepEqual(await budget.reserve(keys().derive(verified)!,8192),{status:'INVALID_REQUEST'});
+   assert.equal((await f.store.snapshot()).b6BudgetAttempts?.length??0,0);
+  }finally{await f.close();}
+ });
+}

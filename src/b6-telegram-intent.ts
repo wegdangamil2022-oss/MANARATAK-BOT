@@ -30,6 +30,11 @@ export class B6TelegramIntentKeys {
    throw Error('INVALID_B6_TELEGRAM_INTENT_SECRET');
   this.key=Buffer.from(secretHex,'hex');
  }
+ /** Proof of secret continuity without storing or exposing the secret itself. */
+ bindingFingerprint():string{
+  return createHmac('sha256',this.key)
+   .update('MANARATAK:B6:TG-KEY-BIND:v1','utf8').digest('hex');
+ }
  derive(intent:unknown):string|null{
   try{
    if(!isRecord(intent)||Object.keys(intent).length!==2||
@@ -58,7 +63,7 @@ export class B6TelegramDraftEntrypoint {
  async prepare(input:B6AnswerRequest,intent:unknown):Promise<B6DraftResult>{
   const requestKey=this.keys.derive(intent);
   if(!requestKey)return {status:'INVALID_REQUEST'};
-  try{return await this.service.prepareDurableDraft(input,requestKey);}
+  try{return await this.service.prepareDurableDraft(input,requestKey,this.keys.bindingFingerprint());}
   catch{return {status:'UNAVAILABLE'};}
  }
 }

@@ -145,6 +145,8 @@ export interface BotState {
   b6BudgetAttempts?:B6BudgetAttempt[];
   /** Monotonic clock high-water mark rejects rollback of daily budget boundaries. */
   b6BudgetClock?:number;
+  /** Versioned, non-secret HMAC verifier pinned when the first Telegram fake attempt is reserved. */
+  b6TelegramKeyBinding?:string;
   /** Optional additive B5 owner review queue; absent on old schema-8 files. */
   platformReviewQueue?: PlatformReviewQueueEntry[];
 }
@@ -192,6 +194,10 @@ export class BotStore {
       previous.purgeJobs = [];
     }
     if (previous.schemaVersion !== 8 ||
+      (previous.b6TelegramKeyBinding!==undefined&&
+       (typeof previous.b6TelegramKeyBinding!=='string'||
+        !/^[a-f0-9]{64}$/u.test(previous.b6TelegramKeyBinding)||
+        /^0{64}$/u.test(previous.b6TelegramKeyBinding)))||
       !Array.isArray(previous.rollingMessageMeta) || !Array.isArray(previous.purgeJobs) ||
       (previous.b6BudgetClock!==undefined&&
         (typeof previous.b6BudgetClock!=='number'||
