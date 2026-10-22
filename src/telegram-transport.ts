@@ -1,6 +1,6 @@
 import { timingSafeEqual } from 'node:crypto';
 import type { IncomingMessage, RequestListener, ServerResponse } from 'node:http';
-import { BotStore, type AuditRecord } from './store.js';
+import { BotStore, type AuditRecord, type BotState } from './store.js';
 import { Policy } from './policy.js';
 import { EducationService } from './education.js';
 import { EducationAdminFacade, type VerifiedAdminContext } from './education-admin.js';
@@ -98,6 +98,23 @@ function eventFrom(value:unknown):{event?:Event;reason:string} {
    ...(msg.reply_to_message!==undefined?{replyTo:msg.reply_to_message}:{})},reason:'VALID'};
 }
 
+/** Immutable local authorization witness for a B6 group question. Membership
+ * checks may finish before a slow approved-FAQ lookup. Compare the exact
+ * group + subscription + required-channel state again after that lookup,
+ * including when the first state had no required-channel rule.
+ */
+function groupQuestionSubscriptionEpoch(s:BotState,groupId:string):string {
+ const rules=s.subscriptionRequirements.filter(r=>r?.chatId===groupId);
+ const ids=new Set<string>([groupId]);
+ for(const rule of rules)
+  if(Array.isArray(rule?.channelIds))
+   for(const id of rule.channelIds)
+    if(typeof id==='string')ids.add(id);
+ const approvals=[...ids].sort().map(id=>
+  [id,s.chats.filter(c=>c?.id===id).map(c=>
+   [c.approved,c.present,c.version,c.scopes,c.groupAI])]);
+ return JSON.stringify([subscriptionRequirementMode(s,groupId),rules,approvals]);
+}
 const isScope=(scope:string):boolean=>scope==='private'||/^-[1-9]\d{0,18}$/.test(scope);
 const isId=(value:string):boolean=>/^[a-zA-Z0-9_-]{1,64}$/.test(value);
 const asNumber=(value:string):number|null=>/^\d{1,8}$/.test(value)&&Number.isSafeInteger(Number(value))?Number(value):null;
@@ -112,6 +129,36 @@ export class TelegramUpdateApplication {
   constructor(private readonly opts:TelegramApplicationOptions){
     if(!/^[a-zA-Z0-9_-]{1,80}$/.test(opts.botId)||!/^[a-zA-Z][a-zA-Z0-9_]{4,31}$/.test(opts.botUsername))throw Error('INVALID_BOT_CONFIG');
     this.clock=opts.clock??Date.now;
+  }
+  /** End-of-planning fence, after the FAQ await but before creating a reply.
+   * A changed local policy epoch invalidates prior Telegram membership proof.
+   * When channels are required, fresh membership evidence must be obtained.
+   * This is not an outbound-dispatch-time or remote-API transaction.
+   */
+  private async finalGroupAnswerGate(groupId:string,actorId:string,
+   initialEpoch:string|undefined):Promise<string|null>{
+   if(initialEpoch===undefined)return 'SUBSCRIPTION_UNAVAILABLE';
+   let before:BotState;
+   try{before=await this.opts.store.snapshot();}catch{return 'SUBSCRIPTION_UNAVAILABLE';}
+   if(!this.opts.policy.canUseChat(before,groupId,'navigation')||
+     groupQuestionSubscriptionEpoch(before,groupId)!==initialEpoch)
+    return 'SUBSCRIPTION_UNAVAILABLE';
+   const mode=subscriptionRequirementMode(before,groupId);
+   if(mode==='INVALID')return 'SUBSCRIPTION_UNAVAILABLE';
+   if(mode==='ACTIVE'){
+    if(!this.opts.subscription)return 'SUBSCRIPTION_UNAVAILABLE';
+    let status:Awaited<ReturnType<SubscriptionGate['verify']>>['status'];
+    try{status=(await this.opts.subscription.verify(groupId,actorId)).status;}
+    catch{return 'SUBSCRIPTION_UNAVAILABLE';}
+    if(!acceptsActiveSubscriptionEvidence(status,this.opts.policy.isOwner(actorId)))
+     return status==='NOT_MEMBER'?'SUBSCRIPTION_REQUIRED':'SUBSCRIPTION_UNAVAILABLE';
+   }
+   let latest:BotState;
+   try{latest=await this.opts.store.snapshot();}catch{return 'SUBSCRIPTION_UNAVAILABLE';}
+   if(!this.opts.policy.canUseChat(latest,groupId,'navigation')||
+     groupQuestionSubscriptionEpoch(latest,groupId)!==initialEpoch)
+    return 'SUBSCRIPTION_UNAVAILABLE';
+   return null;
   }
   private plan(chatId:string,text:string,replyMarkup?:TelegramReplyKeyboard):TelegramReplyPlan {
     if(Buffer.byteLength(text,'utf8')>4096)throw Error('REPLY_TOO_LONG');
@@ -202,9 +249,12 @@ export class TelegramUpdateApplication {
      ?(mention.status==='MATCH'?mention.question:
        text.startsWith(commandPrefix)?text.slice(commandPrefix.length):null)
      :null;
+    let groupAnswerSubscriptionEpoch:string|undefined;
     if(kind==='group'&&(cmd==='/categories'||cmd==='/resources'||
       cmd===`/ask@${this.opts.botUsername}`||groupQuestion!==null)) {
       const snapshot=await this.opts.store.snapshot();
+      if(groupQuestion!==null)
+       groupAnswerSubscriptionEpoch=groupQuestionSubscriptionEpoch(snapshot,chatId);
       const requirement=subscriptionRequirementMode(snapshot,chatId);
       if(requirement==='INVALID')
         return {status:'DENIED',reason:'SUBSCRIPTION_UNAVAILABLE'};
@@ -601,12 +651,16 @@ export class TelegramUpdateApplication {
        });
        if(plan.status!=='APPROVED_ANSWER')
         return {status:'DENIED',reason:'B6_'+plan.status};
+       const fence=await this.finalGroupAnswerGate(chatId,actorId,groupAnswerSubscriptionEpoch);
+       if(fence)return {status:'DENIED',reason:fence};
        return result('<b>إجابة من موارد منارتك المعتمدة</b>\n'
         +escapeTelegramHtml(plan.answer)+'\n'
         +'جواب محفوظ ومعتمد، لا AI توليدي.');
       }
       const ans=await this.opts.faq.answerGroup(actorId,chatId,question,true);
       if(ans.status!=='ANSWER')return {status:'DENIED',reason:`FAQ_${ans.status}`};
+      const fence=await this.finalGroupAnswerGate(chatId,actorId,groupAnswerSubscriptionEpoch);
+      if(fence)return {status:'DENIED',reason:fence};
       return result(`<b>إجابة من موارد منارتك المعتمدة</b>\n${escapeTelegramHtml(ans.answer)}`);
     }
     // No admin command may be executed in groups; no AI or subscription bypass.
