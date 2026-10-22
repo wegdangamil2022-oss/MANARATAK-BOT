@@ -1,3 +1,11 @@
+## 0.7.52 — 2026-10-22 — B6 block unclassified legacy queued Telegram group replies
+
+- Introduce a strict optional `groupReplyKind` origin discriminator for newly queued group replies: `GENERAL` for ordinary group UI, `REVIEWED_FAQ` for replies with a short-lived B6 group-question witness. Save it when the trusted update is finished; remove it when the queue item is claimed or rejected.
+- Close the upgrade bypass: earlier queued group replies with neither a new classification marker nor the v0.7.51 `groupQuestionAccess` witness have unverifiable provenance. Reject and redact them at dispatch rather than assuming they are safe navigation plans. Do not inspect HTML for authority, issue Telegram requests, create send attempt IDs, refund or automatically retry.
+- Preserve the previously guarded v0.7.51 FAQ replies without the new origin marker: their original expiring proof and fresh membership reauthorization remain mandatory. Old unclassified **private** replies are unaffected; new group navigation replies with explicit GENERAL continue to dispatch normally.
+- Validate group marker enum, status, group address and marker/witness consistency in the state decoder and dispatcher. JSON + SQLite: 14 new regression tests, plus strict TypeScript and all five existing offline demo gates.
+- Limitation: pre-upgrade group navigation jobs may also be refused due to unknown provenance. Operators should reissue safe commands after upgrade. No automatic bulk migration or AI activation. External Telegram membership/send still cannot be atomic.
+
 ## 0.7.51 — 2026-10-22 — B6 short-lived pre-dispatch group FAQ authorization witness
 
 - Fix the gap between B6's post-FAQ policy check and eventual queued outbound dispatch. Attach a 120-second, scoped `groupQuestionAccess` witness to approved group FAQ reply jobs only: actor ID, hashed group/subscription policy epoch, and expiration. The queued actor ID is short-lived persisted metadata, not pseudonymous; scrub it and the reply plan on claim/rejection.
