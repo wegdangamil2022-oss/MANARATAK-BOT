@@ -1,3 +1,9 @@
+## B6 v0.7.41 — first knowledge-source answer preflight (offline; NO GENERATIVE AI)
+
+The B6 `KnowledgeSourcePort` receives only a question and its scope, not the Telegram actor or prior conversation. The `B6AnswerPreflight` validates explicit private opt-in or an approved group mention and independently rechecks the existing B3 **approved FAQ** against the returned candidate after any asynchronous source read. Changed/archived material, revoked policy, ambiguous matches, fabricated hints and provider errors never produce an answer.
+
+For explicitly injected offline test applications only, `/ask QUESTION` in an opted-in private chat and `/ask@BOT QUESTION` in an approved group may return an exact reviewed answer. Unconfigured apps behave as before, and `/faq` stays independently usable even when AI is off. The new path **does not generate text**, call any AI provider or send live Telegram messages. Phase 17 integration, budgets, credential management, secure prompt assembly and deployed Telegram delivery are separate future acceptance stages.
+
 ## B5 v0.7.40 — signed owner Mini App source preview and integrity (offline)
 
 An administrator's optional Telegram Mini App web listener now has two **read-only**, owner-only B5 endpoints when configured with an independently verified `PlatformCatalogPreviewService`:
