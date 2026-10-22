@@ -316,7 +316,6 @@ export class BotStore {
         const g=job.groupQuestionAccess;
         if(!g||typeof g!=='object'||Array.isArray(g))return true;
         const v=g as Record<string,unknown>;
-        const plan=job.plan as Record<string,unknown>|undefined;
         return job.status!=='QUEUED'||Object.keys(v).length!==3||
          typeof v.actorId!=='string'||!/^[1-9]\d{0,19}$/u.test(v.actorId)||
          typeof v.epoch!=='string'||!/^[a-f0-9]{64}$/u.test(v.epoch)||
