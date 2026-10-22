@@ -212,7 +212,10 @@ for(const engine of ['json','sqlite'] as const){
    assert.equal(accepted.status,'APPLIED');
    // Explicitly reconstruct a v0.7.50 group job that predates the kind
    // discriminator; a newly queued group menu correctly has GENERAL.
-   await f.store.transaction(s=>{delete s.telegramReplyJobs![0]!.groupReplyKind;});
+   await f.store.transaction(s=>{
+    delete s.telegramReplyJobs![0]!.groupReplyKind;
+    Reflect.deleteProperty(s.telegramReplyJobs![0]!,'groupMenuAccess');
+   });
    const before=(await f.store.snapshot()).telegramReplyJobs![0]!;
    assert.equal(before.groupReplyKind,undefined);
    assert.equal(before.groupQuestionAccess,undefined);

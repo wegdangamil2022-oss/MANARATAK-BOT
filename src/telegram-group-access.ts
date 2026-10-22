@@ -2,7 +2,7 @@ import {createHash} from 'node:crypto';
 import type {BotState} from './store.js';
 import {subscriptionRequirementMode} from './subscription-integrity.js';
 
-/** Captures the exact local approval/rule epoch before a read-only FAQ await.
+/** Captures the exact local approval/rule epoch before a read-only FAQ or group menu await.
  * A SHA-256 digest is persisted briefly instead of chat/channel configuration.
  * It is a change detector, NOT authentication or an anonymous user identity.
  */
@@ -20,5 +20,10 @@ export function groupQuestionSubscriptionEpoch(s:BotState,groupId:string):string
 }
 export function groupQuestionEpochDigest(state:BotState,groupId:string):string{
  return createHash('sha256').update('MANARATAK:B6:GROUP-FAQ:DISPATCH:v1:')
+  .update(groupQuestionSubscriptionEpoch(state,groupId)).digest('hex');
+}
+
+export function groupMenuEpochDigest(state:BotState,groupId:string):string{
+ return createHash('sha256').update('MANARATAK:B6:GROUP-MENU:DISPATCH:v1:')
   .update(groupQuestionSubscriptionEpoch(state,groupId)).digest('hex');
 }

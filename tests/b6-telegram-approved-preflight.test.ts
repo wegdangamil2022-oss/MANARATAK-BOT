@@ -664,3 +664,125 @@ for(const engine of ['json','sqlite'] as const){
   }finally{await f.close();}
  });
 }
+
+
+for(const engine of ['json','sqlite'] as const){
+ const groupNav=async(f:Awaited<ReturnType<typeof setup>>,id:number,cmd:'/categories'|'/resources grants'='/categories')=>{
+  const response=await f.app(true,undefined,true).handle(msg(id,STUDENT,cmd,true));
+  assert.equal(response.status,'APPLIED');
+  assert.ok(response.deliveryKey);
+  return response.deliveryKey!;
+ };
+ const dispatcher=(f:Awaited<ReturnType<typeof setup>>,sent:string[],verify=true,now=Date.now())=>
+  new TelegramReplyDispatcher(f.store,f.policy,{
+   send:async plan=>{sent.push(plan.text);return {status:'CONFIRMED' as const,messageId:900};}
+  },()=>now,undefined,verify?f.subscription:undefined);
+
+ test('B6 '+engine+': group categories acquire a scoped queued navigation witness and scrub it on success',async()=>{
+  const f=await setup(engine);try{
+   const key=await groupNav(f,950);
+   const before=(await f.store.snapshot()).telegramReplyJobs![0]!;
+   assert.equal(before.groupReplyKind,'GENERAL');
+   const access=Reflect.get(before,'groupMenuAccess') as Record<string,unknown>|undefined;
+   assert.equal(access?.actorId,String(STUDENT));
+   assert.match(String(access?.epoch),/^[a-f0-9]{64}$/);
+   assert.equal(typeof access?.expiresAt,'number');
+   const sent:string[]=[];
+   assert.equal((await dispatcher(f,sent).dispatch(key)).status,'CONFIRMED');
+   assert.equal(sent.length,1);
+   const after=(await f.store.snapshot()).telegramReplyJobs![0]!;
+   assert.equal(after.status,'SENT');
+   assert.equal(Reflect.get(after,'groupMenuAccess'),undefined);
+   assert.equal(after.plan,undefined);
+  }finally{await f.close();}
+ });
+ test('B6 '+engine+': a queued resources menu cannot send after required subscription membership is lost',async()=>{
+  const f=await setup(engine);try{
+   await f.subscription.configure(OWNER,GROUP,[CHANNEL],'ALL');
+   f.membership.set(CHANNEL,String(STUDENT),'MEMBER');
+   const key=await groupNav(f,951,'/resources grants');
+   f.membership.set(CHANNEL,String(STUDENT),'NOT_MEMBER');
+   const sent:string[]=[];
+   assert.equal((await dispatcher(f,sent).dispatch(key)).status,'FAILED_CONFIRMED');
+   assert.equal(sent.length,0);
+   const row=(await f.store.snapshot()).telegramReplyJobs![0]!;
+   assert.equal(row.status,'FAILED_CONFIRMED');
+   assert.equal(row.plan,undefined);
+   assert.equal(Reflect.get(row,'groupMenuAccess'),undefined);
+  }finally{await f.close();}
+ });
+ test('B6 '+engine+': adding a required subscription after categories queued invalidates the menu',async()=>{
+  const f=await setup(engine);try{
+   const key=await groupNav(f,952);
+   await f.subscription.configure(OWNER,GROUP,[CHANNEL],'ALL');
+   f.membership.set(CHANNEL,String(STUDENT),'MEMBER');
+   const sent:string[]=[];
+   assert.equal((await dispatcher(f,sent).dispatch(key)).status,'FAILED_CONFIRMED');
+   assert.equal(sent.length,0);
+  }finally{await f.close();}
+ });
+ test('B6 '+engine+': queued menu with active membership requires a verifier, rejects unknown and accepts valid',async()=>{
+  const f=await setup(engine);try{
+   await f.subscription.configure(OWNER,GROUP,[CHANNEL],'ALL');
+   f.membership.set(CHANNEL,String(STUDENT),'MEMBER');
+   const key=await groupNav(f,953);
+   const sent:string[]=[];
+   assert.equal((await dispatcher(f,sent,false).dispatch(key)).status,'FAILED_CONFIRMED');
+   assert.equal(sent.length,0);
+   const next=await groupNav(f,954);
+   f.membership.set(CHANNEL,String(STUDENT),'UNKNOWN');
+   assert.equal((await dispatcher(f,sent,true).dispatch(next)).status,'FAILED_CONFIRMED');
+   f.membership.set(CHANNEL,String(STUDENT),'MEMBER');
+   const third=await groupNav(f,955);
+   assert.equal((await dispatcher(f,sent,true).dispatch(third)).status,'CONFIRMED');
+   assert.equal(sent.length,1);
+  }finally{await f.close();}
+ });
+ test('B6 '+engine+': group menu epoch changes while the membership check is in flight prevent send',async()=>{
+  const f=await setup(engine);try{
+   await f.subscription.configure(OWNER,GROUP,[CHANNEL],'ALL');
+   f.membership.set(CHANNEL,String(STUDENT),'MEMBER');
+   const key=await groupNav(f,956);
+   const original=f.membership.getMember.bind(f.membership);
+   let entered!:()=>void,release!:()=>void;
+   const started=new Promise<void>(r=>entered=r),held=new Promise<void>(r=>release=r);
+   f.membership.getMember=async(ch,user)=>{entered();await held;return original(ch,user);};
+   const sent:string[]=[];
+   const pending=dispatcher(f,sent).dispatch(key);
+   await started;
+   await f.subscription.configure(OWNER,GROUP,[CHANNEL],'ANY');
+   release();
+   assert.equal((await pending).status,'FAILED_CONFIRMED');
+   assert.equal(sent.length,0);
+  }finally{await f.close();}
+ });
+ test('B6 '+engine+': expired menu witness and legacy tagged GENERAL without witness both refuse to send',async()=>{
+  const f=await setup(engine);try{
+   const key=await groupNav(f,957);
+   const expiry=Reflect.get((await f.store.snapshot()).telegramReplyJobs![0]!,'groupMenuAccess') as {expiresAt:number};
+   const sent:string[]=[];
+   assert.equal((await dispatcher(f,sent,true,expiry.expiresAt+1).dispatch(key)).status,'FAILED_CONFIRMED');
+   const second=await groupNav(f,958);
+   await f.store.transaction(s=>{
+    const row=s.telegramReplyJobs?.find(j=>j.updateKey===second);
+    if(row)Reflect.deleteProperty(row,'groupMenuAccess');
+   });
+   assert.equal((await dispatcher(f,sent).dispatch(second)).status,'FAILED_CONFIRMED');
+   assert.equal(sent.length,0);
+  }finally{await f.close();}
+ });
+ test('B6 '+engine+': malformed queued menu witness cannot be persisted',async()=>{
+  const f=await setup(engine);try{
+   await groupNav(f,959);
+   const snapshot=await f.store.snapshot();
+   for(const wrong of [{actorId:'invalid',epoch:'x',expiresAt:0},null,'bad',{},{
+    actorId:String(STUDENT),epoch:'a'.repeat(64),expiresAt:-1
+   }]){
+    await assert.rejects(f.store.transaction(s=>{
+     Reflect.set(s.telegramReplyJobs![0]!,'groupMenuAccess',wrong);
+    }),/Unsupported state schema/);
+    assert.deepEqual(await f.store.snapshot(),snapshot);
+   }
+  }finally{await f.close();}
+ });
+}

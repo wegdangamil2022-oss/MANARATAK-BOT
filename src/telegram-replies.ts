@@ -3,7 +3,7 @@ import {BotStore,type TelegramReplyJob} from './store.js';
 import {Policy} from './policy.js';
 import type {TelegramReplyPlan} from './telegram-transport.js';
 import {isValidTelegramReplyKeyboard} from './telegram-menu.js';
-import {groupQuestionEpochDigest} from './telegram-group-access.js';
+import {groupQuestionEpochDigest,groupMenuEpochDigest} from './telegram-group-access.js';
 import {subscriptionRequirementMode,acceptsActiveSubscriptionEvidence} from './subscription-integrity.js';
 import type {SubscriptionGate} from './subscription.js';
 
@@ -106,8 +106,14 @@ export function validTelegramReplyJob(v:unknown):v is TelegramReplyJob{
   (j.groupReplyKind===undefined||
    (j.status==='QUEUED'&&validPlan(j.plan)&&j.plan.chatId.startsWith('-')&&
     (j.groupReplyKind==='GENERAL'||j.groupReplyKind==='REVIEWED_FAQ')&&
-    ((j.groupReplyKind==='GENERAL'&&j.groupQuestionAccess===undefined)||
-     (j.groupReplyKind==='REVIEWED_FAQ'&&validGroupReplyAccess(j.groupQuestionAccess)))))&&
+    ((j.groupReplyKind==='GENERAL'&&j.groupQuestionAccess===undefined&&
+      (j.groupMenuAccess===undefined||validGroupReplyAccess(j.groupMenuAccess)))||
+     (j.groupReplyKind==='REVIEWED_FAQ'&&validGroupReplyAccess(j.groupQuestionAccess)&&
+      j.groupMenuAccess===undefined))))&&
+  (j.groupMenuAccess===undefined||
+    (j.groupReplyKind==='GENERAL'&&j.status==='QUEUED'&&
+     validPlan(j.plan)&&j.plan.chatId.startsWith('-')&&
+     validGroupReplyAccess(j.groupMenuAccess)))&&
   (j.groupQuestionAccess===undefined||
    (j.status==='QUEUED'&&validPlan(j.plan)&&j.plan.chatId.startsWith('-')&&
     validGroupReplyAccess(j.groupQuestionAccess)))&&
@@ -132,19 +138,24 @@ export class TelegramReplyDispatcher {
   * A subsequent transactional policy/epoch fence prevents local state changes
   * during the external membership lookup from authorizing a stale send.
   */
- private async checkGroupFaqEligibility(updateKey:string):Promise<
-  {access:NonNullable<TelegramReplyJob['groupQuestionAccess']>;allowed:boolean}|undefined>{
+ private async checkGroupEligibility(updateKey:string):Promise<
+  {access:NonNullable<TelegramReplyJob['groupQuestionAccess']>;
+   kind:'FAQ'|'MENU';allowed:boolean}|undefined>{
   const snap=await this.store.snapshot();
   const job=snap.telegramReplyJobs?.find(j=>j.updateKey===updateKey);
-  if(!job||job.status!=='QUEUED'||!job.groupQuestionAccess)return undefined;
+  if(!job||job.status!=='QUEUED')return undefined;
   if(!validTelegramReplyJob(job))throw Error('INVALID_REPLY_JOB');
-  const access=structuredClone(job.groupQuestionAccess);
+  const kind=job.groupQuestionAccess?'FAQ' as const:job.groupMenuAccess?'MENU' as const:null;
+  if(!kind)return undefined;
+  const access=structuredClone((kind==='FAQ'?job.groupQuestionAccess:job.groupMenuAccess)!);
   const groupId=job.plan!.chatId,actor=access.actorId;
   let allowed=false;
   try{
    if(this.clock()<access.expiresAt&&
-      this.policy.mayAskGroup(snap,groupId,actor,true)&&
-      groupQuestionEpochDigest(snap,groupId)===access.epoch){
+      (kind==='FAQ'?this.policy.mayAskGroup(snap,groupId,actor,true):
+       this.policy.canUseChat(snap,groupId,'navigation'))&&
+      (kind==='FAQ'?groupQuestionEpochDigest(snap,groupId):
+       groupMenuEpochDigest(snap,groupId))===access.epoch){
     const mode=subscriptionRequirementMode(snap,groupId);
     if(mode==='NONE'||mode==='PAUSED')allowed=true;
     else if(mode==='ACTIVE'&&this.subscription){
@@ -153,13 +164,13 @@ export class TelegramReplyDispatcher {
     }
    }
   }catch{/* provider and local failures fail closed */}
-  return {access,allowed};
+  return {access,kind,allowed};
  }
  async dispatch(updateKey:string):Promise<ReplyDispatchResult>{
   if(!/^b3-webhook:[a-zA-Z0-9_-]{1,80}:\d+$/.test(updateKey))
    throw new Error('INVALID_REPLY_KEY');
-  let groupPrecheck:Awaited<ReturnType<TelegramReplyDispatcher['checkGroupFaqEligibility']>>;
-  try{groupPrecheck=await this.checkGroupFaqEligibility(updateKey);}
+  let groupPrecheck:Awaited<ReturnType<TelegramReplyDispatcher['checkGroupEligibility']>>;
+  try{groupPrecheck=await this.checkGroupEligibility(updateKey);}
   catch{/* invalid state gets revalidated inside the transactional claim */}
   const claim=await this.store.transaction(async s=>{
    const job=s.telegramReplyJobs?.find(j=>j.updateKey===updateKey);
@@ -176,23 +187,25 @@ export class TelegramReplyDispatcher {
     if(!allowed)return {status:'PAUSED' as const};
    }
    const plan=structuredClone(job.plan!);
-   const access=job.groupQuestionAccess;
-   // v0.7.51 and earlier queued group rows have no origin discriminator.
-   // Some may be unguarded FAQ answers; their text cannot prove provenance.
-   // Permit previously guarded B6 FAQ rows (with the old access proof),
-   // but quarantine ALL unclassified, unguarded group rows on first dispatch.
-   const legacyUnclassified=plan.chatId.startsWith('-')&&
-    job.groupReplyKind===undefined&&access===undefined;
-   const forbidden=legacyUnclassified||(!!access&&(
-    !groupPrecheck?.allowed||groupPrecheck.access.actorId!==access.actorId||
+   const faq=job.groupQuestionAccess,menu=job.groupMenuAccess;
+   const access=faq??menu;
+   // Unknown legacy group origins, plus GENERAL plans created before the
+   // menu witness existed, cannot prove original actor/subscription authority.
+   const noGroupProof=plan.chatId.startsWith('-')&&!access;
+   const forbidden=noGroupProof||(!!access&&(
+    !groupPrecheck?.allowed||
+    groupPrecheck.kind!==(faq?'FAQ':'MENU')||
+    groupPrecheck.access.actorId!==access.actorId||
     groupPrecheck.access.epoch!==access.epoch||
     groupPrecheck.access.expiresAt!==access.expiresAt||
     this.clock()>=access.expiresAt||
-    !this.policy.mayAskGroup(s,plan.chatId,access.actorId,true)||
-    groupQuestionEpochDigest(s,plan.chatId)!==access.epoch));
+    !(faq?this.policy.mayAskGroup(s,plan.chatId,access.actorId,true):
+      this.policy.canUseChat(s,plan.chatId,'navigation'))||
+    (faq?groupQuestionEpochDigest(s,plan.chatId):
+      groupMenuEpochDigest(s,plan.chatId))!==access.epoch));
    if(forbidden||(plan.chatId.startsWith('-')&&!this.policy.canUseChat(s,plan.chatId,'navigation'))){
     job.status='FAILED_CONFIRMED';
-    delete job.plan;delete job.groupQuestionAccess;delete job.groupReplyKind;job.redactedAt=this.clock();
+    delete job.plan;delete job.groupQuestionAccess;delete job.groupMenuAccess;delete job.groupReplyKind;job.redactedAt=this.clock();
     return {status:'FAILED_CONFIRMED' as const};
    }
    const attemptId=randomUUID();
@@ -200,7 +213,7 @@ export class TelegramReplyDispatcher {
    job.status='SENDING';job.attemptId=attemptId;job.startedAt=at;
    // Remove the durable body *before* the external call. The immediate local
    // copy goes to the sender, but a crash leaves no replayable payload.
-   delete job.plan;delete job.groupQuestionAccess;delete job.groupReplyKind;job.redactedAt=at;
+   delete job.plan;delete job.groupQuestionAccess;delete job.groupMenuAccess;delete job.groupReplyKind;job.redactedAt=at;
    return {status:'SEND' as const,attemptId,plan};
   });
   if(claim.status!=='SEND')return {status:claim.status};

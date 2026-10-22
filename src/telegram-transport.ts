@@ -1,7 +1,7 @@
 import { timingSafeEqual,createHash } from 'node:crypto';
 import type { IncomingMessage, RequestListener, ServerResponse } from 'node:http';
 import { BotStore, type AuditRecord, type BotState, type TelegramReplyJob } from './store.js';
-import {groupQuestionSubscriptionEpoch} from './telegram-group-access.js';
+import {groupQuestionSubscriptionEpoch,groupMenuEpochDigest} from './telegram-group-access.js';
 import { Policy } from './policy.js';
 import { EducationService } from './education.js';
 import { EducationAdminFacade, type VerifiedAdminContext } from './education-admin.js';
@@ -50,7 +50,8 @@ export interface TelegramReplyPlan { chatId: string; parseMode: 'HTML'; text: st
  replyMarkup?:TelegramReplyKeyboard; }
 export interface TelegramResult { status: 'APPLIED' | 'DUPLICATE' | 'DENIED' | 'IGNORED' | 'UNKNOWN'; reason: string; plan?: TelegramReplyPlan; deliveryKey?: string; }
 type ProcessedReply={status:TelegramResult['status'];reason:string;plan?:TelegramReplyPlan;
- groupQuestionAccess?:TelegramReplyJob['groupQuestionAccess']};
+ groupQuestionAccess?:TelegramReplyJob['groupQuestionAccess'];
+ groupMenuAccess?:TelegramReplyJob['groupMenuAccess']};
 export interface TelegramApplicationOptions {
   store: BotStore; policy: Policy; education: EducationService; admin: EducationAdminFacade;
   faq: ApprovedAnswerService; links: ResourceLinkService; membership: MembershipPort;
@@ -244,8 +245,7 @@ export class TelegramUpdateApplication {
     if(kind==='group'&&(cmd==='/categories'||cmd==='/resources'||
       cmd===`/ask@${this.opts.botUsername}`||groupQuestion!==null)) {
       const snapshot=await this.opts.store.snapshot();
-      if(groupQuestion!==null)
-       groupAnswerSubscriptionEpochValue=groupQuestionSubscriptionEpoch(snapshot,chatId);
+      groupAnswerSubscriptionEpochValue=groupQuestionSubscriptionEpoch(snapshot,chatId);
       const requirement=subscriptionRequirementMode(snapshot,chatId);
       if(requirement==='INVALID')
         return {status:'DENIED',reason:'SUBSCRIPTION_UNAVAILABLE'};
@@ -267,9 +267,22 @@ export class TelegramUpdateApplication {
       }
     }
     const result=(message:string,replyMarkup?:TelegramReplyKeyboard,
-      groupQuestionAccess?:TelegramReplyJob['groupQuestionAccess']):ProcessedReply=>({
-      status:'APPLIED',reason:'RESPONSE_PLANNED_ONLY',plan:this.plan(chatId,message,replyMarkup),
-      ...(groupQuestionAccess?{groupQuestionAccess}:{})});
+      groupQuestionAccess?:TelegramReplyJob['groupQuestionAccess']):ProcessedReply=>{
+      let groupMenuAccess:TelegramReplyJob['groupMenuAccess'];
+      if(kind==='group'&&!groupQuestionAccess){
+       const epoch=groupAnswerSubscriptionEpochValue;
+       const at=this.clock();
+       if(epoch===undefined||!Number.isSafeInteger(at)||at<0||
+          at>8_640_000_000_000_000-120_000)throw Error('B6_MENU_EPOCH_INVALID');
+       groupMenuAccess={actorId,epoch:createHash('sha256')
+        .update('MANARATAK:B6:GROUP-MENU:DISPATCH:v1:').update(epoch).digest('hex'),
+        expiresAt:at+120_000};
+      }
+      return {status:'APPLIED',reason:'RESPONSE_PLANNED_ONLY',
+       plan:this.plan(chatId,message,replyMarkup),
+       ...(groupQuestionAccess?{groupQuestionAccess}:{}),
+       ...(groupMenuAccess?{groupMenuAccess}:{})};
+    };
     const groupAnswerAccess=():TelegramReplyJob['groupQuestionAccess']=>{
       const epoch=groupAnswerSubscriptionEpochValue;
       if(epoch===undefined)throw Error('B6_GROUP_EPOCH_MISSING');
@@ -683,9 +696,10 @@ export class TelegramUpdateApplication {
     const audit:AuditRecord={updateKey:key,decision:handled.status==='APPLIED'?'ALLOW':handled.status==='DENIED'?'DENY':'NOOP',reason:handled.reason,policyVersion:0,at:this.clock()};
     // Commit the decision and outbound reply intent in one durable transaction.
     // No external call occurs before the outbox row exists.
-    await this.opts.store.finish(key,audit,handled.plan,handled.groupQuestionAccess);
-    // Actor ID and short-lived verification metadata never escape in results.
-    const {groupQuestionAccess:_,...publicResult}=handled;
+    await this.opts.store.finish(key,audit,handled.plan,handled.groupQuestionAccess,
+     handled.groupMenuAccess);
+    // Temporary actor IDs are only stored in the guarded queue, never returned.
+    const {groupQuestionAccess:_,groupMenuAccess:__,...publicResult}=handled;
     return publicResult.plan?{...publicResult,deliveryKey:key}:publicResult;
   }
 }
