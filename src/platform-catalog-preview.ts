@@ -98,7 +98,7 @@ function activePrivateCategory(state:BotState,id:string):EducationCategory|null{
  }
  return null;
 }
-const PLATFORM_IMPORT_SOURCE='b5-external-catalog-v1';
+export const PLATFORM_IMPORT_SOURCE='b5-external-catalog-v1';
 const strictDigest=/^[a-f0-9]{64}$/u;
 export function platformCandidateDigest(record:PlatformReviewCandidate):string{
  return createHash('sha256').update(JSON.stringify([
