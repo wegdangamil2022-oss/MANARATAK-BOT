@@ -1,4 +1,4 @@
-import {randomUUID} from 'node:crypto';
+import {randomUUID,timingSafeEqual} from 'node:crypto';
 import {BotStore,type B6BudgetAttempt} from './store.js';
 
 /** A conservative, source-independent durable attempt reservation boundary.
@@ -63,10 +63,16 @@ export class B6DurableBudget{
  private clockState(highwater:number|undefined,now:number):boolean{
   return highwater!==undefined&&now<highwater;
  }
- async reserve(requestKey:string,reservedTokens:number):Promise<B6Reservation>{
+ async reserve(requestKey:string,reservedTokens:number,telegramBinding?:string):Promise<B6Reservation>{
   if(typeof requestKey!=='string'||!validKey.test(requestKey)||
     typeof reservedTokens!=='number'||!Number.isSafeInteger(reservedTokens)||
     reservedTokens<1||reservedTokens>8192)return {status:'INVALID_REQUEST'};
+  // Telegram-derived keys may only be admitted with a pinned secret verifier.
+  if((requestKey.startsWith('b6tg1_')&&telegramBinding===undefined)||
+    (telegramBinding!==undefined&&
+     (!/^[a-f0-9]{64}$/u.test(telegramBinding)||/^0{64}$/u.test(telegramBinding)||
+      !/^b6tg1_[A-Za-z0-9_-]{43}$/u.test(requestKey))))
+   return {status:'INVALID_REQUEST'};
   let now:number;
   try{now=this.clock();}catch{return {status:'UNAVAILABLE'};}
   if(!safeNow(now))return {status:'UNAVAILABLE'};
@@ -74,6 +80,15 @@ export class B6DurableBudget{
    return await this.store.transaction<B6Reservation>(state=>{
     if(this.clockState(state.b6BudgetClock,now))return {status:'CLOCK_ROLLBACK'};
     const rows=state.b6BudgetAttempts??[];
+    if(telegramBinding!==undefined){
+     const pinned=state.b6TelegramKeyBinding;
+     if(pinned!==undefined&&
+       !timingSafeEqual(Buffer.from(pinned,'hex'),Buffer.from(telegramBinding,'hex')))
+      return {status:'UNAVAILABLE'};
+     // Ledger from before v0.7.47 has no verifiable key provenance.
+     // It must not enroll an arbitrary new secret over existing attempts.
+     if(pinned===undefined&&rows.length>0)return {status:'UNAVAILABLE'};
+    }
     // Duplicate must never trigger a new provider attempt, even on another day.
     if(rows.some(row=>row.requestKey===requestKey))return {status:'DUPLICATE'};
     this.sweep(rows,now);
@@ -92,6 +107,8 @@ export class B6DurableBudget{
     rows.push({requestKey,attemptId,day:today,reservedTokens,reservedAt:now,
       leaseUntil,status:'RESERVED'});
     state.b6BudgetAttempts=rows;
+    if(telegramBinding!==undefined&&state.b6TelegramKeyBinding===undefined)
+     state.b6TelegramKeyBinding=telegramBinding;
     state.b6BudgetClock=now;
     return {status:'RESERVED',attemptId,leaseUntil};
    });

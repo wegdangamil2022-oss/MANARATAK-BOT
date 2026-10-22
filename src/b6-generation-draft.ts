@@ -154,11 +154,11 @@ export class B6GenerationDraftService {
  /** Only the durable fake ledger may handle a stable verified transport intent.
   * A caller using an ephemeral-only service fails closed before any fake model call.
   */
- async prepareDurableDraft(input:B6AnswerRequest,requestKey:string):Promise<B6DraftResult>{
+ async prepareDurableDraft(input:B6AnswerRequest,requestKey:string,telegramBinding?:string):Promise<B6DraftResult>{
   if(!this.durableBudget)return {status:'UNAVAILABLE'};
-  return this.prepareDraft(input,requestKey);
+  return this.prepareDraft(input,requestKey,telegramBinding);
  }
- async prepareDraft(input:B6AnswerRequest,requestKey?:string):Promise<B6DraftResult>{
+ async prepareDraft(input:B6AnswerRequest,requestKey?:string,telegramBinding?:string):Promise<B6DraftResult>{
   if(!this.enabled)return {status:'DISABLED'};
   const initial=await this.preflight.prepare(input);
   if(initial.status!=='APPROVED_ANSWER')return {status:initial.status};
@@ -173,7 +173,7 @@ export class B6GenerationDraftService {
   if(this.durableBudget){
    // This reserves the maximum allowed fake budget units (NOT actual provider
    // token pricing). Fail closed on any durable ledger denial/unknown.
-   const reserved=await this.durableBudget.reserve(requestKey!,8192);
+   const reserved=await this.durableBudget.reserve(requestKey!,8192,telegramBinding);
    if(reserved.status!=='RESERVED'){
     admission.finish();
     return {status:reserved.status};
