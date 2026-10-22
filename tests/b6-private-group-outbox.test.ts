@@ -161,3 +161,37 @@ for(const engine of ['json','sqlite'] as const){
   }finally{await f.close();}
  });
 }
+
+
+for(const engine of ['json','sqlite'] as const){
+ test('B6 '+engine+': private group queue proof expires before its attempted send',async()=>{
+  const f=await fixture(engine);try{
+   const response=await f.app.handle(update(1820,'/categories '+GROUP));
+   assert.equal(response.status,'APPLIED');
+   const until=(await f.store.snapshot()).telegramReplyJobs?.[0]?.privateGroupAccess?.expiresAt;
+   assert.equal(typeof until,'number');
+   const result=await f.dispatch(true,true,()=>until!+1).dispatch(response.deliveryKey!);
+   assert.equal(result.status,'FAILED_CONFIRMED');
+   assert.equal(f.sent.length,0);
+   const row=(await f.store.snapshot()).telegramReplyJobs?.[0];
+   assert.equal(row?.plan,undefined);
+   assert.equal(row?.privateGroupAccess,undefined);
+  }finally{await f.close();}
+ });
+ test('B6 '+engine+': changing required-channel policy during fresh membership proof denies queued private group resources',async()=>{
+  const f=await fixture(engine);try{
+   const response=await f.app.handle(update(1821,'/categories '+GROUP));
+   assert.equal(response.status,'APPLIED');
+   let entered!:()=>void,release!:()=>void;
+   const started=new Promise<void>(r=>entered=r),held=new Promise<void>(r=>release=r);
+   f.overrideMember(async()=>{entered();await held;return 'VERIFIED';});
+   const pending=f.dispatch().dispatch(response.deliveryKey!);
+   await started;
+   await f.subscription.configure(OWNER,GROUP,[CHANNEL],'ALL');
+   f.gateway.set(CHANNEL,STUDENT,'MEMBER');
+   release();
+   assert.equal((await pending).status,'FAILED_CONFIRMED');
+   assert.equal(f.sent.length,0);
+  }finally{await f.close();}
+ });
+}
