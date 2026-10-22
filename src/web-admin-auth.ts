@@ -143,8 +143,11 @@ export function telegramAdminWebListener(auth:TelegramMiniAppAuth, admin:Educati
               ...(payload.limit===undefined?{}:{limit:payload.limit as number}),
               ...(payload.cursor===undefined?{}:{cursor:payload.cursor as string|null})
             });
-            if(preview.status==='DENIED'){reply(res,403,{ok:false});return;}
-            if(preview.status==='UNAVAILABLE'){reply(res,503,{ok:false,status:'UNAVAILABLE'});return;}
+            if(preview.status!=='PREVIEW'){
+              if(preview.status==='DENIED')reply(res,403,{ok:false});
+              else reply(res,503,{ok:false,status:'UNAVAILABLE'});
+              return;
+            }
             reply(res,200,{
               ok:true,status:'PREVIEW',trust:'UNVERIFIED_EXTERNAL',
               records:preview.records,nextCursor:preview.nextCursor,
