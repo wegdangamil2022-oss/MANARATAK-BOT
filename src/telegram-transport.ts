@@ -24,9 +24,12 @@ import {parseSearchQuery,parseSearchPageCommand,searchPageButton,
  parseSearchResultsBreadcrumb} from './telegram-search.js';
 import {parsePrivateFAQQuery,privateFAQBrowseLabel,parsePrivateFAQPage,
  privateFAQPageLabel,parsePrivateFAQSelection,privateFAQButton,
+ privateFAQBrowseReturnLabel,parsePrivateFAQBrowseReturn,
  isPrivateFAQBrowseText} from './telegram-private-faq.js';
 import {privateFAQSearchLabel,parsePrivateFAQSearchQuery,parsePrivateFAQSearchPage,
- privateFAQSearchPageLabel,isPrivateFAQSearchText} from './telegram-private-faq-search.js';
+ privateFAQSearchPageLabel,isPrivateFAQSearchText,
+ privateFAQSearchSelectionLabel,parsePrivateFAQSearchSelection,
+ privateFAQSearchReturnLabel,parsePrivateFAQSearchReturn} from './telegram-private-faq-search.js';
 import {escapeTelegramListPreview} from './telegram-preview.js';
 import {parseB6ExplicitMention} from './b6-telegram-mention.js';
 import {parseB6OwnerReplyTarget} from './b6-telegram-owner-reply.js';
@@ -371,8 +374,11 @@ export class TelegramUpdateApplication {
         listingKeyboard([privateFAQBrowseLabel]));
        const command=parsePrivateFAQSearchQuery(text);
        const paging=parsePrivateFAQSearchPage(text);
-       if(!command&&!paging)return {status:'DENIED',reason:'INVALID_PRIVATE_FAQ_SEARCH'};
-       const query=command??paging!.query;
+       const returned=parsePrivateFAQSearchReturn(text);
+       const selected=parsePrivateFAQSearchSelection(text);
+       if(!command&&!paging&&!returned&&!selected)
+        return {status:'DENIED',reason:'INVALID_PRIVATE_FAQ_SEARCH'};
+       const query=command??paging?.query??returned?.query??selected!.query;
        // The trusted service matches reviewed titles and approved aliases
        // on a single freshly authorized source snapshot. It exposes only
        // question titles and GLOBAL ordinals, never alias/admin metadata.
@@ -382,10 +388,11 @@ export class TelegramUpdateApplication {
        const hits=catalogue.items.map(({id,question,ordinal})=>({
         q:{id,question},ordinal
        }));
-       const page=paging?.page??0,pages=Math.ceil(hits.length/10);
-       if(paging&&(!pages||page>=pages||
-         (paging.direction==='next'&&page===0)||
-         (paging.direction==='previous'&&page===pages-1)))
+       const page=paging?.page??returned?.page??selected?.page??0;
+       const pages=Math.ceil(hits.length/10);
+       if((paging||returned||selected)&&(!pages||page>=pages||
+         (paging?.direction==='next'&&page===0)||
+         (paging?.direction==='previous'&&page===pages-1)))
         return {status:'DENIED',reason:'INVALID_PRIVATE_FAQ_SEARCH_PAGE'};
        if(!hits.length)return result(
         '<b>البحث في الأسئلة المعتمدة 🔎</b>\n'
@@ -393,12 +400,26 @@ export class TelegramUpdateApplication {
         +'يمكنك تغيير الكلمات أو تصفح القائمة المعتمدة.',
         listingKeyboard([privateFAQBrowseLabel]));
        const shown=hits.slice(page*10,page*10+10);
+       if(selected){
+        const exact=shown.filter(({q,ordinal})=>
+         ordinal===selected.ordinal&&
+         privateFAQSearchSelectionLabel(q.id,ordinal,query,page)===text);
+        if(exact.length!==1)return {status:'DENIED',reason:'PRIVATE_FAQ_SEARCH_SELECTION_INVALID'};
+        const answer=await this.opts.faq.answerPrivateReviewedFAQById(actorId,exact[0]!.q.id);
+        if(answer.status!=='ANSWER')
+         return {status:'DENIED',reason:'PRIVATE_FAQ_SEARCH_NOT_ACCESSIBLE'};
+        return result('<b>إجابة معتمدة من مكتبة منارتك ✅</b>\n'
+          +escapeTelegramHtml(answer.answer)+'\n'
+          +'مصدرها منشور ومعتمد في مكتبة الخاص، وليس إجابة AI مولدة.',
+          listingKeyboard([privateFAQSearchReturnLabel(query,page),privateFAQBrowseLabel]));
+       }
        return result('<b>نتائج البحث في الأسئلة 🔎</b>\n'
         +'المطابقات: '+hits.length+'\nصفحة '+(page+1)+' من '+pages+'\n'
         +shown.map(({q,ordinal})=>ordinal+'. '+
           escapeTelegramListPreview(q.question,220)).join('\n')
         +'\nاختر رقم السؤال المطابق لفتح إجابته المعتمدة.',
-        listingKeyboard(shown.map(({q,ordinal})=>privateFAQButton(q.id,ordinal)),{
+        listingKeyboard(shown.map(({q,ordinal})=>
+         privateFAQSearchSelectionLabel(q.id,ordinal,query,page)),{
          previous:page>0?privateFAQSearchPageLabel(query,page-1,'previous'):undefined,
          next:page+1<pages?privateFAQSearchPageLabel(query,page+1,'next'):undefined
         }));
@@ -434,12 +455,13 @@ export class TelegramUpdateApplication {
         return {status:'DENIED',reason:'PRIVATE_EDUCATION_DISABLED'};
        const items=catalogue.items;
        const requested=parsePrivateFAQPage(text);
-       if(text===privateFAQBrowseLabel||requested){
-        const page=requested?.page??0;
+       const returnPage=parsePrivateFAQBrowseReturn(text);
+       if(text===privateFAQBrowseLabel||requested||returnPage!==null){
+        const page=requested?.page??returnPage??0;
         const pages=Math.min(1000,Math.ceil(items.length/10));
-        if(requested&&(!pages||page>=pages||
-          (requested.direction==='next'&&page===0)||
-          (requested.direction==='previous'&&page===pages-1)))
+        if((requested||returnPage!==null)&&(!pages||page>=pages||
+          (requested?.direction==='next'&&page===0)||
+          (requested?.direction==='previous'&&page===pages-1)))
          return {status:'DENIED',reason:'INVALID_PRIVATE_FAQ_PAGE'};
         if(!pages)return result('<b>تصفح الأسئلة المعتمدة 📖</b>\n'
          +'لا توجد أسئلة معتمدة من موارد الخاص المنشورة حاليًا.\n'
@@ -458,14 +480,15 @@ export class TelegramUpdateApplication {
        }
        const token=parsePrivateFAQSelection(text);
        if(!token)return {status:'DENIED',reason:'INVALID_PRIVATE_FAQ_SELECTION'};
-       const matches=items.filter((q,i)=>privateFAQButton(q.id,i+1)===text);
-       if(matches.length!==1)return {status:'DENIED',reason:'PRIVATE_FAQ_NOT_ACCESSIBLE'};
-       const answer=await this.opts.faq.answerPrivateReviewedFAQById(actorId,matches[0]!.id);
+       const index=items.findIndex((q,i)=>privateFAQButton(q.id,i+1)===text);
+       if(index<0)return {status:'DENIED',reason:'PRIVATE_FAQ_NOT_ACCESSIBLE'};
+       const answer=await this.opts.faq.answerPrivateReviewedFAQById(actorId,items[index]!.id);
        if(answer.status!=='ANSWER')return {status:'DENIED',reason:'PRIVATE_FAQ_NOT_ACCESSIBLE'};
        return result('<b>إجابة معتمدة من مكتبة منارتك ✅</b>\n'
          +escapeTelegramHtml(answer.answer)+'\n'
          +'مصدرها منشور ومعتمد في مكتبة الخاص، وليس إجابة AI مولدة.',
-         listingKeyboard([privateFAQBrowseLabel]));
+         listingKeyboard([privateFAQBrowseReturnLabel(Math.floor(index/10)),
+           privateFAQBrowseLabel]));
       }
       const sections:Readonly<Record<string,{section:string;title:string}>>={
         [m.scholarships]:{section:'scholarships',title:'المنح الدراسية'},
