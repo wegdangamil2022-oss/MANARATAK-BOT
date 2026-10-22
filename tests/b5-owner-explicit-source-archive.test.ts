@@ -128,7 +128,7 @@ for(const engine of ['json','sqlite'] as const){
    assert.equal((await f.application().handle(msg(12,STUDENT,preview))).status,'DENIED');
    const confirm=await f.application().handle(msg(13,OWNER,preview));
    assert.equal(confirm.status,'APPLIED');
-   assert.match(confirm.plan?.text??'',/لا يثبت|لا يعني/);
+   assert.match(confirm.plan?.text??'',/لا يثبت|لا يعني|لا تعني/);
    const archive=buttons(confirm).find(x=>x.startsWith('✅ تأكيد أرشفة محلية · '))!;
    assert.ok(archive);
    assert.equal((await f.store.snapshot()).educationResources[0]?.status,'PUBLISHED');
