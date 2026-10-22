@@ -134,11 +134,11 @@ export function validTelegramReplyJob(v:unknown):v is TelegramReplyJob{
       j.plan.chatId===j.privateGroupAccess.actorId))))&&
   (j.privateGroupAccess===undefined||
    (j.status==='QUEUED'&&validPlan(j.plan)&&
+    validPrivateGroupAccess(j.privateGroupAccess)&&
     j.plan.chatId===j.privateGroupAccess.actorId&&
     !j.plan.chatId.startsWith('-')&&
     j.groupReplyKind===undefined&&
-    j.groupQuestionAccess===undefined&&j.groupMenuAccess===undefined&&
-    validPrivateGroupAccess(j.privateGroupAccess)))&&
+    j.groupQuestionAccess===undefined&&j.groupMenuAccess===undefined))&&
   (j.groupMenuAccess===undefined||
    (j.status==='QUEUED'&&validPlan(j.plan)&&j.plan.chatId.startsWith('-')&&
     j.groupReplyKind==='GENERAL'&&
