@@ -16,6 +16,7 @@ import {BoundedIngress,decodeStrictJsonBytes,type IngressOptions} from './http-i
 import {menuLabels,mainMenuKeyboard,backMenuKeyboard,categoryButton,
  resourceButton,listingKeyboard,categoryButtonId,resourceButtonId,
  matchingCategories,menuPageButton,parseMenuPageCommand,type MenuPageCommand,
+ catalogBackToCategories,catalogBackToCategory,parseCatalogBackToCategory,
  type TelegramReplyKeyboard} from './telegram-menu.js';
 import {OwnerTelegramMenu,isOwnerMenuText} from './telegram-owner-menu.js';
 import {parseSearchQuery,parseSearchPageCommand,searchPageButton} from './telegram-search.js';
@@ -502,7 +503,8 @@ export class TelegramUpdateApplication {
         const resources=await this.opts.education.listResources(actorId,'private',catId);
         if(resources.length===0&&page===0&&!direction)return result(
           '<b>'+escapeTelegramHtml(cat.title)+'</b>\n'
-          +'لا توجد موارد معتمدة منشورة في هذا القسم حاليًا.',backMenuKeyboard());
+          +'لا توجد موارد معتمدة منشورة في هذا القسم حاليًا.',
+          listingKeyboard([],{},catalogBackToCategories));
         const pages=Math.ceil(resources.length/10);
         if(page<0||page>=pages||
           (direction==='next'&&page===0)||
@@ -514,8 +516,16 @@ export class TelegramUpdateApplication {
           listingKeyboard(view.map(resourceButton),{
             previous:page>0?menuPageButton('r',cat.id,page-1,'previous'):undefined,
             next:page+1<pages?menuPageButton('r',cat.id,page+1,'next'):undefined
-          }));
+          },catalogBackToCategories));
       };
+      // These are plain Telegram reply-keyboard texts, not auth grants.
+      // Re-enter the existing reviewed B3 list services for every tap.
+      if(text===catalogBackToCategories)
+       return sectionPage('all','التعليم والموارد',0);
+      const breadcrumbId=parseCatalogBackToCategory(text);
+      if(breadcrumbId)return resourcesPage(breadcrumbId,0);
+      if(text.startsWith('↩️ موارد القسم · '))
+       return {status:'DENIED',reason:'INVALID_CATEGORY_BREADCRUMB'};
       if(Object.prototype.hasOwnProperty.call(sections,text)){
         const selection=sections[text]!;
         return sectionPage(selection.section,selection.title,0);
@@ -610,7 +620,10 @@ export class TelegramUpdateApplication {
         return result('<b>مورد تعليمي معتمد 📄</b>\n'
           +escapeTelegramHtml(found.title)+'\nالجامعة: '+escapeTelegramHtml(found.university)
           +'\nالدورة: '+escapeTelegramHtml(found.cycle)+'\nالدرجة: '
-          +escapeTelegramHtml(found.degree),backMenuKeyboard());
+          +escapeTelegramHtml(found.degree),
+          listingKeyboard([
+           catalogBackToCategory(found.categoryId),catalogBackToCategories
+          ]));
       }
     }
     if(cmd==='/admin'&&kind==='private'){
