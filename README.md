@@ -1,3 +1,9 @@
+## B6 v0.7.42 — fake-only generation drafts, owner review required (OFFLINE)
+
+A new `AnswerGenerationPort` interface and `B6GenerationDraftService` can prepare an **unpublished review draft** from a trusted approved FAQ after explicit injection of a **fake** provider and an enable flag. The source and permission policy are checked again after awaiting the fake response. A draft includes validated provenance, bounded token counters, and a separately escaped HTML preview; it is **not an approved answer** and is never displayed to a student or sent to Telegram. There are no API credentials, external AI requests, production model calls, or automatic fallback.
+
+The `B6EphemeralCallBudget` can limit fake attempts within one running process and prevent concurrent over-subscription. It returns `durable:false`: it cannot enforce spending or usage quotas across restarts/replicas, and failures still consume an attempt. A **durable central Phase 17 budget, authenticated provider contract, output moderation/review and deployment acceptance** are prerequisites before production AI. All existing /faq and knowledge-only /ask simulation behavior is unchanged.
+
 ## B6 v0.7.41 — first knowledge-source answer preflight (offline; NO GENERATIVE AI)
 
 The B6 `KnowledgeSourcePort` receives only a question and its scope, not the Telegram actor or prior conversation. The `B6AnswerPreflight` validates explicit private opt-in or an approved group mention and independently rechecks the existing B3 **approved FAQ** against the returned candidate after any asynchronous source read. Changed/archived material, revoked policy, ambiguous matches, fabricated hints and provider errors never produce an answer.
