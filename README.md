@@ -1,3 +1,12 @@
+## B5 v0.7.40 — signed owner Mini App source preview and integrity (offline)
+
+An administrator's optional Telegram Mini App web listener now has two **read-only**, owner-only B5 endpoints when configured with an independently verified `PlatformCatalogPreviewService`:
+
+- `POST /admin/platform/preview` — strict optional JSON `{ "limit": 10, "cursor": null }`; authenticated owner sees a bounded `UNVERIFIED_EXTERNAL` preview and full-page fingerprint without writing any local import or resource.
+- `POST /admin/platform/integrity` — strict JSON `{ "sourceId": "external-id", "expectedDigest": "<64 lowercase hex characters>" }` for a previously locally published B5 source; returns a read-only integrity status. `NOT_ON_PAGE` never proves that an offer closed.
+
+Both reuse the authenticated Telegram Mini App `x-telegram-init-data` header, require current owner-dashboard permission and reject unknown or duplicated JSON properties. Neither is registered by default, because the production Manaratak API contract and trusted reader are not connected. No Telegram channel post, automatic archive/publish, platform write, AI generation or live server activation is introduced by this release.
+
 ## B5 v0.7.39 — Explicit local archival of reviewed external resources (offline)
 
 The optional owner-only external source integrity report can display an archive preview and an independent final confirmation for a published local scholarship. A stale local resource fingerprint, copied student button, revoked owner dashboard or conflicting concurrent click is rejected. This action changes only the local student catalogue, never the upstream website, and does not claim the scholarship has closed. No Telegram channel announcement or production external API is enabled.
