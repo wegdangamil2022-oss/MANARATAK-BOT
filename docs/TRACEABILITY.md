@@ -4,6 +4,7 @@
 
 | المتطلب أو الاختبار | التطبيق | الحالة | الإثبات |
 |---|---|---|---|
+| B6 v0.7.45؛ T12-06/20 حدود الاستدعاء الوهمي | b6-generation-draft.ts + b6-generation-draft.test.ts | TESTED_MOCK | 7 اختبارات جديدة: مهلة انتظار، محاولات UNKNOWN لا تعاد، عدم عرض الرد المتأخر، قفل الميزانية عند تراجع/خلل الساعة؛ Phase17 غير متصل |
 | B0 جرد وفرع مستقل | docs/DECISIONS.md | IMPLEMENTED | جرد الفرعين وAGENTS |
 | v0.1 النواة والمالك والسماح والتفويض | store.ts / policy.ts | TESTED_MOCK | اختبارات owner, grant, revoke, default-deny |
 | S121-01؛ T121-01..04 | pipeline.ts / store.ts | TESTED_MOCK جزئيًا | تكرار/lease/restart/UNKNOWN ومنع قبل المحتوى والبوابة وحقوق وهمية |

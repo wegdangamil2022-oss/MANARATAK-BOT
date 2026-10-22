@@ -1,3 +1,10 @@
+## 0.7.45 — 2026-10-22 — B6 bounded fake-call deadline and rollback-safe ephemeral admission (OFFLINE)
+
+- Introduces strict optional `B6DraftConfig.maxDurationMs` (20–900,000 ms, default 30,000) for offline fake generation. A stalled fake-port promise resolves the service with `UNAVAILABLE` after the deadline; late text cannot be published or delivered. The local slot is released and an existing durable reservation becomes `UNKNOWN_OUTCOME` without refund or automatic replay.
+- Hardens nonpersistent `B6EphemeralCallBudget` with monotonic clock high-water checks. Clock rollback returns `CLOCK_ROLLBACK` from `begin()` and does not reset spent UTC-day counters. Invalid or throwing clocks return `UNAVAILABLE` rather than escaping as uncaught exceptions; `summary()` still throws on bad clock reads.
+- TDD: RED commit failed six new behavioral tests on JSON/SQLite and local budget; GREEN commit passed 1049/1049 tests plus typecheck and offline demos in GitHub Actions. Seven new test cases; final release CI must succeed on final head before merge.
+- **Limits:** in-memory budget is not cross-process; wall-clock timeout does not prove an upstream provider stopped or completed. Real Phase 17 provider contracts, billing reconciliation and Telegram live generation remain disconnected and OFF.
+
 ## 0.7.44 — 2026-10-22 — B6 owner-only fake AI budget monitoring and unknown-outcome acknowledgement (OFFLINE)
 
 - Adds a privacy-redacted **🧮 ميزانية المساعد التجريبية** owner Telegram menu with deterministic 8-record pagination. The owner can inspect UTC-day attempted calls and conserved reservation units, active calls, expired requests, and unknown outcomes. Report displays only short opaque attempt ID prefixes; **never** displays request keys, student prompts, AI answers, Telegram user IDs or provider secrets.
