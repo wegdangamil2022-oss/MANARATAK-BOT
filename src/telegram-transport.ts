@@ -19,7 +19,9 @@ import {menuLabels,mainMenuKeyboard,backMenuKeyboard,categoryButton,
  catalogBackToCategories,catalogBackToCategory,parseCatalogBackToCategory,
  type TelegramReplyKeyboard} from './telegram-menu.js';
 import {OwnerTelegramMenu,isOwnerMenuText} from './telegram-owner-menu.js';
-import {parseSearchQuery,parseSearchPageCommand,searchPageButton} from './telegram-search.js';
+import {parseSearchQuery,parseSearchPageCommand,searchPageButton,
+ searchResourceButton,parseSearchResourceSelection,searchResultsBreadcrumb,
+ parseSearchResultsBreadcrumb} from './telegram-search.js';
 import {parsePrivateFAQQuery,privateFAQBrowseLabel,parsePrivateFAQPage,
  privateFAQPageLabel,parsePrivateFAQSelection,privateFAQButton,
  isPrivateFAQBrowseText} from './telegram-private-faq.js';
@@ -550,7 +552,7 @@ export class TelegramUpdateApplication {
           +'البحث: '+escapeTelegramHtml(query)+'\n'
           +'صفحة '+(page+1)+' من '+pages+'\n'
           +selection.map(r=>'• '+escapeTelegramListPreview(r.title,220)).join('\n'),
-          listingKeyboard(selection.map(resourceButton),{
+          listingKeyboard(selection.map(r=>searchResourceButton(r,query,page)),{
             previous:page>0?searchPageButton(query,page-1,'previous'):undefined,
             next:page+1<pages?searchPageButton(query,page+1,'next'):undefined
           }));
@@ -568,6 +570,10 @@ export class TelegramUpdateApplication {
         searchRequest.query,searchRequest.page,searchRequest.direction);
       if(text.startsWith('➡️ التالي · s:')||text.startsWith('⬅️ السابق · s:'))
         return denyPage();
+      const searchBack=parseSearchResultsBreadcrumb(text);
+      if(searchBack)return searchPage(searchBack.query,searchBack.page);
+      if(text.startsWith('↩️ نتائج البحث · '))
+       return {status:'DENIED',reason:'INVALID_SEARCH_BREADCRUMB'};
       const pageRequest=parseMenuPageCommand(text);
       if(pageRequest){
         if(pageRequest.kind==='c'){
@@ -598,6 +604,37 @@ export class TelegramUpdateApplication {
         +'للتصفح اختر أحد أقسام القائمة أو استخدم /categories private.\n'
         +'التواصل المباشر مع فريق الدعم ونظام التذاكر لم يُفعّلا بعد.',
         backMenuKeyboard());
+      // A stateless search-result button may carry a query and page so the
+      // student can return to the exact *current* search result page.
+      // A forged or stale selector must be both an exact currently rendered
+      // button and an item of the freshly authorized search page.
+      const searchSelection=parseSearchResourceSelection(text);
+      if(searchSelection){
+       const now=await this.opts.store.snapshot();
+       if(!this.opts.policy.privateFeature(now,'education.navigate',actorId))
+        return {status:'DENIED',reason:'PRIVATE_EDUCATION_DISABLED'};
+       const matches=await this.opts.education.searchPublishedResources(
+        actorId,searchSelection.query);
+       const page=matches.slice(searchSelection.page*10,searchSelection.page*10+10);
+       const matched=page.find(r=>r.id===searchSelection.resourceId);
+       if(!matched||searchResourceButton(matched,searchSelection.query,
+         searchSelection.page)!==text)
+        return {status:'DENIED',reason:'SEARCH_RESOURCE_NOT_ACCESSIBLE'};
+       const visible=await this.opts.education.listResources(
+        actorId,'private',matched.categoryId);
+       const item=visible.find(r=>r.id===matched.id);
+       if(!item||searchResourceButton(item,searchSelection.query,
+         searchSelection.page)!==text)
+        return {status:'DENIED',reason:'SEARCH_RESOURCE_NOT_ACCESSIBLE'};
+       return result('<b>مورد تعليمي معتمد 📄</b>\n'
+         +escapeTelegramHtml(item.title)+'\nالجامعة: '+escapeTelegramHtml(item.university)
+         +'\nالدورة: '+escapeTelegramHtml(item.cycle)+'\nالدرجة: '
+         +escapeTelegramHtml(item.degree),
+         listingKeyboard([
+          searchResultsBreadcrumb(searchSelection.query,searchSelection.page),
+          catalogBackToCategory(item.categoryId),catalogBackToCategories
+         ]));
+      }
       const categoryId=categoryButtonId(text);
       if(!categoryId&&text.startsWith('📁 '))
         return {status:'DENIED',reason:'INVALID_MENU_SELECTION'};
