@@ -3,9 +3,10 @@ import {BotStore,type TelegramReplyJob} from './store.js';
 import {Policy} from './policy.js';
 import type {TelegramReplyPlan} from './telegram-transport.js';
 import {isValidTelegramReplyKeyboard} from './telegram-menu.js';
-import {groupQuestionEpochDigest,groupMenuEpochDigest} from './telegram-group-access.js';
+import {groupQuestionEpochDigest,groupMenuEpochDigest,privateGroupEpochDigest} from './telegram-group-access.js';
 import {subscriptionRequirementMode,acceptsActiveSubscriptionEvidence} from './subscription-integrity.js';
 import type {SubscriptionGate} from './subscription.js';
+import type {MembershipPort} from './education-interactions.js';
 
 export type TelegramSendResult={status:'CONFIRMED';messageId:number}|
  {status:'FAILED_CONFIRMED'|'UNKNOWN_OUTCOME'};
@@ -94,6 +95,16 @@ const validGroupReplyAccess=(v:unknown):v is NonNullable<TelegramReplyJob['group
   typeof r.expiresAt==='number'&&Number.isSafeInteger(r.expiresAt)&&
   r.expiresAt>=0&&r.expiresAt<=8_640_000_000_000_000;
 };
+const validPrivateGroupAccess=(v:unknown):v is NonNullable<TelegramReplyJob['privateGroupAccess']>=>{
+ if(!v||typeof v!=='object'||Array.isArray(v))return false;
+ const a=v as Record<string,unknown>;
+ return Object.keys(a).length===4&&
+  typeof a.actorId==='string'&&/^[1-9]\d{0,19}$/u.test(a.actorId)&&
+  typeof a.scope==='string'&&/^-[1-9]\d{0,18}$/u.test(a.scope)&&
+  typeof a.epoch==='string'&&/^[a-f0-9]{64}$/u.test(a.epoch)&&
+  typeof a.expiresAt==='number'&&Number.isSafeInteger(a.expiresAt)&&
+  a.expiresAt>=0&&a.expiresAt<=8_640_000_000_000_000;
+};
 export function validTelegramReplyJob(v:unknown):v is TelegramReplyJob{
  if(!v||typeof v!=='object'||Array.isArray(v))return false;
  const j=v as Record<string,unknown>;
@@ -107,7 +118,14 @@ export function validTelegramReplyJob(v:unknown):v is TelegramReplyJob{
    (j.status==='QUEUED'&&validPlan(j.plan)&&j.plan.chatId.startsWith('-')&&
     (j.groupReplyKind==='GENERAL'||j.groupReplyKind==='REVIEWED_FAQ')&&
     ((j.groupReplyKind==='GENERAL'&&j.groupQuestionAccess===undefined&&
-      (j.groupMenuAccess===undefined||validGroupReplyAccess(j.groupMenuAccess)))||
+      (j.privateGroupAccess===undefined||(
+    j.status==='QUEUED'&&validPlan(j.plan)&&
+    j.plan.chatId===(j.privateGroupAccess as {actorId?:string}).actorId&&
+    j.groupReplyKind===undefined&&j.groupMenuAccess===undefined&&
+    j.groupQuestionAccess===undefined&&
+    validPrivateGroupAccess(j.privateGroupAccess)
+  ))&&
+  (j.groupMenuAccess===undefined||validGroupReplyAccess(j.groupMenuAccess)))||
      (j.groupReplyKind==='REVIEWED_FAQ'&&validGroupReplyAccess(j.groupQuestionAccess)&&
       j.groupMenuAccess===undefined))))&&
   (j.groupMenuAccess===undefined||
@@ -133,29 +151,39 @@ export class TelegramReplyDispatcher {
  constructor(private readonly store:BotStore,private readonly policy:Policy,
   private readonly sender:TelegramReplySender,private readonly clock:()=>number=Date.now,
   private readonly safetyGate?:()=>Promise<boolean>,
-  private readonly subscription?:SubscriptionGate){}
+  private readonly subscription?:SubscriptionGate,
+  private readonly membership?:MembershipPort){}
  /** Membership evidence is checked before the irreversible SENDING claim.
   * A subsequent transactional policy/epoch fence prevents local state changes
   * during the external membership lookup from authorizing a stale send.
   */
  private async checkGroupEligibility(updateKey:string):Promise<
   {access:NonNullable<TelegramReplyJob['groupQuestionAccess']>;
-   kind:'FAQ'|'MENU';allowed:boolean}|undefined>{
+   kind:'FAQ'|'MENU'|'PRIVATE_GROUP';allowed:boolean}|undefined>{
   const snap=await this.store.snapshot();
   const job=snap.telegramReplyJobs?.find(j=>j.updateKey===updateKey);
   if(!job||job.status!=='QUEUED')return undefined;
   if(!validTelegramReplyJob(job))throw Error('INVALID_REPLY_JOB');
-  const kind=job.groupQuestionAccess?'FAQ' as const:job.groupMenuAccess?'MENU' as const:null;
+  const kind=job.groupQuestionAccess?'FAQ' as const:
+   job.groupMenuAccess?'MENU' as const:job.privateGroupAccess?'PRIVATE_GROUP' as const:null;
   if(!kind)return undefined;
-  const access=structuredClone((kind==='FAQ'?job.groupQuestionAccess:job.groupMenuAccess)!);
-  const groupId=job.plan!.chatId,actor=access.actorId;
+  const access=structuredClone((kind==='FAQ'?job.groupQuestionAccess:
+   kind==='MENU'?job.groupMenuAccess:job.privateGroupAccess)!);
+  const groupId=kind==='PRIVATE_GROUP'?
+   (access as NonNullable<TelegramReplyJob['privateGroupAccess']>).scope:
+   job.plan!.chatId,actor=access.actorId;
   let allowed=false;
   try{
    if(this.clock()<access.expiresAt&&
       (kind==='FAQ'?this.policy.mayAskGroup(snap,groupId,actor,true):
        this.policy.canUseChat(snap,groupId,'navigation'))&&
       (kind==='FAQ'?groupQuestionEpochDigest(snap,groupId):
-       groupMenuEpochDigest(snap,groupId))===access.epoch){
+       kind==='MENU'?groupMenuEpochDigest(snap,groupId):
+       privateGroupEpochDigest(snap,groupId))===access.epoch){
+    if(kind==='PRIVATE_GROUP'){
+     if(!this.membership||await this.membership(groupId,actor)!=='VERIFIED')
+      return {access,kind,allowed:false};
+    }
     const mode=subscriptionRequirementMode(snap,groupId);
     if(mode==='NONE'||mode==='PAUSED')allowed=true;
     else if(mode==='ACTIVE'&&this.subscription){
@@ -187,25 +215,28 @@ export class TelegramReplyDispatcher {
     if(!allowed)return {status:'PAUSED' as const};
    }
    const plan=structuredClone(job.plan!);
-   const faq=job.groupQuestionAccess,menu=job.groupMenuAccess;
-   const access=faq??menu;
+   const faq=job.groupQuestionAccess,menu=job.groupMenuAccess,dm=job.privateGroupAccess;
+   const access=faq??menu??dm;
+   const accessKind=faq?'FAQ':menu?'MENU':dm?'PRIVATE_GROUP':null;
+   const accessScope=dm?.scope??plan.chatId;
    // Unknown legacy group origins, plus GENERAL plans created before the
    // menu witness existed, cannot prove original actor/subscription authority.
    const noGroupProof=plan.chatId.startsWith('-')&&!access;
    const forbidden=noGroupProof||(!!access&&(
     !groupPrecheck?.allowed||
-    groupPrecheck.kind!==(faq?'FAQ':'MENU')||
+    groupPrecheck.kind!==accessKind||
     groupPrecheck.access.actorId!==access.actorId||
     groupPrecheck.access.epoch!==access.epoch||
     groupPrecheck.access.expiresAt!==access.expiresAt||
     this.clock()>=access.expiresAt||
-    !(faq?this.policy.mayAskGroup(s,plan.chatId,access.actorId,true):
-      this.policy.canUseChat(s,plan.chatId,'navigation'))||
-    (faq?groupQuestionEpochDigest(s,plan.chatId):
-      groupMenuEpochDigest(s,plan.chatId))!==access.epoch));
+    !(faq?this.policy.mayAskGroup(s,accessScope,access.actorId,true):
+      this.policy.canUseChat(s,accessScope,'navigation'))||
+    (faq?groupQuestionEpochDigest(s,accessScope):
+      menu?groupMenuEpochDigest(s,accessScope):
+      privateGroupEpochDigest(s,accessScope))!==access.epoch));
    if(forbidden||(plan.chatId.startsWith('-')&&!this.policy.canUseChat(s,plan.chatId,'navigation'))){
     job.status='FAILED_CONFIRMED';
-    delete job.plan;delete job.groupQuestionAccess;delete job.groupMenuAccess;delete job.groupReplyKind;job.redactedAt=this.clock();
+    delete job.plan;delete job.groupQuestionAccess;delete job.groupMenuAccess;delete job.privateGroupAccess;delete job.groupReplyKind;job.redactedAt=this.clock();
     return {status:'FAILED_CONFIRMED' as const};
    }
    const attemptId=randomUUID();
@@ -213,7 +244,7 @@ export class TelegramReplyDispatcher {
    job.status='SENDING';job.attemptId=attemptId;job.startedAt=at;
    // Remove the durable body *before* the external call. The immediate local
    // copy goes to the sender, but a crash leaves no replayable payload.
-   delete job.plan;delete job.groupQuestionAccess;delete job.groupMenuAccess;delete job.groupReplyKind;job.redactedAt=at;
+   delete job.plan;delete job.groupQuestionAccess;delete job.groupMenuAccess;delete job.privateGroupAccess;delete job.groupReplyKind;job.redactedAt=at;
    return {status:'SEND' as const,attemptId,plan};
   });
   if(claim.status!=='SEND')return {status:claim.status};
