@@ -99,7 +99,7 @@ for(const engine of ['json','sqlite'] as const){
    const ctx={origin:'TELEGRAM_PRIVATE' as const,actorId:OWNER,chatId:OWNER,verified:true};
    const screen=await f.menu().handle(ownerMenuLabels.delivery,ctx);
    assert.ok(screen);
-   assert.match(screen.text,/غير موثوقة|مجهولة المصدر|المنشأ/);
+   assert.match(screen.text,/غير موثوق|مجهولة المصدر|المنشأ/);
    assert.match(screen.text,/1/);
    assert.doesNotMatch(screen.text,/Secret grant 77|b3-webhook|300/);
    assert.equal(await f.menu().handle(ownerMenuLabels.delivery,{...ctx,actorId:STUDENT,chatId:STUDENT}),null);

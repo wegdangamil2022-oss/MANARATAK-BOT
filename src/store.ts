@@ -320,9 +320,9 @@ export class BotStore {
         const job=raw as Record<string,unknown>;
         const plan=job.plan as Record<string,unknown>|undefined;
         if(job.accessDenialCode!==undefined&&(
-           job.status!=='FAILED_CONFIRMED'||
+           job.status!=='FAILED_CONFIRMED'||typeof job.accessDenialCode!=='string'||
            !['LEGACY_UNVERIFIABLE','ACCESS_RECHECK_FAILED','GROUP_UNAVAILABLE']
-            .includes(String(job.accessDenialCode))))
+            .includes(job.accessDenialCode)))
           return true;
         if(job.groupReplyKind!==undefined){
          if(job.status!=='QUEUED'||!plan||typeof plan.chatId!=='string'||
