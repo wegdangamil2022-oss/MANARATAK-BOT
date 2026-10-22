@@ -173,7 +173,7 @@ export async function createLiveTelegramServer(config:LiveTelegramConfig,
   botId:check.botId,botUsername:check.botUsername,
   membership:(chatId,actorId)=>membership.verifyMembership(chatId,actorId),subscription});
  const dispatcher=new TelegramReplyDispatcher(store,policy,
-  new TelegramBotApiTextSender(check.token,request),Date.now,safetyGate);
+  new TelegramBotApiTextSender(check.token,request),Date.now,safetyGate,subscription);
  const server=createServer(telegramWebhookListener(app,check.webhookSecret,dispatcher,{},safetyGate));
  // Local-only listener. These are resource budgets, not a substitute for the
  // trusted HTTPS proxy, ingress anti-abuse controls, TLS or real load testing.
