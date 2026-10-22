@@ -1,3 +1,11 @@
+## 0.7.40 — 2026-10-22 — B5 signed owner Mini App external-source preview and integrity (OFFLINE)
+
+- Adds two strictly opt-in **read-only** routes to the existing Telegram Mini App HMAC-protected administrative listener: `POST /admin/platform/preview` and `POST /admin/platform/integrity`. They exist only when a trusted B5 `PlatformCatalogPreviewService` is injected explicitly. The real Manaratak API, source URLs and service credentials are neither assumed nor connected.
+- Both endpoints authenticate the Telegram Mini App signed actor, require the immutable owner, and recheck the current owner dashboard permission before and after external reads. Client-provided user IDs or scope cannot create authority; no source data is returned to students, delegates or groups.
+- Request JSON is bounded to 2 KiB, checked for exact allowed keys and rejects duplicate top-level property names, including JSON escape aliases. Invalid scope, cursor, record ID, SHA-256 proof, methods, signature and content type fail closed.
+- Preview returns bounded source metadata explicitly labeled `UNVERIFIED_EXTERNAL`; the integrity route checks only previously owner-reviewed locally published B5 resources, distinguishing CURRENT, SOURCE_CHANGED, NOT_ON_PAGE, UNAVAILABLE, LOCAL_ARCHIVED, and LOCAL_INCONSISTENT without local database changes or Telegram publication.
+- 22 additional HTTP integration tests with signed Telegram Mini App fixtures across JSON/SQLite, including absent optional routes, forged students, invalid/duplicate JSON, upstream faults, source drift, archived state, changed authorization during I/O and unchanged state. All **934/934** offline CI tests passed along with the configured offline demos; this is NOT a public live web endpoint.
+
 ## 0.7.39 — 2026-10-22 — Explicit owner-confirmed B5 local archival (offline)
 
 - Owner may inspect an externally sourced, locally published resource, preview archival, then separately confirm archival. No source-driven automatic archive, no claim that application periods have closed, and no messages to Telegram channels.
