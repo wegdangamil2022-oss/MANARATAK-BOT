@@ -1,3 +1,10 @@
+## 0.7.37 — 2026-10-22 — B5 owner confirmation screens for source-reviewed local publication (OFFLINE)
+
+- An owner with the optional B5 reader can move from external metadata review to an explicit **private category picker**, a separate owner **category approval confirmation**, then a distinct **local visibility preview** and **local publication confirmation**. Selection and approval do not publish to students; the final confirmation can create a private published resource only through the already guarded v0.7.36 backend.
+- New owner review selectors are treated as untrusted text. All button requests must originate from a verified owner private chat with an active dashboard. The store queue and categories are freshly authorized on each step. Source/category identifiers use stable bounded tokens, source digests are shortened ONLY for reply keyboard length; handlers must resolve unambiguously to an exact saved full SHA-256 digest, then approval/publication methods independently revalidate the current external source and its revision.
+- Category picker is paginated in eight options, excludes invisible/disabled categories, and rejects forged or stale pages and copied student/group buttons. Additional JSON/SQLite Telegram integration tests cover the full owner decision path, forbidden publication paths, category pagination, revocation, source drift, byte/codepoint-safe keyboards and a maximum-length private category ID.
+- No automatic Telegram channel broadcast, campaign, AI call, real Manaratak provider API or live bot deployment is added. Availability to actual owners still depends on an independently configured and authenticated external reader.
+
 ## 0.7.36 — 2026-10-22 — B5 explicit separate category approval and local publication for reviewed external metadata (OFFLINE)
 
 - After owner-only external metadata review, a **new and separate owner approval** may bind exactly one current external candidate to a currently enabled `private` education category (`approveForLocal`). Approval changes the quarantined state to `APPROVED_FOR_LOCAL` and is **not** a local publication or Telegram/channel send.
