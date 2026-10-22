@@ -301,7 +301,7 @@ for(const engine of ['json','sqlite'] as const){
     {...studentQuestion(439),via_bot:{id:999}},
     {...studentQuestion(439),from:{id:STUDENT,is_bot:true}},
     {...studentQuestion(439),chat:{id:-100998,type:'supergroup'}},
-    {...studentQuestion(439),message_id:440},
+    {...studentQuestion(439),message_id:9999},
     {...studentQuestion(439),text:''},
     {...studentQuestion(439),text:QUESTION,caption:'untrusted'},
     {...studentQuestion(439),text:QUESTION,reply_to_message:studentQuestion(1)},
