@@ -1,3 +1,10 @@
+## 0.7.48 — 2026-10-22 — B6 Telegram UTF-16 explicit mention support, reviewed FAQ only
+
+- Add `parseB6ExplicitMention` for current-message Telegram `MessageEntity` bot-prefix mention only. Validate bot username, exact mention span, UTF-16 entity offsets, bounded question, malformed/overlapping mention metadata, quotes and other-bot mentions. Text substrings without a matching Telegram entity never activate the assistant.
+- Wire this reviewed question route into the existing Telegram group policy and subscription verification, preserving read-only approved B3 FAQ and the optional B6 preflight with post-await policy rechecks. Do not accept channel forwards or `sender_chat` impersonation and do not introduce persistent chat memory or a generative fallback.
+- Add 21 JSON/SQLite/group and pure parser regressions, including group revocation during lookup, policy OFF, raw spoofed mentions, case folding and supplementary characters. TDD RED recorded missing behavior; GitHub Actions must verify full TypeScript checks and all offline demos on final head.
+- No Phase 17 AI consumer API is connected or assumed. Mention answers are pre-approved knowledge, not generative AI.
+
 ## 0.7.47 — 2026-10-22 — B6 atomic offline Telegram HMAC secret continuity (no real AI)
 
 - Pin a domain-separated secret-verifier fingerprint (`b6TelegramKeyBinding`) together with the first successful `b6tg1_` durable attempt reservation in a JSON/SQLite state transaction. Reject changed secrets on repeat/restart/race **before** calling a fake model; no automatic key rotation or billing refund.

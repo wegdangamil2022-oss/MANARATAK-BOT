@@ -24,6 +24,7 @@ import {parsePrivateFAQQuery,privateFAQBrowseLabel,parsePrivateFAQPage,
 import {privateFAQSearchLabel,parsePrivateFAQSearchQuery,parsePrivateFAQSearchPage,
  privateFAQSearchPageLabel,isPrivateFAQSearchText} from './telegram-private-faq-search.js';
 import {escapeTelegramListPreview} from './telegram-preview.js';
+import {parseB6ExplicitMention} from './b6-telegram-mention.js';
 
 /** Inbound-only boundary. A test double may supply bytes; there is intentionally no live HTTP implementation. */
 export interface TelegramDocumentPort {
@@ -56,7 +57,7 @@ export interface TelegramApplicationOptions {
   answerPreflight?:B6AnswerPreflight;
 }
 
-type Event = {updateId: number; actorId: string; chatId: string; kind: 'private' | 'group'; text: string; document?: IncomingDocument};
+type Event = {updateId: number; actorId: string; chatId: string; kind: 'private' | 'group'; text: string; entities?:unknown; document?: IncomingDocument};
 const isObject=(x:unknown):x is Record<string,unknown>=>Boolean(x)&&typeof x==='object'&&!Array.isArray(x);
 const positiveId=(x:unknown): x is number=>typeof x==='number'&&Number.isSafeInteger(x)&&x>0;
 const chatId=(x:unknown): x is number=>typeof x==='number'&&Number.isSafeInteger(x)&&x!==0;
@@ -90,7 +91,8 @@ function eventFrom(value:unknown):{event?:Event;reason:string} {
   }
   if(typeof msg.text!=='string'||msg.text.length<1||msg.text.length>4096)return {reason:'UNSUPPORTED_MESSAGE'};
   if(/\u0000/u.test(msg.text))return {reason:'INVALID_TEXT'};
-  return {event:{updateId:value.update_id as number,actorId:String(msg.from.id),chatId:String(msg.chat.id),kind,text:msg.text},reason:'VALID'};
+  return {event:{updateId:value.update_id as number,actorId:String(msg.from.id),chatId:String(msg.chat.id),kind,text:msg.text,
+   ...(msg.entities!==undefined?{entities:msg.entities}:{})},reason:'VALID'};
 }
 
 const isScope=(scope:string):boolean=>scope==='private'||/^-[1-9]\d{0,18}$/.test(scope);
@@ -186,7 +188,19 @@ export class TelegramUpdateApplication {
     const adminCtx:VerifiedAdminContext={origin:'TELEGRAM_PRIVATE',actorId,chatId,verified:true};
     const words=text.split(/\s+/u);
     const cmd=words[0]??'';
-    if(kind==='group'&&(cmd==='/categories'||cmd==='/resources'||cmd===`/ask@${this.opts.botUsername}`)) {
+    // Telegram's verified MessageEntity is mandatory for a free-text mention.
+    // The slash command remains a separate explicit opt-in route.
+    const mention=kind==='group'
+     ?parseB6ExplicitMention(text,event.entities,this.opts.botUsername)
+     :{status:'NO_MATCH'} as const;
+    if(mention.status==='INVALID')return {status:'DENIED',reason:'INVALID_MENTION_ENTITIES'};
+    const commandPrefix=`/ask@${this.opts.botUsername} `;
+    const groupQuestion=kind==='group'
+     ?(mention.status==='MATCH'?mention.question:
+       text.startsWith(commandPrefix)?text.slice(commandPrefix.length):null)
+     :null;
+    if(kind==='group'&&(cmd==='/categories'||cmd==='/resources'||
+      cmd===`/ask@${this.opts.botUsername}`||groupQuestion!==null)) {
       const snapshot=await this.opts.store.snapshot();
       const requirement=subscriptionRequirementMode(snapshot,chatId);
       if(requirement==='INVALID')
@@ -563,8 +577,8 @@ export class TelegramUpdateApplication {
       if(opened.status!=='FOUND')return {status:'DENIED',reason:'RESOURCE_DENIED'};
       return result(`<b>مورد تعليمي</b>\n${escapeTelegramHtml(opened.resource.title)}\n${escapeTelegramHtml(opened.resource.university)}`);
     }
-    if(kind==='group'&&text.startsWith(`/ask@${this.opts.botUsername} `)){
-      const question=text.slice(`/ask@${this.opts.botUsername} `.length);
+    if(kind==='group'&&groupQuestion!==null){
+      const question=groupQuestion;
       if(this.opts.answerPreflight){
        const plan=await this.opts.answerPreflight.prepare({
         actor:actorId,scope:chatId,question,explicitMention:true
