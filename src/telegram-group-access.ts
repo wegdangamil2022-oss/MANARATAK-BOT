@@ -22,3 +22,8 @@ export function groupQuestionEpochDigest(state:BotState,groupId:string):string{
  return createHash('sha256').update('MANARATAK:B6:GROUP-FAQ:DISPATCH:v1:')
   .update(groupQuestionSubscriptionEpoch(state,groupId)).digest('hex');
 }
+
+export function groupMenuEpochDigest(state:BotState,groupId:string):string{
+ return createHash('sha256').update('MANARATAK:B6:GROUP-MENU:DISPATCH:v1:')
+  .update(groupQuestionSubscriptionEpoch(state,groupId)).digest('hex');
+}
