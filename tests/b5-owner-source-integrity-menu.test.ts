@@ -148,7 +148,7 @@ for(const engine of ['json','sqlite'] as const){
    assert.equal(keys(second).filter(x=>x.startsWith('🔬 فحص مصدر · ')).length,4);
    const prev=keys(second).find(x=>x==='⬅️ السابق · b5i:0')!;
    assert.equal((await f.app().handle(message(62,OWNER,prev))).status,'APPLIED');
-   assert.equal((await f.app().handle(message(63,OWNER,'➡️ التالي · b5i:0')).status,'DENIED');
+   assert.equal((await f.app().handle(message(63,OWNER,'➡️ التالي · b5i:0'))).status,'DENIED');
   }finally{await f.close();}
  });
 }
