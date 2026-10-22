@@ -250,3 +250,138 @@ test('B3 search-only non-meaningful kashida never causes all approved grants to 
   assert.equal(buttons(result).some(x=>x.startsWith('🔎 ')),false);
  }finally{await f.close();}
 });
+
+
+for(const engine of ['json','sqlite'] as const){
+ test('B3 '+engine+': search result selection preserves an actionable return to the same search results',async()=>{
+  const f=await fixture(engine);try{
+   const result=await f.app().handle(msg(220,'/search Grant'));
+   const token=buttons(result).find(b=>b.includes('resource-00'))!;
+   assert.match(token,/ · s:Grant:0$/u);
+   const opened=await f.app().handle(msg(221,token));
+   assert.equal(opened.status,'APPLIED');
+   assert.match(opened.plan?.text??'',/Scholarship 00/);
+   assert.ok(buttons(opened).includes('↩️ نتائج البحث · s:Grant:0'));
+   assert.ok(buttons(opened).includes('↩️ موارد القسم · grants'));
+   assert.equal(isValidTelegramReplyKeyboard(opened.plan?.replyMarkup),true);
+   const returned=await f.app().handle(msg(222,'↩️ نتائج البحث · s:Grant:0'));
+   assert.equal(returned.status,'APPLIED');
+   assert.match(returned.plan?.text??'',/صفحة 1 من 3/);
+   assert.ok(buttons(returned).some(b=>b.includes('resource-00')));
+  }finally{await f.close();}
+ });
+ test('B3 '+engine+': selecting third-page result returns exactly to current third page',async()=>{
+  const f=await fixture(engine);try{
+   const third=await f.app().handle(msg(230,'➡️ التالي · s:Grant:2'));
+   assert.equal(third.status,'APPLIED');
+   const token=buttons(third).find(b=>b.includes('resource-22'))!;
+   assert.match(token,/ · s:Grant:2$/u);
+   const opened=await f.app().handle(msg(231,token));
+   assert.equal(opened.status,'APPLIED');
+   assert.ok(buttons(opened).includes('↩️ نتائج البحث · s:Grant:2'));
+   const returned=await f.app().handle(msg(232,'↩️ نتائج البحث · s:Grant:2'));
+   assert.equal(returned.status,'APPLIED');
+   assert.match(returned.plan?.text??'',/صفحة 3 من 3/);
+   assert.equal(buttons(returned).filter(b=>b.startsWith('🔎 ')).length,3);
+   assert.ok(buttons(returned).includes('⬅️ السابق · s:Grant:1'));
+  }finally{await f.close();}
+ });
+ test('B3 '+engine+': archived, unpublished, or renamed matches invalidate old search-result selections',async()=>{
+  const f=await fixture(engine);try{
+   const listing=await f.app().handle(msg(240,'/search Grant'));
+   const token=buttons(listing).find(b=>b.includes('resource-00'))!;
+   await f.education.archiveResource(OWNER,'resource-00');
+   const denied=await f.app().handle(msg(241,token));
+   assert.equal(denied.status,'DENIED');assert.equal(denied.plan,undefined);
+   const next=await f.app().handle(msg(242,'/search Grant'));
+   const other=buttons(next).find(b=>b.includes('resource-01'))!;
+   await f.store.transaction(s=>{s.educationResources.find(r=>r.id==='resource-01')!.title='Other available title';});
+   const stale=await f.app().handle(msg(243,other));
+   assert.equal(stale.status,'DENIED');assert.equal(stale.plan,undefined);
+  }finally{await f.close();}
+ });
+ test('B3 '+engine+': forged query or wrong page cannot rebind a resource selection to an unrelated result',async()=>{
+  const f=await fixture(engine);try{
+   const listing=await f.app().handle(msg(250,'/search Grant'));
+   const original=buttons(listing).find(b=>b.includes('resource-00'))!;
+   const changedQuery=original.replace(' · s:Grant:0',' · s:China:0');
+   const changedPage=original.replace(' · s:Grant:0',' · s:Grant:2');
+   for(const [i,text] of [changedQuery,changedPage].entries()){
+    const r=await f.app().handle(msg(251+i,text));
+    assert.equal(r.status,'DENIED',text);
+    assert.equal(r.plan,undefined);
+   }
+   assert.equal((await f.app().handle(msg(253,original))).status,'APPLIED');
+  }finally{await f.close();}
+ });
+ test('B3 '+engine+': invalid search return labels and malformed selection contexts do not enter a result list',async()=>{
+  const f=await fixture(engine);try{
+   const invalid=[
+    '↩️ نتائج البحث · s:Grant:01',
+    '↩️ نتائج البحث · s:Grant:-1',
+    '↩️ نتائج البحث · s:Grant:1000',
+    '↩️ نتائج البحث · s:<bad>:0',
+    '↩️ نتائج البحث · s:Grant:0\n/admin',
+    '↩️ نتائج البحث · s:Grant:999',
+    '🔎 Scholarship 00 · resource-00 · s:Grant:01',
+    '🔎 Scholarship 00 · resource-00 · s:Grant:999',
+    '🔎 Scholarship 00 · resource-00 · s:<bad>:0'
+   ];
+   for(const [i,text] of invalid.entries()){
+    const r=await f.app().handle(msg(260+i,text));
+    assert.equal(r.status,'DENIED',text);
+    assert.equal(r.plan,undefined);
+   }
+  }finally{await f.close();}
+ });
+ test('B3 '+engine+': search-origin resources and breadcrumbs are revoked with private navigation',async()=>{
+  const f=await fixture(engine);try{
+   const listing=await f.app().handle(msg(275,'/search Grant'));
+   const token=buttons(listing).find(b=>b.includes('resource-00'))!;
+   await f.store.transaction(s=>{s.privateFeatures['education.navigate']=false;});
+   for(const [i,label] of [token,'↩️ نتائج البحث · s:Grant:0'].entries()){
+    const r=await f.app().handle(msg(276+i,label));
+    assert.equal(r.status,'DENIED');
+    assert.equal(r.plan,undefined);
+   }
+  }finally{await f.close();}
+ });
+ test('B3 '+engine+': Arabic search origin is retained on selection and not stored as student browsing history',async()=>{
+  const f=await fixture(engine);try{
+   await f.store.transaction(s=>{s.educationResources.find(r=>r.id==='resource-00')!.title='منحة الصين ٢٠٢٧';});
+   const result=await f.app().handle(msg(280,'/search منحة الصين'));
+   const token=buttons(result).find(b=>b.includes('resource-00'))!;
+   assert.match(token,/ · s:منحة الصين:0$/u);
+   const opened=await f.app().handle(msg(281,token));
+   assert.equal(opened.status,'APPLIED');
+   assert.ok(buttons(opened).includes('↩️ نتائج البحث · s:منحة الصين:0'));
+   const returned=await f.app().handle(msg(282,'↩️ نتائج البحث · s:منحة الصين:0'));
+   assert.equal(returned.status,'APPLIED');
+   assert.match(returned.plan?.text??'',/منحة الصين/);
+   const state=await f.store.snapshot();
+   assert.equal('studentSearchSessions' in state,false);
+   assert.equal(isValidTelegramReplyKeyboard(opened.plan?.replyMarkup),true);
+  }finally{await f.close();}
+ });
+ test('B3 '+engine+': max-sized ids or long Arabic query fall back to standard bounded resource buttons',async()=>{
+  const f=await fixture(engine);try{
+   const longId='r'.repeat(64),longQuery='منحة'.repeat(6)+'ين';
+   await f.store.transaction(s=>{
+    s.educationResources.push({
+     id:longId,categoryId:'grants',scope:'private',title:longQuery,
+     university:'University',cycle:'2027',degree:'Bachelor',seats:null,
+     sourceImportId:'import',sourceLocator:'long',reviewedBy:OWNER,status:'PUBLISHED'
+    });
+   });
+   const listing=await f.app().handle(msg(290,'/search '+longQuery));
+   assert.equal(listing.status,'APPLIED');
+   assert.equal(isValidTelegramReplyKeyboard(listing.plan?.replyMarkup),true);
+   const token=buttons(listing).find(b=>b.includes(longId));
+   assert.ok(token);
+   assert.equal(token!.includes(' · s:'),false);
+   const opened=await f.app().handle(msg(291,token!));
+   assert.equal(opened.status,'APPLIED');
+   assert.ok(buttons(opened).includes('↩️ موارد القسم · grants'));
+  }finally{await f.close();}
+ });
+}
