@@ -298,3 +298,10 @@
 ## B5 v0.7.39 — Archival requires a separate verified human choice
 
 A changed, missing or unavailable external source is never proof of scholarship closure and never archives local resources automatically. A verified Telegram-private owner must preview and confirm local archival, and the transaction must recheck owner dashboard rights, B5 source association and the exact current resource fingerprint. The source review queue retains historical provenance, while the archived local resource is hidden from student search. No Telegram outbound send or live API integration is added.
+
+## B5 v0.7.40 — Optional owner-read web routes must not imply production integration (2026-10-22)
+
+- Keep the Telegram Mini App's existing signed `initData` verifier as the only web identity source. The client may not select the owner identity, turn on `owner.dashboard`, add credentials, or discover group-scoped source content through a preview payload.
+- Register platform preview and post-publication source-integrity endpoints **only when** an independently provided B5 reader service is explicitly injected. Both operations are owner-only and read-only; use bounded JSON with no extra or duplicate top-level keys, including Unicode-escaped duplicates.
+- Owner permissions are checked again after external I/O. Source self-reported `PUBLISHED` remains `UNVERIFIED_EXTERNAL` at preview time. Missing records on a stored cursor page are uncertain, not evidence that a grant has closed. All mutations require separate reviewed owner workflows outside these routes.
+- This implementation does not supply or validate a real Manaratak public/private API URL, authentication credential, production ACL, uptime, or live Telegram Mini App deployment.
