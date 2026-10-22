@@ -1,7 +1,7 @@
 import { timingSafeEqual,createHash } from 'node:crypto';
 import type { IncomingMessage, RequestListener, ServerResponse } from 'node:http';
 import { BotStore, type AuditRecord, type BotState, type TelegramReplyJob } from './store.js';
-import {groupQuestionSubscriptionEpoch,groupMenuEpochDigest} from './telegram-group-access.js';
+import {groupQuestionSubscriptionEpoch,groupMenuEpochDigest,privateGroupEpochDigest} from './telegram-group-access.js';
 import { Policy } from './policy.js';
 import { EducationService } from './education.js';
 import { EducationAdminFacade, type VerifiedAdminContext } from './education-admin.js';
@@ -51,7 +51,8 @@ export interface TelegramReplyPlan { chatId: string; parseMode: 'HTML'; text: st
 export interface TelegramResult { status: 'APPLIED' | 'DUPLICATE' | 'DENIED' | 'IGNORED' | 'UNKNOWN'; reason: string; plan?: TelegramReplyPlan; deliveryKey?: string; }
 type ProcessedReply={status:TelegramResult['status'];reason:string;plan?:TelegramReplyPlan;
  groupQuestionAccess?:TelegramReplyJob['groupQuestionAccess'];
- groupMenuAccess?:TelegramReplyJob['groupMenuAccess']};
+ groupMenuAccess?:TelegramReplyJob['groupMenuAccess'];
+ privateGroupAccess?:TelegramReplyJob['privateGroupAccess']};
 export interface TelegramApplicationOptions {
   store: BotStore; policy: Policy; education: EducationService; admin: EducationAdminFacade;
   faq: ApprovedAnswerService; links: ResourceLinkService; membership: MembershipPort;
@@ -242,6 +243,12 @@ export class TelegramUpdateApplication {
        text.startsWith(commandPrefix)?text.slice(commandPrefix.length):null)
      :null;
     let groupAnswerSubscriptionEpochValue:string|undefined;
+    let privateGroupSource:{scope:string;epoch:string}|undefined;
+    const markPrivateGroupSource=async(scope:string):Promise<void>=>{
+     if(kind!=='private'||scope==='private')return;
+     const snap=await this.opts.store.snapshot();
+     privateGroupSource={scope,epoch:privateGroupEpochDigest(snap,scope)};
+    };
     if(kind==='group'&&(cmd==='/categories'||cmd==='/resources'||
       cmd===`/ask@${this.opts.botUsername}`||groupQuestion!==null)) {
       const snapshot=await this.opts.store.snapshot();
@@ -269,6 +276,15 @@ export class TelegramUpdateApplication {
     const result=(message:string,replyMarkup?:TelegramReplyKeyboard,
       groupQuestionAccess?:TelegramReplyJob['groupQuestionAccess']):ProcessedReply=>{
       let groupMenuAccess:TelegramReplyJob['groupMenuAccess'];
+      let privateGroupAccess:TelegramReplyJob['privateGroupAccess'];
+      if(kind==='private'&&privateGroupSource){
+       if(chatId!==actorId)throw Error('B6_PRIVATE_RECIPIENT_MISMATCH');
+       const at=this.clock();
+       if(!Number.isSafeInteger(at)||at<0||at>8_640_000_000_000_000-120_000)
+        throw Error('B6_PRIVATE_GROUP_CLOCK');
+       privateGroupAccess={actorId,scope:privateGroupSource.scope,
+        epoch:privateGroupSource.epoch,expiresAt:at+120_000};
+      }
       if(kind==='group'&&!groupQuestionAccess){
        const epoch=groupAnswerSubscriptionEpochValue;
        const at=this.clock();
@@ -281,7 +297,8 @@ export class TelegramUpdateApplication {
       return {status:'APPLIED',reason:'RESPONSE_PLANNED_ONLY',
        plan:this.plan(chatId,message,replyMarkup),
        ...(groupQuestionAccess?{groupQuestionAccess}:{}),
-       ...(groupMenuAccess?{groupMenuAccess}:{})};
+       ...(groupMenuAccess?{groupMenuAccess}:{}),
+       ...(privateGroupAccess?{privateGroupAccess}:{})};
     };
     const groupAnswerAccess=():TelegramReplyJob['groupQuestionAccess']=>{
       const epoch=groupAnswerSubscriptionEpochValue;
@@ -622,6 +639,7 @@ export class TelegramUpdateApplication {
       const scope=kind==='private'?(words[1]??'private'):chatId;
       if(!isScope(scope))return {status:'DENIED',reason:'INVALID_SCOPE'};
       if(kind==='private') {
+        await markPrivateGroupSource(scope);
         const denied=await this.authorizePrivateGroupBrowse(scope,actorId);
         if(denied)return {status:'DENIED',reason:denied};
       }
@@ -633,6 +651,7 @@ export class TelegramUpdateApplication {
       const scope=kind==='private'?(words[1]??''):chatId,cat=kind==='private'?words[2]:words[1];
       if(!isScope(scope)||!cat||!isId(cat))return {status:'DENIED',reason:'INVALID_RESOURCE_QUERY'};
       if(kind==='private') {
+        await markPrivateGroupSource(scope);
         const denied=await this.authorizePrivateGroupBrowse(scope,actorId);
         if(denied)return {status:'DENIED',reason:denied};
       }
@@ -642,6 +661,8 @@ export class TelegramUpdateApplication {
     }
     if(cmd==='/resource'&&kind==='private'){
       if(words.length!==2)return {status:'DENIED',reason:'INVALID_RESOURCE_REF'};
+      const link=(await this.opts.store.snapshot()).resourceLinks.find(x=>x.ref===words[1]!);
+      if(link)await markPrivateGroupSource(link.scope);
       const subscription=this.opts.subscription;
       const opened=await this.opts.links.resolve(words[1]!,actorId,this.opts.membership,
         subscription?async (scope,user)=>(await subscription.verify(scope,user)).status:undefined);
@@ -697,9 +718,9 @@ export class TelegramUpdateApplication {
     // Commit the decision and outbound reply intent in one durable transaction.
     // No external call occurs before the outbox row exists.
     await this.opts.store.finish(key,audit,handled.plan,handled.groupQuestionAccess,
-     handled.groupMenuAccess);
+     handled.groupMenuAccess,handled.privateGroupAccess);
     // Temporary actor IDs are only stored in the guarded queue, never returned.
-    const {groupQuestionAccess:_,groupMenuAccess:__,...publicResult}=handled;
+    const {groupQuestionAccess:_,groupMenuAccess:__,privateGroupAccess:___,...publicResult}=handled;
     return publicResult.plan?{...publicResult,deliveryKey:key}:publicResult;
   }
 }
