@@ -96,6 +96,8 @@ export interface TelegramReplyJob {
   * jobs is valid for storage but MUST deny any attempted send.
   */
  groupMenuAccess?:{actorId:string;epoch:string;expiresAt:number};
+ /** Temporary source scope + actor used to recheck DM group browsing at send. */
+ privateGroupAccess?:{actorId:string;scope:string;epoch:string;expiresAt:number};
  /** Immutable operator acknowledgement; it NEVER proves delivery or permits retry. */
  manualReview?:{decision:'ACKNOWLEDGED_UNRESOLVED'|'ESCALATED';
   reviewedBy:string;reviewedAt:number;attemptId:string};
@@ -328,6 +330,21 @@ export class BotStore {
             typeof m.epoch!=='string'||!/^[a-f0-9]{64}$/u.test(m.epoch)||
             typeof m.expiresAt!=='number'||!Number.isSafeInteger(m.expiresAt)||
             m.expiresAt<0||m.expiresAt>8_640_000_000_000_000)return true;
+        }
+        if(job.privateGroupAccess!==undefined){
+         const v=job.privateGroupAccess;
+         if(!v||typeof v!=='object'||Array.isArray(v))return true;
+         const a=v as Record<string,unknown>;
+         if(job.status!=='QUEUED'||!plan||typeof plan.chatId!=='string'||
+            job.groupReplyKind!==undefined||
+            job.groupQuestionAccess!==undefined||job.groupMenuAccess!==undefined||
+            Object.keys(a).length!==4||
+            typeof a.actorId!=='string'||!/^[1-9]\d{0,19}$/u.test(a.actorId)||
+            plan.chatId!==a.actorId||
+            typeof a.scope!=='string'||!/^-[1-9]\d{0,18}$/u.test(a.scope)||
+            typeof a.epoch!=='string'||!/^[a-f0-9]{64}$/u.test(a.epoch)||
+            typeof a.expiresAt!=='number'||!Number.isSafeInteger(a.expiresAt)||
+            a.expiresAt<0||a.expiresAt>8_640_000_000_000_000)return true;
         }
         if(job.groupQuestionAccess===undefined)return false;
         const g=job.groupQuestionAccess;
@@ -625,7 +642,8 @@ export class BotStore {
   }
   async finish(key: string, decision: AuditRecord, reply?: TelegramReplyJob['plan'],
     groupQuestionAccess?:TelegramReplyJob['groupQuestionAccess'],
-    groupMenuAccess?:TelegramReplyJob['groupMenuAccess']): Promise<void> {
+    groupMenuAccess?:TelegramReplyJob['groupMenuAccess'],
+    privateGroupAccess?:TelegramReplyJob['privateGroupAccess']): Promise<void> {
     await this.transaction(s => {
       const update = s.updates.find(x => x.key === key);
       if (!update || update.status !== 'CLAIMED') throw new Error('Update not claimed');
@@ -638,7 +656,8 @@ export class BotStore {
          s.telegramReplyJobs.push({updateKey:key,plan:structuredClone(reply),status:'QUEUED',queuedAt:decision.at,
           ...(reply.chatId.startsWith('-')?{groupReplyKind:groupQuestionAccess?'REVIEWED_FAQ' as const:'GENERAL' as const}:{}),
           ...(groupQuestionAccess?{groupQuestionAccess:structuredClone(groupQuestionAccess)}:{}),
-          ...(groupMenuAccess?{groupMenuAccess:structuredClone(groupMenuAccess)}:{})});
+          ...(groupMenuAccess?{groupMenuAccess:structuredClone(groupMenuAccess)}:{}),
+          ...(privateGroupAccess?{privateGroupAccess:structuredClone(privateGroupAccess)}:{})});
       }
     });
   }

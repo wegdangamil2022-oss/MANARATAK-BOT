@@ -132,11 +132,11 @@ test('live webhook checks actual membership for private group catalog, sends rep
   const first=await call();
   assert.deepEqual(await first.json(),{ok:true,status:'APPLIED'});
   assert.equal(first.status,200);
-  assert.deepEqual(calls.map(c=>c.url.split('/').at(-1)),['getChatMember','getChatMember','sendMessage']);
-  assert.equal(calls[2]?.body.chat_id,'300');
-  assert.match(String(calls[2]?.body.text),/Approved scholarships/);
+  assert.deepEqual(calls.map(c=>c.url.split('/').at(-1)),['getChatMember','getChatMember','getChatMember','getChatMember','sendMessage']);
+  assert.equal(calls[4]?.body.chat_id,'300');
+  assert.match(String(calls[4]?.body.text),/Approved scholarships/);
   assert.equal((await call()).status,200);
-  assert.equal(calls.length,3);
+  assert.equal(calls.length,5);
   const snapshot=await store.snapshot();assert.equal(snapshot.telegramReplyJobs?.[0]?.status,'SENT');
   assert.equal(JSON.stringify(snapshot.telegramReplyJobs).includes(TOKEN),false);
  }finally{server.close();await once(server,'close');await rm(directory,{recursive:true,force:true})}

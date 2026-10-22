@@ -38,3 +38,9 @@ export function groupMenuEpochDigest(state:BotState,groupId:string):string{
  return createHash('sha256').update('MANARATAK:B6:GROUP-MENU:DISPATCH:v2:')
   .update(groupQuestionSubscriptionEpoch(state,groupId)).digest('hex');
 }
+
+/** Scoped private DM browsing uses a separate change-detection domain. */
+export function privateGroupEpochDigest(state:BotState,scope:string):string{
+ return createHash('sha256').update('MANARATAK:B6:PRIVATE-GROUP:DISPATCH:v1:')
+  .update(groupQuestionSubscriptionEpoch(state,scope)).digest('hex');
+}

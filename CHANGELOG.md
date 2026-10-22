@@ -1,3 +1,12 @@
+## 0.7.55 — 2026-10-23 — B6 private group-scope Telegram queued resource reauthorization
+
+- Close the gap between admission and queued Telegram delivery when a student requests *group-scoped* published resources in private chat. Persist a `privateGroupAccess` source/recipient witness with actor, group scope, SHA-256 domain-separated content+subscription+policy epoch and 120-second expiry. Do not copy source text into authorization metadata.
+- Require fresh actual group membership at dispatch even if no required channels exist; for ACTIVE mandatory-channel requirements, separately re-verify subscription channels. After awaiting Telegram, compare the original source/authorization epoch inside the durable one-shot queue claim. Reject and scrub stale, missing, expired or malformed proof without a Telegram send.
+- Supply the same live, read-only Telegram membership gateway to the actual reply dispatcher. Add strict state schema and runtime validation: direct private recipient must equal actor ID, scope must be a canonical group ID, and group FAQ/menu metadata cannot coexist with private-group proof.
+- Existing ordinary private scope browsing, group FAQ and group menu outbox semantics remain unchanged, and UNKNOWN external send outcomes are never retried. **Preexisting legacy DM jobs have no scoped proof and remain a documented migration risk**; no claim of retrospective coverage.
+- TDD: 22 new JSON/SQLite and live test assertions; tests demonstrate membership loss, changed subscription and content while a request is queued, live provider-time rechecks and expiry. Strict TS, all unit/integration tests and five offline demos required.
+- No Phase17 real model integration, automatic generated answers or production AI billing.
+
 ## 0.7.54 — 2026-10-22 — B6 prevent stale published group content in queued Telegram replies
 
 - Bind both queued approved FAQ and group navigation messages to a **group-scoped content epoch** covering locally reviewed categories, published resources and FAQ approval/answer state, in addition to the existing membership/subscription/rule policy epoch. Digest input is deterministically sorted by ID. Do not persist raw source text in the witness.

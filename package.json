@@ -1,6 +1,6 @@
 {
   "name": "manaratak-bot",
-  "version": "0.7.54",
+  "version": "0.7.55",
   "private": true,
   "type": "module",
   "description": "MANARATAK BOT B0-B4 mock plus B2-Advanced reviewed purge, confirmed 429 cooldown and evidence-bound review and owner-approved privacy retention and opt-in review checkpoints and local one-shot runner and guarded SQLite backups and read-only retention inventory and isolated SQLite restore drill and opt-in live Telegram reply sender and read-only group membership verification and privacy-limited Telegram reply outbox and owner-only unresolved reply review and opt-in HMAC-protected local owner audit HTTP interface and offline HTTPS webhook readiness preflight and authenticated ingress pressure and graceful drain hardening and offline read-only aggregate outbox monitoring and persistent fail-closed operator emergency switch and offline trial acceptance, rollback anchor verification and isolated restore rehearsal",
