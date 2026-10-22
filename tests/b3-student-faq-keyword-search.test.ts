@@ -154,3 +154,92 @@ test('B3 keyword search is private-only and unknown messages never invoke FAQ or
   assert.equal((await f.store.snapshot()).privateAI,'OFF');
  }finally{await f.close();}
 });
+
+
+// v0.7.60 red: a FAQ search answer must offer an exact, reauthorized return
+// to the original keyword result page rather than dropping it on selection.
+for(const engine of ['json','sqlite'] as const){
+ test('B3 '+engine+': FAQ search-origin answer offers return to same approved query and page',async()=>{
+  const f=await fixture(engine);try{
+   await f.create('متى يبدأ تقديم منحة الصين؟','Reviewed answer');
+   const listing=await f.app().handle(msg(370,'/faqsearch منحة'));
+   const button=buttons(listing).find(x=>x.startsWith('📖 سؤال '))!;
+   assert.ok(button.includes(' · fs:0:'),button);
+   const opened=await f.app().handle(msg(371,button));
+   assert.equal(opened.status,'APPLIED');
+   const back=buttons(opened).find(x=>x.startsWith('↩️ نتائج الأسئلة · fs:0:'));
+   assert.ok(back);
+   assert.ok(buttons(opened).includes(privateFAQBrowseLabel));
+   assert.equal(isValidTelegramReplyKeyboard(opened.plan?.replyMarkup),true);
+   const returned=await f.app().handle(msg(372,back!));
+   assert.equal(returned.status,'APPLIED');
+   assert.match(returned.plan?.text??'',/المطابقات: 1/);
+   assert.ok(buttons(returned).some(x=>x.includes(' · fs:0:')));
+  }finally{await f.close();}
+ });
+ test('B3 '+engine+': FAQ search second page returns to exact current second result page',async()=>{
+  const f=await fixture(engine);try{
+   for(let i=0;i<12;i++)await f.create('منحة عالمية '+String(i).padStart(2,'0'));
+   const first=await f.app().handle(msg(379,'/faqsearch منحة'));
+   const next=buttons(first).find(x=>x.startsWith('➡️ التالي · fq:'))!;
+   assert.ok(next);
+   const second=await f.app().handle(msg(380,next));
+   assert.equal(second.status,'APPLIED');
+   const choice=buttons(second).find(x=>x.startsWith('📖 سؤال '))!;
+   assert.match(choice,/ · fs:1:/u);
+   const detail=await f.app().handle(msg(381,choice));
+   assert.equal(detail.status,'APPLIED');
+   const back=buttons(detail).find(x=>x.startsWith('↩️ نتائج الأسئلة · fs:1:'))!;
+   assert.ok(back);
+   const restored=await f.app().handle(msg(382,back));
+   assert.equal(restored.status,'APPLIED');
+   assert.match(restored.plan?.text??'',/صفحة 2 من 2/);
+   assert.equal(buttons(restored).filter(x=>x.startsWith('📖 سؤال ')).length,2);
+  }finally{await f.close();}
+ });
+ test('B3 '+engine+': forged search-origin question button cannot rebind to a query or another page',async()=>{
+  const f=await fixture(engine);try{
+   await f.create('منحة الصين','Trusted only');
+   const listing=await f.app().handle(msg(390,'/faqsearch منحة'));
+   const choice=buttons(listing).find(x=>x.startsWith('📖 سؤال '))!;
+   assert.ok(choice.includes(' · fs:0:'));
+   for(const [i,candidate] of [
+    choice.replace(' · fs:0:',' · fs:1:'),
+    choice.replace(/ · fs:0:[A-Za-z0-9_-]+$/u,' · fs:0:Q2hpbmE'),
+    choice.replace(' · ~',' · ~0000'),
+    choice+' ',
+    '📖 سؤال 1 · ~1111111111111111 · fs:0:@@@'
+   ].entries()){
+    const denied=await f.app().handle(msg(391+i,candidate));
+    assert.equal(denied.status,'DENIED',candidate);
+    assert.equal(denied.plan,undefined);
+   }
+  }finally{await f.close();}
+ });
+ test('B3 '+engine+': FAQ search back and selection lose rights after source is archived',async()=>{
+  const f=await fixture(engine);try{
+   const q=await f.create('منحة متاحة','Trusted answer');
+   const listing=await f.app().handle(msg(400,'/faqsearch منحة'));
+   const choice=buttons(listing).find(x=>x.startsWith('📖 سؤال '))!;
+   assert.ok(choice);
+   await f.faq.archive(OWNER,q.id);
+   const denied=await f.app().handle(msg(401,choice));
+   assert.equal(denied.status,'DENIED');
+   assert.equal(denied.plan,undefined);
+   const stale=await f.app().handle(msg(402,'↩️ نتائج الأسئلة · fs:999:2YXZhtit'));
+   assert.equal(stale.status,'DENIED');
+  }finally{await f.close();}
+ });
+ test('B3 '+engine+': disabled FAQ education blocks both search-origin detail and return',async()=>{
+  const f=await fixture(engine);try{
+   await f.create('منحة جديدة');
+   const list=await f.app().handle(msg(410,'/faqsearch منحة'));
+   const choice=buttons(list).find(x=>x.startsWith('📖 سؤال '))!;
+   await f.store.transaction(s=>{s.privateFeatures['education.navigate']=false;});
+   const denied=await f.app().handle(msg(411,choice));
+   assert.equal(denied.status,'DENIED');assert.equal(denied.plan,undefined);
+   const back=await f.app().handle(msg(412,'↩️ نتائج الأسئلة · fs:0:2YXZhtit'));
+   assert.equal(back.status,'DENIED');assert.equal(back.plan,undefined);
+  }finally{await f.close();}
+ });
+}
