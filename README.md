@@ -1,3 +1,13 @@
+## B6 v0.7.50 — end-of-planning Telegram group subscription evidence fence (approved FAQ only)
+
+The optional B6 Telegram group `/ask@Bot` and explicit `@Bot` mention routes now carry a local subscription/group authorization epoch from the **initial** gate across the potentially slow reviewed FAQ/knowledge lookup. Immediately before planning a group answer, the handler rereads group approval and AI settings, required-channel rule versions, channel authorizations and subscription mode; any change denies the answer instead of trusting an outdated Telegram membership result. The fence is enforced for the legacy approved B3 group FAQ fallback too.
+
+For an unchanged active required-channel rule, the handler makes a second fresh subscription verification after FAQ retrieval. Missing verifier, unknown/unverifiable membership and removal of membership all deny planning; a rule change or revoke/reapprove during this second external check is also rejected. The route permits an unchanged verified member; private FAQ is unaffected. The check does not authorize non-reviewed model text or substitute for a proper Phase 17 consumer API.
+
+**Important boundary:** This is a *reply-plan* authorization check. It cannot guarantee membership remains current when a previously queued Telegram reply is eventually dispatched. The outbox/sender must separately guard actual delivery with a provider-time authorization/evidence model before claiming live last-mile protection; do not interpret this release as closing all delayed-send races. JSON simulation is single-process; SQLite tests exercise transactional local state. Fake AI remains OFF.
+
+Sixteen added JSON/SQLite behavior tests cover new rules after the first check, rule pause/reconfiguration, lost membership while FAQ awaits, rule change during the second membership check, preservation of valid member answers and legacy FAQ fallback. GitHub Actions runs strict TypeScript, automated tests and five offline demos. No real AI model, external Phase 17 authorization, or automatic generated reply is connected.
+
 ## B6 v0.7.49 — owner-only reply to one student's current Telegram message (approved FAQ only)
 
 When the verified bot owner **replies to an existing student message inside an approved group** with `@ManaratakBot أجب عن هذا السؤال` (using a real Telegram mention entity), or `/ask@ManaratakBot أجب عن هذا السؤال`, the bot now extracts the question **only** from that update's direct `reply_to_message.text`. There is no chat history retrieval, previous question cache, forwarding, quote concatenation or arbitrary model generation. If the replied-to message is missing, the owner receives a prompt to reply directly instead of guessing the question. Students cannot use this privileged reply-to shortcut.
