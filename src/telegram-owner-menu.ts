@@ -13,6 +13,7 @@ import {PLATFORM_IMPORT_SOURCE,type PlatformCatalogPreviewService} from './platf
 import {resourceArchiveFingerprint} from './education-archive.js';
 import {OwnerB6BudgetMenu,b6BudgetMenuLabel,isOwnerB6BudgetText} from './telegram-owner-b6-budget.js';
 import {escapeTelegramListPreview} from './telegram-preview.js';
+import {summarizeOutboxAccessDenials} from './telegram-outbox-access-summary.js';
 
 export const ownerMenuLabels={
  imports:'🧾 مراجعة الوارد',
@@ -544,6 +545,11 @@ export class OwnerTelegramMenu{
     [ownerMenuLabels.groups,ownerMenuLabels.settings]);
   }
   if(text===ownerMenuLabels.delivery){
+   // Existing trusted owner-private menu boundary; a second service-level
+   // owner and dashboard ACL check prevents reuse by other contexts.
+   let denied:Awaited<ReturnType<typeof summarizeOutboxAccessDenials>>;
+   try{denied=await summarizeOutboxAccessDenials(this.store,this.policy,ctx.actorId);}
+   catch{return reject();}
    const jobs=state.telegramReplyJobs??[];
    const queued=jobs.filter(x=>x.status==='QUEUED').length;
    const uncertain=jobs.filter(x=>x.status==='UNKNOWN_OUTCOME'||x.status==='SENDING').length;
@@ -555,6 +561,12 @@ export class OwnerTelegramMenu{
     +'ردود في الانتظار: '+queued+'\n'
     +'محاولات مجهولة أو قيد الإرسال: '+uncertain+'\n'
     +'نشر حملات معلّق أو مجهول: '+pendingPublication+'\n'
+    +'ردود رُفضت نهائيًا: '+denied.totalFailed+'\n'
+    +'منشأ قديم غير موثوق: '+denied.legacyUnverifiable+'\n'
+    +'صلاحية غير قابلة لإعادة التحقق: '+denied.accessRecheckFailed+'\n'
+    +'مجموعة لم تعد متاحة: '+denied.groupUnavailable+'\n'
+    +'فشل إرسال مؤكد أو غير مصنف: '+denied.otherConfirmedFailures+'\n'
+    +'هذه أعداد إجمالية دون رسائل أو معرفات للطلاب، ولا تحدد السبب الخارجي بدقة.\n'
     +'لا تعيد إرسال UNKNOWN تلقائيًا. فحص البيانات التفصيلي للمشغّل المحلي فقط.'
     );
   }

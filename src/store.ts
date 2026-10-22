@@ -102,6 +102,11 @@ export interface TelegramReplyJob {
   * without either this or privateGroupAccess are quarantine-only on dispatch.
   */
  privateReplyKind?:'LOCAL'|'GROUP_SCOPED';
+ /** Explicit bounded classification of a locally denied QUEUED send.
+  * No actor ID, chat ID, text, evidence key or provider description.
+  * Historical FAILED_CONFIRMED and network-provider failures remain untagged.
+  */
+ accessDenialCode?:'LEGACY_UNVERIFIABLE'|'ACCESS_RECHECK_FAILED'|'GROUP_UNAVAILABLE';
  /** Immutable operator acknowledgement; it NEVER proves delivery or permits retry. */
  manualReview?:{decision:'ACKNOWLEDGED_UNRESOLVED'|'ESCALATED';
   reviewedBy:string;reviewedAt:number;attemptId:string};
@@ -314,6 +319,11 @@ export class BotStore {
         if(!raw||typeof raw!=='object'||Array.isArray(raw))return true;
         const job=raw as Record<string,unknown>;
         const plan=job.plan as Record<string,unknown>|undefined;
+        if(job.accessDenialCode!==undefined&&(
+           job.status!=='FAILED_CONFIRMED'||typeof job.accessDenialCode!=='string'||
+           !['LEGACY_UNVERIFIABLE','ACCESS_RECHECK_FAILED','GROUP_UNAVAILABLE']
+            .includes(job.accessDenialCode)))
+          return true;
         if(job.groupReplyKind!==undefined){
          if(job.status!=='QUEUED'||!plan||typeof plan.chatId!=='string'||
             !/^-[1-9]\d{0,18}$/u.test(plan.chatId)||
