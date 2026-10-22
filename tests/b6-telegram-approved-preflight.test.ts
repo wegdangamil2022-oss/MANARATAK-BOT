@@ -444,3 +444,64 @@ for(const engine of ['json','sqlite'] as const){
   }finally{await f.close();}
  });
 }
+
+
+for(const engine of ['json','sqlite'] as const){
+ test('B6 '+engine+': changed ALL to ANY subscription revision during approved FAQ wait invalidates evidence',async()=>{
+  const f=await setup(engine);try{
+   await f.subscription.configure(OWNER,GROUP,[CHANNEL],'ALL');
+   f.membership.set(CHANNEL,String(STUDENT),'MEMBER');
+   let entered!:()=>void,release!:()=>void;
+   const started=new Promise<void>(r=>entered=r),held=new Promise<void>(r=>release=r);
+   const source:KnowledgeSourcePort={lookup:async q=>{
+    const value=await f.knowledge.lookup(q);entered();await held;return value;
+   }};
+   const pending=f.app(true,source,true).handle(msg(705,STUDENT,
+    '/ask@ManaratakBot '+QUESTION,true));
+   await started;
+   await f.subscription.configure(OWNER,GROUP,[CHANNEL],'ANY');
+   release();
+   const outcome=await pending;
+   assert.equal(outcome.status,'DENIED');
+   assert.equal(outcome.plan,undefined);
+  }finally{await f.close();}
+ });
+ test('B6 '+engine+': subscription changes during second membership verification are rejected',async()=>{
+  const f=await setup(engine);try{
+   await f.subscription.configure(OWNER,GROUP,[CHANNEL],'ALL');
+   f.membership.set(CHANNEL,String(STUDENT),'MEMBER');
+   const original=f.membership.getMember.bind(f.membership);
+   let attempts=0,entered!:()=>void,release!:()=>void;
+   const started=new Promise<void>(r=>entered=r),held=new Promise<void>(r=>release=r);
+   f.membership.getMember=async(channel,user)=>{
+    attempts++;
+    if(attempts===2){entered();await held;}
+    return original(channel,user);
+   };
+   const pending=f.app(true,undefined,true).handle(msg(706,STUDENT,
+    '/ask@ManaratakBot '+QUESTION,true));
+   await started;
+   await f.subscription.configure(OWNER,GROUP,[CHANNEL],'ANY');
+   release();
+   const outcome=await pending;
+   assert.equal(outcome.status,'DENIED');
+   assert.equal(outcome.plan,undefined);
+   assert.equal(attempts,2);
+  }finally{await f.close();}
+ });
+ test('B6 '+engine+': legacy B3 FAQ path retains active mandatory subscription enforcement',async()=>{
+  const f=await setup(engine);try{
+   await f.subscription.configure(OWNER,GROUP,[CHANNEL],'ALL');
+   f.membership.set(CHANNEL,String(STUDENT),'MEMBER');
+   const allowed=await f.app(false,undefined,true).handle(msg(707,STUDENT,
+    '/ask@ManaratakBot '+QUESTION,true));
+   assert.equal(allowed.status,'APPLIED');
+   assert.match(allowed.plan?.text??'',/جواب المجموعة فقط/);
+   f.membership.set(CHANNEL,String(STUDENT),'NOT_MEMBER');
+   const denied=await f.app(false,undefined,true).handle(msg(708,STUDENT,
+    '/ask@ManaratakBot '+QUESTION,true));
+   assert.equal(denied.status,'DENIED');
+   assert.equal(denied.plan,undefined);
+  }finally{await f.close();}
+ });
+}
