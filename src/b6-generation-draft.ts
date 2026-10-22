@@ -151,6 +151,13 @@ export class B6GenerationDraftService {
   this.maxOutputChars=config.maxOutputChars??400;
   this.maxDurationMs=config.maxDurationMs??30_000;
  }
+ /** Only the durable fake ledger may handle a stable verified transport intent.
+  * A caller using an ephemeral-only service fails closed before any fake model call.
+  */
+ async prepareDurableDraft(input:B6AnswerRequest,requestKey:string):Promise<B6DraftResult>{
+  if(!this.durableBudget)return {status:'UNAVAILABLE'};
+  return this.prepareDraft(input,requestKey);
+ }
  async prepareDraft(input:B6AnswerRequest,requestKey?:string):Promise<B6DraftResult>{
   if(!this.enabled)return {status:'DISABLED'};
   const initial=await this.preflight.prepare(input);

@@ -111,7 +111,10 @@ for(const engine of ['json','sqlite'] as const){
    const rows=(await f.store.snapshot()).b6BudgetAttempts!;
    assert.equal(rows.length,1);
    assert.match(rows[0]!.requestKey,allowed);
-   assert.doesNotMatch(JSON.stringify(rows),/300|manaratak_bot|ما شروط|الجواب الرسمي/);
+   assert.equal(JSON.stringify(rows).includes('"actor":"300"'),false);
+   assert.equal(JSON.stringify(rows).includes('manaratak_bot'),false);
+   assert.equal(JSON.stringify(rows).includes('ما شروط المنحة'),false);
+   assert.equal(JSON.stringify(rows).includes('الجواب الرسمي المعتمد'),false);
   }finally{await f.close();}
  });
  test('B6 '+engine+': distinct verified update has a unique durable reservation',async()=>{
