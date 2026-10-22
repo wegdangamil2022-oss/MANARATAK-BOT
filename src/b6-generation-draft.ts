@@ -1,5 +1,6 @@
 import type {B6AnswerRequest} from './b6-approved-answer-preflight.js';
 import {B6AnswerPreflight} from './b6-approved-answer-preflight.js';
+import {B6DurableBudget} from './b6-durable-budget.js';
 
 /** B6 Phase-17-facing PROPOSED contract, fake-only in this release.
  * The port receives no Telegram actor ID, previous chat history, session
@@ -27,7 +28,8 @@ export interface B6AttemptLimits {
 }
 export type B6DraftResult=
  |{status:'DISABLED'|'DENIED'|'STALE'|'NO_APPROVED_SOURCE'|'AMBIGUOUS'|
-   'UNAVAILABLE'|'BUSY'|'BUDGET_EXHAUSTED'|'INVALID_OUTPUT'}
+   'UNAVAILABLE'|'BUSY'|'BUDGET_EXHAUSTED'|'INVALID_OUTPUT'|
+   'DUPLICATE'|'INVALID_REQUEST'|'CLOCK_ROLLBACK'}
  |{status:'DRAFT';draftText:string;safeHtml:string;sourceId:string;
    reviewState:'OWNER_REVIEW_REQUIRED';
    usage:{inputTokens:number;outputTokens:number}};
@@ -118,7 +120,9 @@ export class B6GenerationDraftService {
   private readonly preflight:B6AnswerPreflight,
   private readonly port:AnswerGenerationPort,
   private readonly budget:B6EphemeralCallBudget,
-  config:B6DraftConfig={}){
+  config:B6DraftConfig={},
+  /** OFFLINE persisted conservative tokens/attempt gate; never grants real-provider billing permission. */
+  private readonly durableBudget?:B6DurableBudget){
   if(config===null||typeof config!=='object'||Array.isArray(config)||
     Object.keys(config).some(k=>k!=='enabled'&&k!=='maxOutputChars')||
     (config.enabled!==undefined&&typeof config.enabled!=='boolean')||
@@ -130,12 +134,28 @@ export class B6GenerationDraftService {
   this.enabled=config.enabled===true;
   this.maxOutputChars=config.maxOutputChars??400;
  }
- async prepareDraft(input:B6AnswerRequest):Promise<B6DraftResult>{
+ async prepareDraft(input:B6AnswerRequest,requestKey?:string):Promise<B6DraftResult>{
   if(!this.enabled)return {status:'DISABLED'};
   const initial=await this.preflight.prepare(input);
   if(initial.status!=='APPROVED_ANSWER')return {status:initial.status};
+  // An explicitly configured persistent budget MUST have the stable upstream
+  // request key before any fake generation. Callers may not mint a new key to
+  // retry an unknown or duplicate outcome from a prior Telegram request.
+  if(this.durableBudget&&(!requestKey||typeof requestKey!=='string'))
+   return {status:'INVALID_REQUEST'};
   const admission=this.budget.begin();
   if(admission.status!=='ADMITTED')return {status:admission.status};
+  let attemptId:string|undefined;
+  if(this.durableBudget){
+   // This reserves the maximum allowed fake budget units (NOT actual provider
+   // token pricing). Fail closed on any durable ledger denial/unknown.
+   const reserved=await this.durableBudget.reserve(requestKey!,8192);
+   if(reserved.status!=='RESERVED'){
+    admission.finish();
+    return {status:reserved.status};
+   }
+   attemptId=reserved.attemptId;
+  }
   let returned:unknown;
   try{
    returned=await this.port.generate({
@@ -144,8 +164,16 @@ export class B6GenerationDraftService {
     approvedAnswer:initial.answer,sourceId:initial.sourceId,
     maxOutputChars:this.maxOutputChars
    });
-  }catch{return {status:'UNAVAILABLE'};}
-  finally{admission.finish();}
+  }catch{
+   if(this.durableBudget&&attemptId)
+    await this.durableBudget.finish(requestKey!,attemptId,'UNKNOWN_OUTCOME');
+   return {status:'UNAVAILABLE'};
+  }finally{admission.finish();}
+  // Never expose a result if the reservation was lost/expired while external
+  // processing was in flight, regardless of whether it returned a valid draft.
+  if(this.durableBudget&&attemptId&&
+     await this.durableBudget.finish(requestKey!,attemptId,'COMPLETED')!=='COMPLETED')
+   return {status:'UNAVAILABLE'};
   const reviewed=reviewDraft(returned,initial.sourceId,this.maxOutputChars);
   if(!reviewed)return {status:'INVALID_OUTPUT'};
   const current=await this.preflight.prepare(input);
