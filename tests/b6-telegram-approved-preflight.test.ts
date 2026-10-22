@@ -786,3 +786,122 @@ for(const engine of ['json','sqlite'] as const){
   }finally{await f.close();}
  });
 }
+
+
+// v0.7.54: source revisions must travel with the queued answer. A previously
+// verified Telegram subscription is not proof that a *source* remains public.
+for(const engine of ['json','sqlite'] as const){
+ const queued=async(f:Awaited<ReturnType<typeof setup>>,id:number,cmd:string)=>{
+  const r=await f.app(true,undefined,true).handle(msg(id,STUDENT,cmd,true));
+  assert.equal(r.status,'APPLIED');
+  assert.ok(r.deliveryKey);
+  return r.deliveryKey!;
+ };
+ const deliver=(f:Awaited<ReturnType<typeof setup>>,sent:string[],active=false)=>{
+  return new TelegramReplyDispatcher(f.store,f.policy,{
+   send:async plan=>{sent.push(plan.text);return {status:'CONFIRMED' as const,messageId:919};}
+  },Date.now,undefined,active?f.subscription:undefined);
+ };
+ const denied=(f:Awaited<ReturnType<typeof setup>>,sent:string[],key:string)=>
+  deliver(f,sent).dispatch(key);
+
+ test('B6 '+engine+': archiving an already queued group resource list rejects stale published names',async()=>{
+  const f=await setup(engine);try{
+   const key=await queued(f,1500,'/resources grants');
+   await f.education.archiveResource(OWNER,f.groupResourceId);
+   const sent:string[]=[];
+   assert.equal((await denied(f,sent,key)).status,'FAILED_CONFIRMED');
+   assert.deepEqual(sent,[]);
+   const job=(await f.store.snapshot()).telegramReplyJobs?.[0];
+   assert.equal(job?.plan,undefined);assert.equal(job?.status,'FAILED_CONFIRMED');
+  }finally{await f.close();}
+ });
+ test('B6 '+engine+': disabling a category after queuing its group menu rejects stale category labels',async()=>{
+  const f=await setup(engine);try{
+   const key=await queued(f,1501,'/categories');
+   await f.education.setCategoryEnabled(OWNER,'grants',false);
+   const sent:string[]=[];
+   assert.equal((await denied(f,sent,key)).status,'FAILED_CONFIRMED');
+   assert.equal(sent.length,0);
+  }finally{await f.close();}
+ });
+ test('B6 '+engine+': archiving an approved FAQ after reply planning rejects the queued answer',async()=>{
+  const f=await setup(engine);try{
+   const key=await queued(f,1502,'/ask@ManaratakBot '+QUESTION);
+   const entry=(await f.store.snapshot()).faqEntries.find(q=>q.scope===GROUP&&q.status==='APPROVED');
+   assert.ok(entry);
+   await f.faq.archive(OWNER,entry.id);
+   const sent:string[]=[];
+   assert.equal((await denied(f,sent,key)).status,'FAILED_CONFIRMED');
+   assert.equal(sent.length,0);
+   assert.equal((await f.store.snapshot()).telegramReplyJobs?.[0]?.groupQuestionAccess,undefined);
+  }finally{await f.close();}
+ });
+ test('B6 '+engine+': archiving the source resource invalidates previously planned FAQ answer',async()=>{
+  const f=await setup(engine);try{
+   const key=await queued(f,1503,'/ask@ManaratakBot '+QUESTION);
+   await f.education.archiveResource(OWNER,f.groupResourceId);
+   const sent:string[]=[];
+   assert.equal((await denied(f,sent,key)).status,'FAILED_CONFIRMED');
+   assert.equal(sent.length,0);
+  }finally{await f.close();}
+ });
+ test('B6 '+engine+': changing already approved FAQ text invalidates previously queued answer',async()=>{
+  const f=await setup(engine);try{
+   const key=await queued(f,1504,'/ask@ManaratakBot '+QUESTION);
+   await f.store.transaction(s=>{
+    const entry=s.faqEntries.find(q=>q.scope===GROUP&&q.status==='APPROVED');
+    if(entry)entry.answer='جواب جديد راجعه المالك';
+   });
+   const sent:string[]=[];
+   assert.equal((await denied(f,sent,key)).status,'FAILED_CONFIRMED');
+   assert.equal(sent.length,0);
+  }finally{await f.close();}
+ });
+ test('B6 '+engine+': changing private-only content does not cancel valid group source',async()=>{
+  const f=await setup(engine);try{
+   const key=await queued(f,1505,'/resources grants');
+   await f.education.archiveResource(OWNER,f.resourceId);
+   const sent:string[]=[];
+   assert.equal((await denied(f,sent,key)).status,'CONFIRMED');
+   assert.equal(sent.length,1);
+  }finally{await f.close();}
+ });
+ test('B6 '+engine+': removing the group source mid-membership verification rejects the send',async()=>{
+  const f=await setup(engine);try{
+   await f.subscription.configure(OWNER,GROUP,[CHANNEL],'ALL');
+   f.membership.set(CHANNEL,String(STUDENT),'MEMBER');
+   const key=await queued(f,1506,'/resources grants');
+   const original=f.membership.getMember.bind(f.membership);
+   let entered!:()=>void,release!:()=>void;
+   const pendingCheck=new Promise<void>(r=>entered=r),held=new Promise<void>(r=>release=r);
+   f.membership.getMember=async(channel,user)=>{
+    entered();await held;return original(channel,user);
+   };
+   const sent:string[]=[];
+   const dispatch=deliver(f,sent,true).dispatch(key);
+   await pendingCheck;
+   await f.education.archiveResource(OWNER,f.groupResourceId);
+   release();
+   assert.equal((await dispatch).status,'FAILED_CONFIRMED');
+   assert.equal(sent.length,0);
+  }finally{await f.close();}
+ });
+ test('B6 '+engine+': removing source while approved B6 preflight awaits denies response planning',async()=>{
+  const f=await setup(engine);try{
+   let entered!:()=>void,release!:()=>void;
+   const started=new Promise<void>(r=>entered=r),held=new Promise<void>(r=>release=r);
+   const source:KnowledgeSourcePort={lookup:async q=>{
+    const answer=await f.knowledge.lookup(q);entered();await held;return answer;
+   }};
+   const pending=f.app(true,source,true).handle(msg(1507,STUDENT,
+    '/ask@ManaratakBot '+QUESTION,true));
+   await started;
+   await f.education.archiveResource(OWNER,f.groupResourceId);
+   release();
+   const result=await pending;
+   assert.equal(result.status,'DENIED');
+   assert.equal(result.plan,undefined);
+  }finally{await f.close();}
+ });
+}

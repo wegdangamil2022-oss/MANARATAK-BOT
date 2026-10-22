@@ -1,3 +1,11 @@
+## 0.7.54 — 2026-10-22 — B6 prevent stale published group content in queued Telegram replies
+
+- Bind both queued approved FAQ and group navigation messages to a **group-scoped content epoch** covering locally reviewed categories, published resources and FAQ approval/answer state, in addition to the existing membership/subscription/rule policy epoch. Digest input is deterministically sorted by ID. Do not persist raw source text in the witness.
+- Upgrade the group reply witness hash domains from v1 to v2, ensuring all pre-v0.7.54 queued group messages with outdated, content-unaware authorization fail closed, including those with valid old actor/subscription witnesses. Such messages are rejected/redacted locally and not retried; previously started or UNKNOWN sends remain unchanged.
+- Revalidate the same content-inclusive epoch during approved FAQ retrieval and again both before and inside exclusive outbox claim. Concurrent owner archiving or unpublishing an educational source, disabling a category, or changing approved FAQ text invalidates the send, including during an external membership-await race. Private-only changes don't invalidate unrelated group content.
+- Add 16 JSON/SQLite regression tests: 12 failed in the RED state, and final successful TypeScript + 1,198/1,198 tests + five offline demos required before merge.
+- This is a local pre-dispatch freshness fence, not an atomic revocation of a Telegram message already accepted by the provider. Phase17 generative AI, production model accounting and autonomous response publication remain OFF.
+
 ## 0.7.53 — 2026-10-22 — B6 guarded group navigation outbox membership, no real AI
 
 - Close remaining pre-dispatch group resource-list leak: newly queued Telegram `/categories` and `/resources` replies now carry a 120-second, actor-scoped `groupMenuAccess` witness derived from the exact local group and subscription epoch. A queued GENERAL response with no such witness is denied/redacted as legacy, even if v0.7.52 supplied the GENERAL tag.
