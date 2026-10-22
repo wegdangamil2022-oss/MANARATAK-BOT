@@ -732,8 +732,8 @@ for(const engine of ['json','sqlite'] as const){
    const next=await groupNav(f,954);
    f.membership.set(CHANNEL,String(STUDENT),'UNKNOWN');
    assert.equal((await dispatcher(f,sent,true).dispatch(next)).status,'FAILED_CONFIRMED');
-   const third=await groupNav(f,955);
    f.membership.set(CHANNEL,String(STUDENT),'MEMBER');
+   const third=await groupNav(f,955);
    assert.equal((await dispatcher(f,sent,true).dispatch(third)).status,'CONFIRMED');
    assert.equal(sent.length,1);
   }finally{await f.close();}
