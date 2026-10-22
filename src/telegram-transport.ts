@@ -8,6 +8,7 @@ import { ApprovedAnswerService, ResourceLinkService, type MembershipPort } from 
 import type { ImportFormat } from './ingestion.js';
 import type { SubscriptionGate } from './subscription.js';
 import type {PlatformCatalogPreviewService} from './platform-catalog-preview.js';
+import type {B6AnswerPreflight} from './b6-approved-answer-preflight.js';
 import {subscriptionRequirementMode,acceptsActiveSubscriptionEvidence} from './subscription-integrity.js';
 import type { TelegramReplyDispatcher } from './telegram-replies.js';
 import {BoundedIngress,decodeStrictJsonBytes,type IngressOptions} from './http-ingress-guard.js';
@@ -51,6 +52,8 @@ export interface TelegramApplicationOptions {
   botId: string; botUsername: string; subscription?: SubscriptionGate; clock?: () => number; documentDownload?: TelegramDocumentPort;
   /** Optional B5 read-only owner preview; absent in usual offline deployment. */
   platformCatalog?:PlatformCatalogPreviewService;
+  /** B6 offline approved-knowledge-only planner; no AI configured by default. */
+  answerPreflight?:B6AnswerPreflight;
 }
 
 type Event = {updateId: number; actorId: string; chatId: string; kind: 'private' | 'group'; text: string; document?: IncomingDocument};
@@ -226,6 +229,28 @@ export class TelegramUpdateApplication {
         ).handle(text,adminCtx);
         if(!screen)return {status:'DENIED',reason:'OWNER_MENU_UNAVAILABLE'};
         return result(screen.text,screen.keyboard);
+      }
+      // Explicit /ask is separate from /faq. This opt-in B6 preview relies
+      // solely on current approved B3 FAQ text; no generation or source mixing.
+      if(this.opts.answerPreflight&&(text==='/ask'||text.startsWith('/ask '))){
+       const plan=await this.opts.answerPreflight.prepare({
+        actor:actorId,scope:'private',question:text.slice(5),optedIn:true
+       });
+       if(plan.status==='NO_APPROVED_SOURCE')return result(
+        '<b>المساعد التعليمي</b>\n'
+        +'لم نعثر على إجابة معتمدة لهذا السؤال. لا يوجد توليد AI تلقائي.\n'
+        +'يمكنك تجربة /faq أو تصفح المكتبة المنشورة.',
+        backMenuKeyboard());
+       if(plan.status==='AMBIGUOUS')return result(
+        '<b>المساعد التعليمي</b>\n'
+        +'هناك إجابات معتمدة متعارضة؛ يلزم توضيح أو مراجعة المالك.',
+        backMenuKeyboard());
+       if(plan.status!=='APPROVED_ANSWER')
+        return {status:'DENIED',reason:'B6_'+plan.status};
+       return result('<b>إجابة من مصادر منارتك المعتمدة ✅</b>\n'
+        +escapeTelegramHtml(plan.answer)+'\n'
+        +'هذه إجابة محفوظة وليست مولدة بالذكاء الاصطناعي.',
+        backMenuKeyboard());
       }
       if(text==='/faq')return result(
        '<b>الأسئلة الشائعة المعتمدة ❓</b>\n'
@@ -540,6 +565,16 @@ export class TelegramUpdateApplication {
     }
     if(kind==='group'&&text.startsWith(`/ask@${this.opts.botUsername} `)){
       const question=text.slice(`/ask@${this.opts.botUsername} `.length);
+      if(this.opts.answerPreflight){
+       const plan=await this.opts.answerPreflight.prepare({
+        actor:actorId,scope:chatId,question,explicitMention:true
+       });
+       if(plan.status!=='APPROVED_ANSWER')
+        return {status:'DENIED',reason:'B6_'+plan.status};
+       return result('<b>إجابة من موارد منارتك المعتمدة</b>\n'
+        +escapeTelegramHtml(plan.answer)+'\n'
+        +'جواب محفوظ ومعتمد، لا AI توليدي.');
+      }
       const ans=await this.opts.faq.answerGroup(actorId,chatId,question,true);
       if(ans.status!=='ANSWER')return {status:'DENIED',reason:`FAQ_${ans.status}`};
       return result(`<b>إجابة من موارد منارتك المعتمدة</b>\n${escapeTelegramHtml(ans.answer)}`);
