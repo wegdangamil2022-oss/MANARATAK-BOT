@@ -82,7 +82,7 @@ export class OwnerB6BudgetMenu{
      a.status==='UNKNOWN_OUTCOME'?'نتيجة مجهولة':
      a.status==='RESERVED'?'محاولة جارية':'مكتملة')+
     (a.reviewed?' (تم الاطلاع)':'')+' — '+a.reservedTokens+' وحدة');
-  return screen('<b>مراقبة حجوزات AI التجريبية 🧮</b>\n'
+  return screen('<b>مراقبة الحجوزات التجريبية للمساعد AI 🧮</b>\n'
    +'اليوم (UTC): '+report.day+'\n'
    +'محاولات اليوم: '+report.attemptsToday+'\n'
    +'الوحدات المحجوزة اليوم: '+report.reservedTokensToday+'\n'
