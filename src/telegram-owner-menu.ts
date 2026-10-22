@@ -11,6 +11,7 @@ import {OwnerTelegramCategoryMenu,isOwnerCategoryText} from './telegram-owner-ca
 import {OwnerTelegramFAQMenu,isOwnerFAQText} from './telegram-owner-faq.js';
 import {PLATFORM_IMPORT_SOURCE,type PlatformCatalogPreviewService} from './platform-catalog-preview.js';
 import {resourceArchiveFingerprint} from './education-archive.js';
+import {OwnerB6BudgetMenu,b6BudgetMenuLabel,isOwnerB6BudgetText} from './telegram-owner-b6-budget.js';
 import {escapeTelegramListPreview} from './telegram-preview.js';
 
 export const ownerMenuLabels={
@@ -23,6 +24,7 @@ export const ownerMenuLabels={
  delivery:'📊 حالة الرسائل',
  platformCatalog:'🔎 معاينة بيانات منارتك',
  platformIntegrity:'🔬 سلامة المصادر الخارجية',
+ b6Budget:b6BudgetMenuLabel,
  settings:'⚙️ إعدادات التشغيل',
 } as const;
 type OwnerMenuAction={
@@ -92,7 +94,7 @@ const sections=new Set<string>(Object.values(ownerMenuLabels));
  * ordinary student message. Never use text alone to authenticate its sender.
  */
 export function isOwnerMenuText(text:string):boolean{
- return text===menuLabels.owner||sections.has(text)||isOwnerGroupText(text)||isOwnerLibraryText(text)||isOwnerCategoryText(text)||isOwnerFAQText(text)||
+ return text===menuLabels.owner||sections.has(text)||isOwnerGroupText(text)||isOwnerLibraryText(text)||isOwnerCategoryText(text)||isOwnerFAQText(text)||isOwnerB6BudgetText(text)||
   text.startsWith('➡️ التالي · o:')||text.startsWith('⬅️ السابق · o:')||
   text.startsWith('➡️ التالي · b5:')||text.startsWith('⬅️ السابق · b5:')||
   text.startsWith('📥 تسجيل مرشح · ')||text.startsWith('✅ تدقيق بيانات · ')||
@@ -112,7 +114,7 @@ const line=(s:string,max=100):string=>esc(clean(s).slice(0,max));
 export interface OwnerMenuScreen {text:string;keyboard:TelegramReplyKeyboard;}
 const buttonRows=(choices:readonly string[],pages:{previous?:string|undefined;next?:string|undefined}={}):TelegramReplyKeyboard=>{
  const rows:{text:string}[][]=[];
- for(let i=0;i<Math.min(choices.length,10);i+=2)
+ for(let i=0;i<Math.min(choices.length,12);i+=2)
   rows.push(choices.slice(i,i+2).map(text=>({text})));
  const controls=[pages.previous,pages.next].filter((x):x is string=>typeof x==='string');
  if(controls.length)rows.push(controls.map(text=>({text})));
@@ -134,7 +136,8 @@ export class OwnerTelegramMenu{
   private readonly policy:Policy,
   private readonly education:EducationService,
   private readonly admin:EducationAdminFacade,
-  private readonly platformCatalog?:PlatformCatalogPreviewService
+  private readonly platformCatalog?:PlatformCatalogPreviewService,
+  private readonly clock:()=>number=Date.now
  ){}
  private allowedRun(state:BotState,id:string):ImportRun|null{
   const run=state.importRuns.find(x=>x.id===id);
@@ -211,6 +214,8 @@ export class OwnerTelegramMenu{
  async handle(text:string,ctx:VerifiedAdminContext):Promise<OwnerMenuScreen|null>{
   if(ctx.origin!=='TELEGRAM_PRIVATE'||!ctx.verified||
     ctx.chatId!==ctx.actorId||!this.policy.isOwner(ctx.actorId))return reject();
+  if(isOwnerB6BudgetText(text))
+   return new OwnerB6BudgetMenu(this.store,this.policy,this.clock).handle(text,ctx);
   if(isOwnerGroupText(text))
    return new OwnerTelegramGroupMenu(this.store,this.policy).handle(text,ctx);
   if(isOwnerLibraryText(text))
