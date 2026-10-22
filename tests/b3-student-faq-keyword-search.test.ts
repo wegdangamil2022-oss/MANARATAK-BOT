@@ -12,6 +12,7 @@ import {ApprovedAnswerService,ResourceLinkService} from '../src/education-intera
 import {TelegramUpdateApplication} from '../src/telegram-transport.js';
 import {menuLabels,isValidTelegramReplyKeyboard} from '../src/telegram-menu.js';
 import {privateFAQSearchLabel,parsePrivateFAQSearchQuery,parsePrivateFAQSearchPage,privateFAQSearchPageLabel} from '../src/telegram-private-faq-search.js';
+import {privateFAQBrowseLabel} from '../src/telegram-private-faq.js';
 const OWNER='100',STUDENT=300,GROUP='-100123';
 const msg=(id:number,text:string,actor=STUDENT,group=false)=>({
  update_id:id,message:{message_id:id,chat:{id:group?Number(GROUP):actor,type:group?'supergroup':'private'},
