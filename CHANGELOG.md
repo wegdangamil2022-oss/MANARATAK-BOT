@@ -1,3 +1,11 @@
+## 0.7.50 — 2026-10-22 — B6 stale group subscription evidence fence (OFFLINE reviewed FAQ)
+
+- Fix a TOCTOU authorization flaw in the Telegram group approved-FAQ path: required-channel subscriptions previously were checked before awaiting a possibly slow B6 knowledge source, allowing plans based on stale membership when requirements were introduced, paused or changed during that await.
+- Preserve an initial group/rule/required-channel epoch and fail closed on epoch mismatch or changed group authorization **after** answering from the approved FAQ. For active requirements, reverify current channel membership after the FAQ lookup and recheck the same local epoch again after the second external verification.
+- Apply the last planning fence to both optional B6 reviewed-knowledge and legacy B3 FAQ-only group `/ask` paths. No bypass when the subscription adapter is missing or the previously unconfigured rule becomes active. Stable membership still works.
+- Sixteen new JSON/SQLite regression cases, including rule update during a second membership lookup. TDD RED showed 8 previously unhandled failures in the first 10 scenarios; GREEN requires all 1,136 tests and the standard offline demos before merge.
+- Scope limitation: this is a last-**planning**-step fence, not a delivery-time subscription reauthorization for queued outbox messages. No real Phase 17 AI, model billing or unreviewed Telegram AI output.
+
 ## 0.7.49 — 2026-10-22 — B6 owner-only direct replied-to question (OFFLINE approved knowledge)
 
 - Recognize the explicit owner command `@BotUsername أجب عن هذا السؤال` or `/ask@BotUsername أجب عن هذا السؤال` only within approved group settings. Resolve the student question solely from the direct `reply_to_message` carried by that Telegram update, never from chat history or forwarded/quoted messages.
