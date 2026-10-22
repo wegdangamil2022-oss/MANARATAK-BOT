@@ -21,6 +21,7 @@ export const ownerMenuLabels={
  subscriptionHealth:'🛡 سلامة الاشتراكات',
  delivery:'📊 حالة الرسائل',
  platformCatalog:'🔎 معاينة بيانات منارتك',
+ platformIntegrity:'🔬 سلامة المصادر الخارجية',
  settings:'⚙️ إعدادات التشغيل',
 } as const;
 type OwnerMenuAction={
@@ -94,6 +95,8 @@ export function isOwnerMenuText(text:string):boolean{
   text.startsWith('➡️ التالي · o:')||text.startsWith('⬅️ السابق · o:')||
   text.startsWith('➡️ التالي · b5:')||text.startsWith('⬅️ السابق · b5:')||
   text.startsWith('📥 تسجيل مرشح · ')||text.startsWith('✅ تدقيق بيانات · ')||
+  text.startsWith('🔬 فحص مصدر · ')||text.startsWith('➡️ التالي · b5i:')||
+  text.startsWith('⬅️ السابق · b5i:')||
   text.startsWith('📋 اختيار قسم · ')||text.startsWith('📁 تعيين قسم · ')||
   text.startsWith('✅ تأكيد اعتماد محلي · ')||text.startsWith('📝 معاينة إتاحة · ')||
   text.startsWith('📚 تأكيد إتاحة محلية · ')||
@@ -257,6 +260,67 @@ export class OwnerTelegramMenu{
   const b5Token=(value:string):string=>
    value.length<=16?value:'~'+createHash('sha256').update(value,'utf8').digest('hex').slice(0,16);
   const b5Proof=(digest:string):string=>digest.slice(0,24);
+
+  // Read-only integrity inventory. A source may disappear from a page merely
+  // due to reordered pagination; absence never triggers removal/closure.
+  const inspection=/^🔬 فحص مصدر · ([A-Za-z0-9][A-Za-z0-9_-]{0,63}|~[a-f0-9]{16}):([a-f0-9]{24})$/u.exec(text);
+  const integrityPage=/^(➡️ التالي|⬅️ السابق) · b5i:(0|[1-9][0-9]{0,2})$/u.exec(text);
+  if(text===ownerMenuLabels.platformIntegrity||text.startsWith('🔬 فحص مصدر · ')||
+    text.startsWith('➡️ التالي · b5i:')||text.startsWith('⬅️ السابق · b5i:')){
+   if(!this.platformCatalog)return reject();
+   const current=await this.store.snapshot();
+   if(!this.policy.privateFeature(current,'owner.dashboard',ctx.actorId))return reject();
+   const entries=(current.platformReviewQueue??[])
+     .filter(q=>q.status==='PUBLISHED_LOCALLY')
+     .sort((a,b)=>a.sourceId.localeCompare(b.sourceId));
+   if(text.startsWith('🔬 فحص مصدر · ')){
+    if(!inspection)return reject();
+    const found=entries.filter(q=>
+      (q.sourceId===inspection[1]||b5Token(q.sourceId)===inspection[1])&&
+      b5Proof(q.digest)===inspection[2]);
+    if(found.length!==1)return reject();
+    const result=await this.platformCatalog.inspectPublished(ctx.actorId,
+      found[0]!.sourceId,found[0]!.digest);
+    if(result.status==='DENIED'||result.status==='STALE')return reject();
+    const statusMessages:Record<string,string>={
+     CURRENT:'متطابق: البيانات المحلية تتفق مع نسخة المصدر المقروءة الآن. لا يثبت ذلك أهلية أو موعد تقديم.',
+     SOURCE_CHANGED:'تغيّرت بيانات المصدر مقارنة بالمورد المحلي. يلزم مراجعة المالك؛ لم نحدّث المنحة أو نؤرشفها.',
+     NOT_ON_PAGE:'المورد لا يظهر في صفحة المصدر الحالية. هذا غير حاسم ولا يثبت سحب المنحة أو إغلاق التقديم.',
+     UNAVAILABLE:'تعذر فحص المصدر بشكل موثوق. لم نُصدر حكمًا على المنحة ولم نغيرها.',
+     LOCAL_ARCHIVED:'المورد مؤرشف محليًا؛ لم نقرأ المصدر الخارجي ولم نعد إتاحته.',
+     LOCAL_INCONSISTENT:'بيانات المكتبة المحلية لا تطابق سجل مراجعة المصدر. يلزم فحص المشغل قبل أي تحديث.'
+    };
+    const warning=statusMessages[result.status]??'نتيجة غير محسومة.';
+    return screen('<b>فحص سلامة المصدر الخارجي 🔬</b>\n'
+     +'المصدر: <code>'+found[0]!.sourceId+'</code>\n'
+     +'المورد: '+escapeTelegramListPreview(found[0]!.title,130)+'\n'
+     +warning+'\n'
+     +'لا أرشفة ولا تحديث تلقائي للبيانات.',
+     [ownerMenuLabels.platformIntegrity,ownerMenuLabels.library]);
+   }
+   const page=integrityPage?Number(integrityPage[2]):0;
+   if(text!==ownerMenuLabels.platformIntegrity&&!integrityPage)return reject();
+   const pages=Math.ceil(entries.length/8);
+   if(!entries.length&&text===ownerMenuLabels.platformIntegrity)
+    return screen('<b>سلامة المصادر الخارجية 🔬</b>\n'
+      +'لا توجد موارد منشورة محليًا من سجل المصادر الخارجية.',
+      [ownerMenuLabels.platformCatalog]);
+   if(page>=pages||
+      (integrityPage?.[1]==='➡️ التالي'&&page===0)||
+      (integrityPage?.[1]==='⬅️ السابق'&&page===pages-1))return reject();
+   const visible=entries.slice(page*8,page*8+8);
+   const lines=visible.map((e,i)=>
+    (page*8+i+1)+'. <code>'+e.sourceId+'</code> — '+
+    escapeTelegramListPreview(e.title,95)).join('\n');
+   return screen('<b>سلامة المصادر الخارجية 🔬</b>\n'
+    +'سجلات منشورة داخل مكتبة الخاص: '+entries.length+'\n'
+    +'اختر موردًا لفحص تطابقه مع المصدر دون تغيير أي بيانات.\n'
+    +lines+'\nصفحة '+(page+1)+' من '+pages,
+    visible.map(e=>'🔬 فحص مصدر · '+b5Token(e.sourceId)+':'+b5Proof(e.digest)),{
+      previous:page>0?'⬅️ السابق · b5i:'+(page-1):undefined,
+      next:page+1<pages?'➡️ التالي · b5i:'+(page+1):undefined
+    });
+  }
   const b5Selector='([A-Za-z0-9][A-Za-z0-9_-]{0,63}|~[a-f0-9]{16})';
   const b5Hash='([a-f0-9]{24}|[a-f0-9]{64})';
   const picker=new RegExp('^📋 اختيار قسم · '+b5Selector+':'+b5Hash+'$','u').exec(text);
@@ -409,7 +473,8 @@ export class OwnerTelegramMenu{
     +'رفع المحتوى في الخاص: '+(panel.canUpload?'مسموح':'مقيد')+'\n'
     +'نشر المحتوى إلى قنوات Telegram لم يُفعّل.\n'
     +'اختر وظيفة الإدارة من الأزرار أدناه.',
-    Object.values(ownerMenuLabels).filter(x=>this.platformCatalog||x!==ownerMenuLabels.platformCatalog));
+    Object.values(ownerMenuLabels).filter(x=>this.platformCatalog||
+      (x!==ownerMenuLabels.platformCatalog&&x!==ownerMenuLabels.platformIntegrity)));
   }
   if(text===ownerMenuLabels.imports)return this.pagedImports(state,0);
   if(text===ownerMenuLabels.subscriptionHealth){
