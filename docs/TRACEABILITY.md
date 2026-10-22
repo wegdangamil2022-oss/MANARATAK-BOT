@@ -4,6 +4,7 @@
 
 | المتطلب أو الاختبار | التطبيق | الحالة | الإثبات |
 |---|---|---|---|
+| B6 v0.7.51؛ T12-06 صلاحية الإرسال عند حجز outbox | telegram-transport.ts + telegram-group-access.ts + telegram-replies.ts + store.ts + telegram-live-server.ts + b6-telegram-approved-preflight.test.ts | TESTED_MOCK | 18 اختباراً JSON/SQLite: إثبات عضوية متجدد، إبطال نسخة الاشتراك، مهلة 120 ثانية، منع إعادة التشغيل دون مدقق، حذف معرف الطالب المؤقت عند الحسم؛ فحص وقت الإرسال المحلي فقط وليس ضماناً ذريا مع Telegram |
 | B6 v0.7.50؛ T12-06 / T121-01 صلاحية الاشتراك بعد انتظار FAQ | telegram-transport.ts + b6-telegram-approved-preflight.test.ts | TESTED_MOCK | 16 اختبارًا JSON/SQLite لانتهاء إثبات العضوية، إضافة شرط أثناء انتظار FAQ، تغيير/إيقاف القاعدة، فحص ثان بعد الإجابة، ورفض تبدل الإصدار أثناء الفحص؛ خطة الرد فقط، لم يُحم إرسال outbox وقت التسليم |
 | B6 v0.7.49؛ S12-02 / T12-04 رد المالك على سؤال مباشر | b6-telegram-owner-reply.ts + telegram-transport.ts + b6-telegram-approved-preflight.test.ts + b6-telegram-owner-reply.test.ts | TESTED_MOCK | 20 اختبار JSON/SQLite وعزل السؤال من reply_to_message فقط؛ رفض التاريخ المحوّل/المتداخل/الهوية غير الموثوقة؛ FAQ معتمد دون AI توليدي |
 | B6 v0.7.48؛ S12-01 / T12-01..03 منشن Telegram الصريح | b6-telegram-mention.ts + telegram-transport.ts + b6-telegram-approved-preflight.test.ts + b6-telegram-mention.test.ts | TESTED_MOCK | 21 اختباراً لــ MessageEntity وUTF-16 والاسم الصحيح ومنع الاقتباس والتمرير والإعفاء ونزع الصلاحية؛ إجابات FAQ معتمدة فقط، لا Phase17 |

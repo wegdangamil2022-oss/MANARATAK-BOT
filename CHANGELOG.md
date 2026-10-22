@@ -1,3 +1,11 @@
+## 0.7.51 — 2026-10-22 — B6 short-lived pre-dispatch group FAQ authorization witness
+
+- Fix the gap between B6's post-FAQ policy check and eventual queued outbound dispatch. Attach a 120-second, scoped `groupQuestionAccess` witness to approved group FAQ reply jobs only: actor ID, hashed group/subscription policy epoch, and expiration. The queued actor ID is short-lived persisted metadata, not pseudonymous; scrub it and the reply plan on claim/rejection.
+- Extend `TelegramReplyDispatcher` to check the actor's current group AI permission, compare the policy/rule/channel epoch, and re-verify active mandatory-channel membership before irrevocably claiming the queued Telegram send. Compare the same epoch again inside the atomic local state transaction after external verification. Unknown/revoked membership, switched AI mode, rule changes, absent verifier or expired proof denies and redacts rather than sending.
+- The production server explicitly passes the existing read-only `SubscriptionGate` to the dispatcher. Old B3/private reply jobs remain backward-compatible, and redaction and replay/no-blind-retry behavior are preserved.
+- 18 new JSON/SQLite tests; strict typecheck, 1,154/1,154 automated tests and five offline demos passed on the final source commit. Release docs/head CI must also pass before merge.
+- Limitation: membership and Telegram send cannot be atomic across the external provider boundary. This is a last-local-claim fence, not a guarantee against remote member removal between check and send; no Phase 17 AI or generated answer activated.
+
 ## 0.7.50 — 2026-10-22 — B6 stale group subscription evidence fence (OFFLINE reviewed FAQ)
 
 - Fix a TOCTOU authorization flaw in the Telegram group approved-FAQ path: required-channel subscriptions previously were checked before awaiting a possibly slow B6 knowledge source, allowing plans based on stale membership when requirements were introduced, paused or changed during that await.
