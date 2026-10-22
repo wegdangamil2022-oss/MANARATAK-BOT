@@ -114,6 +114,9 @@ export function validTelegramReplyJob(v:unknown):v is TelegramReplyJob{
   (j.queuedAt===undefined||(typeof j.queuedAt==='number'&&Number.isSafeInteger(j.queuedAt)&&j.queuedAt>=0))&&
   (j.startedAt===undefined||(typeof j.startedAt==='number'&&Number.isSafeInteger(j.startedAt)&&j.startedAt>=0))&&
   (j.redactedAt===undefined||(typeof j.redactedAt==='number'&&Number.isSafeInteger(j.redactedAt)&&j.redactedAt>=0))&&
+  (j.accessDenialCode===undefined||(j.status==='FAILED_CONFIRMED'&&[
+   'LEGACY_UNVERIFIABLE','ACCESS_RECHECK_FAILED','GROUP_UNAVAILABLE'
+  ].includes(j.accessDenialCode as string)))&&
   (j.groupReplyKind===undefined||
    (j.status==='QUEUED'&&validPlan(j.plan)&&j.plan.chatId.startsWith('-')&&
     (j.groupReplyKind==='GENERAL'||j.groupReplyKind==='REVIEWED_FAQ')&&
@@ -250,7 +253,14 @@ export class TelegramReplyDispatcher {
     (faq?groupQuestionEpochDigest(s,accessScope):
       menu?groupMenuEpochDigest(s,accessScope):
       privateGroupEpochDigest(s,accessScope))!==access.epoch));
-   if(forbidden||(plan.chatId.startsWith('-')&&!this.policy.canUseChat(s,plan.chatId,'navigation'))){
+   const groupUnavailable=plan.chatId.startsWith('-')&&
+    !this.policy.canUseChat(s,plan.chatId,'navigation');
+   if(forbidden||groupUnavailable){
+    // A reason is only set if no provider call was made. Recheck failures
+    // intentionally combine unknown membership, expiry and changed sources;
+    // the owner report MUST NOT claim which external event occurred.
+    job.accessDenialCode=noGroupProof||noPrivateProvenance?
+     'LEGACY_UNVERIFIABLE':groupUnavailable?'GROUP_UNAVAILABLE':'ACCESS_RECHECK_FAILED';
     job.status='FAILED_CONFIRMED';
     delete job.plan;delete job.groupQuestionAccess;delete job.groupMenuAccess;delete job.privateGroupAccess;delete job.privateReplyKind;delete job.groupReplyKind;job.redactedAt=this.clock();
     return {status:'FAILED_CONFIRMED' as const};
