@@ -111,6 +111,8 @@ export interface B6BudgetAttempt {
   requestKey:string;attemptId:string;day:string;reservedTokens:number;
   reservedAt:number;leaseUntil:number;
   status:'RESERVED'|'COMPLETED'|'UNKNOWN_OUTCOME';
+  /** Owner acknowledgement is historical annotation only; it NEVER changes cost or allows retry. */
+  operatorReview?:{reviewedBy:string;reviewedAt:number};
 }
 export interface BotState {
   schemaVersion: 8;
@@ -203,10 +205,22 @@ export class BotStore {
           const a=row as Record<string,unknown>;
           const expected=['requestKey','attemptId','day','reservedTokens',
             'reservedAt','leaseUntil','status'];
+          const optional=['operatorReview'];
           const goodId=/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/u;
           const goodDay=/^\d{4}-\d{2}-\d{2}$/u;
-          if(Object.keys(a).length!==expected.length||
+          if(Object.keys(a).some(k=>!expected.includes(k)&&!optional.includes(k))||
              expected.some(k=>!Object.prototype.hasOwnProperty.call(a,k)))return true;
+          if(a.operatorReview!==undefined){
+            if(!a.operatorReview||typeof a.operatorReview!=='object'||
+               Array.isArray(a.operatorReview))return true;
+            const review=a.operatorReview as Record<string,unknown>;
+            if(Object.keys(review).length!==2||
+              typeof review.reviewedBy!=='string'||
+              !/^[1-9][0-9]{0,19}$/u.test(review.reviewedBy)||
+              typeof review.reviewedAt!=='number'||
+              !Number.isSafeInteger(review.reviewedAt)||review.reviewedAt<0||
+              a.status!=='UNKNOWN_OUTCOME')return true;
+          }
           return typeof a.requestKey!=='string'||
             !/^[A-Za-z0-9_-]{8,96}$/u.test(a.requestKey)||
             typeof a.attemptId!=='string'||!goodId.test(a.attemptId)||

@@ -1,3 +1,9 @@
+## B6 v0.7.44 — owner Telegram fake-AI reservation monitoring (OFFLINE)
+
+The optional local owner menu now includes **🧮 ميزانية المساعد التجريبية**. It displays an eight-attempts-per-page privacy-redacted report of daily attempt counts, reserved conservative units, active leases, expired leases and unknown outcomes. An expired lease is **only reported** on a read; the owner can separately choose **🧯 عزل المحاولات المنتهية** to quarantine it as `UNKNOWN_OUTCOME`. A distinct **⚠️ مراجعة محاولة** and **✅ إقرار المراجعة** workflow records that the owner saw the warning, without changing that unknown outcome, refunding units, reissuing the original request or proving anything about the upstream AI provider.
+
+This remains an offline fake-model operation. Budget values are reservation simulation units, **not real model usage or payment amounts**, and the review is not provider receipt reconciliation. Access is limited to verified owner private Telegram interactions, with fresh permission checks and a durable audit note. Invalid, copied, replayed or revoked controls fail closed. The existing /faq, knowledge-only /ask and live Telegram deployment configuration remain unchanged.
+
 ## B6 v0.7.43 — persistent fake-generation reservations (OFFLINE; not a money budget)
 
 `B6DurableBudget` adds conservative reservations to the bot's schema-8 JSON/SQLite storage: an opaque request key, unique attempt ID, UTC day, upper-bound reserved units, lease and final state. SQLite uses serialized write transactions, so two bot processes cannot independently admit over the same local SQLite budget. JSON is only a single-process simulation. A duplicate request key is rejected after restart; an expired in-flight attempt is quarantined `UNKNOWN_OUTCOME` and never retried/refunded automatically. Malformed stored state or a full bounded ledger fails closed without wiping past attempts.
