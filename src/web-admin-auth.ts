@@ -5,6 +5,7 @@ import { EducationAdminFacade, type VerifiedAdminContext } from './education-adm
 import type { ImportFormat } from './ingestion.js';
 import type { BotStore } from './store.js';
 import type { Policy } from './policy.js';
+import type {PlatformCatalogPreviewService} from './platform-catalog-preview.js';
 import { reviewTelegramReplyOutbox, recordTelegramReplyManualReview } from './telegram-reply-maintenance.js';
 import {BoundedIngress,decodeStrictJsonBytes,type IngressOptions} from './http-ingress-guard.js';
 
@@ -72,6 +73,8 @@ export interface OwnerReplyReviewWebOptions{
  readonly store:BotStore;
  readonly policy:Policy;
  readonly clock?:()=>number;
+ /** Opt-in, separately configured source reader. Never installs a real API itself. */
+ readonly platformCatalog?:PlatformCatalogPreviewService;
 }
 /** Optional owner-only route extension. Existing admin routes remain unchanged,
  * and neither Telegram's live webhook server nor any external listener installs
@@ -82,17 +85,21 @@ export function telegramAdminWebListener(auth:TelegramMiniAppAuth, admin:Educati
   const guard=new BoundedIngress(ingressOptions);
   const routes=new Set(['/admin/panel','/admin/import','/admin/approve','/admin/publish']);
   if(replyOps){routes.add('/admin/replies/summary');routes.add('/admin/replies/review');}
+  if(replyOps?.platformCatalog){
+    routes.add('/admin/platform/preview');routes.add('/admin/platform/integrity');
+  }
   return (req,res)=>{
     void (async()=>{
       if(req.method!=='POST'){reply(res,405,{ok:false});return;}
       if(!routes.has(req.url??'')){reply(res,404,{ok:false});return;}
       const opsRoute=req.url==='/admin/replies/summary'||req.url==='/admin/replies/review';
+      const platformRoute=req.url==='/admin/platform/preview'||req.url==='/admin/platform/integrity';
       const initData=requestInitData(req);
       if(!initData){reply(res,401,{ok:false});return;}
       let ctx:VerifiedAdminContext;
       try{ctx=auth.verify(initData);}catch{reply(res,401,{ok:false});return;}
       // Auth derives actor from signed initData, never from submitted JSON.
-      if(opsRoute&&(!replyOps||!replyOps.policy.isOwner(ctx.actorId))){
+      if((opsRoute||platformRoute)&&(!replyOps||!replyOps.policy.isOwner(ctx.actorId))){
         reply(res,403,{ok:false});return;
       }
       const release=guard.enter(req);
@@ -102,7 +109,7 @@ export function telegramAdminWebListener(auth:TelegramMiniAppAuth, admin:Educati
       if(!/^application\/json(?:\s*;\s*charset=utf-8)?$/i.test(req.headers['content-type']??'')){
         reply(res,415,{ok:false});return;
       }
-      const maxBytes=opsRoute?2048:MAX_JSON_BYTES;
+      const maxBytes=opsRoute||platformRoute?2048:MAX_JSON_BYTES;
       const declared=req.headers['content-length'];
       if(declared!==undefined&&(!/^\d+$/.test(declared)||Number(declared)>maxBytes)){
         reply(res,413,{ok:false});return;
@@ -118,6 +125,50 @@ export function telegramAdminWebListener(auth:TelegramMiniAppAuth, admin:Educati
       catch{reply(res,400,{ok:false});return;}
       if(!isObject(payload)){reply(res,422,{ok:false});return;}
       try{
+        if(platformRoute){
+          // HMAC provides identity, but never bypasses local owner-dashboard
+          // policy. Source data comes exclusively from an explicitly injected
+          // read-only reader and is unverified until reviewed separately.
+          const source=replyOps?.platformCatalog;
+          if(!source){reply(res,404,{ok:false});return;}
+          if(req.url==='/admin/platform/preview'){
+            if(Object.keys(payload).some(k=>k!=='limit'&&k!=='cursor')||
+               (payload.limit!==undefined&&(!Number.isSafeInteger(payload.limit)||
+                 typeof payload.limit!=='number'||payload.limit<1||payload.limit>10))||
+               (payload.cursor!==undefined&&payload.cursor!==null&&
+                 (typeof payload.cursor!=='string'||!/^[A-Za-z0-9_-]{1,64}$/u.test(payload.cursor)))){
+              reply(res,422,{ok:false});return;
+            }
+            const preview=await source.preview(ctx.actorId,{
+              ...(payload.limit===undefined?{}:{limit:payload.limit as number}),
+              ...(payload.cursor===undefined?{}:{cursor:payload.cursor as string|null})
+            });
+            if(preview.status==='DENIED'){reply(res,403,{ok:false});return;}
+            if(preview.status==='UNAVAILABLE'){reply(res,503,{ok:false,status:'UNAVAILABLE'});return;}
+            reply(res,200,{
+              ok:true,status:'PREVIEW',trust:'UNVERIFIED_EXTERNAL',
+              records:preview.records,nextCursor:preview.nextCursor,
+              fingerprint:preview.fingerprint
+            });return;
+          }
+          if(Object.keys(payload).length!==2||
+             !Object.keys(payload).every(k=>k==='sourceId'||k==='expectedDigest')||
+             typeof payload.sourceId!=='string'||
+             !/^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/u.test(payload.sourceId)||
+             typeof payload.expectedDigest!=='string'||
+             !/^[a-f0-9]{64}$/u.test(payload.expectedDigest)){
+            reply(res,422,{ok:false});return;
+          }
+          const report=await source.inspectPublished(ctx.actorId,payload.sourceId,payload.expectedDigest);
+          if(report.status==='DENIED'){reply(res,403,{ok:false});return;}
+          if(report.status==='STALE'){reply(res,409,{ok:false,status:'STALE'});return;}
+          if(report.status==='UNAVAILABLE'){reply(res,503,{ok:false,status:'UNAVAILABLE'});return;}
+          if(report.status==='CURRENT'){
+            reply(res,200,{ok:true,status:report.status,
+              sourceId:report.sourceId,resourceId:report.resourceId});return;
+          }
+          reply(res,200,{ok:true,status:report.status});return;
+        }
         if(opsRoute){
           // Both paths are reachable only when explicitly injected at creation.
           if(!replyOps){reply(res,404,{ok:false});return;}
