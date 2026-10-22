@@ -28,9 +28,22 @@ export function privateFAQPageLabel(page:number,direction:PrivateFAQPage['direct
  if(!Number.isInteger(page)||page<0||page>999)throw Error('INVALID_PRIVATE_FAQ_PAGE');
  return (direction==='next'?'➡️ التالي':'⬅️ السابق')+' · pf:'+page;
 }
+/** Returning from an answer reuses the current reviewed FAQ catalogue.
+ * A page index is an untrusted request, never a durable source cursor.
+ */
+export function privateFAQBrowseReturnLabel(page:number):string{
+ if(!Number.isSafeInteger(page)||page<0||page>999)throw Error('INVALID_PRIVATE_FAQ_RETURN');
+ return '↩️ صفحة الأسئلة · pf:'+page;
+}
+export function parsePrivateFAQBrowseReturn(text:string):number|null{
+ if(typeof text!=='string'||text.length>50)return null;
+ const m=/^↩️ صفحة الأسئلة · pf:(0|[1-9][0-9]{0,2})$/u.exec(text);
+ return m?Number(m[1]):null;
+}
 export function isPrivateFAQBrowseText(text:string):boolean{
  return text===privateFAQBrowseLabel||text.startsWith('📖 سؤال ')||
-  text.startsWith('➡️ التالي · pf:')||text.startsWith('⬅️ السابق · pf:');
+  text.startsWith('➡️ التالي · pf:')||text.startsWith('⬅️ السابق · pf:')||
+  text.startsWith('↩️ صفحة الأسئلة · pf:');
 }
 
 /**

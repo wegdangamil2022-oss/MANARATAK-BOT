@@ -203,3 +203,60 @@ test('B3 FAQ numbering uses global row index across pages, not ten repeated one-
   assert.ok(keys[2]!.startsWith('📖 سؤال 13 · '));
  }finally{await f.close();}
 });
+
+
+// v0.7.60 red: exact back-to-page path rather than a forced restart at page one.
+for(const engine of ['json','sqlite'] as const){
+ test('B3 '+engine+': opening FAQ from page two returns to the same current reviewed FAQ page',async()=>{
+  const f=await fixture(engine);try{
+   for(let i=0;i<12;i++){
+    const q=await f.faq.submit(OWNER,'private',{question:'Published FAQ '+i,
+     answer:'Reviewed answer '+i,sourceResourceId:f.privateResource});
+    await f.faq.approve(OWNER,q.id);
+   }
+   const second=await f.app().handle(msg(330,'➡️ التالي · pf:1'));
+   assert.equal(second.status,'APPLIED');
+   const selected=buttons(second).find(x=>x.startsWith('📖 سؤال 11 · '))!;
+   assert.ok(selected);
+   const opened=await f.app().handle(msg(331,selected));
+   assert.equal(opened.status,'APPLIED');
+   assert.ok(buttons(opened).includes('↩️ صفحة الأسئلة · pf:1'));
+   assert.equal(isValidTelegramReplyKeyboard(opened.plan?.replyMarkup),true);
+   const returned=await f.app().handle(msg(332,'↩️ صفحة الأسئلة · pf:1'));
+   assert.equal(returned.status,'APPLIED');
+   assert.match(returned.plan?.text??'',/صفحة 2 من 2/);
+   assert.equal(buttons(returned).filter(x=>x.startsWith('📖 سؤال ')).length,3);
+   assert.ok(buttons(returned).includes('⬅️ السابق · pf:0'));
+  }finally{await f.close();}
+ });
+ test('B3 '+engine+': stale FAQ page return is denied after owner hides its reviewed sources',async()=>{
+  const f=await fixture(engine);try{
+   for(let i=0;i<11;i++){
+    const q=await f.faq.submit(OWNER,'private',{question:'Other FAQ '+i,
+     answer:'Answer '+i,sourceResourceId:f.privateResource});
+    await f.faq.approve(OWNER,q.id);
+   }
+   const second=await f.app().handle(msg(340,'➡️ التالي · pf:1'));
+   assert.equal(second.status,'APPLIED');
+   await f.education.setCategoryEnabled(OWNER,'guide',false);
+   const denied=await f.app().handle(msg(341,'↩️ صفحة الأسئلة · pf:1'));
+   assert.equal(denied.status,'DENIED');
+   assert.equal(denied.plan,undefined);
+  }finally{await f.close();}
+ });
+ test('B3 '+engine+': invalid FAQ back-page labels and group attempts are fail closed',async()=>{
+  const f=await fixture(engine);try{
+   for(const [i,input] of [
+    '↩️ صفحة الأسئلة · pf:01','↩️ صفحة الأسئلة · pf:-1',
+    '↩️ صفحة الأسئلة · pf:1000','↩️ صفحة الأسئلة · pf:999',
+    '↩️ صفحة الأسئلة · pf:0\n/admin'
+   ].entries()){
+    const r=await f.app().handle(msg(350+i,input));
+    assert.equal(r.status,'DENIED',input);
+    assert.equal(r.plan,undefined);
+   }
+   const g=await f.app().handle(msg(360,'↩️ صفحة الأسئلة · pf:0',STUDENT,true));
+   assert.equal(g.plan,undefined);
+  }finally{await f.close();}
+ });
+}
