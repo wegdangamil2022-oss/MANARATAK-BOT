@@ -228,7 +228,6 @@ for(const engine of ['json','sqlite'] as const){
   const f=await fixture(engine);try{
    const mk=(store=f.store)=>new B6DurableBudget(store,{
     maxDailyAttempts:2,maxDailyReservedTokens:16384,maxConcurrent:1,leaseMs:60000},()=>NOW);
-   const first=f.service(true,f.budget(),undefined as unknown as AnswerGenerationPort);
    // A real fake port is explicitly supplied; absence of a key is denied BEFORE provider.
    const fake:AnswerGenerationPort={generate:async input=>draft(input.sourceId)};
    const s=new B6GenerationDraftService(
