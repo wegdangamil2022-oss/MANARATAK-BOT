@@ -202,3 +202,89 @@ test('private /start and /help produce user guidance without bypassing group adm
   assert.equal((await f.store.snapshot()).telegramReplyJobs?.length,2);
  }finally{await f.close()}
 });
+
+
+for(const engine of ['json','sqlite'] as const){
+ test('B6 '+engine+': queued legacy group plan without classified origin is not sent on upgraded dispatcher',async()=>{
+  const f=await fixture(engine);try{
+   // Simulates a v0.7.50 and earlier job left QUEUED during deployment.
+   const accepted=await f.app().handle(incoming(1200,300,Number(GROUP),'/categories','supergroup'));
+   assert.equal(accepted.status,'APPLIED');
+   const before=(await f.store.snapshot()).telegramReplyJobs![0]!;
+   assert.equal(before.groupReplyKind,undefined);
+   assert.equal(before.groupQuestionAccess,undefined);
+   assert.ok(before.plan?.text);
+   const result=await f.dispatcher().dispatch(accepted.deliveryKey!);
+   assert.equal(result.status,'FAILED_CONFIRMED');
+   assert.equal(f.sent.length,0);
+   const job=(await f.store.snapshot()).telegramReplyJobs![0]!;
+   assert.equal(job.status,'FAILED_CONFIRMED');
+   assert.equal(job.plan,undefined);
+   assert.equal(job.groupReplyKind,undefined);
+   assert.equal(job.groupQuestionAccess,undefined);
+   assert.ok(job.redactedAt!==undefined);
+   assert.equal(job.attemptId,undefined);
+   assert.equal((await f.dispatcher().dispatch(accepted.deliveryKey!)).status,'FAILED_CONFIRMED');
+   assert.equal(f.sent.length,0);
+  }finally{await f.close();}
+ });
+ test('B6 '+engine+': newly created generic group menu job is explicitly classified and remains sendable',async()=>{
+  const f=await fixture(engine);try{
+   const accepted=await f.app().handle(incoming(1201,300,Number(GROUP),'/categories','supergroup'));
+   assert.equal(accepted.status,'APPLIED');
+   const before=(await f.store.snapshot()).telegramReplyJobs![0]!;
+   assert.equal(before.groupReplyKind,'GENERAL');
+   assert.equal(before.groupQuestionAccess,undefined);
+   assert.equal((await f.dispatcher().dispatch(accepted.deliveryKey!)).status,'CONFIRMED');
+   assert.equal(f.sent.length,1);
+   const after=(await f.store.snapshot()).telegramReplyJobs![0]!;
+   assert.equal(after.status,'SENT');
+   assert.equal(after.groupReplyKind,undefined);
+  }finally{await f.close();}
+ });
+ test('B6 '+engine+': preupgrade unclassified private response remains dispatchable',async()=>{
+  const f=await fixture(engine);try{
+   const accepted=await f.app().handle(incoming(1202));
+   assert.equal(accepted.status,'APPLIED');
+   assert.equal((await f.store.snapshot()).telegramReplyJobs![0]?.groupReplyKind,undefined);
+   assert.equal((await f.dispatcher().dispatch(accepted.deliveryKey!)).status,'CONFIRMED');
+   assert.equal(f.sent.length,1);
+  }finally{await f.close();}
+ });
+ test('B6 '+engine+': invalid group classification values cannot be persisted',async()=>{
+  const f=await fixture(engine);try{
+   const accepted=await f.app().handle(incoming(1203,300,Number(GROUP),'/categories','supergroup'));
+   assert.equal(accepted.status,'APPLIED');
+   const original=await f.store.snapshot();
+   for(const invalid of ['', 'FAQ', 'GENERAL ', 1, null, {}, ['GENERAL']]){
+    await assert.rejects(f.store.transaction(s=>{
+     (s.telegramReplyJobs![0] as unknown as Record<string,unknown>).groupReplyKind=invalid;
+    }),/Unsupported state schema/);
+    assert.deepEqual(await f.store.snapshot(),original);
+   }
+  }finally{await f.close();}
+ });
+ test('B6 '+engine+': group classification cannot mislabel a guarded FAQ as general or an unguarded menu as FAQ',async()=>{
+  const f=await fixture(engine);try{
+   await f.app().handle(incoming(1204,300,Number(GROUP),'/categories','supergroup'));
+   const original=await f.store.snapshot();
+   await assert.rejects(f.store.transaction(s=>{
+    s.telegramReplyJobs![0]!.groupReplyKind='REVIEWED_FAQ';
+   }),/Unsupported state schema/);
+   assert.deepEqual(await f.store.snapshot(),original);
+  }finally{await f.close();}
+ });
+ test('B6 '+engine+': old group sends already in SENDING or UNKNOWN_OUTCOME are never replayed',async()=>{
+  const f=await fixture(engine);try{
+   await f.store.transaction(s=>{
+    s.telegramReplyJobs=[
+     {updateKey:'b3-webhook:bot-main:1205',status:'SENDING',attemptId:'old',startedAt:120},
+     {updateKey:'b3-webhook:bot-main:1206',status:'UNKNOWN_OUTCOME',attemptId:'old',startedAt:120}
+    ];
+   });
+   assert.equal((await f.dispatcher().dispatch('b3-webhook:bot-main:1205')).status,'UNKNOWN_OUTCOME');
+   assert.equal((await f.dispatcher().dispatch('b3-webhook:bot-main:1206')).status,'UNKNOWN_OUTCOME');
+   assert.equal(f.sent.length,0);
+  }finally{await f.close();}
+ });
+}
