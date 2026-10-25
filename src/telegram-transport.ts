@@ -24,6 +24,7 @@ import {renderOwnerInlineGroups} from './telegram-inline-groups.js';
 import {OwnerInlineGroupControls} from './telegram-inline-group-controls.js';
 import {renderOwnerInlineDelegations} from './telegram-inline-delegations.js';
 import {renderStaffInline} from './telegram-inline-staff.js';
+import {renderStudentInline} from './telegram-inline-student.js';
 import {parseSearchQuery,parseSearchPageCommand,searchPageButton,
  searchResourceButton,parseSearchResourceSelection,searchResultsBreadcrumb,
  parseSearchResultsBreadcrumb} from './telegram-search.js';
@@ -271,6 +272,13 @@ export class TelegramUpdateApplication {
      // Reauthorize the real sender at every tap. Never dispatch a privileged
      // command from untrusted callback_data or from a group context.
      if(kind!=='private'||actorId!==chatId)return {status:'DENIED',reason:'PRIVATE_CALLBACK_ONLY'};
+     if(event.callbackData.startsWith('si:1:')){
+      const screen=await renderStudentInline(this.opts.store,this.opts.policy,
+       actorId,event.callbackData);
+      if(!screen)return {status:'DENIED',reason:'STUDENT_CALLBACK_NOT_ACCESSIBLE'};
+      return {status:'APPLIED',reason:'RESPONSE_PLANNED_ONLY',
+       plan:this.plan(chatId,screen.text,undefined,screen.keyboard,event.callbackMessageId)};
+     }
      if(event.callbackData.startsWith('ms:1:')){
       const screen=await renderStaffInline(this.opts.store,this.opts.policy,
        actorId,event.callbackData,this.clock());
@@ -428,6 +436,13 @@ export class TelegramUpdateApplication {
        const view=ownerInlineHome();
        return {status:'APPLIED',reason:'RESPONSE_PLANNED_ONLY',
         plan:this.plan(chatId,view.text,undefined,view.keyboard)};
+      }
+      if(text==='/studentinline'){
+       const screen=await renderStudentInline(this.opts.store,this.opts.policy,
+        actorId,'student:open');
+       if(!screen)return {status:'DENIED',reason:'STUDENT_CATALOGUE_NOT_ACCESSIBLE'};
+       return {status:'APPLIED',reason:'RESPONSE_PLANNED_ONLY',
+        plan:this.plan(chatId,screen.text,undefined,screen.keyboard)};
       }
       if(text==='/staffinline'){
        const screen=await renderStaffInline(this.opts.store,this.opts.policy,
