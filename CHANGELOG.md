@@ -1,3 +1,11 @@
+## 0.7.84 — 2026-10-26 — strict offline moderation trial single-chat isolation
+
+- Tightened `inspectOfflineModerationTrialScope` to require the trial chat to be the **only approved local chat**, regardless of navigation, publishing or other scope. A previously accepted second navigation-only group now returns the redacted blocker `OTHER_APPROVED_CHAT_PRESENT` (the existing `OTHER_MODERATION_GROUP_APPROVED` remains for a second moderation-enabled chat).
+- Fail closed if **any historical moderation operation, moderation reason, or warning** remains in the trial group OR any other chat (including revoked groups, inactive reasons and inactive warnings). Reasons remain generic and never contain user IDs, chat IDs or record references.
+- Require an owner-only clean local rehearsal: non-revoked `chat.manage` grants in the trial chat or elsewhere cause `TRIAL_GROUP_HAS_MODERATION_GRANTS`/`OTHER_MODERATION_GRANTS`. Even expired but unrevoked delegated configurations must be explicitly revoked. Previously revoked grants do not block.
+- Expanded TDD tests with eleven cases including a clean revoked-other-chat PASS, old staff/history rejection, unchanged Telegram zero-call guarantee on any local scope blocker, and revised old navigation-only test. Existing independent fresh SQLite backup, STOP and no unresolved jobs remain mandatory.
+- **Scope and limitations:** this is a conservative *offline-only advisory* for an otherwise empty isolated rehearsal database. It never disables other groups, removes grants/warnings or modifies production data, and never calls Telegram. It does not certify remote Telegram group identity, actual admin permissions or permission to turn on live sanctions. The production server continues using `FakeModerationGateway`.
+
 ## 0.7.83 — 2026-10-26 — preserve other administrators' Telegram member restrictions
 
 - Closed a Telegram moderation safety gap: the official Bot API adapter previously considered a Telegram `restricted` member eligible for BAN or MUTE if `is_member: true`. Telegram's `getChatMember` does not say which administrator imposed the original restriction. An additional sanction could silently overwrite the other administrator's action.
