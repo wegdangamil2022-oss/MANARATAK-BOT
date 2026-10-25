@@ -1,25 +1,31 @@
 import type {BotStore,Chat,BotState} from './store.js';
 import type {Policy} from './policy.js';
 import type {TelegramInlineKeyboard} from './telegram-inline-owner.js';
+import {groupModerationOperations,moderationAuditDigest,moderationAuditKey,renderStaffModerationAudit} from './telegram-moderation-audit.js';
 
 /** Read-only staff view over locally approved groups, not Telegram's actual
  * administrator roster or permissions. Routes are selectors, never grants.
  * The caller must prove private chat identity independently on every tap.
  */
 export type StaffInlineRoute={kind:'list';page:number}|
- {kind:'detail';chatId:string;version:number;page:number};
+ {kind:'detail';chatId:string;version:number;page:number}|
+ {kind:'operations';chatId:string;version:number;page:number;operationPage:number;digest:string};
 export interface StaffInlineScreen {readonly text:string;readonly keyboard:TelegramInlineKeyboard;}
 const pageToken='(0|[1-9][0-9]{0,2})';
 const listRe=new RegExp('^ms:1:p:'+pageToken+'$','u');
 const detailRe=new RegExp('^ms:1:g:(-[1-9][0-9]{0,18}):([1-9][0-9]{0,9}):'+pageToken+'$','u');
+const operationsRe=new RegExp('^ms:1:o:(-[1-9][0-9]{0,18}):([1-9][0-9]{0,9}):'+pageToken+':'+pageToken+':([a-f0-9]{12})$','u');
 export function staffInlineRoute(data:string):StaffInlineRoute|null{
  if(typeof data!=='string'||Buffer.byteLength(data,'utf8')>64)return null;
  if(data==='ms:1:h')return {kind:'list',page:0};
  const l=listRe.exec(data);
  if(l&&l[0]===data)return {kind:'list',page:Number(l[1])};
  const m=detailRe.exec(data);
- if(!m||m[0]!==data)return null;
- return {kind:'detail',chatId:m[1]!,version:Number(m[2]),page:Number(m[3])};
+ if(m&&m[0]===data)return {kind:'detail',chatId:m[1]!,version:Number(m[2]),page:Number(m[3])};
+ const o=operationsRe.exec(data);
+ if(o&&o[0]===data)return {kind:'operations',chatId:o[1]!,version:Number(o[2]),
+  page:Number(o[3]),operationPage:Number(o[4]),digest:o[5]!};
+ return null;
 }
 const safe=(v:string):string=>v.replace(/&/gu,'&amp;').replace(/</gu,'&lt;')
  .replace(/>/gu,'&gt;').replace(/"/gu,'&quot;').replace(/'/gu,'&#39;');
@@ -76,6 +82,12 @@ export async function renderStaffInline(store:BotStore,policy:Policy,actor:strin
   return null;
  const warnings=state.warnings.filter(w=>w.chatId===chat.id&&w.active).length;
  const moderation=state.moderationReasons.filter(m=>m.chatId===chat.id&&m.active).length;
+ const savedOperations=groupModerationOperations(state,chat.id);
+ const digest=moderationAuditDigest(savedOperations);
+ if(route.kind==='operations'){
+  if(route.digest!==digest)return null;
+  return renderStaffModerationAudit(chat,route.page,route.operationPage,savedOperations,digest);
+ }
  // No student IDs, complaints, media content or private subscription channels
  // are included: aggregate counts only for an authorized staff member.
  return menu('<b>بطاقة إشراف محلية 🛡️</b>\n'
@@ -87,5 +99,6 @@ export async function renderStaffInline(store:BotStore,policy:Policy,actor:strin
   +'أسباب تقييد نشطة محفوظة: '+moderation+'\n'
   +'الأرقام محلية وليست حالة Telegram الحية.\n'
   +'لا يمكن تنفيذ العقوبات أو تغيير الأذونات من هذه الشاشة.',
-  [[btn('↩️ مجموعات الصفحة',pageKey(route.page)),btn('🏠 الرئيسية','ms:1:h')]]);
+  [[btn('📊 سجل حالات العقوبات',moderationAuditKey(chat,route.page,0,digest))],
+   [btn('↩️ مجموعات الصفحة',pageKey(route.page)),btn('🏠 الرئيسية','ms:1:h')]]);
 }
