@@ -54,7 +54,7 @@ interface IncomingDocument {
 }
 /** Offline B3 application adapter: creates plans, NEVER sends a message or connects to Telegram. */
 export interface TelegramReplyPlan { chatId: string; parseMode: 'HTML'; text: string;
- replyMarkup?:TelegramReplyKeyboard; inlineMarkup?:TelegramInlineKeyboard; }
+ replyMarkup?:TelegramReplyKeyboard; inlineMarkup?:TelegramInlineKeyboard; editMessageId?:number; }
 export interface TelegramResult { status: 'APPLIED' | 'DUPLICATE' | 'DENIED' | 'IGNORED' | 'UNKNOWN'; reason: string; plan?: TelegramReplyPlan; deliveryKey?: string; callbackQueryId?:string; }
 type ProcessedReply={status:TelegramResult['status'];reason:string;plan?:TelegramReplyPlan;
  groupQuestionAccess?:TelegramReplyJob['groupQuestionAccess'];
@@ -70,7 +70,7 @@ export interface TelegramApplicationOptions {
   answerPreflight?:B6AnswerPreflight;
 }
 
-type Event = {updateId: number; actorId: string; chatId: string; kind: 'private' | 'group'; text: string; entities?:unknown; messageId?:number; replyTo?:unknown; document?: IncomingDocument; callbackData?:string; callbackQueryId?:string};
+type Event = {updateId: number; actorId: string; chatId: string; kind: 'private' | 'group'; text: string; entities?:unknown; messageId?:number; replyTo?:unknown; document?: IncomingDocument; callbackData?:string; callbackQueryId?:string; callbackMessageId?:number};
 const isObject=(x:unknown):x is Record<string,unknown>=>Boolean(x)&&typeof x==='object'&&!Array.isArray(x);
 const positiveId=(x:unknown): x is number=>typeof x==='number'&&Number.isSafeInteger(x)&&x>0;
 const chatId=(x:unknown): x is number=>typeof x==='number'&&Number.isSafeInteger(x)&&x!==0;
@@ -98,7 +98,7 @@ function eventFrom(value:unknown):{event?:Event;reason:string} {
     return {reason:'INVALID_CALLBACK_CHAT'};
    return {event:{updateId:value.update_id as number,actorId:String(cb.from.id),
     chatId:String(cb.message.chat.id),kind,text:'',
-    callbackData:cb.data,callbackQueryId:cb.id},reason:'VALID'};
+    callbackData:cb.data,callbackQueryId:cb.id,callbackMessageId:cb.message.message_id},reason:'VALID'};
   }
   if(!isObject(value.message))return {reason:'UNSUPPORTED_EVENT'};
   const msg=value.message;
@@ -182,9 +182,14 @@ export class TelegramUpdateApplication {
    return null;
   }
   private plan(chatId:string,text:string,replyMarkup?:TelegramReplyKeyboard,
-    inlineMarkup?:TelegramInlineKeyboard):TelegramReplyPlan {
+    inlineMarkup?:TelegramInlineKeyboard,editMessageId?:number):TelegramReplyPlan {
     if(Buffer.byteLength(text,'utf8')>4096)throw Error('REPLY_TOO_LONG');
     if(replyMarkup&&inlineMarkup)throw Error('CONFLICTING_KEYBOARDS');
+    if(editMessageId!==undefined){
+     if(!Number.isSafeInteger(editMessageId)||editMessageId<=0||!inlineMarkup)
+      throw Error('INVALID_EDIT_TARGET');
+     return {chatId,parseMode:'HTML',text,inlineMarkup,editMessageId};
+    }
     return inlineMarkup?{chatId,parseMode:'HTML',text,inlineMarkup}:
       replyMarkup?{chatId,parseMode:'HTML',text,replyMarkup}:{chatId,parseMode:'HTML',text};
   }
@@ -266,7 +271,7 @@ export class TelegramUpdateApplication {
      const view=ownerInlineRender(event.callbackData);
      if(!view)return {status:'DENIED',reason:'INVALID_OWNER_CALLBACK'};
      return {status:'APPLIED',reason:'RESPONSE_PLANNED_ONLY',
-      plan:this.plan(chatId,view.text,undefined,view.keyboard)};
+      plan:this.plan(chatId,view.text,undefined,view.keyboard,event.callbackMessageId)};
     }
     if(kind==='group'&&!this.opts.policy.canUseChat(await this.opts.store.snapshot(),chatId,'navigation'))return {status:'DENIED',reason:'CHAT_NOT_AUTHORIZED'};
     const adminCtx:VerifiedAdminContext={origin:'TELEGRAM_PRIVATE',actorId,chatId,verified:true};
