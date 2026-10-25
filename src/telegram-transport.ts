@@ -89,7 +89,7 @@ function eventFrom(value:unknown):{event?:Event;reason:string} {
     !chatId(cb.message.chat.id)||!positiveId(cb.message.message_id)||
     typeof cb.id!=='string'||!(/^[A-Za-z0-9_-]{1,128}$/u.test(cb.id))||
     typeof cb.data!=='string'||Buffer.byteLength(cb.data,'utf8')>64||
-    cb.data.length===0||/[\\u0000-\\u001f\\u007f]/u.test(cb.data))
+    cb.data.length===0||/[\u0000-\u001f\u007f]/u.test(cb.data))
     return {reason:'INVALID_CALLBACK'};
    const kind=cb.message.chat.type==='private'?'private':
     cb.message.chat.type==='group'||cb.message.chat.type==='supergroup'?'group':null;
