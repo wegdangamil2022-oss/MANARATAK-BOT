@@ -1,3 +1,11 @@
+## 0.7.80 — 2026-10-26 — offline single-group moderation trial scope verification
+
+- Added `inspectOfflineModerationTrialScope`, a read-only isolated trial-group checklist that **cannot bypass** the earlier STOP/independent fresh backup checks. It accepts exactly one operator-provided, valid negative Telegram group ID, requires a locally approved and present group with the `moderation` scope, and rejects any second approved moderation-enabled group. It also rejects **any** historical moderation operation or reason in the chosen trial group; even prior simulated confirmations are not safe cleanliness proof.
+- Added strict `npm run telegram:moderation-trial -- --offline-only --state <absolute sqlite> --backup <absolute sqlite backup> --safety <private STOP file> --stale-ms 900000 --trial-chat <negative chat ID>`. The output contains only `PASS`/`BLOCKED`, the STOP/rollback statuses and generic blocker codes. Invalid selector/flag combinations fail before filesystem reads; no group/member/operator IDs or secrets are printed.
+- After the group scope read, acceptance prerequisites and source snapshot are rechecked. Changed state fails closed; no configuration, Telegram API call, ban, mute, unban or unmute is performed.
+- Nine new tests cover a clean local group, approval/presence/scope revocation, a second approved moderation group, safe unrelated navigation groups, old simulated history/reasons, STOP/stale backup inheritance, strict CLI selector validation and redaction. Full strict TypeScript suite and five offline demos gate merging.
+- **Important:** local `present` and `approved` flags do not prove remote Telegram isolation. A PASS is an *offline planning signal only*, not go-live authorization. The live server still uses `FakeModerationGateway`.
+
 ## 0.7.79 — 2026-10-26 — offline trial backup age and time consistency
 
 - Repaired the offline trial acceptance's previously unused `now` / `staleAfterMs` inputs: a logically identical but **stale SQLite rollback anchor** now produces the redacted `BACKUP_TOO_OLD` blocker instead of a false PASS. A filesystem modification time more than one minute in the future produces `BACKUP_TIMESTAMP_IN_FUTURE`. Small clock skew is tolerated.
