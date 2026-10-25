@@ -57,9 +57,17 @@ export class TelegramBotApiModerationGateway implements ModerationGateway{
   const adapter=gateway as TelegramBotApiModerationGateway;
   // A subclass or monkey-patched adapter that replaces the rights checks or
   // outbound implementation no longer gets to claim this origin.
-  return adapter.setRestriction===TelegramBotApiModerationGateway.prototype.setRestriction&&
-   adapter.canRestrict===TelegramBotApiModerationGateway.prototype.canRestrict&&
-   adapter.isProtected===TelegramBotApiModerationGateway.prototype.isProtected;
+  // TypeScript "private" is not a JavaScript private brand: an instance or
+  // subclass can replace these internal transport/STOP methods at runtime
+  // while leaving all three public entry points unchanged.
+  const prototype=TelegramBotApiModerationGateway.prototype;
+  return Object.getPrototypeOf(adapter)===prototype&&
+   adapter.setRestriction===prototype.setRestriction&&
+   adapter.canRestrict===prototype.canRestrict&&
+   adapter.isProtected===prototype.isProtected&&
+   adapter.call===prototype.call&&
+   adapter.getMember===prototype.getMember&&
+   adapter.allowed===prototype.allowed;
  }
  private readonly botId:number;
  constructor(private readonly token:string,private readonly request:typeof fetch=fetch,
