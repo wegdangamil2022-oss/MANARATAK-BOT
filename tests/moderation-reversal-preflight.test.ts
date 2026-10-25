@@ -18,6 +18,7 @@ async function fixture(engine:'json'|'sqlite'){
  await store.transaction(s=>{s.moderationOperations.push({
   id:'confirmed-ban',chatId:CHAT,memberId:TARGET,actorId:OWNER,kind:'BAN',
   reasonFingerprint:'private-reason',policyVersion:version,status:'CONFIRMED',
+   attemptGateway:'TELEGRAM_API',
   createdAt:1700000000000
  });});
  let calls=0;let observation:'BAN_PRESENT'|'MUTE_PRESENT'|'NO_RESTRICTION'|'PROTECTED'|'NO_RIGHTS'|'UNKNOWN'='BAN_PRESENT';

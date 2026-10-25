@@ -32,7 +32,7 @@ async function fixture(engine:'json'|'sqlite'){
  const v=(await store.snapshot()).chats[0]!.version;
  const operation=(member:string,status:OperationStatus,rev=v,kind:RestrictionKind='BAN')=>({
   id:'op-'+member,chatId:GROUP,memberId:member,actorId:OWNER,kind,
-  reasonFingerprint:'SECRET-EVIDENCE-'+member,policyVersion:rev,status,createdAt:1700000000000
+  reasonFingerprint:'SECRET-EVIDENCE-'+member,policyVersion:rev,status,createdAt:1700000000000,attemptGateway:'TELEGRAM_API' as const
  });
  return {store,policy,app,v,operation,close:()=>rm(dir,{recursive:true,force:true})};
 }

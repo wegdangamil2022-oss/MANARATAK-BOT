@@ -42,6 +42,9 @@ export function inspectLocalReversal(s:BotState,policy:Policy,chat:string,
  if(!last||last.status!=='CONFIRMED'||(last.kind!=='BAN'&&last.kind!=='MUTE'))
   return {status:'BLOCKED_UNPROVEN'};
  if(last.policyVersion!==policy.chatRevision(s,chat))return {status:'BLOCKED_STALE'};
+ // Local fake successes and legacy/unidentified gateways are never
+ // treated as observations of a possible real Telegram restriction.
+ if(last.attemptGateway!=='TELEGRAM_API')return {status:'BLOCKED_UNPROVEN'};
  return {status:'MAY_INSPECT',kind:last.kind};
 }
 const localEpoch=(s:BotState,chat:string,member:string)=>JSON.stringify([

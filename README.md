@@ -1,3 +1,9 @@
+## Phase 3 v0.7.74 — don't confuse an offline sanction simulation with a Telegram ban
+
+Every newly `STARTED` moderation operation now records the **locally selected dispatch adapter** in `attemptGateway`: `SIMULATION` for `FakeModerationGateway`, `TELEGRAM_API` for the optional real-request adapter, or `UNSPECIFIED` for other gateways. Legacy rows without a gateway label stay untrusted. The read-only `ModerationReversalPreflight` and the owner's reversal inventory reject simulated, unspecified and unlabeled confirmed operations as `BLOCKED_UNPROVEN`, without contacting Telegram. They consider only operations explicitly associated with the Telegram adapter as potential candidates for read-only status inspection.
+
+**Important:** the new label records which adapter the bot code selected, *not* verified external sanction authorship, an immutable provider receipt, or permission to unban/unmute. Even a matching `getChatMember` result remains `OBSERVED_NOT_ATTRIBUTABLE` and is never a release grant. The production live server still uses `FakeModerationGateway`; no real Telegram ban/mute or rollback is activated in this release.
+
 ## Phase 3 v0.7.73 — durable moderation safety rate limits
 
 The `ModerationService` now applies **fixed conservative anti-abuse ceilings** for new BAN/MUTE intents: 5 per actor/group per 10 minutes, 12 total per group per 10 minutes and 30 per actor across all groups per 24 hours. The check and new INTENT use the same durable store transaction. Pending and UNKNOWN outcomes count toward budgets, as do confirmed and explicitly failed attempts; cancelled attempts and `NONE` reversals are excluded from sanction caps. Limits are NOT configurable from Telegram yet; there is no manual override that could bypass the ledger. Exhausted manual and subscription actions fail closed without an outbound sanction. Reconcile still enforces the existing no-retry UNKNOWN outcome guard.
