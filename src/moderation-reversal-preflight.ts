@@ -20,6 +20,30 @@ const validChat=(x:string)=>/^-[1-9][0-9]{0,15}$/u.test(x)&&
  Number.isSafeInteger(Number(x));
 const validMember=(x:string)=>/^[1-9][0-9]{0,15}$/u.test(x)&&
  Number.isSafeInteger(Number(x));
+/** Share the local-only risk classification with the owner's aggregate
+ * status screen, so the UI can never classify a blocked case as promising.
+ * MAY_INSPECT is NOT permission to unban, unmute or even contact Telegram.
+ */
+export type LocalReversalAssessment=
+ |{status:'DENIED'|'BLOCKED_UNKNOWN'|'BLOCKED_PENDING'|
+   'BLOCKED_ACTIVE_REASON'|'BLOCKED_UNPROVEN'|'BLOCKED_STALE'}
+ |{status:'MAY_INSPECT';kind:'BAN'|'MUTE'};
+export function inspectLocalReversal(s:BotState,policy:Policy,chat:string,
+ member:string):LocalReversalAssessment{
+ if(!validChat(chat)||!validMember(member)||member===policy.ownerId||
+   !policy.canUseChat(s,chat,'moderation'))return {status:'DENIED'};
+ const all=s.moderationOperations.filter(o=>o.chatId===chat&&o.memberId===member);
+ if(all.some(o=>o.status==='UNKNOWN_OUTCOME'))return {status:'BLOCKED_UNKNOWN'};
+ if(all.some(o=>o.status==='INTENT'||o.status==='STARTED'))
+  return {status:'BLOCKED_PENDING'};
+ if(s.moderationReasons.some(r=>r.chatId===chat&&r.memberId===member&&r.active))
+  return {status:'BLOCKED_ACTIVE_REASON'};
+ const last=all.at(-1);
+ if(!last||last.status!=='CONFIRMED'||(last.kind!=='BAN'&&last.kind!=='MUTE'))
+  return {status:'BLOCKED_UNPROVEN'};
+ if(last.policyVersion!==policy.chatRevision(s,chat))return {status:'BLOCKED_STALE'};
+ return {status:'MAY_INSPECT',kind:last.kind};
+}
 const localEpoch=(s:BotState,chat:string,member:string)=>JSON.stringify([
  s.chats.filter(c=>c.id===chat),
  s.moderationReasons.filter(r=>r.chatId===chat&&r.memberId===member),
@@ -39,20 +63,9 @@ export class ModerationReversalPreflight {
   const before=await this.store.snapshot();
   if(!this.policy.isOwner(actor)||!this.policy.canUseChat(before,chat,'moderation'))
    return {status:'DENIED'};
-  const all=before.moderationOperations.filter(o=>o.chatId===chat&&o.memberId===member);
-  if(all.some(o=>o.status==='UNKNOWN_OUTCOME'))return {status:'BLOCKED_UNKNOWN'};
-  if(all.some(o=>o.status==='INTENT'||o.status==='STARTED'))
-   return {status:'BLOCKED_PENDING'};
-  if(before.moderationReasons.some(r=>r.chatId===chat&&r.memberId===member&&r.active))
-   return {status:'BLOCKED_ACTIVE_REASON'};
-  // Only the latest successful BAN/MUTE, with no subsequent local operation,
-  // is even worth checking externally. That is evidence, not provenance.
-  const last=all.at(-1);
-  if(!last||last.status!=='CONFIRMED'||(last.kind!=='BAN'&&last.kind!=='MUTE'))
-   return {status:'BLOCKED_UNPROVEN'};
-  if(last.policyVersion!==this.policy.chatRevision(before,chat))
-   return {status:'BLOCKED_STALE'};
-  const expected=last.kind;
+  const local=inspectLocalReversal(before,this.policy,chat,member);
+  if(local.status!=='MAY_INSPECT')return local;
+  const expected=local.kind;
   const epoch=localEpoch(before,chat,member);
   let remote:RestrictionObservation;
   try{remote=await this.observer.observeRestriction(chat,member);}
