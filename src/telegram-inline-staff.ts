@@ -81,6 +81,12 @@ export async function renderStaffInline(store:BotStore,policy:Policy,actor:strin
   return null;
  const warnings=state.warnings.filter(w=>w.chatId===chat.id&&w.active).length;
  const moderation=state.moderationReasons.filter(m=>m.chatId===chat.id&&m.active).length;
+ const savedOperations=groupModerationOperations(state,chat.id);
+ const digest=moderationAuditDigest(savedOperations);
+ if(route.kind==='operations'){
+  if(route.digest!==digest)return null;
+  return renderStaffModerationAudit(chat,route.page,route.operationPage,savedOperations,digest);
+ }
  // No student IDs, complaints, media content or private subscription channels
  // are included: aggregate counts only for an authorized staff member.
  return menu('<b>بطاقة إشراف محلية 🛡️</b>\n'
@@ -92,7 +98,8 @@ export async function renderStaffInline(store:BotStore,policy:Policy,actor:strin
   +'أسباب تقييد نشطة محفوظة: '+moderation+'\n'
   +'الأرقام محلية وليست حالة Telegram الحية.\n'
   +'لا يمكن تنفيذ العقوبات أو تغيير الأذونات من هذه الشاشة.',
-  [[btn('↩️ مجموعات الصفحة',pageKey(route.page)),btn('🏠 الرئيسية','ms:1:h')]]);
+  [[btn('📊 سجل حالات العقوبات',moderationAuditKey(chat,route.page,0,digest))],
+   [btn('↩️ مجموعات الصفحة',pageKey(route.page)),btn('🏠 الرئيسية','ms:1:h')]]);
 }
 ,'u');
 const operationsRe=new RegExp('^ms:1:o:(-[1-9][0-9]{0,18}):([1-9][0-9]{0,9}):'+pageToken+':'+pageToken+':([a-f0-9]{12})
