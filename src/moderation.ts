@@ -11,7 +11,8 @@ export interface ModerationGateway {
   readonly attemptGateway?:ModerationDispatchGateway;
   canRestrict(chatId: string, memberId: string): Promise<boolean>;
   isProtected(chatId: string, memberId: string): Promise<boolean>;
-  setRestriction(chatId: string, memberId: string, kind: RestrictionKind): Promise<RestrictionOutcome>;
+  setRestriction(chatId: string, memberId: string, kind: RestrictionKind,
+    verifyCurrentAuthority?:()=>Promise<boolean>): Promise<RestrictionOutcome>;
 }
 export class FakeModerationGateway implements ModerationGateway {
   readonly attemptGateway='SIMULATION' as const;
@@ -163,8 +164,25 @@ export class ModerationService {
       op.status = 'STARTED'; return true;
     });
     if (!started) return { status: 'DENIED', reason: 'REVOKED_BEFORE_DISPATCH' };
+    // Telegram rights checks are asynchronous. Group approval, staff grants,
+    // subscription evidence and the reason set may change AFTER STARTED.
+    // The official Bot API adapter invokes this immediately before its write.
+    // It is read-only; a false/throw is a definitive no-send, never a retry.
+    const verifyCurrentAuthority=async():Promise<boolean>=>{
+      try{
+        const s=await this.store.snapshot();
+        const op=s.moderationOperations.find(x=>x.id===candidate.id);
+        return op?.status==='STARTED'&&
+          this.authorized(s,actorId,chatId,memberId)&&
+          (!stillCurrent||stillCurrent(s))&&
+          this.policy.chatRevision(s,chatId)===op.policyVersion&&
+          fingerprint(s,chatId,memberId)===op.reasonFingerprint;
+      }catch{return false;}
+    };
     let outcome: RestrictionOutcome;
-    try { outcome = await this.gateway.setRestriction(chatId, memberId, (await this.store.snapshot()).moderationOperations.find(x => x.id === candidate.id)!.kind); }
+    try { outcome = await this.gateway.setRestriction(chatId, memberId,
+      (await this.store.snapshot()).moderationOperations.find(x => x.id === candidate.id)!.kind,
+      verifyCurrentAuthority); }
     catch { outcome = 'UNKNOWN_OUTCOME'; }
     await this.store.transaction(s => {
       const op = s.moderationOperations.find(x => x.id === candidate.id)!;
