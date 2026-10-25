@@ -78,7 +78,7 @@ for(const engine of ['json','sqlite'] as const){
    const before=await f.app().handle(cb(14,100,selected));
    assert.equal(before.status,'APPLIED');
    // Move a new grant into the beginning; old callback must not switch people.
-   await f.policy.grant(OWNER,'100','chat.manage',CHAT,f.now()+60000);
+   await f.policy.grant(OWNER,'499','chat.manage',CHAT,f.now()+60000);
    assert.equal((await f.app().handle(cb(15,100,selected))).status,'DENIED');
   }finally{await f.close();}
  });
