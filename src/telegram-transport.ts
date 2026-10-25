@@ -20,6 +20,7 @@ import {menuLabels,mainMenuKeyboard,backMenuKeyboard,categoryButton,
  type TelegramReplyKeyboard} from './telegram-menu.js';
 import {OwnerTelegramMenu,isOwnerMenuText} from './telegram-owner-menu.js';
 import {ownerInlineHome,ownerInlineRender,ownerInlineLinkedReadOnly,type TelegramInlineKeyboard} from './telegram-inline-owner.js';
+import {renderOwnerInlineGroups} from './telegram-inline-groups.js';
 import {parseSearchQuery,parseSearchPageCommand,searchPageButton,
  searchResourceButton,parseSearchResourceSelection,searchResultsBreadcrumb,
  parseSearchResultsBreadcrumb} from './telegram-search.js';
@@ -268,6 +269,14 @@ export class TelegramUpdateApplication {
      // command from untrusted callback_data or from a group context.
      if(kind!=='private'||actorId!==chatId)return {status:'DENIED',reason:'OWNER_CALLBACK_PRIVATE_ONLY'};
      if(!this.opts.policy.isOwner(actorId))return {status:'DENIED',reason:'OWNER_ONLY'};
+     // Group browsing is the first migrated *drill-down* feature. Every page,
+     // chat revision and local policy is freshly authorized from durable state.
+     if(event.callbackData==='mi:1:i:01:01'||event.callbackData.startsWith('mi:1:g:')){
+      const screen=await renderOwnerInlineGroups(this.opts.store,this.opts.policy,actorId,event.callbackData);
+      if(!screen)return {status:'DENIED',reason:'INVALID_OR_STALE_GROUP_CALLBACK'};
+      return {status:'APPLIED',reason:'RESPONSE_PLANNED_ONLY',
+       plan:this.plan(chatId,screen.text,undefined,screen.keyboard,event.callbackMessageId)};
+     }
      const view=ownerInlineRender(event.callbackData);
      if(!view)return {status:'DENIED',reason:'INVALID_OWNER_CALLBACK'};
      const linked=ownerInlineLinkedReadOnly(event.callbackData);
@@ -846,7 +855,13 @@ export class TelegramUpdateApplication {
     const event=parsed.event;
     const key=`b3-webhook:${this.opts.botId}:${event.updateId}`;
     const claim=await this.opts.store.claim(key,this.clock());
-    if(claim!=='CLAIMED')return {status:claim==='UNKNOWN'?'UNKNOWN':'DUPLICATE',reason:'REPLAY_OR_UNRESOLVED'};
+    if(claim!=='CLAIMED'){
+     const duplicate={status:claim==='UNKNOWN'?'UNKNOWN' as const:'DUPLICATE' as const,
+      reason:'REPLAY_OR_UNRESOLVED'};
+     // Telegram retries or duplicated updates still need an ephemeral ACK;
+     // this NEVER re-runs the operation or re-sends the durable reply.
+     return event.callbackQueryId?{...duplicate,callbackQueryId:event.callbackQueryId}:duplicate;
+    }
     let handled:ProcessedReply;
     try{handled=await this.process(event);}catch(err){handled={status:'DENIED',reason:safeError(err)};}
     const audit:AuditRecord={updateKey:key,decision:handled.status==='APPLIED'?'ALLOW':handled.status==='DENIED'?'DENY':'NOOP',reason:handled.reason,policyVersion:0,at:this.clock()};
