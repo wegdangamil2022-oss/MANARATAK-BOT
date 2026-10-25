@@ -1,3 +1,10 @@
+## 0.7.67 — 2026-10-25 — opt-in private student Inline Keyboard with actual published library
+
+- Added `/studentinline` in private Telegram chats to browse the current approved PRIVATE educational catalogue using Inline Keyboard buttons, 8-per-page categories and resources, message edits, genuine back navigation and public-only resource details (title, university, cycle, degree, optional seats). Empty library/sections are described as empty rather than claiming imported or external opportunities exist.
+- Bounded canonical `si:1:...` callbacks contain current-state fingerprints and list/page slots. Every click re-reads a single store snapshot and rechecks private education feature authorization, enabled category ancestor chain, published-only resource status, exact category/resource projection fingerprint and list page membership. Hidden/archived, newly reordered, malformed, expired-visibility or forged selection fails closed. Neither imported drafts nor reviewer/import/source locator metadata is exposed.
+- Student navigation cannot call owner `mi:1`, staff `ms:1`, one-shot administrative `c_` or group moderation actions; group-context callbacks are denied. The existing student Reply Keyboard, FAQ and owner/staff menus remain functional. No production platform API, real Telegram membership grant, live AI provider, application submission or new content publication is claimed.
+- Tests cover JSON and SQLite published-only drill-down, category/resource pagination, HTML escaping, stale fingerprints, privacy feature disable, empty library, cross-role blocking and replay-safe callbacks. Strict TypeScript, all tests and five offline demos required before merging.
+
 ## 0.7.66 — 2026-10-25 — private staff Inline Keyboard with scoped live-local authorization
 
 - Added opt-in `/staffinline` in private Telegram chat. The staff menu lists only approved **local** groups with the moderation scope and a currently valid internal `chat.manage` delegation to the actor (or owner policy permission); it never infers live Telegram administrator rights.

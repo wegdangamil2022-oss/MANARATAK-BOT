@@ -1,3 +1,7 @@
+## B2 v0.7.67 — real approved educational catalogue in opt-in student Inline Keyboard
+
+Send `/studentinline` in a private Telegram conversation to browse the *currently enabled, locally published* private educational categories and their published resources with Telegram Inline Keyboard buttons. Select a category, open a resource, or navigate back and through pages; the bot edits the original message rather than treating button labels as user commands. It displays only public fields and checks the latest local education permissions and visibility again on every tap. Empty sections, disabled features and archived resources are handled transparently. The existing Reply Keyboard remains compatible. This is **not** a live scholarship/university API integration and does not independently verify official application deadlines.
+
 ## B2 v0.7.66 — opt-in Inline Keyboard for delegated staff
 
 Use `/staffinline` in a **private Telegram chat** to inspect the moderation groups that the actor is allowed to administer **inside Manaratak**. The view uses current, scoped, unexpired internal `chat.manage` grants and approved moderation scopes; staff can browse 8 entries per page and inspect only local aggregate warning/restriction counts. Owner privileges remain separate at `/ownerinline`. Every callback is re-authorized; old buttons fail after grant revocation, expiry or chat changes. No permissions or punishments are changed, and no external Telegram administration rights are implied. Live moderation awaits explicit gateway implementation and a controlled test group.
