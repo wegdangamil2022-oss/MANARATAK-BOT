@@ -8,7 +8,7 @@ import {EducationService} from './education.js';
 import {EducationAdminFacade} from './education-admin.js';
 import {ApprovedAnswerService,ResourceLinkService} from './education-interactions.js';
 import {TelegramUpdateApplication,telegramWebhookListener} from './telegram-transport.js';
-import {TelegramReplyDispatcher,TelegramBotApiTextSender} from './telegram-replies.js';
+import {TelegramReplyDispatcher,TelegramBotApiTextSender,TelegramBotApiCallbackAcker} from './telegram-replies.js';
 import {TelegramBotApiMembershipGateway} from './telegram-membership.js';
 import {SubscriptionGate} from './subscription.js';
 import {ModerationService,FakeModerationGateway} from './moderation.js';
@@ -175,7 +175,8 @@ export async function createLiveTelegramServer(config:LiveTelegramConfig,
  const dispatcher=new TelegramReplyDispatcher(store,policy,
   new TelegramBotApiTextSender(check.token,request),Date.now,safetyGate,subscription,
   (chatId,actorId)=>membership.verifyMembership(chatId,actorId));
- const server=createServer(telegramWebhookListener(app,check.webhookSecret,dispatcher,{},safetyGate));
+ const server=createServer(telegramWebhookListener(app,check.webhookSecret,dispatcher,{},safetyGate,
+  new TelegramBotApiCallbackAcker(check.token,request)));
  // Local-only listener. These are resource budgets, not a substitute for the
  // trusted HTTPS proxy, ingress anti-abuse controls, TLS or real load testing.
  server.requestTimeout=15_000;
