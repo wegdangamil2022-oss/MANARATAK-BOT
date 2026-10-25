@@ -1,3 +1,11 @@
+## 0.7.72 — 2026-10-25 — current-state owner Inline Keyboard reversal blockers summary
+
+- The owner private Inline Keyboard's `👥 المجموعات والشبكات → 📋 مجموعاتي → بطاقة المجموعة` now includes a **🧭 عوائق التراجع المحلية** read-only button for locally approved moderation-enabled groups. The new screen counts distinct target cases without printing their Telegram IDs, operator IDs, member identities, reasons, source references, evidence or UUIDs.
+- Local outcome buckets are derived from **the exact same `inspectLocalReversal` classification used by the v0.7.71 preflight**: unknown, pending, active reasons, unproven history, stale group-policy revision and cases that may be worth a subsequent real Telegram read. Even the latter does NOT authorize unbanning/unmuting, prove attribution or claim live Telegram status.
+- Each callback is bound to the current group ID, exact chat-policy revision and actual approved-list page, plus a 12-hex SHA-256 digest over current group moderation reasons and operations. A change to the ledger, page position, scope or policy invalidates the old button. The digest is a freshness selector only, never an access token; every click still requires verified private owner identity.
+- Added 9 JSON/SQLite tests for six mixed blocker categories, no member/evidence disclosure, no live network call, immutable moderation domain state, stale reason/operation changes, forged selectors, foreign-user/group rejection, moderation-scope loss and empty ledgers. The full strict TypeScript/test suite and five offline demos gate merging.
+- No live Telegram sanction, release or rollback operation is activated. The preflight's matching state remains `OBSERVED_NOT_ATTRIBUTABLE` and must never be confused with permission to reverse another administrator's action.
+
 ## 0.7.71 — 2026-10-25 — read-only Telegram sanction reversal preflight (never executes release)
 
 - Added `ModerationReversalPreflight` to evaluate an owner-scoped, current locally approved moderation group and target before **considering** future BAN/MUTE reversal. It requires the latest local operation to be a matching `CONFIRMED` BAN/MUTE at the current policy revision, no active reasons, and no `UNKNOWN_OUTCOME` or pending operation for that target. All uncertainties or revoked scopes fail closed **before a Telegram query**.
