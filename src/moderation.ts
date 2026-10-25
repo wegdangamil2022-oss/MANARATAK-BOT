@@ -1,16 +1,19 @@
 import { randomUUID } from 'node:crypto';
-import { BotStore, type BotState, type ModerationReason, type ModerationOperation, type RestrictionKind } from './store.js';
+import { BotStore, type BotState, type ModerationReason, type ModerationOperation, type RestrictionKind, type ModerationDispatchGateway } from './store.js';
 import { Policy } from './policy.js';
 import {moderationRateFuse,moderationRateDenial} from './moderation-rate-fuse.js';
 
 export type RestrictionOutcome = 'CONFIRMED' | 'FAILED_CONFIRMED' | 'UNKNOWN_OUTCOME';
 export type ModerationResult = { status: 'APPLIED' | 'NO_CHANGE' | 'DENIED' | 'BLOCKED_PENDING' | 'BLOCKED_UNKNOWN' | 'FAILED_CONFIRMED' | 'UNKNOWN_OUTCOME'; reason: string };
 export interface ModerationGateway {
+  /** Local adapter identifier only: never a Telegram enforcement receipt. */
+  readonly attemptGateway?:ModerationDispatchGateway;
   canRestrict(chatId: string, memberId: string): Promise<boolean>;
   isProtected(chatId: string, memberId: string): Promise<boolean>;
   setRestriction(chatId: string, memberId: string, kind: RestrictionKind): Promise<RestrictionOutcome>;
 }
 export class FakeModerationGateway implements ModerationGateway {
+  readonly attemptGateway='SIMULATION' as const;
   rights = true;
   protectedMembers = new Set<string>();
   calls: { chatId: string; memberId: string; kind: RestrictionKind }[] = [];
@@ -146,6 +149,12 @@ export class ModerationService {
         (!stillCurrent||stillCurrent(s)) &&
         this.policy.chatRevision(s, chatId) === op.policyVersion && fingerprint(s, chatId, memberId) === op.reasonFingerprint;
       if (!valid) { op.status = 'CANCELLED'; return false; }
+      // Durable local provenance hint recorded only if a dispatch is actually
+      // about to be attempted. A fake success must never look like Telegram
+      // proof. Unknown adapters are quarantined, not inferred.
+      op.attemptGateway=this.gateway.attemptGateway==='TELEGRAM_API'?
+        'TELEGRAM_API':this.gateway.attemptGateway==='SIMULATION'?
+        'SIMULATION':'UNSPECIFIED';
       op.status = 'STARTED'; return true;
     });
     if (!started) return { status: 'DENIED', reason: 'REVOKED_BEFORE_DISPATCH' };
