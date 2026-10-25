@@ -44,7 +44,11 @@ export class ModerationService {
     return reasons.some(r => r.kind === 'BAN') ? 'BAN' : reasons.some(r => r.kind === 'MUTE') ? 'MUTE' : 'NONE';
   }
   private authorized(s: BotState, actorId: string, chatId: string, memberId: string): boolean {
+    // Locally delegated chat managers are protected targets even if Telegram
+    // currently reports them as ordinary members. Expired/revoked grants do
+    // not shield members, and every dispatch phase reuses this same check.
     return actorId !== memberId && memberId !== this.policy.ownerId && /^\d+$/.test(memberId) && memberId !== '0' &&
+      !this.policy.has(s, memberId, 'chat.manage', chatId, this.clock()) &&
       this.policy.canUseChat(s, chatId, 'moderation') && this.policy.has(s, actorId, 'chat.manage', chatId, this.clock());
   }
   private async check(actorId: string, chatId: string, memberId: string): Promise<boolean> {
