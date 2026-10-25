@@ -89,7 +89,7 @@ for(const engine of ['json','sqlite'] as const){
   const f=await fixture(engine);try{
    await f.store.transaction(s=>{
     for(let i=0;i<4;i++)s.moderationOperations.push(record(i,{
-     status:(['INTENT','STARTED','FAILED_CONFIRMED','UNKNOWN_OUTCOME'] as const)[i]
+     status:(['INTENT','STARTED','FAILED_CONFIRMED','UNKNOWN_OUTCOME'] as const)[i]!
     }));
     s.moderationOperations.push(record(4,{status:'CANCELLED'}));
    });
