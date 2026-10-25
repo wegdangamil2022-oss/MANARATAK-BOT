@@ -141,7 +141,7 @@ test('callback acknowledgement validates IDs and never reports false success',as
 });
 
 test('linked owner inline read-only actions are exact documented selectors',()=>{
- const linked=[
+ const linked:readonly (readonly [string,string])[]=[
   ['mi:1:i:01:01',ownerMenuLabels.groups],
   ['mi:1:i:04:05',ownerMenuLabels.subscriptionHealth],
   ['mi:1:i:10:08',ownerMenuLabels.faq],
