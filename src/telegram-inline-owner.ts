@@ -3,6 +3,7 @@
  * or operationally implemented action. Existing owner actions remain available
  * through the separately authorized legacy menu while migrated incrementally.
  */
+import {ownerMenuLabels} from './telegram-owner-menu.js';
 export interface TelegramInlineKeyboard {
  readonly inline_keyboard:readonly (readonly {readonly text:string;readonly callback_data:string}[])[];
 }
@@ -627,6 +628,21 @@ export const ownerInlineSections:readonly ApprovedOwnerSection[]=[
   ]
  }
 ] as const;
+/** Exact safe owner *read-only* routes. Mutating owner commands must never be
+ * passed through this catalogue merely because their names resemble a button.
+ * The receiving handler calls the existing privileged owner service again.
+ */
+export function ownerInlineLinkedReadOnly(data:string):string|null {
+ switch(data){
+  case 'mi:1:i:01:01':return ownerMenuLabels.groups;
+  case 'mi:1:i:04:05':return ownerMenuLabels.subscriptionHealth;
+  case 'mi:1:i:10:08':return ownerMenuLabels.faq;
+  case 'mi:1:i:10:09':return ownerMenuLabels.library;
+  case 'mi:1:i:13:01':return ownerMenuLabels.delivery;
+  case 'mi:1:i:15:01':return ownerMenuLabels.settings;
+  default:return null;
+ }
+}
 export interface OwnerInlineScreen {readonly text:string;readonly keyboard:TelegramInlineKeyboard;}
 const esc=(s:string):string=>s.replace(/&/gu,'&amp;').replace(/</gu,'&lt;').replace(/>/gu,'&gt;')
  .replace(/"/gu,'&quot;').replace(/'/gu,'&#39;');

@@ -10,8 +10,9 @@ import {EducationAdminFacade} from '../src/education-admin.js';
 import {ApprovedAnswerService,ResourceLinkService} from '../src/education-interactions.js';
 import {TelegramUpdateApplication} from '../src/telegram-transport.js';
 import {TelegramBotApiTextSender,TelegramBotApiCallbackAcker} from '../src/telegram-replies.js';
-import {ownerInlineHome,ownerInlineRender,ownerInlineSections,isValidTelegramInlineKeyboard} from '../src/telegram-inline-owner.js';
+import {ownerInlineHome,ownerInlineRender,ownerInlineSections,isValidTelegramInlineKeyboard,ownerInlineLinkedReadOnly} from '../src/telegram-inline-owner.js';
 
+import {ownerMenuLabels} from '../src/telegram-owner-menu.js';
 const TOKEN='123456789:ABCDEFGHIJKLMNOPQRSTUVWXYZabcde';
 const message=(updateId:number,actor:number,text:string)=>({
  update_id:updateId,message:{message_id:updateId,chat:{id:actor,type:'private'},
@@ -137,4 +138,43 @@ test('callback acknowledgement validates IDs and never reports false success',as
  await acker.answer('unsafe\nquery');
  assert.equal(requests.length,1);
  assert.match(requests[0]??'',/answerCallbackQuery$/);
+});
+
+test('linked owner inline read-only actions are exact documented selectors',()=>{
+ const linked:readonly (readonly [string,string])[]=[
+  ['mi:1:i:01:01',ownerMenuLabels.groups],
+  ['mi:1:i:04:05',ownerMenuLabels.subscriptionHealth],
+  ['mi:1:i:10:08',ownerMenuLabels.faq],
+  ['mi:1:i:10:09',ownerMenuLabels.library],
+  ['mi:1:i:13:01',ownerMenuLabels.delivery],
+  ['mi:1:i:15:01',ownerMenuLabels.settings]
+ ];
+ for(const [callbackData,route] of linked)
+  assert.equal(ownerInlineLinkedReadOnly(callbackData),route);
+ for(const bad of ['mi:1:p:0','mi:1:i:02:02','mi:1:i:04:04','mi:1:i:10:07',
+  'mi:1:i:13:02','mi:1:i:15:02','mi:1:i:13:01x','mi:2:i:13:01'])
+  assert.equal(ownerInlineLinkedReadOnly(bad),null);
+});
+test('owner inline live local read-only views reuse existing authorization and audited state',async()=>{
+ const f=await fixture('sqlite');try{
+  let id=100;
+  for(const [data,content] of [
+   ['mi:1:i:01:01',/المجموعات/],
+   ['mi:1:i:04:05',/سلامة قواعد الاشتراك/],
+   ['mi:1:i:10:08',/الأسئلة/],
+   ['mi:1:i:10:09',/المكتبة/],
+   ['mi:1:i:13:01',/حالة الرسائل/],
+   ['mi:1:i:15:01',/إعدادات التشغيل/],
+  ] as const){
+   const outcome=await f.app.handle(callback(++id,100,data));
+   assert.equal(outcome.status,'APPLIED',data);
+   assert.match(outcome.plan?.text??'',content,data);
+   assert.equal(outcome.plan?.editMessageId,55);
+   assert.equal(isValidTelegramInlineKeyboard(outcome.plan?.inlineMarkup),true);
+   const refused=await f.app.handle(callback(++id,300,data));
+   assert.equal(refused.status,'DENIED');
+   assert.equal(refused.plan,undefined);
+  }
+  assert.equal((await f.store.snapshot()).educationResources.length,0);
+ }finally{await f.close();}
 });
