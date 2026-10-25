@@ -19,7 +19,7 @@ async function fixture(){
  return {dir,state,backup,safety,store,snapshot,close:()=>rm(dir,{recursive:true,force:true})};
 }
 const args=(f:Awaited<ReturnType<typeof fixture>>)=>({
- stateFile:f.state,backupFile:f.backup,safetyFile:f.safety,now:NOW,staleAfterMs:900_000
+ stateFile:f.state,backupFile:f.backup,safetyFile:f.safety,now:Date.now(),staleAfterMs:900_000
 });
 const cli=(f:Awaited<ReturnType<typeof fixture>>,extra:string[]=[])=>spawnSync(
  process.execPath,['dist/src/telegram-trial-acceptance-cli.js','--offline-only','--state',f.state,
