@@ -706,8 +706,10 @@ function sectionScreen(sectionIndex:number,page:number):OwnerInlineScreen|null{
  for(let i=start;i<end;i+=2){
   rows.push(Array.from({length:Math.min(2,end-i)},(_,j)=>{
    const itemIndex=i+j;
-   return callback('⌛ '+section.items[itemIndex],
-    'mi:1:i:'+number(sectionIndex+1)+':'+number(itemIndex+1));
+   const selector='mi:1:i:'+number(sectionIndex+1)+':'+number(itemIndex+1);
+   const browsable=ownerInlineLinkedReadOnly(selector)!==null;
+   // Read-only connected views are different from design-only placeholders.
+   return callback((browsable?'👁️ ':'⌛ ')+section.items[itemIndex],selector);
   }));
  }
  const controls=[] as {text:string;callback_data:string}[];
