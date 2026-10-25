@@ -1,3 +1,10 @@
+## 0.7.69 — 2026-10-25 — privacy-scoped moderation outcome audit for staff
+
+- In the opt-in private `/staffinline` panel, an approved group's card now includes **📊 سجل حالات العقوبات**. Authorized locally delegated staff and the owner can inspect bounded, paginated (8 records/page) *aggregate local operation outcomes*: pending intent, started/uncertain, provider-confirmed, confirmed-failed, unknown, and cancelled. It expressly warns against blindly retrying an UNKNOWN outcome.
+- **No member IDs, actor IDs, report text, detailed moderation reasons, operation UUIDs or evidence fingerprints** are shown; the staff view displays only case ordinals, action types and status labels. It is informational, not an execution or retry interface, and it does not claim to know actual current Telegram sanctions.
+- Every click rechecks the actual Telegram sender in a private chat, current active unexpired internal `chat.manage` grant, approved group moderation scope, exact group policy revision and page membership. The operation history selector includes a bounded digest of the current private operation ledger; appended or changed operations invalidate old buttons, and out-of-range or malformed selectors fail closed.
+- Added 11 JSON/SQLite tests for status distributions, zero identity disclosure, 19-operation pagination, stale-operation hashes, revocation/isolation, empty ledger, owner/staff keyboard boundaries and no outbound sanctions. Entire CI suite, strict TypeScript and five offline demos gate merge.
+
 ## 0.7.68 — 2026-10-25 — fail-closed Telegram Bot API moderation gateway, NOT activated
 
 - Added `src/telegram-moderation-gateway.ts`: a **real Bot API request adapter** implementing `ModerationGateway` for BAN (`banChatMember`) and MUTE (`restrictChatMember`). It uses canonical numerical Telegram IDs, strict JSON and exact boolean confirmation, bounded responses and timeouts, no automatic retries, and safe `FAILED_CONFIRMED` versus `UNKNOWN_OUTCOME` distinction.
