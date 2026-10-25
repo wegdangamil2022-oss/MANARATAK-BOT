@@ -97,7 +97,7 @@ export class OwnerInlineGroupControls {
  private async confirm(token:string,actorId:string):Promise<OwnerInlineScreen|null>{
   // The nonce and local policy update commit in ONE durable transaction. A
   // crash cannot consume approval without applying the local restriction.
-  const applied=await this.policy.applyOwnerInlineConfirmation(actorId,token);
+  const applied=await this.policy.applyOwnerInlineConfirmation(actorId,token,this.clock());
   if(!applied)return null;
   const label=actionLabels[applied.action];
   return ui('<b>تم تنفيذ الإجراء المحلي ✅</b>\n'
