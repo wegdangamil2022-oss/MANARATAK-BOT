@@ -23,8 +23,8 @@ async function fixture(engine:'json'|'sqlite'){
  const service=()=>new ModerationService(store,policy,gateway,()=>time);
  await policy.approveChat(OWNER,GROUP,['moderation']);
  await policy.approveChat(OWNER,OTHER,['moderation']);
- await policy.grant(OWNER,STAFF,'chat.manage',GROUP,BASE+86_400_000);
- await policy.grant(OWNER,STAFF,'chat.manage',OTHER,BASE+86_400_000);
+ await policy.grant(OWNER,STAFF,'chat.manage',GROUP,BASE+259_200_000);
+ await policy.grant(OWNER,STAFF,'chat.manage',OTHER,BASE+259_200_000);
  return {store,policy,gateway,service,now:()=>time,advance:(ms:number)=>{time+=ms},
   close:()=>rm(dir,{recursive:true,force:true})};
 }
