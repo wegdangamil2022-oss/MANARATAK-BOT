@@ -127,7 +127,7 @@ for(const engine of ['json','sqlite'] as const){
    const last=await f.app().handle(cb(202,301,'ms:1:p:2'));
    assert.equal(buttons(last).filter(b=>b.callback_data.startsWith('ms:1:g:')).length,2);
    assert.equal((await f.app().handle(cb(203,301,'ms:1:p:3'))).status,'DENIED');
-   const old=buttons(middle).find(b=>b.callback_data.startsWith('ms:1:g:'))!.callback_data;
+   const old=buttons(middle).filter(b=>b.callback_data.startsWith('ms:1:g:')).at(-1)!.callback_data;
    await f.policy.approveChat(OWNER,'-1000999',['moderation']);
    await f.policy.grant(OWNER,STAFF,'chat.manage','-1000999',f.now()+60000);
    assert.equal((await f.app().handle(cb(204,301,old))).status,'DENIED');
