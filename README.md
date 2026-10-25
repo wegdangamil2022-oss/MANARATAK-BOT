@@ -1,3 +1,7 @@
+## B2 v0.7.63 — explicit local-only owner group restrictions (opt-in inline UI)
+
+After `/ownerinline` → `👥 المجموعات والشبكات` → `📋 مجموعاتي` → an approved group's card, the owner may preview a **local group AI OFF** or **internal assistant/publishing scope restriction**, then confirm with a one-shot short-lived callback token. Preview never mutates state. Confirmation is tied to the real verified owner, exact group and current policy version, is consumed once, and writes to the existing policy audit. Legacy owner actions remain available. **These controls do not call Telegram to ban, mute, leave groups, grant rights, or publish to channels.** They do not claim to know live bot permissions, and state and callback metadata remain subject to the project's storage and retention policy. No real bot or token is needed to run the offline tests.
+
 ## B2 v0.7.61 — Owner-only read-only Inline Keyboard navigation (offline)
 
 - Added the explicit private `/ownerinline` command as a safe migration path without removing the existing owner/student Reply Keyboard menus. The new 2-page owner dashboard reproduces 16 approved sections and all 253 named subordinate items from `docs/أزرار_منارتك.md` in read-only catalogue form. Sections and items have bounded two-byte-ish ASCII callback tokens, not grants; all unported actions are conspicuously described as NOT operational.
