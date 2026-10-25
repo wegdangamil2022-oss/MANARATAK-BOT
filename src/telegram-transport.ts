@@ -21,6 +21,7 @@ import {menuLabels,mainMenuKeyboard,backMenuKeyboard,categoryButton,
 import {OwnerTelegramMenu,isOwnerMenuText} from './telegram-owner-menu.js';
 import {ownerInlineHome,ownerInlineRender,ownerInlineLinkedReadOnly,type TelegramInlineKeyboard} from './telegram-inline-owner.js';
 import {renderOwnerInlineGroups} from './telegram-inline-groups.js';
+import {OwnerInlineGroupControls} from './telegram-inline-group-controls.js';
 import {parseSearchQuery,parseSearchPageCommand,searchPageButton,
  searchResourceButton,parseSearchResourceSelection,searchResultsBreadcrumb,
  parseSearchResultsBreadcrumb} from './telegram-search.js';
@@ -269,6 +270,16 @@ export class TelegramUpdateApplication {
      // command from untrusted callback_data or from a group context.
      if(kind!=='private'||actorId!==chatId)return {status:'DENIED',reason:'OWNER_CALLBACK_PRIVATE_ONLY'};
      if(!this.opts.policy.isOwner(actorId))return {status:'DENIED',reason:'OWNER_ONLY'};
+     // Durable one-shot confirmations are owner-only, bounded to the current
+     // chat policy revision and never execute live Telegram moderation.
+     if(event.callbackData.startsWith('mi:1:g:v:')||
+       event.callbackData.startsWith('c_')){
+      const control=await new OwnerInlineGroupControls(
+       this.opts.store,this.opts.policy,this.clock).handle(event.callbackData,actorId);
+      if(!control)return {status:'DENIED',reason:'INVALID_OR_STALE_OWNER_CONFIRMATION'};
+      return {status:'APPLIED',reason:'RESPONSE_PLANNED_ONLY',
+       plan:this.plan(chatId,control.text,undefined,control.keyboard,event.callbackMessageId)};
+     }
      // Group browsing is the first migrated *drill-down* feature. Every page,
      // chat revision and local policy is freshly authorized from durable state.
      if(event.callbackData==='mi:1:i:01:01'||event.callbackData.startsWith('mi:1:g:')){
