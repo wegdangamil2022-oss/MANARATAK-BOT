@@ -19,7 +19,7 @@ import {menuLabels,mainMenuKeyboard,backMenuKeyboard,categoryButton,
  catalogBackToCategories,catalogBackToCategory,parseCatalogBackToCategory,
  type TelegramReplyKeyboard} from './telegram-menu.js';
 import {OwnerTelegramMenu,isOwnerMenuText} from './telegram-owner-menu.js';
-import {ownerInlineHome,ownerInlineRender,type TelegramInlineKeyboard} from './telegram-inline-owner.js';
+import {ownerInlineHome,ownerInlineRender,ownerInlineLinkedReadOnly,type TelegramInlineKeyboard} from './telegram-inline-owner.js';
 import {parseSearchQuery,parseSearchPageCommand,searchPageButton,
  searchResourceButton,parseSearchResourceSelection,searchResultsBreadcrumb,
  parseSearchResultsBreadcrumb} from './telegram-search.js';
@@ -270,6 +270,20 @@ export class TelegramUpdateApplication {
      if(!this.opts.policy.isOwner(actorId))return {status:'DENIED',reason:'OWNER_ONLY'};
      const view=ownerInlineRender(event.callbackData);
      if(!view)return {status:'DENIED',reason:'INVALID_OWNER_CALLBACK'};
+     const linked=ownerInlineLinkedReadOnly(event.callbackData);
+     if(linked){
+      // Call the original owner menu's verified private and service-level ACLs.
+      // Only its READ-ONLY root views are exposed. Its reply keyboard actions
+      // are intentionally not translated into mutable inline callbacks.
+      const ctx:VerifiedAdminContext={origin:'TELEGRAM_PRIVATE',actorId,chatId,verified:true};
+      const screen=await new OwnerTelegramMenu(this.opts.store,this.opts.policy,
+       this.opts.education,this.opts.admin,this.opts.platformCatalog,this.clock).handle(linked,ctx);
+      if(!screen)return {status:'DENIED',reason:'OWNER_MENU_UNAVAILABLE'};
+      const text=screen.text+'\n\n↩️ الرجوع عبر الأزرار الشفافة. الإجراءات الإدارية '
+       +'والانتقال التفصيلي ما زالا عبر لوحة المالك القديمة.';
+      return {status:'APPLIED',reason:'RESPONSE_PLANNED_ONLY',
+       plan:this.plan(chatId,text,undefined,view.keyboard,event.callbackMessageId)};
+     }
      return {status:'APPLIED',reason:'RESPONSE_PLANNED_ONLY',
       plan:this.plan(chatId,view.text,undefined,view.keyboard,event.callbackMessageId)};
     }
