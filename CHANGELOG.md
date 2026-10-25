@@ -1,3 +1,10 @@
+## 0.7.62 — 2026-10-25 — owner-only inline group drill-down (local read-only)
+
+- "📋 مجموعاتي" in the opt-in `/ownerinline` dashboard now opens a real bounded, paginated Inline Keyboard list of currently locally approved groups (eight per page). Selecting a group opens current saved group scopes, AI policy, presence hint and subscription status; dedicated buttons display scope and subscription details. Back navigation returns to the actual group-list page, while old owner Reply Keyboard actions remain unchanged.
+- Each group detail selector carries the canonical group ID, current chat-policy revision and list page. It is fully revalidated against current authorized owner identity, approved group, exact revision and page membership. Revoked/reconfigured/moved groups and forged or out-of-range selectors fail closed; no claim is made that saved presence or group rights prove live Telegram status.
+- Duplicate Telegram callbacks are acknowledged without replaying planned responses. Strict callback validation rejects extra fields, noncanonical numbers, oversized selectors and control bytes. Connected read-only items are distinguished visibly from placeholders.
+- Added JSON/SQLite regression tests for 19-group pagination, per-chat nested screens, cross-page navigation, policy changes and revocation, forged selectors, actor isolation, no state mutations, empty groups, and duplicate callback acknowledgments. This stage does NOT enable live Telegram moderation, subscription changes, or AI providers. Full strict TypeScript/tests/five offline demos required before merge.
+
 ## 0.7.61 — 2026-10-25 — B2 owner-only inline menu groundwork and safe read-only links
 
 - Add opt-in `/ownerinline` navigation: two owner-dashboard pages for 16 approved sections, and all 253 subordinate approved labels with multi-page drill-down, back and home. Until ported, a button shows approved design notes only, never a misleading success.
