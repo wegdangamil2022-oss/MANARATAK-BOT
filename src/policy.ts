@@ -141,12 +141,12 @@ export class Policy {
    * applied between independent transactions. No Telegram network calls.
    * Invalid, expired, stale or cross-owner actions have zero state effects.
    */
-  async applyOwnerInlineConfirmation(actor:string,ref:string):Promise<{
+  async applyOwnerInlineConfirmation(actor:string,ref:string,at=this.clock()):Promise<{
     action:'owner.chat.ai_off'|'owner.chat.restrict.assistant'|'owner.chat.restrict.publishing'|
       'owner.chat.revoke'|'owner.subscription.pause';chatId:string
   }|null>{
     if(!this.isOwner(actor)||!/^c_[A-Za-z0-9_-]{24}$/u.test(ref))return null;
-    const at=this.clock();
+    if(!Number.isSafeInteger(at)||at<0||at>8_640_000_000_000_000)return null;
     const known=[
       'owner.chat.ai_off','owner.chat.restrict.assistant',
       'owner.chat.restrict.publishing','owner.chat.revoke','owner.subscription.pause'
