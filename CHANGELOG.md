@@ -1,3 +1,10 @@
+## 0.7.76 — 2026-10-26 — last-mile durable policy recheck before Telegram sanction write
+
+- The `ModerationService` now supplies the official Bot API adapter with a **service-owned, read-only, fail-closed dispatch authority callback**. After async Telegram bot rights and protected-target queries, just before a BAN/MUTE HTTP request, the adapter rechecks current durable chat approval and moderation scope, staff `chat.manage` entitlement/expiry, the original operation's `STARTED` status and policy version, the active reason fingerprint and any trusted subscription evidence guard.
+- Revocation or a changed moderation reason **while Telegram preflight is awaiting a response** now produces `FAILED_CONFIRMED` without making a mutating Telegram call. No new retry, unban, unmute or release path was added, and `UNKNOWN_OUTCOME` remains quarantined. This extra gate narrows but cannot eliminate the unavoidable race between the final local check and a remote network write.
+- Added six JSON/SQLite tests for group approval revocation, staff grant revocation and reason-fingerprint changes exactly after STARTED. All six were first verified failing against previous behavior (RED) before implementation. Existing bot rights, target-protection, independent STOP switch and owner scopes remain in place.
+- The live server still uses `FakeModerationGateway`; these tests run against an injected fake HTTP responder. No real Telegram mutation, production access or token is needed.
+
 ## 0.7.75 — 2026-10-26 — authenticated moderation adapter origin, never self-certified
 
 - Hardened durable moderation origin recording: a third-party or overwritten gateway cannot assign itself `TELEGRAM_API` merely by advertising an `attemptGateway` string. A genuine `TelegramBotApiModerationGateway` now carries a private runtime brand, and only an instance retaining its original enforcement and permission-check implementations can receive this *local adapter* origin hint. Other custom/modified gateways are `UNSPECIFIED`; the normal local fake is still `SIMULATION`.
