@@ -1,3 +1,9 @@
+## 0.7.78 — 2026-10-26 — verify internal moderation adapter integrity before tagging an attempted Bot API dispatch
+
+- Further restricted the locally recorded `TELEGRAM_API` classification: besides the private instance brand and original public dispatch/preflight methods, the adapter must now use the exact audited prototype and unchanged TypeScript-private `call`, `getMember` and `allowed` implementations. Replaced helpers and inherited subclass instances are classified `UNSPECIFIED`, not given the official adapter origin hint. This removes a local provenance false-positive where a patched helper could forge a successful call without changing public methods.
+- Seven TDD tests cover the genuine adapter, subclass inheritance, replacement of three private helpers, and durable JSON/SQLite recording. Six failed on the earlier implementation (RED) while the untampered control passed, then the new checks were added.
+- **Security limits:** This is a conservative process-local classifier, not attestation of a remote Telegram sanction, a cryptographic receipt or authorization for unban/unmute. A fully compromised process or modified trusted prototype cannot be made trustworthy by this check. Live sanctions are still disabled, and no real Telegram network action is part of tests.
+
 ## 0.7.77 — 2026-10-26 — emergency STOP gate checked after awaited authority
 
 - Closed a last-mile race introduced by the v0.7.76 asynchronous durable-authority callback: the official `TelegramBotApiModerationGateway` now evaluates the independent emergency gate **again after** that callback and immediately before any `banChatMember` or `restrictChatMember` request. A STOP transition during the callback, an invalid/missing switch, or an exception in the final check returns `FAILED_CONFIRMED` with **zero mutating API requests**. No automatic retry or release action was added.
