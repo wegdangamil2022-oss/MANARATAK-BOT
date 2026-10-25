@@ -1,3 +1,9 @@
+## Phase 3 v0.7.80 — verify a single moderation test group offline
+
+Before contemplating a moderated Telegram sandbox, operators can run `npm run telegram:moderation-trial -- --offline-only --state <absolute-private-sqlite> --backup <absolute-private-sqlite-backup> --safety <private-stop-file> --stale-ms 900000 --trial-chat -100123`. Replace the sample group with a **separately created test group**, never a production one. The command requires the existing independent, matching **fresh** rollback backup and STOP switch, and checks the locally approved/present moderation scope, lack of other approved moderation-enabled groups, and absence of any previous moderation reasons/operations for the selected group.
+
+Results are redacted, status-only and do not transmit requests to Telegram. `PASS` means the **local state** fits the sandbox checklist; it cannot establish remote administrator rights, actual chat isolation, group ownership, or permission to switch on real sanctions. The production live server still uses the fake moderation gateway, with all live bans/mutes and reversals disabled.
+
 ## Phase 3 v0.7.79 — offline trial rollback anchor freshness
 
 Before a controlled rehearsal, run the existing read-only `npm run telegram:acceptance -- --offline-only --state <absolute-private-sqlite> --backup <absolute-private-backup> --safety <private-STOP-file> --stale-ms 900000`. The supplied backup must be both **an independent, matching SQLite snapshot** and no older than the configured `--stale-ms` threshold. Outdated snapshots produce `BACKUP_TOO_OLD`; files dated more than 60 seconds in the future produce `BACKUP_TIMESTAMP_IN_FUTURE`. Neither result includes private paths or member IDs. A matching but stale backup blocks the isolated `telegram:rehearse` command before creating scratch files.
