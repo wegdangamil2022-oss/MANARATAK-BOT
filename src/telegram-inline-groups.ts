@@ -31,6 +31,8 @@ const listKey=(p:number)=>'mi:1:g:p:'+p;
 const detailKey=(chat:Chat,p:number)=>'mi:1:g:d:'+chat.id+':'+chat.version+':'+p;
 const accessKey=(chat:Chat,p:number)=>'mi:1:g:a:'+chat.id+':'+chat.version+':'+p;
 const subKey=(chat:Chat,p:number)=>'mi:1:g:u:'+chat.id+':'+chat.version+':'+p;
+const reviewKey=(chat:Chat,p:number,action:'x'|'a'|'p')=>
+ 'mi:1:g:v:'+chat.id+':'+chat.version+':'+p+':'+action;
 const footer=(back:string):Button[]=>[
  button('↩️ رجوع',back),button('🏠 لوحة المالك','mi:1:h')
 ];
@@ -92,9 +94,19 @@ export async function renderOwnerInlineGroups(store:BotStore,policy:Policy,actor
    +'الاشتراك المحفوظ: '+(enabled?'لديه '+subscription!.channelIds.length+' قناة مطلوبة':'غير مفعل')+'\n'
    +'إصدار سياسة المجموعة: '+chat.version+'\n'
    +'لا يوجد تحقق حي من Telegram. لا توجد أوامر حظر أو نشر في هذه الشاشة.';
+  const actionRows:Button[][]=[];
+  if(chat.groupAI!=='OFF')
+   actionRows.push([button('🛑 معاينة إيقاف AI محليًا',reviewKey(chat,route.page,'x'))]);
+  const restrictions:Button[]=[];
+  if(chat.scopes.includes('assistant'))
+   restrictions.push(button('🔐 معاينة تقييد المساعد',reviewKey(chat,route.page,'a')));
+  if(chat.scopes.includes('publishing'))
+   restrictions.push(button('📢 معاينة تعطيل النشر',reviewKey(chat,route.page,'p')));
+  if(restrictions.length)actionRows.push(restrictions);
   return {text:body,keyboard:markup([
    [button('🔐 نطاقات الصلاحيات',accessKey(chat,route.page)),
     button('📋 اشتراكات المجموعة',subKey(chat,route.page))],
+   ...actionRows,
    footer(listKey(route.page))
   ])};
  }
