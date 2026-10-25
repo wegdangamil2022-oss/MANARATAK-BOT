@@ -77,8 +77,11 @@ test('target preflight protects chat owners, administrators, bots and unverified
   const gw=new TelegramBotApiModerationGateway(TOKEN,f.request);
   assert.equal(await gw.isProtected(GROUP,MEMBER),protectedExpected,status);
  }
- const allowed=fake(()=>member('restricted',300,{is_member:true}));
- assert.equal(await new TelegramBotApiModerationGateway(TOKEN,allowed.request).isProtected(GROUP,MEMBER),false);
+ // A restriction applied by another Telegram administrator cannot be
+ // attributed to this bot, even when the user is still a group member.
+ const alreadyRestricted=fake(()=>member('restricted',300,{is_member:true}));
+ assert.equal(await new TelegramBotApiModerationGateway(TOKEN,alreadyRestricted.request)
+  .isProtected(GROUP,MEMBER),true);
 });
 test('unarmed gateway never performs a sanction even with valid IDs',async()=>{
  const f=fake(granted);
