@@ -1,3 +1,7 @@
+## B2 v0.7.65 — read-only owner delegation inventory
+
+Use `/ownerinline` → `👑 المشرفون والصلاحيات` → `📋 قائمة المشرفين` to inspect the bot's saved **internal delegated capabilities** with paging, scoped details and status classification. The screen requires a verified private owner callback every time; changing or revoked records invalidate their old detail selectors. This is **not** the Telegram administrator roster, does not inspect live Telegram rights, and cannot change/grant/revoke any permission. Only deliberately authorized owner operations elsewhere can mutate policy. The older owner Reply Keyboard workflows remain available while the Inline Keyboard migration continues.
+
 ## B2 v0.7.64 — owner inline group actions: atomic local confirmations
 
 The opt-in `/ownerinline` → `📋 مجموعاتي` → approved-group card now offers separate previews for pausing the group's local required-channel subscription rule and revoking its local approval, in addition to AI OFF and internal assistant/publishing restrictions. All previews require verified private owner context; confirmation uses a 120-second, actor+group+policy-bound one-shot token. **Token usage, current-policy revision checks and the local mutation are committed in one durable transaction.** Subscription suspension additionally rechecks the independent rule version. Stale, expired, copied, replayed or cross-user confirmations cannot change policy. Approval revocation also invalidates related stored subscription dependencies.
