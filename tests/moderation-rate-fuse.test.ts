@@ -25,7 +25,7 @@ async function fixture(engine:'json'|'sqlite'){
  await policy.approveChat(OWNER,OTHER,['moderation']);
  await policy.grant(OWNER,STAFF,'chat.manage',GROUP,BASE+259_200_000);
  await policy.grant(OWNER,STAFF,'chat.manage',OTHER,BASE+259_200_000);
- return {store,policy,gateway,service,now:()=>time,advance:(ms:number)=>{time+=ms},
+ return {store,policy,gateway,service,file:join(dir,engine==='sqlite'?'db.sqlite':'db.json'),now:()=>time,advance:(ms:number)=>{time+=ms},
   close:()=>rm(dir,{recursive:true,force:true})};
 }
 test('rate fuse has explicit conservative bounds and fails closed on invalid clock',()=>{
@@ -109,6 +109,35 @@ for(const engine of ['json','sqlite'] as const){
    const operations=(await f.store.snapshot()).moderationOperations;
    assert.equal(operations.length,5);
    assert.equal(operations.filter(x=>x.status==='CONFIRMED').length,5);
+  }finally{await f.close();}
+ });
+ test('rate budget survives a fresh store and service instance ('+engine+')',async()=>{
+  const f=await fixture(engine);try{
+   await f.store.transaction(s=>{
+    for(let i=0;i<5;i++)s.moderationOperations.push(record(i));
+   });
+   const fresh=new BotStore(f.file,{engine});
+   const policy=new Policy(fresh,OWNER,()=>f.now());
+   const gateway=new FakeModerationGateway();
+   const service=new ModerationService(fresh,policy,gateway,()=>f.now());
+   assert.equal((await service.addManualReason(STAFF,GROUP,'989','after-restart','MUTE')).status,'DENIED');
+   assert.equal(gateway.calls.length,0);
+   assert.equal((await fresh.snapshot()).moderationReasons.length,0);
+  }finally{await f.close();}
+ });
+ test('subscription-linked restrictions obey the same owner rate budget ('+engine+')',async()=>{
+  const f=await fixture(engine);try{
+   await f.store.transaction(s=>{
+    for(let i=0;i<5;i++)s.moderationOperations.push(record(i,{actorId:OWNER}));
+   });
+   const denied=await f.service().setSubscriptionReason(GROUP,'989','-100100999',true);
+   assert.equal(denied.status,'DENIED');
+   assert.equal(denied.reason,'MODERATION_RATE_LIMIT_SUBSCRIPTION');
+   assert.equal((await f.store.snapshot()).moderationReasons.length,0);
+   assert.equal(f.gateway.calls.length,0);
+   f.advance(600_001);
+   assert.equal((await f.service().setSubscriptionReason(GROUP,'989','-100100999',true)).status,'APPLIED');
+   assert.equal(f.gateway.calls.length,1);
   }finally{await f.close();}
  });
  test('release is not rate-blocked in simulator, while unknown still blocks retry ('+engine+')',async()=>{
