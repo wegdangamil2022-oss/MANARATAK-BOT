@@ -1,3 +1,9 @@
+## Phase 3 v0.7.68 — Telegram moderation adapter (DISARMED, offline-tested only)
+
+The opt-in `TelegramBotApiModerationGateway` in `src/telegram-moderation-gateway.ts` can implement a future explicitly approved BAN or MUTE dispatch through the real Telegram Bot API. It requires a trusted operator-supplied safety gate returning `true` at dispatch time and again after fresh bot-administrator and protected-member checks; the default safety gate always denies. The existing `ModerationService` durable state machine records intended operations and prevents unsafe retry of uncertain outcomes. No moderator button, student command or Telegram webhook currently enables live ban/mute. **`createLiveTelegramServer` still creates `FakeModerationGateway`**, by design.
+
+**Release/unban/unmute is not implemented by this adapter:** a general `NONE` cannot safely infer which external moderation restrictions belong to this bot. A separate explicit reviewed rollback and controlled real-group validation are required before production live moderation. No Telegram tokens or real users are contacted in CI.
+
 ## B2 v0.7.67 — real approved educational catalogue in opt-in student Inline Keyboard
 
 Send `/studentinline` in a private Telegram conversation to browse the *currently enabled, locally published* private educational categories and their published resources with Telegram Inline Keyboard buttons. Select a category, open a resource, or navigate back and through pages; the bot edits the original message rather than treating button labels as user commands. It displays only public fields and checks the latest local education permissions and visibility again on every tap. Empty sections, disabled features and archived resources are handled transparently. The existing Reply Keyboard remains compatible. This is **not** a live scholarship/university API integration and does not independently verify official application deadlines.
