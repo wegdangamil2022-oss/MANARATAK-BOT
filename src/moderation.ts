@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { BotStore, type BotState, type ModerationReason, type ModerationOperation, type RestrictionKind, type ModerationDispatchGateway } from './store.js';
 import { Policy } from './policy.js';
 import {moderationRateFuse,moderationRateDenial} from './moderation-rate-fuse.js';
+import {TelegramBotApiModerationGateway} from './telegram-moderation-gateway.js';
 
 export type RestrictionOutcome = 'CONFIRMED' | 'FAILED_CONFIRMED' | 'UNKNOWN_OUTCOME';
 export type ModerationResult = { status: 'APPLIED' | 'NO_CHANGE' | 'DENIED' | 'BLOCKED_PENDING' | 'BLOCKED_UNKNOWN' | 'FAILED_CONFIRMED' | 'UNKNOWN_OUTCOME'; reason: string };
@@ -152,8 +153,12 @@ export class ModerationService {
       // Durable local provenance hint recorded only if a dispatch is actually
       // about to be attempted. A fake success must never look like Telegram
       // proof. Unknown adapters are quarantined, not inferred.
-      op.attemptGateway=this.gateway.attemptGateway==='TELEGRAM_API'?
-        'TELEGRAM_API':this.gateway.attemptGateway==='SIMULATION'?
+      // Never trust a caller-supplied transport label: only the nominal,
+      // unmodified official adapter can claim an attempted Telegram API call.
+      // This remains a local attempt hint, NOT evidence of remote authorship.
+      op.attemptGateway=TelegramBotApiModerationGateway.usesOfficialDispatch(this.gateway)?
+        'TELEGRAM_API':this.gateway instanceof FakeModerationGateway&&
+        this.gateway.setRestriction===FakeModerationGateway.prototype.setRestriction?
         'SIMULATION':'UNSPECIFIED';
       op.status = 'STARTED'; return true;
     });
