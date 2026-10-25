@@ -97,7 +97,7 @@ export class TelegramBotApiModerationGateway implements ModerationGateway{
   if(!validGroup(chatId)||!validUser(memberId)||
     Number(memberId)===this.botId)return false;
   const bot=await this.getMember(chatId,String(this.botId));
-  return bot!==null&&bot.user.is_bot!==false&&
+  return bot!==null&&bot.user.is_bot===true&&
    (bot.status==='creator'||bot.status==='administrator'&&bot.can_restrict_members===true);
  }
  /** Unknown or missing evidence is PROTECTED, not an unprotected assumption.
