@@ -91,12 +91,12 @@ for(const engine of ['json','sqlite'] as const){
    await f.policy.revokeGrant(OWNER,'301','chat.manage',CHAT);
    assert.equal((await f.app().handle(cb(21,100,token))).status,'DENIED');
    const fresh=await f.app().handle(cb(22,100,'mi:1:d:p:0'));
-   assert.match(fresh.plan?.text??'',/ملغى/);
+   assert.match(fresh.plan?.text??'',/الملغاة/);
    const revoked=btn(fresh).find(x=>x.callback_data.startsWith('mi:1:d:i:'))!.callback_data;
    f.advance(40000);
    // Revoked grant stays revoked; expiration changes its status without lifting restrictions.
    assert.equal((await f.app().handle(cb(23,100,revoked))).status,'APPLIED');
-   assert.match((await f.app().handle(cb(24,100,'mi:1:d:p:0'))).plan?.text??'',/ملغى/);
+   assert.match((await f.app().handle(cb(24,100,'mi:1:d:p:0'))).plan?.text??'',/الملغاة/);
   }finally{await f.close();}
  });
  test('owner-only private context blocks all student/staff/group access ('+engine+')',async()=>{
