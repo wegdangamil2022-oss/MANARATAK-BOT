@@ -23,7 +23,7 @@ async function fixture(){
 }
 const opts=(f:Awaited<ReturnType<typeof fixture>>)=>({stateFile:f.stateFile,
  backupFile:f.backupFile,safetyFile:f.safetyFile,sandboxDir:f.sandboxDir,
- now:NOW,staleAfterMs:900_000});
+ now:Date.now(),staleAfterMs:900_000});
 function cli(f:Awaited<ReturnType<typeof fixture>>,extra:string[]=[]){
  return spawnSync(process.execPath,['dist/src/telegram-trial-rehearsal-cli.js',
   '--offline-only','--state',f.stateFile,'--backup',f.backupFile,

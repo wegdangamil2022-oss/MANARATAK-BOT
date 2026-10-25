@@ -13,7 +13,8 @@ export interface TelegramTrialAcceptanceReport{
  reasons:readonly (
   'SAFETY_NOT_STOP'|'BACKUP_STATE_MISMATCH'|'PENDING_REPLIES'|
   'UNRESOLVED_REPLIES'|'UNRESOLVED_UPDATES'|'UNRESOLVED_OPERATIONS'|
-  'UNRESOLVED_PUBLICATIONS'|'ACTIVE_PURGE'|'INVALID_SUBSCRIPTION_REQUIREMENTS'
+  'UNRESOLVED_PUBLICATIONS'|'ACTIVE_PURGE'|'INVALID_SUBSCRIPTION_REQUIREMENTS'|
+  'BACKUP_TOO_OLD'|'BACKUP_TIMESTAMP_IN_FUTURE'
  )[];
 }
 export interface TelegramTrialAcceptanceOptions{
@@ -58,8 +59,10 @@ export async function inspectTelegramTrialAcceptanceReadOnly(
  // A filesystem hard link to the primary database is NOT an independent
  // backup. Compare device/inode after read-only validation; never trust a
  // distinct pathname alone as evidence of rollback protection.
+ let sourceMeta:Awaited<ReturnType<typeof lstat>>;
+ let backupMeta:Awaited<ReturnType<typeof lstat>>;
  try{
-  const [sourceMeta,backupMeta]=await Promise.all([
+  [sourceMeta,backupMeta]=await Promise.all([
    lstat(options.stateFile),lstat(options.backupFile)]);
   if(sourceMeta.dev===backupMeta.dev&&sourceMeta.ino===backupMeta.ino)
    throw Error('TRIAL_ACCEPTANCE_INVALID_BACKUP');
@@ -71,6 +74,16 @@ export async function inspectTelegramTrialAcceptanceReadOnly(
  // arbitrary different dataset to count as a verified rollback anchor.
  const same=JSON.stringify(live)===JSON.stringify(backup);
  const reasons:TelegramTrialAcceptanceReport['reasons'][number][]=[];
+ // An exact logical match is necessary but not sufficient: a rollback anchor
+ // older than the caller's maximum age is not a fresh trial checkpoint.
+ // Also distrust far-future filesystem timestamps (clock skew / tampering).
+ // A one-minute tolerance handles coarse-grained filesystem clock skew.
+ const futureSkewMs=60_000;
+ if(!Number.isFinite(backupMeta.mtimeMs)||
+    backupMeta.mtimeMs>options.now+futureSkewMs)
+  reasons.push('BACKUP_TIMESTAMP_IN_FUTURE');
+ else if(options.now-backupMeta.mtimeMs>options.staleAfterMs)
+  reasons.push('BACKUP_TOO_OLD');
  if(safety!=='STOP')reasons.push('SAFETY_NOT_STOP');
  if(!same)reasons.push('BACKUP_STATE_MISMATCH');
  if(pendingReply(live))reasons.push('PENDING_REPLIES');
@@ -99,7 +112,19 @@ export async function inspectTelegramTrialAcceptanceReadOnly(
   latest=await BotStore.snapshotSqliteReadOnly(options.stateFile);
   latestSwitch=await readTelegramSafetySwitch(options.safetyFile);
  }catch{throw Error('TRIAL_ACCEPTANCE_STATE_CHANGED');}
- if(JSON.stringify(latest)!==JSON.stringify(live)||latestSwitch!==safety)
+ // A backup replaced/re-timestamped while the asynchronous checks were
+ // running must not inherit the earlier age/independence decision.
+ let currentState:Awaited<ReturnType<typeof lstat>>;
+ let currentBackup:Awaited<ReturnType<typeof lstat>>;
+ try{
+  [currentState,currentBackup]=await Promise.all([
+   lstat(options.stateFile),lstat(options.backupFile)]);
+ }catch{throw Error('TRIAL_ACCEPTANCE_STATE_CHANGED');}
+ if(JSON.stringify(latest)!==JSON.stringify(live)||latestSwitch!==safety||
+    currentState.dev!==sourceMeta.dev||currentState.ino!==sourceMeta.ino||
+    currentBackup.dev!==backupMeta.dev||currentBackup.ino!==backupMeta.ino||
+    currentBackup.size!==backupMeta.size||
+    currentBackup.mtimeMs!==backupMeta.mtimeMs)
   throw Error('TRIAL_ACCEPTANCE_STATE_CHANGED');
  return {stage:'OFFLINE_ONLY',status:reasons.length?'BLOCKED':'PASS',
   safety,rollback:same?'MATCH':'MISMATCH',reasons};

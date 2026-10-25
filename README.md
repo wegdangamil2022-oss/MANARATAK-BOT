@@ -1,3 +1,9 @@
+## Phase 3 v0.7.79 — offline trial rollback anchor freshness
+
+Before a controlled rehearsal, run the existing read-only `npm run telegram:acceptance -- --offline-only --state <absolute-private-sqlite> --backup <absolute-private-backup> --safety <private-STOP-file> --stale-ms 900000`. The supplied backup must be both **an independent, matching SQLite snapshot** and no older than the configured `--stale-ms` threshold. Outdated snapshots produce `BACKUP_TOO_OLD`; files dated more than 60 seconds in the future produce `BACKUP_TIMESTAMP_IN_FUTURE`. Neither result includes private paths or member IDs. A matching but stale backup blocks the isolated `telegram:rehearse` command before creating scratch files.
+
+File modification time is *not* an authenticity certificate. Only prepare backups while all writers are stopped and never interpret a PASS as permission to arm Telegram moderation. The live bot still uses `FakeModerationGateway`; real sanctions, automatic unban and unmute remain disabled.
+
 ## Phase 3 v0.7.74 — don't confuse an offline sanction simulation with a Telegram ban
 
 Every newly `STARTED` moderation operation now records the **locally selected dispatch adapter** in `attemptGateway`: `SIMULATION` for `FakeModerationGateway`, `TELEGRAM_API` for the optional real-request adapter, or `UNSPECIFIED` for other gateways. Legacy rows without a gateway label stay untrusted. The read-only `ModerationReversalPreflight` and the owner's reversal inventory reject simulated, unspecified and unlabeled confirmed operations as `BLOCKED_UNPROVEN`, without contacting Telegram. They consider only operations explicitly associated with the Telegram adapter as potential candidates for read-only status inspection.

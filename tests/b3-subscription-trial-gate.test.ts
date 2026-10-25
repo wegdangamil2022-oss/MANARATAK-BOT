@@ -20,7 +20,7 @@ async function fixture(){
  await chmod(file,0o600);await writeFile(safety,'STOP\n',{mode:0o600});
  const snapshot=async()=>{await BotStore.backupSqlite(file,backup);await chmod(backup,0o600);};
  const check=()=>inspectTelegramTrialAcceptanceReadOnly({
-  stateFile:file,backupFile:backup,safetyFile:safety,now:1_800_000_000_000,staleAfterMs:900000
+  stateFile:file,backupFile:backup,safetyFile:safety,now:Date.now(),staleAfterMs:900000
  });
  return {dir,file,backup,safety,store,policy,snapshot,check,close:()=>rm(dir,{recursive:true,force:true})};
 }
