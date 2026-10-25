@@ -669,7 +669,8 @@ export function isValidTelegramInlineKeyboard(input:unknown):input is TelegramIn
     Array.from(button.text).length>96||Buffer.byteLength(button.text,'utf8')>256||
     Buffer.byteLength(button.callback_data,'utf8')<1||
     Buffer.byteLength(button.callback_data,'utf8')>64||
-    !/^mi:1:(?:h|p:[01]|s:(?:0[1-9]|1[0-6]):[0-2]|i:(?:0[1-9]|1[0-6]):(?:0[1-9]|1[0-7]))$/u.test(button.callback_data))
+    /[\u0000-\u001f\u007f]/u.test(button.callback_data)||
+    !/^mi:1:(?:h|p:[01]|s:(?:0[1-9]|1[0-6]):[0-2]|i:(?:0[1-9]|1[0-6]):(?:0[1-9]|1[0-7])|g:(?:p:(?:0|[1-9][0-9]{0,2})|[dua]:-[1-9][0-9]{0,18}:[1-9][0-9]{0,9}:(?:0|[1-9][0-9]{0,2})))$/u.test(button.callback_data))
     return false;
   }
  }
@@ -705,8 +706,10 @@ function sectionScreen(sectionIndex:number,page:number):OwnerInlineScreen|null{
  for(let i=start;i<end;i+=2){
   rows.push(Array.from({length:Math.min(2,end-i)},(_,j)=>{
    const itemIndex=i+j;
-   return callback('⌛ '+section.items[itemIndex],
-    'mi:1:i:'+number(sectionIndex+1)+':'+number(itemIndex+1));
+   const selector='mi:1:i:'+number(sectionIndex+1)+':'+number(itemIndex+1);
+   const browsable=ownerInlineLinkedReadOnly(selector)!==null;
+   // Read-only connected views are different from design-only placeholders.
+   return callback((browsable?'👁️ ':'⌛ ')+section.items[itemIndex],selector);
   }));
  }
  const controls=[] as {text:string;callback_data:string}[];
