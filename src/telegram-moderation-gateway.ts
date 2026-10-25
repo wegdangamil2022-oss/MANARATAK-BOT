@@ -171,6 +171,10 @@ export class TelegramBotApiModerationGateway implements ModerationGateway{
    try{current=await verifyCurrentAuthority()===true;}catch{return 'FAILED_CONFIRMED';}
    if(!current)return 'FAILED_CONFIRMED';
   }
+  // The authority callback itself may await I/O while STOP is applied.
+  // Read the independent operator gate once more at the final mutation
+  // boundary; a failed/throwing gate is a definitive NO-SEND.
+  if(!await this.allowed())return 'FAILED_CONFIRMED';
   const result=kind==='BAN'?
    await this.call('banChatMember',{
     chat_id:chatId,user_id:Number(memberId),revoke_messages:false

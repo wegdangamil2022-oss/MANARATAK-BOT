@@ -1,3 +1,9 @@
+## 0.7.77 — 2026-10-26 — emergency STOP gate checked after awaited authority
+
+- Closed a last-mile race introduced by the v0.7.76 asynchronous durable-authority callback: the official `TelegramBotApiModerationGateway` now evaluates the independent emergency gate **again after** that callback and immediately before any `banChatMember` or `restrictChatMember` request. A STOP transition during the callback, an invalid/missing switch, or an exception in the final check returns `FAILED_CONFIRMED` with **zero mutating API requests**. No automatic retry or release action was added.
+- Added six fake-HTTP regression tests: STOP flipped during BAN/MUTE last-mile callback; refusal by final safety check for BAN/MUTE; exception on the final check; and a stable RUN/authorized single-dispatch control. All six failed on v0.7.76 (RED) while the original 1,473 tests passed, demonstrating the previous gap.
+- This is a best-effort final check, **not an atomic transaction with Telegram**: a switch can still change after the final check but before/during the outbound request. Live production server still uses `FakeModerationGateway`; no live Telegram sanctions are enabled.
+
 ## 0.7.76 — 2026-10-26 — last-mile durable policy recheck before Telegram sanction write
 
 - The `ModerationService` now supplies the official Bot API adapter with a **service-owned, read-only, fail-closed dispatch authority callback**. After async Telegram bot rights and protected-target queries, just before a BAN/MUTE HTTP request, the adapter rechecks current durable chat approval and moderation scope, staff `chat.manage` entitlement/expiry, the original operation's `STARTED` status and policy version, the active reason fingerprint and any trusted subscription evidence guard.
