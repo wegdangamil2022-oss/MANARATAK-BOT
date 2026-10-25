@@ -155,7 +155,7 @@ export class TelegramBotApiModerationGateway implements ModerationGateway{
   return 'UNKNOWN';
  }
  async setRestriction(chatId:string,memberId:string,
-  kind:RestrictionKind):Promise<RestrictionOutcome>{
+  kind:RestrictionKind,verifyCurrentAuthority?:()=>Promise<boolean>):Promise<RestrictionOutcome>{
   if(!validGroup(chatId)||!validUser(memberId)||Number(memberId)===this.botId||
     (kind!=='BAN'&&kind!=='MUTE'))return 'FAILED_CONFIRMED';
   if(!await this.allowed())return 'FAILED_CONFIRMED';
@@ -163,6 +163,14 @@ export class TelegramBotApiModerationGateway implements ModerationGateway{
    return 'FAILED_CONFIRMED';
   // A STOP triggered during the rights/target lookups must win before write.
   if(!await this.allowed())return 'FAILED_CONFIRMED';
+  // Service-owned durable grant/scope/operation evidence may have changed
+  // during these remote reads. False, throwing or ambiguous => no mutation.
+  // Direct standalone callers still require an independently armed safetyGate.
+  if(verifyCurrentAuthority){
+   let current=false;
+   try{current=await verifyCurrentAuthority()===true;}catch{return 'FAILED_CONFIRMED';}
+   if(!current)return 'FAILED_CONFIRMED';
+  }
   const result=kind==='BAN'?
    await this.call('banChatMember',{
     chat_id:chatId,user_id:Number(memberId),revoke_messages:false
