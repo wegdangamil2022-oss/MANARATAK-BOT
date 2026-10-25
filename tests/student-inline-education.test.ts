@@ -71,7 +71,7 @@ for(const engine of ['json','sqlite'] as const){
    const home=await f.app().handle(msg(1,300,'/studentinline'));
    assert.equal(home.status,'APPLIED');
    assert.equal(isValidTelegramInlineKeyboard(home.plan?.inlineMarkup),true);
-   assert.match(home.plan?.text??'',/التعليم|المكتبة/);
+   assert.match(home.plan?.text??'',/مكتبة الطالب/);
    const items=buttons(home).filter(x=>x.callback_data.startsWith('si:1:c:'));
    assert.equal(items.length,2);
    assert.ok(items.some(x=>x.text.includes('منح')));
