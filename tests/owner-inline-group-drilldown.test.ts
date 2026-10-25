@@ -103,13 +103,14 @@ for(const engine of ['json','sqlite'] as const){
    assert.equal(p2.status,'APPLIED');
    assert.equal(buttons(p2).filter(b=>b.callback_data.startsWith('mi:1:g:d:')).length,3);
    const chosen=buttons(p2).find(b=>b.callback_data.startsWith('mi:1:g:d:'))!;
+   const shifted=buttons(p1).filter(b=>b.callback_data.startsWith('mi:1:g:d:')).at(-1)!;
    assert.equal((await f.app().handle(cb(23,100,chosen.callback_data))).status,'APPLIED');
    assert.equal((await f.app().handle(cb(24,100,'mi:1:g:p:3'))).status,'DENIED');
    const wrongPage=chosen.callback_data.replace(/:2$/u,':0');
    assert.equal((await f.app().handle(cb(25,100,wrongPage))).status,'DENIED');
    // A newly approved chat can move the selected group out of its old page.
    await f.policy.approveChat(OWNER,'-1000999',['navigation']);
-   assert.equal((await f.app().handle(cb(26,100,chosen.callback_data))).status,'DENIED');
+   assert.equal((await f.app().handle(cb(26,100,shifted.callback_data))).status,'DENIED');
   }finally{await f.close();}
  });
  test('inline group details fail closed after policy changes, revocation and foreign scope ('+engine+')',async()=>{
