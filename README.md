@@ -1,3 +1,9 @@
+## v0.7.81 — optional read-only Telegram moderation rights audit
+
+The **offline** `telegram:moderation-trial` command remains the first mandatory gate; it cannot send HTTP requests and requires a private STOP file and an independently validated fresh rollback backup. The new `inspectIsolatedModerationRightsReadOnly(options, gateway)` TypeScript API can then perform a separate limited **read-only** check of Telegram bot moderation rights, using an explicitly supplied `TelegramBotApiModerationGateway`. It sends two `getChatMember` requests for the *bot itself*, not for student targets, and rechecks the local STOP/group/backup state before the second read and after it. Known missing rights, changed rights and unknown provider results all BLOCK the advisory readiness signal. It never calls `setRestriction`.
+
+The new probe is **not wired to the production server or exposed as a go-live command**. Its integration tests use isolated SQLite and fake HTTP; no Telegram token or live group has been used. It does not grant permission to run live sanctions, prove the group is truly isolated or resolve sanctions made by other admins.
+
 ## Phase 3 v0.7.80 — verify a single moderation test group offline
 
 Before contemplating a moderated Telegram sandbox, operators can run `npm run telegram:moderation-trial -- --offline-only --state <absolute-private-sqlite> --backup <absolute-private-sqlite-backup> --safety <private-stop-file> --stale-ms 900000 --trial-chat -100123`. Replace the sample group with a **separately created test group**, never a production one. The command requires the existing independent, matching **fresh** rollback backup and STOP switch, and checks the locally approved/present moderation scope, lack of other approved moderation-enabled groups, and absence of any previous moderation reasons/operations for the selected group.
