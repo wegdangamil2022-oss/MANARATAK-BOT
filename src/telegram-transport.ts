@@ -23,6 +23,7 @@ import {ownerInlineHome,ownerInlineRender,ownerInlineLinkedReadOnly,type Telegra
 import {renderOwnerInlineGroups} from './telegram-inline-groups.js';
 import {OwnerInlineGroupControls} from './telegram-inline-group-controls.js';
 import {renderOwnerInlineDelegations} from './telegram-inline-delegations.js';
+import {renderStaffInline} from './telegram-inline-staff.js';
 import {parseSearchQuery,parseSearchPageCommand,searchPageButton,
  searchResourceButton,parseSearchResourceSelection,searchResultsBreadcrumb,
  parseSearchResultsBreadcrumb} from './telegram-search.js';
@@ -269,7 +270,14 @@ export class TelegramUpdateApplication {
     if(event.callbackData!==undefined){
      // Reauthorize the real sender at every tap. Never dispatch a privileged
      // command from untrusted callback_data or from a group context.
-     if(kind!=='private'||actorId!==chatId)return {status:'DENIED',reason:'OWNER_CALLBACK_PRIVATE_ONLY'};
+     if(kind!=='private'||actorId!==chatId)return {status:'DENIED',reason:'PRIVATE_CALLBACK_ONLY'};
+     if(event.callbackData.startsWith('ms:1:')){
+      const screen=await renderStaffInline(this.opts.store,this.opts.policy,
+       actorId,event.callbackData,this.clock());
+      if(!screen)return {status:'DENIED',reason:'STAFF_SCOPE_OR_CALLBACK_INVALID'};
+      return {status:'APPLIED',reason:'RESPONSE_PLANNED_ONLY',
+       plan:this.plan(chatId,screen.text,undefined,screen.keyboard,event.callbackMessageId)};
+     }
      if(!this.opts.policy.isOwner(actorId))return {status:'DENIED',reason:'OWNER_ONLY'};
      // Delegation audit is read-only and owner-private. Paged details are
      // independently checked against the CURRENT stored grant and status.
@@ -420,6 +428,13 @@ export class TelegramUpdateApplication {
        const view=ownerInlineHome();
        return {status:'APPLIED',reason:'RESPONSE_PLANNED_ONLY',
         plan:this.plan(chatId,view.text,undefined,view.keyboard)};
+      }
+      if(text==='/staffinline'){
+       const screen=await renderStaffInline(this.opts.store,this.opts.policy,
+        actorId,'staff:open',this.clock());
+       if(!screen)return {status:'DENIED',reason:'STAFF_SCOPE_REQUIRED'};
+       return {status:'APPLIED',reason:'RESPONSE_PLANNED_ONLY',
+        plan:this.plan(chatId,screen.text,undefined,screen.keyboard)};
       }
       if(isOwnerMenuText(text)){
         if(!owner)return {status:'DENIED',reason:'OWNER_ONLY'};

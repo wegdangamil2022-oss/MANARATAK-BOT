@@ -1,3 +1,7 @@
+## B2 v0.7.66 — opt-in Inline Keyboard for delegated staff
+
+Use `/staffinline` in a **private Telegram chat** to inspect the moderation groups that the actor is allowed to administer **inside Manaratak**. The view uses current, scoped, unexpired internal `chat.manage` grants and approved moderation scopes; staff can browse 8 entries per page and inspect only local aggregate warning/restriction counts. Owner privileges remain separate at `/ownerinline`. Every callback is re-authorized; old buttons fail after grant revocation, expiry or chat changes. No permissions or punishments are changed, and no external Telegram administration rights are implied. Live moderation awaits explicit gateway implementation and a controlled test group.
+
 ## B2 v0.7.65 — read-only owner delegation inventory
 
 Use `/ownerinline` → `👑 المشرفون والصلاحيات` → `📋 قائمة المشرفين` to inspect the bot's saved **internal delegated capabilities** with paging, scoped details and status classification. The screen requires a verified private owner callback every time; changing or revoked records invalidate their old detail selectors. This is **not** the Telegram administrator roster, does not inspect live Telegram rights, and cannot change/grant/revoke any permission. Only deliberately authorized owner operations elsewhere can mutate policy. The older owner Reply Keyboard workflows remain available while the Inline Keyboard migration continues.
