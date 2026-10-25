@@ -73,7 +73,7 @@ test('target preflight protects chat owners, administrators, bots and unverified
   const f=fake((_m,body)=>new Response(JSON.stringify({ok:true,result:{
    status,user:{id:body.user_id,is_bot:botFlag},
    ...(status==='restricted'?{is_member:false}:{})
-  }}),{status:200}));
+  }}),{status:200,headers:{'content-type':'application/json'}}));
   const gw=new TelegramBotApiModerationGateway(TOKEN,f.request);
   assert.equal(await gw.isProtected(GROUP,MEMBER),protectedExpected,status);
  }
@@ -145,8 +145,8 @@ test('ambiguous API results stay UNKNOWN_OUTCOME, explicit 4xx denial stays FAIL
   new Response(JSON.stringify({ok:true,result:false}),{status:200}),
   new Response(JSON.stringify({ok:true,result:true}),{status:503}),
   new Response(JSON.stringify({ok:false,error_code:500}),{status:503}),
-  new Response(JSON.stringify({ok:false,error_code:403,description:'token='+TOKEN}),{status:403}),
-  new Response(JSON.stringify({ok:false,error_code:429}),{status:429}),
+  new Response(JSON.stringify({ok:false,error_code:403,description:'token='+TOKEN}),{status:403,headers:{'content-type':'application/json'}}),
+  new Response(JSON.stringify({ok:false,error_code:429}),{status:429,headers:{'content-type':'application/json'}}),
   new Response(JSON.stringify({ok:true,result:true}),{status:200,headers:{'content-type':'text/html'}})
  ];
  for(const [i,r] of responses.entries()){
