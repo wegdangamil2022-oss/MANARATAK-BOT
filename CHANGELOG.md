@@ -1,3 +1,10 @@
+## 0.7.61 — 2026-10-25 — B2 owner-only inline menu groundwork and safe read-only links
+
+- Add opt-in `/ownerinline` navigation: two owner-dashboard pages for 16 approved sections, and all 253 subordinate approved labels with multi-page drill-down, back and home. Until ported, a button shows approved design notes only, never a misleading success.
+- Strict private-owner `callback_query` handling, replay rejection, bounded callback_data, `answerCallbackQuery` and `editMessageText` for current bot-owned message. Reuse the durable reply outbox and distinguish queued plans from confirmed provider outcomes.
+- Link six safe selectors to current authorized local group, subscription, FAQ, library, delivery and settings views. Keep the original owner operational interface and all student flows compatible. No new live ban/mute/publish/AI capabilities are declared or invoked.
+- Add JSON/SQLite tests for all sections, invalid callbacks, replay, owner/staff isolation, Bot API serialization, safe live local summaries and failure handling; CI must pass strict types, complete tests and five demos before merge.
+
 ## 0.7.60 — 2026-10-23 — B3 actionable FAQ browse and search-result return buttons
 
 - Preserve current approved FAQ browse page when opening a numbered reviewed question: answer keyboard gets `↩️ صفحة الأسئلة · pf:<page>` and original catalogue entry. On every return reread the current private reviewed FAQ catalogue; stale/out-of-range, disabled or group-only content cannot be recovered through old buttons.
