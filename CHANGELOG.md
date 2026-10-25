@@ -1,3 +1,11 @@
+## 0.7.79 — 2026-10-26 — offline trial backup age and time consistency
+
+- Repaired the offline trial acceptance's previously unused `now` / `staleAfterMs` inputs: a logically identical but **stale SQLite rollback anchor** now produces the redacted `BACKUP_TOO_OLD` blocker instead of a false PASS. A filesystem modification time more than one minute in the future produces `BACKUP_TIMESTAMP_IN_FUTURE`. Small clock skew is tolerated.
+- The existing isolated rollback rehearsal shares this acceptance check and therefore refuses to start or create scratch files when the backup is stale or future-dated. The status-only CLI exits with code 2 on blocked readiness; secrets, file paths, students and moderator identities are not included.
+- After the asynchronous checks, the acceptance inspector also rechecks source/backup device and inode, backup size and modification time. A replaced or retimestamped rollback anchor during inspection fails closed with `TRIAL_ACCEPTANCE_STATE_CHANGED`.
+- Added eight tests for fresh/matched, stale, future-dated, threshold/skew boundaries, isolated scratch prevention and sanitized CLI reporting. Existing offline acceptance/rehearsal test fixtures now use the actual current clock for filesystem age checks.
+- **Scope:** mtime is a conservative local freshness signal, not cryptographic proof of when the SQLite backup was created; an operator must still ensure the snapshot is trustworthy and all writers are stopped. The review remains offline-only with mandatory STOP; a PASS never authorizes live moderation or release actions.
+
 ## 0.7.78 — 2026-10-26 — verify internal moderation adapter integrity before tagging an attempted Bot API dispatch
 
 - Further restricted the locally recorded `TELEGRAM_API` classification: besides the private instance brand and original public dispatch/preflight methods, the adapter must now use the exact audited prototype and unchanged TypeScript-private `call`, `getMember` and `allowed` implementations. Replaced helpers and inherited subclass instances are classified `UNSPECIFIED`, not given the official adapter origin hint. This removes a local provenance false-positive where a patched helper could forge a successful call without changing public methods.
