@@ -48,6 +48,19 @@ const MUTE_PERMISSIONS={
 type JsonOutcome={status:'HTTP_OK'|'CLIENT_DENIED'|'UNKNOWN';value?:unknown};
 export class TelegramBotApiModerationGateway implements ModerationGateway{
  readonly attemptGateway='TELEGRAM_API' as const;
+ // A third-party adapter's public attemptGateway string cannot authenticate
+ // its implementation. This private brand is created only by this constructor.
+ readonly #officialAdapterBrand=true;
+ static usesOfficialDispatch(gateway:unknown):boolean{
+  if(typeof gateway!=='object'||gateway===null||
+    !(#officialAdapterBrand in gateway))return false;
+  const adapter=gateway as TelegramBotApiModerationGateway;
+  // A subclass or monkey-patched adapter that replaces the rights checks or
+  // outbound implementation no longer gets to claim this origin.
+  return adapter.setRestriction===TelegramBotApiModerationGateway.prototype.setRestriction&&
+   adapter.canRestrict===TelegramBotApiModerationGateway.prototype.canRestrict&&
+   adapter.isProtected===TelegramBotApiModerationGateway.prototype.isProtected;
+ }
  private readonly botId:number;
  constructor(private readonly token:string,private readonly request:typeof fetch=fetch,
   private readonly safetyGate:()=>Promise<boolean>=async()=>false){
