@@ -3,6 +3,7 @@ import {BotStore,type TelegramReplyJob} from './store.js';
 import {Policy} from './policy.js';
 import type {TelegramReplyPlan} from './telegram-transport.js';
 import {isValidTelegramReplyKeyboard} from './telegram-menu.js';
+import {isValidTelegramInlineKeyboard} from './telegram-inline-owner.js';
 import {groupQuestionEpochDigest,groupMenuEpochDigest,privateGroupEpochDigest} from './telegram-group-access.js';
 import {subscriptionRequirementMode,acceptsActiveSubscriptionEvidence} from './subscription-integrity.js';
 import type {SubscriptionGate} from './subscription.js';
@@ -18,9 +19,11 @@ const validChat=(chat:string)=>/^(?:[1-9]\d{0,15}|-[1-9]\d{0,15})$/.test(chat)&&
 const validPlan=(p:unknown):p is TelegramReplyPlan=>{
  if(!p||typeof p!=='object'||Array.isArray(p))return false;
  const v=p as Record<string,unknown>;
- return (Object.keys(v).length===(v.replyMarkup===undefined?3:4))&&
-  Object.keys(v).every(k=>['chatId','parseMode','text','replyMarkup'].includes(k))&&
+ return (Object.keys(v).length===(3+(v.replyMarkup===undefined?0:1)+(v.inlineMarkup===undefined?0:1)))&&
+  Object.keys(v).every(k=>['chatId','parseMode','text','replyMarkup','inlineMarkup'].includes(k))&&
+  !(v.replyMarkup!==undefined&&v.inlineMarkup!==undefined)&&
   (v.replyMarkup===undefined||isValidTelegramReplyKeyboard(v.replyMarkup))&&
+  (v.inlineMarkup===undefined||isValidTelegramInlineKeyboard(v.inlineMarkup))&&
   v.parseMode==='HTML'&&typeof v.chatId==='string'&&
   validChat(v.chatId)&&typeof v.text==='string'&&v.text.length>0&&
   Buffer.byteLength(v.text,'utf8')<=4096&& !/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/u.test(v.text);
@@ -43,7 +46,7 @@ export class TelegramBotApiTextSender implements TelegramReplySender {
     method:'POST',headers:{'content-type':'application/json'},
     body:JSON.stringify({chat_id:plan.chatId,text:plan.text,parse_mode:'HTML',
      link_preview_options:{is_disabled:true},protect_content:true,
-     ...(plan.replyMarkup?{reply_markup:plan.replyMarkup}:{})}),
+     ...(plan.inlineMarkup?{reply_markup:plan.inlineMarkup}:plan.replyMarkup?{reply_markup:plan.replyMarkup}:{})}),
     redirect:'error',signal:AbortSignal.timeout(8000)
    });
   }catch{return {status:'UNKNOWN_OUTCOME'};}
@@ -71,7 +74,26 @@ export class TelegramBotApiTextSender implements TelegramReplySender {
  }
 }
 
-export type ReplyDispatchResult={status:'NO_REPLY'|'CONFIRMED'|'SENT'|'SENDING'|'FAILED_CONFIRMED'|'UNKNOWN_OUTCOME'|'PAUSED'};
+/** answerCallbackQuery is a non-durable UI acknowledgement, NOT an action.
+ * Never retry an ambiguous HTTP outcome; no provider body or token is logged.
+ */
+export class TelegramBotApiCallbackAcker {
+ constructor(private readonly token:string,private readonly request:typeof fetch=fetch){
+  if(!/^[1-9]\\d{4,12}:[A-Za-z0-9_-]{30,90}$/.test(token))
+   throw new Error('INVALID_TELEGRAM_TOKEN');
+ }
+ async answer(callbackQueryId:string):Promise<void>{
+  if(typeof callbackQueryId!=='string'||!(/^[A-Za-z0-9_-]{1,128}$/u.test(callbackQueryId)))return;
+  try{
+   await this.request('https://api.telegram.org/bot'+this.token+'/answerCallbackQuery',{
+    method:'POST',headers:{'content-type':'application/json'},
+    body:JSON.stringify({callback_query_id:callbackQueryId}),
+    redirect:'error',signal:AbortSignal.timeout(4000)
+   });
+  }catch{/* Callback acknowledgement is best effort and never retried. */}
+ }
+}
+\nexport type ReplyDispatchResult={status:'NO_REPLY'|'CONFIRMED'|'SENT'|'SENDING'|'FAILED_CONFIRMED'|'UNKNOWN_OUTCOME'|'PAUSED'};
 const knownStatus=(x:unknown):x is TelegramReplyJob['status']=>[
  'QUEUED','SENDING','SENT','FAILED_CONFIRMED','UNKNOWN_OUTCOME'
 ].includes(x as string);
