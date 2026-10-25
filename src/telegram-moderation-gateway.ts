@@ -143,14 +143,16 @@ export class TelegramBotApiModerationGateway implements ModerationGateway{
   return 'UNKNOWN';
  }
  /** Unknown or missing evidence is PROTECTED, not an unprotected assumption.
-  * No Telegram group owner, admin, bot, kicked/left or unknown member is a target.
+  * A user already restricted by Telegram remains protected EVEN if
+  * is_member=true: getChatMember cannot prove which admin imposed the
+  * restriction. Never overwrite that external action with our BAN/MUTE.
+  * Only a verified ordinary human member is an eligible target.
   */
  async isProtected(chatId:string,memberId:string):Promise<boolean>{
   if(!validGroup(chatId)||!validUser(memberId)||Number(memberId)===this.botId)return true;
   const member=await this.getMember(chatId,memberId);
   if(!member||member.user.is_bot!==false)return true;
-  return !(member.status==='member'||
-   member.status==='restricted'&&member.is_member===true);
+  return member.status!=='member';
  }
  /** Owner-only callers may ask for a CURRENT observation. Neither Telegram
   * getChatMember nor the local attempt ledger identifies the original actor,

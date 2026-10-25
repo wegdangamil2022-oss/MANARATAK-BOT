@@ -1,3 +1,9 @@
+## v0.7.83 — never override another Telegram administrator's restrictions
+
+During offline/mock testing, the official Telegram moderation adapter refuses to BAN or MUTE any target that Telegram reports as `restricted`, **even when `is_member: true`**. Telegram's read-only member status does not identify the administrator who created the restriction. Overwriting their existing mute or partial restriction could be unsafe; an ordinary verified `member` is the only remotely eligible human target. This check is repeated around the existing local policy, Telegram role and safety-switch checks. A rejected pending attempt is safely recorded without sending any new sanction.
+
+An existing restriction can be inspected read-only for owner review but cannot be attributed to this bot or used to authorize automatic unmute, unban, retry or replacement. Live `createLiveTelegramServer` continues to use `FakeModerationGateway`; no live moderation is enabled or tried in this release.
+
 ## v0.7.81 — optional read-only Telegram moderation rights audit
 
 The **offline** `telegram:moderation-trial` command remains the first mandatory gate; it cannot send HTTP requests and requires a private STOP file and an independently validated fresh rollback backup. The new `inspectIsolatedModerationRightsReadOnly(options, gateway)` TypeScript API can then perform a separate limited **read-only** check of Telegram bot moderation rights, using an explicitly supplied `TelegramBotApiModerationGateway`. It sends two `getChatMember` requests for the *bot itself*, not for student targets, and rechecks the local STOP/group/backup state before the second read and after it. Known missing rights, changed rights and unknown provider results all BLOCK the advisory readiness signal. It never calls `setRestriction`.
