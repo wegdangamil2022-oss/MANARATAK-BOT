@@ -1,3 +1,9 @@
+## v0.7.84 — stricter safety for isolated moderation rehearsal
+
+Before running the offline-only `telegram:moderation-trial` check, prepare a separate clean SQLite rehearsal snapshot with a private STOP switch and an independently verified recent backup. The group selected for the moderation trial must be the **only locally approved chat**. This includes all scopes: approved navigation or publishing chats elsewhere now block isolated trial acceptance too. A mere second approved chat can receive traffic when a global STOP is lifted, even when moderation scope is absent.
+
+The source state must also be free of *all* historical moderation operations, moderation reasons and warnings across chats, plus non-revoked `chat.manage` delegations in the trial group or other chats. This deliberately requires a pristine scratch rehearsal state; do **not** delete historical moderation logs or disable real groups just to make an existing production database pass. The tool only returns redacted blockers and never changes state, invokes Telegram or enables live penalties. A local PASS remains advisory and is **not** an authorization for a live ban or mute.
+
 ## v0.7.83 — never override another Telegram administrator's restrictions
 
 During offline/mock testing, the official Telegram moderation adapter refuses to BAN or MUTE any target that Telegram reports as `restricted`, **even when `is_member: true`**. Telegram's read-only member status does not identify the administrator who created the restriction. Overwriting their existing mute or partial restriction could be unsafe; an ordinary verified `member` is the only remotely eligible human target. This check is repeated around the existing local policy, Telegram role and safety-switch checks. A rejected pending attempt is safely recorded without sending any new sanction.

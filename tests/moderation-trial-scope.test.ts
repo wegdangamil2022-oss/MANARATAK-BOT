@@ -68,11 +68,11 @@ test('any second approved moderation group violates one-group isolation',async()
   assert.equal(JSON.stringify(r).includes(OTHER),false);
  }finally{await f.close();}
 });
-test('unrelated navigation-only groups do not cause a false isolation failure',async()=>{
+test('even a navigation-only approved second group violates strict single-chat trial isolation',async()=>{
  const f=await fixture();try{
   await f.policy.approveChat(OWNER,OTHER,['navigation']);await f.snapshot();
-  const r=await f.check();assert.equal(r.status,'PASS');
-  assert.deepEqual(r.reasons,[]);
+  const r=await f.check();assert.equal(r.status,'BLOCKED');
+  assert.deepEqual(r.reasons,['OTHER_APPROVED_CHAT_PRESENT']);
  }finally{await f.close();}
 });
 test('a supposedly fresh trial group with old moderation operations/reasons is blocked',async()=>{

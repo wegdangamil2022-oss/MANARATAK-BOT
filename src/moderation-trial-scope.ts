@@ -13,7 +13,11 @@ export type ModerationTrialBlocker=
  TelegramTrialAcceptanceReport['reasons'][number]|
  'TRIAL_GROUP_NOT_APPROVED'|'TRIAL_GROUP_NOT_PRESENT'|
  'TRIAL_MODERATION_SCOPE_MISSING'|'OTHER_MODERATION_GROUP_APPROVED'|
- 'TRIAL_GROUP_HAS_MODERATION_HISTORY'|'TRIAL_GROUP_HAS_MODERATION_REASONS';
+ 'OTHER_APPROVED_CHAT_PRESENT'|'OTHER_MODERATION_HISTORY'|
+ 'OTHER_MODERATION_REASONS'|'OTHER_MODERATION_WARNINGS'|
+ 'TRIAL_GROUP_HAS_MODERATION_HISTORY'|'TRIAL_GROUP_HAS_MODERATION_REASONS'|
+ 'TRIAL_GROUP_HAS_WARNINGS'|'TRIAL_GROUP_HAS_MODERATION_GRANTS'|
+ 'OTHER_MODERATION_GRANTS';
 export interface OfflineModerationTrialReport{
  readonly stage:'OFFLINE_MODERATION_TRIAL';
  readonly status:'PASS'|'BLOCKED';
@@ -38,12 +42,38 @@ export function localModerationTrialBlockers(s:BotState,trialChatId:string):Mode
   if(!chat.present)reasons.push('TRIAL_GROUP_NOT_PRESENT');
   if(!chat.scopes.includes('moderation'))reasons.push('TRIAL_MODERATION_SCOPE_MISSING');
  }
- if(s.chats.some(c=>c.id!==trialChatId&&c.approved&&c.scopes.includes('moderation')))
+ // A strictly isolated trial must not have ANY other active approved chat,
+ // including publishing/navigation chats that would become live if the
+ // operator ever lifted the global STOP switch. Distinguish existing legacy
+ // moderation-scope blockers without duplicating a second reason.
+ const approvedElsewhere=s.chats.filter(c=>c.id!==trialChatId&&c.approved);
+ if(approvedElsewhere.some(c=>c.scopes.includes('moderation')))
   reasons.push('OTHER_MODERATION_GROUP_APPROVED');
+ else if(approvedElsewhere.length)reasons.push('OTHER_APPROVED_CHAT_PRESENT');
+ // Historical sanctions and warnings are never evidence that it is safe to
+ // replay or overwrite them. This must cover all chats, including revoked
+ // groups, and *inactive* records, not just currently actionable work.
  if(s.moderationOperations.some(o=>o.chatId===trialChatId))
   reasons.push('TRIAL_GROUP_HAS_MODERATION_HISTORY');
  if(s.moderationReasons.some(o=>o.chatId===trialChatId))
   reasons.push('TRIAL_GROUP_HAS_MODERATION_REASONS');
+ if(s.warnings.some(w=>w.chatId===trialChatId))
+  reasons.push('TRIAL_GROUP_HAS_WARNINGS');
+ if(s.moderationOperations.some(o=>o.chatId!==trialChatId))
+  reasons.push('OTHER_MODERATION_HISTORY');
+ if(s.moderationReasons.some(o=>o.chatId!==trialChatId))
+  reasons.push('OTHER_MODERATION_REASONS');
+ if(s.warnings.some(w=>w.chatId!==trialChatId))
+  reasons.push('OTHER_MODERATION_WARNINGS');
+ // Owner-only test: no non-revoked chat.manage grants on this or other
+ // groups. Even expired grants must be explicitly revoked, rather than
+ // silently treating latent imported staff configurations as a clean trial.
+ if(s.grants.some(g=>g.chatId===trialChatId&&
+   g.capability==='chat.manage'&&!g.revoked))
+  reasons.push('TRIAL_GROUP_HAS_MODERATION_GRANTS');
+ if(s.grants.some(g=>g.chatId!==trialChatId&&
+   g.capability==='chat.manage'&&!g.revoked))
+  reasons.push('OTHER_MODERATION_GRANTS');
  return reasons;
 }
 export async function inspectOfflineModerationTrialScope(
