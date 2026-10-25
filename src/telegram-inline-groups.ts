@@ -16,9 +16,9 @@ const pageRoute=new RegExp('^mi:1:g:p:'+page+'$','u');
 export function parseOwnerInlineGroupRoute(input:string):OwnerInlineGroupRoute|null{
  if(typeof input!=='string'||Buffer.byteLength(input,'utf8')>64)return null;
  const p=pageRoute.exec(input);
- if(p)return {kind:'list',page:Number(p[1])};
+ if(p&&p[0]===input)return {kind:'list',page:Number(p[1])};
  const m=groupRoute.exec(input);
- if(!m)return null;
+ if(!m||m[0]!==input)return null;
  const kind=m[1]==='d'?'details':m[1]==='u'?'subscription':'access';
  return {kind,chatId:m[2]!,version:Number(m[3]),page:Number(m[4])};
 }
