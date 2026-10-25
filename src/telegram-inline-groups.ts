@@ -31,7 +31,7 @@ const listKey=(p:number)=>'mi:1:g:p:'+p;
 const detailKey=(chat:Chat,p:number)=>'mi:1:g:d:'+chat.id+':'+chat.version+':'+p;
 const accessKey=(chat:Chat,p:number)=>'mi:1:g:a:'+chat.id+':'+chat.version+':'+p;
 const subKey=(chat:Chat,p:number)=>'mi:1:g:u:'+chat.id+':'+chat.version+':'+p;
-const reviewKey=(chat:Chat,p:number,action:'x'|'a'|'p')=>
+const reviewKey=(chat:Chat,p:number,action:'x'|'a'|'p'|'s'|'r')=>
  'mi:1:g:v:'+chat.id+':'+chat.version+':'+p+':'+action;
 const footer=(back:string):Button[]=>[
  button('↩️ رجوع',back),button('🏠 لوحة المالك','mi:1:h')
@@ -103,6 +103,10 @@ export async function renderOwnerInlineGroups(store:BotStore,policy:Policy,actor
   if(chat.scopes.includes('publishing'))
    restrictions.push(button('📢 معاينة تعطيل النشر',reviewKey(chat,route.page,'p')));
   if(restrictions.length)actionRows.push(restrictions);
+  if(enabled){
+   actionRows.push([button('🧊 معاينة تعليق الاشتراك',reviewKey(chat,route.page,'s'))]);
+  }
+  actionRows.push([button('⛔ معاينة إلغاء تصريح المجموعة',reviewKey(chat,route.page,'r'))]);
   return {text:body,keyboard:markup([
    [button('🔐 نطاقات الصلاحيات',accessKey(chat,route.page)),
     button('📋 اشتراكات المجموعة',subKey(chat,route.page))],
