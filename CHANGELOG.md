@@ -1,3 +1,10 @@
+## 0.7.66 — 2026-10-25 — private staff Inline Keyboard with scoped live-local authorization
+
+- Added opt-in `/staffinline` in private Telegram chat. The staff menu lists only approved **local** groups with the moderation scope and a currently valid internal `chat.manage` delegation to the actor (or owner policy permission); it never infers live Telegram administrator rights.
+- Added bounded `ms:1:...` callback routes, 8-per-page group browsing, message editing and back/home navigation, plus read-only group moderation summary counts. Current stored policy and actor grant are rechecked for **every callback**; stale group revisions, expired or revoked grants, dropped moderation scopes, shifted page membership, malformed callbacks, cross-role `mi:1` owner controls and group-chat access fail closed. No member identities or private moderation reports are exposed; only aggregate local counts.
+- All Telegram callback acknowledgements and reply edits reuse the existing replay-safe durable outbox. The older Reply Keyboards and owner Inline Keyboard are preserved; this does **not** activate Telegram live ban, mute, delete, lock, protection filters, promotions or moderator privileges.
+- Added strict callback-grammar, group/page versioning, JSON+SQLite grant-revocation/expiry, denied student/staff owner access and repeat-update tests. Full TypeScript, all unit/integration tests and five offline demos gate merging.
+
 ## 0.7.65 — 2026-10-25 — owner-only inline internal delegation audit
 
 - Implemented the opt-in owner Telegram Inline Keyboard view **👑 المشرفون والصلاحيات → 📋 قائمة المشرفين**, backed by actual saved *internal* `grants` instead of a fake operational panel. Owners can inspect eight entries per page with active-by-time, expired, revoked and no-longer-approved-group counts, then drill into a single saved actor/capability/scope/issuer/expiration record.
