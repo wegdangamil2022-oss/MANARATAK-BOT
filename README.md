@@ -1,3 +1,7 @@
+## Phase 3 v0.7.72 — view local rollback blockers from the owner's group card
+
+In the owner's private chat, open `/ownerinline` → `👥 المجموعات والشبكات` → `📋 مجموعاتي` → an approved moderation-enabled group → `🧭 عوائق التراجع المحلية`. The bot shows anonymous *local* counts of unknown/pending operations, active reasons, missing or stale evidence, and candidates for **further** externally verified inspection. It never shows member IDs or private evidence; buttons are tied to a fresh digest of the stored operation/reason ledger and the group policy revision. The view does **not** query Telegram or offer unban/unmute. Even a later read-only Telegram match cannot prove the bot imposed the original restriction. Live moderation and automatic rollback remain disabled and out of scope.
+
 ## Phase 3 v0.7.71 — evidence checks before considering moderation reversal
 
 The new `ModerationReversalPreflight` (`src/moderation-reversal-preflight.ts`) evaluates a prospective moderation rollback **without modifying the bot's database or any Telegram member restriction**. It first requires an authorized owner, an approved moderation-enabled group, no current moderation reasons or uncertain/pending operations, a latest confirmed matching BAN/MUTE and the exact current local policy revision. An injected read-only `RestrictionObserver` can then check current Telegram member state (via `TelegramBotApiModerationGateway.observeRestriction`, using `getChatMember` only). The post-read recheck rejects local changes during the request.

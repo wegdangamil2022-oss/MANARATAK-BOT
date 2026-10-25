@@ -1,22 +1,28 @@
 import type {BotStore,Chat,SubscriptionRequirement} from './store.js';
 import type {Policy} from './policy.js';
 import type {OwnerInlineScreen,TelegramInlineKeyboard} from './telegram-inline-owner.js';
+import {reversalInventoryDigest,renderReversalInventory} from './moderation-reversal-inventory.js';
 
 /** Read-only owner group browser. The selector is NEVER a permission token.
  * All screens are rebuilt from current durable state after checking the owner.
  * No Telegram rights, group title or live membership is inferred from storage.
  */
 export type OwnerInlineGroupRoute={kind:'list';page:number}|
- {kind:'details'|'subscription'|'access';chatId:string;version:number;page:number};
+ {kind:'details'|'subscription'|'access';chatId:string;version:number;page:number}|
+ {kind:'reversal';chatId:string;version:number;page:number;digest:string};
 const id='(-[1-9][0-9]{0,18})';
 const ver='([1-9][0-9]{0,9})';
 const page='(0|[1-9][0-9]{0,2})';
 const groupRoute=new RegExp('^mi:1:g:(d|u|a):'+id+':'+ver+':'+page+'$','u');
 const pageRoute=new RegExp('^mi:1:g:p:'+page+'$','u');
+const reversalRoute=new RegExp('^mi:1:g:r:'+id+':'+ver+':'+page+':([a-f0-9]{12})$','u');
 export function parseOwnerInlineGroupRoute(input:string):OwnerInlineGroupRoute|null{
  if(typeof input!=='string'||Buffer.byteLength(input,'utf8')>64)return null;
  const p=pageRoute.exec(input);
  if(p&&p[0]===input)return {kind:'list',page:Number(p[1])};
+ const r=reversalRoute.exec(input);
+ if(r&&r[0]===input)return {kind:'reversal',chatId:r[1]!,version:Number(r[2]),
+  page:Number(r[3]),digest:r[4]!};
  const m=groupRoute.exec(input);
  if(!m||m[0]!==input)return null;
  const kind=m[1]==='d'?'details':m[1]==='u'?'subscription':'access';
@@ -31,6 +37,8 @@ const listKey=(p:number)=>'mi:1:g:p:'+p;
 const detailKey=(chat:Chat,p:number)=>'mi:1:g:d:'+chat.id+':'+chat.version+':'+p;
 const accessKey=(chat:Chat,p:number)=>'mi:1:g:a:'+chat.id+':'+chat.version+':'+p;
 const subKey=(chat:Chat,p:number)=>'mi:1:g:u:'+chat.id+':'+chat.version+':'+p;
+const reversalKey=(chat:Chat,p:number,digest:string)=>
+ 'mi:1:g:r:'+chat.id+':'+chat.version+':'+p+':'+digest;
 const reviewKey=(chat:Chat,p:number,action:'x'|'a'|'p'|'s'|'r')=>
  'mi:1:g:v:'+chat.id+':'+chat.version+':'+p+':'+action;
 const footer=(back:string):Button[]=>[
@@ -106,6 +114,9 @@ export async function renderOwnerInlineGroups(store:BotStore,policy:Policy,actor
   if(enabled){
    actionRows.push([button('🧊 معاينة تعليق الاشتراك',reviewKey(chat,route.page,'s'))]);
   }
+  if(chat.scopes.includes('moderation'))
+   actionRows.push([button('🧭 عوائق التراجع المحلية',reversalKey(chat,route.page,
+    reversalInventoryDigest(state,chat)))]);
   actionRows.push([button('⛔ معاينة إلغاء تصريح المجموعة',reviewKey(chat,route.page,'r'))]);
   return {text:body,keyboard:markup([
    [button('🔐 نطاقات الصلاحيات',accessKey(chat,route.page)),
@@ -113,6 +124,12 @@ export async function renderOwnerInlineGroups(store:BotStore,policy:Policy,actor
    ...actionRows,
    footer(listKey(route.page))
   ])};
+ }
+ if(route.kind==='reversal'){
+  if(!chat.scopes.includes('moderation')||
+   reversalInventoryDigest(state,chat)!==route.digest)return null;
+  return {text:renderReversalInventory(state,policy,chat),
+   keyboard:markup([footer(detailKey(chat,route.page))])};
  }
  if(route.kind==='access'){
   const scopeNames=['navigation','assistant','moderation','verification','publishing'];
