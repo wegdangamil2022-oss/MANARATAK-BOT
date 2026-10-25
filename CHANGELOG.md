@@ -1,3 +1,10 @@
+## 0.7.65 — 2026-10-25 — owner-only inline internal delegation audit
+
+- Implemented the opt-in owner Telegram Inline Keyboard view **👑 المشرفون والصلاحيات → 📋 قائمة المشرفين**, backed by actual saved *internal* `grants` instead of a fake operational panel. Owners can inspect eight entries per page with active-by-time, expired, revoked and no-longer-approved-group counts, then drill into a single saved actor/capability/scope/issuer/expiration record.
+- Each button has a bounded, canonical, read-only page/ordinal selector with a 12-hex digest of the exact current grant and status. A changed record, revoked grant, expired active grant or shifted page entry invalidates its old selection; the current ledger is re-read for every click, not cached client-side. Forged pages, malformed selectors and out-of-range slots fail closed.
+- The owner-private Telegram callback gate remains mandatory: students, granted staff members and group chats cannot inspect the listing or details. This screen never grants, renews or revokes any right, and explicitly distinguishes internal MANARATAK permissions from real Telegram administrator/member permissions.
+- Added JSON and SQLite tests for current-state listing, detail, pagination across 19 records, revoked/expired stale selectors, reordering, invalid callback grammar and student/staff/group isolation. This does not introduce a live Telegram permissions gateway or a moderator-facing operational interface; those are separate planned stages.
+
 ## 0.7.64 — 2026-10-25 — atomically confirmed owner local group actions
 
 - **Transaction integrity:** owner inline `c_` confirmations now consume their one-shot approval and apply the corresponding *local* policy restriction in the SAME serialized durable JSON/SQLite transaction. The prior separation could consume approval before an unexpected failure of a subsequent transaction; no partial approval survives a failed policy precondition now.
