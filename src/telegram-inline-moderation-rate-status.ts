@@ -37,5 +37,5 @@ export async function renderOwnerModerationRateStatus(store:BotStore,policy:Poli
   keyboard:{inline_keyboard:[[
    {text:'↩️ قسم الحماية',callback_data:'mi:1:s:02:1'},
    {text:'🏠 لوحة المالك',callback_data:'mi:1:h'}
-  ]]}}};
+  ]]}};
 }
