@@ -11,7 +11,7 @@ import {Policy} from '../src/policy.js';
 const TOKEN='123456789:ABCDEFGHIJKLMNOPQRSTUVWXYZabcde',BOT=123456789;
 const GROUP='-100123',OWNER='100',MEMBER='300',STAFF='301';
 const member=(status:string,userId:number,more:Record<string,unknown>={})=>
- new Response(JSON.stringify({ok:true,result:{status,user:{id:userId,is_bot:false},...more}}),
+ new Response(JSON.stringify({ok:true,result:{status,user:{id:userId,is_bot:userId===BOT},...more}}),
   {status:200,headers:{'content-type':'application/json'}});
 const acknowledged=()=>new Response(JSON.stringify({ok:true,result:true}),
  {status:200,headers:{'content-type':'application/json'}});
