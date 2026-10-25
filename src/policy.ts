@@ -134,6 +134,73 @@ export class Policy {
        decision:'ALLOW',reason:'CHAT_OWNER_AI_DISABLED',policyVersion:c.version,at:this.clock()});
     });
   }
+
+  /**
+   * One durable transaction owns BOTH one-shot token consumption AND the
+   * restrictive local policy mutation. Never acknowledge an operation as
+   * applied between independent transactions. No Telegram network calls.
+   * Invalid, expired, stale or cross-owner actions have zero state effects.
+   */
+  async applyOwnerInlineConfirmation(actor:string,ref:string,at=this.clock()):Promise<{
+    action:'owner.chat.ai_off'|'owner.chat.restrict.assistant'|'owner.chat.restrict.publishing'|
+      'owner.chat.revoke'|'owner.subscription.pause';chatId:string
+  }|null>{
+    if(!this.isOwner(actor)||!/^c_[A-Za-z0-9_-]{24}$/u.test(ref))return null;
+    if(!Number.isSafeInteger(at)||at<0||at>8_640_000_000_000_000)return null;
+    const known=[
+      'owner.chat.ai_off','owner.chat.restrict.assistant',
+      'owner.chat.restrict.publishing','owner.chat.revoke','owner.subscription.pause'
+    ] as const;
+    return this.store.transaction(s=>{
+      const cb=s.callbacks.find(c=>c.ref===ref);
+      if(!cb||cb.used||cb.revoked||!cb.oneShot||cb.actorId!==actor||
+        cb.expiresAt<=at||cb.policyVersion<1||
+        !known.some(action=>action===cb.action)||
+        !/^-[1-9][0-9]{0,18}$/u.test(cb.chatId))return null;
+      const chat=s.chats.find(c=>c.id===cb.chatId);
+      if(!chat?.approved||chat.version!==cb.policyVersion)return null;
+      const action=cb.action as typeof known[number];
+      const requirement=s.subscriptionRequirements.filter(r=>r.chatId===chat.id);
+      if(action==='owner.chat.ai_off'&&chat.groupAI==='OFF')return null;
+      if(action==='owner.chat.restrict.assistant'&&!chat.scopes.includes('assistant'))return null;
+      if(action==='owner.chat.restrict.publishing'&&!chat.scopes.includes('publishing'))return null;
+      if(action==='owner.subscription.pause'&&(
+        !chat.scopes.includes('verification')||requirement.length!==1||
+        !requirement[0]!.channelIds.length||
+        requirement[0]!.version!==cb.requirementVersion))return null;
+      // The rule version is mandatory *only* on subscription pauses, to avoid
+      // old/cross-policy tokens masquerading as a new suspension.
+      if(action!=='owner.subscription.pause'&&cb.requirementVersion!==undefined)return null;
+      // Everything below is atomic, including used=true. A transaction failure
+      // rolls back token usage and the change together.
+      cb.used=true;
+      let reason:string,updateKey:string;
+      if(action==='owner.chat.ai_off'){
+        chat.groupAI='OFF';chat.version++;
+        reason='CHAT_OWNER_AI_DISABLED';updateKey='owner:chat:ai-off:'+chat.id+':'+chat.version;
+      }else if(action==='owner.chat.restrict.assistant'||action==='owner.chat.restrict.publishing'){
+        const scope=action==='owner.chat.restrict.assistant'?'assistant':'publishing';
+        chat.scopes=chat.scopes.filter(s=>s!==scope);
+        if(scope==='assistant')chat.groupAI='OFF';
+        chat.version++;
+        reason='CHAT_OWNER_SCOPE_RESTRICTED';
+        updateKey='owner:chat:restrict:'+chat.id+':'+scope+':'+chat.version;
+      }else if(action==='owner.chat.revoke'){
+        chat.approved=false;chat.groupAI='OFF';chat.version++;
+        this.clearSubscriptionDependencies(s,chat.id);
+        reason='CHAT_OWNER_REVOKED_LOCALLY';
+        updateKey='owner:chat:revoke:'+chat.id+':'+chat.version;
+      }else{
+        const rule=requirement[0]!;
+        rule.channelIds=[];rule.version++;chat.version++;
+        reason='SUBSCRIPTION_REQUIREMENT_PAUSED_LOCALLY';
+        updateKey='owner:subscription:pause:'+chat.id+':'+rule.version;
+      }
+      s.audit.push({updateKey,decision:'ALLOW',reason,
+        policyVersion:chat.version,at});
+      return {action,chatId:chat.id};
+    });
+  }
   async setPresence(chatId: string, present: boolean): Promise<void> {
     await this.store.transaction(s => { const c = s.chats.find(x => x.id === chatId); if (c) c.present = present; });
   }

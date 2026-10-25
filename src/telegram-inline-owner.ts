@@ -670,7 +670,7 @@ export function isValidTelegramInlineKeyboard(input:unknown):input is TelegramIn
     Buffer.byteLength(button.callback_data,'utf8')<1||
     Buffer.byteLength(button.callback_data,'utf8')>64||
     /[\u0000-\u001f\u007f]/u.test(button.callback_data)||
-    !/^mi:1:(?:h|p:[01]|s:(?:0[1-9]|1[0-6]):[0-2]|i:(?:0[1-9]|1[0-6]):(?:0[1-9]|1[0-7])|g:(?:p:(?:0|[1-9][0-9]{0,2})|[dua]:-[1-9][0-9]{0,18}:[1-9][0-9]{0,9}:(?:0|[1-9][0-9]{0,2})|v:-[1-9][0-9]{0,18}:[1-9][0-9]{0,9}:(?:0|[1-9][0-9]{0,2}):[xap]))$/u.test(button.callback_data)&&
+    !/^mi:1:(?:h|p:[01]|s:(?:0[1-9]|1[0-6]):[0-2]|i:(?:0[1-9]|1[0-6]):(?:0[1-9]|1[0-7])|g:(?:p:(?:0|[1-9][0-9]{0,2})|[dua]:-[1-9][0-9]{0,18}:[1-9][0-9]{0,9}:(?:0|[1-9][0-9]{0,2})|v:-[1-9][0-9]{0,18}:[1-9][0-9]{0,9}:(?:0|[1-9][0-9]{0,2}):[xapsr]))$/u.test(button.callback_data)&&
      !/^c_[A-Za-z0-9_-]{24}$/u.test(button.callback_data))
     return false;
   }
