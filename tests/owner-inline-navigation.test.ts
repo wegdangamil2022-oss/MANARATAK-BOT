@@ -71,6 +71,7 @@ for(const engine of ['json','sqlite'] as const){
    const next=await f.app.handle(callback(2,100,'mi:1:p:1'));
    assert.equal(next.status,'APPLIED');
    assert.equal(next.callbackQueryId,'cb_2');
+   assert.equal(next.plan?.editMessageId,55);
    assert.match(next.plan?.text??'',/الصفحة الثانية/);
    const section=await f.app.handle(callback(3,100,'mi:1:s:10:0'));
    assert.equal(section.status,'APPLIED');
@@ -81,7 +82,10 @@ for(const engine of ['json','sqlite'] as const){
    assert.match(item.plan?.text??'',/غير مفع/);
    assert.equal((await f.store.snapshot()).educationResources.length,0);
    assert.equal((await f.app.handle(callback(4,100,'mi:1:i:10:03'))).status,'DUPLICATE');
-   assert.equal((await f.app.handle(callback(5,300,'mi:1:p:0'))).status,'DENIED');
+   const intruder=await f.app.handle(callback(5,300,'mi:1:p:0'));
+   assert.equal(intruder.status,'DENIED');
+   assert.equal(intruder.callbackQueryId,'cb_5');
+   assert.equal(intruder.plan,undefined);
    assert.equal((await f.app.handle(callback(6,100,'mi:1:s:01:0',true))).status,'DENIED');
    assert.equal((await f.app.handle(callback(7,100,'mi:1:s:99:0'))).status,'DENIED');
    const old=await f.app.handle(message(8,100,'🔐 لوحة المالك'));
@@ -103,6 +107,23 @@ test('inline Bot API serialization uses the fixed inline markup and never calls 
  assert.equal((await sender.send({chatId:'100',parseMode:'HTML',text:'x',
   inlineMarkup:{inline_keyboard:[[{text:'x',callback_data:'a'.repeat(65)}]]}})).status,'FAILED_CONFIRMED');
  assert.equal(calls.length,1);
+});
+test('inline callback edits only its own verified message and rejects conflicting markup',async()=>{
+ let url='',body:Record<string,unknown>={};
+ const sender=new TelegramBotApiTextSender(TOKEN,async(u,init)=>{
+  url=String(u);body=JSON.parse(String(init?.body)) as Record<string,unknown>;
+  return new Response(JSON.stringify({ok:true,result:{message_id:55,chat:{id:100}}}),{status:200});
+ });
+ const view=ownerInlineHome();
+ assert.deepEqual(await sender.send({chatId:'100',parseMode:'HTML',text:view.text,
+  inlineMarkup:view.keyboard,editMessageId:55}),{status:'CONFIRMED',messageId:55});
+ assert.match(url,/editMessageText$/);
+ assert.equal(body.message_id,55);
+ assert.equal(body.protect_content,undefined);
+ assert.equal(body.reply_markup!==undefined,true);
+ assert.deepEqual(await sender.send({chatId:'100',parseMode:'HTML',text:'x',
+  replyMarkup:{keyboard:[[{text:'x'}]],resize_keyboard:true,is_persistent:true},
+  inlineMarkup:view.keyboard,editMessageId:55}),{status:'FAILED_CONFIRMED'});
 });
 test('callback acknowledgement validates IDs and never reports false success',async()=>{
  const requests:string[]=[];
