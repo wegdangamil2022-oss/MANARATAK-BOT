@@ -123,6 +123,25 @@ export class TelegramBotApiModerationGateway implements ModerationGateway{
   return bot!==null&&bot.user.is_bot===true&&
    (bot.status==='creator'||bot.status==='administrator'&&bot.can_restrict_members===true);
  }
+ /** A single narrowly scoped, read-only bot-rights observation.
+  * Only getChatMember is reachable: no member target, no mutation, no
+  * safety gate arm and no claim that remote Telegram trial is isolated.
+  * Network failures, unexpected statuses or mismatched identity are UNKNOWN.
+  */
+ async inspectBotModerationRights(chatId:string):Promise<'GRANTED'|'DENIED'|'UNKNOWN'>{
+  if(!validGroup(chatId))return 'UNKNOWN';
+  const bot=await this.getMember(chatId,String(this.botId));
+  if(!bot||bot.user.is_bot!==true)return 'UNKNOWN';
+  if(bot.status==='creator')return 'GRANTED';
+  if(bot.status==='administrator'){
+   if(bot.can_restrict_members===true)return 'GRANTED';
+   return bot.can_restrict_members===false||bot.can_restrict_members===undefined?
+    'DENIED':'UNKNOWN';
+  }
+  if(bot.status==='member'||bot.status==='restricted'||bot.status==='left'||
+     bot.status==='kicked')return 'DENIED';
+  return 'UNKNOWN';
+ }
  /** Unknown or missing evidence is PROTECTED, not an unprotected assumption.
   * No Telegram group owner, admin, bot, kicked/left or unknown member is a target.
   */
