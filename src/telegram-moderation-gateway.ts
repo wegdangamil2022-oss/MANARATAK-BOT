@@ -1,5 +1,6 @@
 import type {ModerationGateway,RestrictionOutcome} from './moderation.js';
 import type {RestrictionKind} from './store.js';
+import type {RestrictionObservation} from './moderation-reversal-preflight.js';
 
 /**
  * A separately injectable, deliberately DISARMED BY DEFAULT Telegram Bot API
@@ -109,6 +110,35 @@ export class TelegramBotApiModerationGateway implements ModerationGateway{
   if(!member||member.user.is_bot!==false)return true;
   return !(member.status==='member'||
    member.status==='restricted'&&member.is_member===true);
+ }
+ /** Owner-only callers may ask for a CURRENT observation. Neither Telegram
+  * getChatMember nor the local attempt ledger identifies the original actor,
+  * so this method can never approve an automatic unban/unmute.
+  * Only getChatMember is sent. No mutating Bot API operation is reachable here.
+  */
+ async observeRestriction(chatId:string,memberId:string):Promise<RestrictionObservation>{
+  if(!validGroup(chatId)||!validUser(memberId)||Number(memberId)===this.botId)
+   return 'UNKNOWN';
+  if(!await this.canRestrict(chatId,memberId))return 'NO_RIGHTS';
+  const member=await this.getMember(chatId,memberId);
+  if(!member)return 'UNKNOWN';
+  if(member.user.is_bot!==false||member.status==='creator'||
+    member.status==='administrator')return 'PROTECTED';
+  if(member.status==='kicked')return 'BAN_PRESENT';
+  if(member.status==='member')return 'NO_RESTRICTION';
+  if(member.status==='restricted'&&member.is_member===true){
+   const permissionFields=[
+    'can_send_messages','can_send_audios','can_send_documents',
+    'can_send_photos','can_send_videos','can_send_video_notes',
+    'can_send_voice_notes','can_send_polls','can_send_other_messages',
+    'can_add_web_page_previews','can_react_to_messages'
+   ] as const;
+   // A Telegram 'restricted' flag alone does NOT establish an identical
+   // all-denied mute; incomplete or weaker restrictions are not a match.
+   return permissionFields.every(key=>(member as unknown as ObjectValue)[key]===false)?
+    'MUTE_PRESENT':'UNKNOWN';
+  }
+  return 'UNKNOWN';
  }
  async setRestriction(chatId:string,memberId:string,
   kind:RestrictionKind):Promise<RestrictionOutcome>{
