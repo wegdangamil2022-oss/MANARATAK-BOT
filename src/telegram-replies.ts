@@ -79,7 +79,7 @@ export class TelegramBotApiTextSender implements TelegramReplySender {
  */
 export class TelegramBotApiCallbackAcker {
  constructor(private readonly token:string,private readonly request:typeof fetch=fetch){
-  if(!/^[1-9]\\d{4,12}:[A-Za-z0-9_-]{30,90}$/.test(token))
+  if(!/^[1-9]\d{4,12}:[A-Za-z0-9_-]{30,90}$/.test(token))
    throw new Error('INVALID_TELEGRAM_TOKEN');
  }
  async answer(callbackQueryId:string):Promise<void>{
@@ -93,7 +93,8 @@ export class TelegramBotApiCallbackAcker {
   }catch{/* Callback acknowledgement is best effort and never retried. */}
  }
 }
-\nexport type ReplyDispatchResult={status:'NO_REPLY'|'CONFIRMED'|'SENT'|'SENDING'|'FAILED_CONFIRMED'|'UNKNOWN_OUTCOME'|'PAUSED'};
+
+export type ReplyDispatchResult={status:'NO_REPLY'|'CONFIRMED'|'SENT'|'SENDING'|'FAILED_CONFIRMED'|'UNKNOWN_OUTCOME'|'PAUSED'};
 const knownStatus=(x:unknown):x is TelegramReplyJob['status']=>[
  'QUEUED','SENDING','SENT','FAILED_CONFIRMED','UNKNOWN_OUTCOME'
 ].includes(x as string);
