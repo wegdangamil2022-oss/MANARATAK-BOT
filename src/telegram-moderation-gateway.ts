@@ -135,7 +135,7 @@ export class TelegramBotApiModerationGateway implements ModerationGateway{
    ] as const;
    // A Telegram 'restricted' flag alone does NOT establish an identical
    // all-denied mute; incomplete or weaker restrictions are not a match.
-   return permissionFields.every(key=>member[key]===false)?
+   return permissionFields.every(key=>(member as unknown as ObjectValue)[key]===false)?
     'MUTE_PRESENT':'UNKNOWN';
   }
   return 'UNKNOWN';
