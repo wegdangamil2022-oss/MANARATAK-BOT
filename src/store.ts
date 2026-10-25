@@ -81,7 +81,9 @@ export interface PurgeJob {
 /** Durable Telegram text reply intent; no automatic retry after unknown sends. */
 export interface TelegramReplyJob {
  updateKey:string;plan?:{chatId:string;parseMode:'HTML';text:string;
-  replyMarkup?:import('./telegram-menu.js').TelegramReplyKeyboard};
+  replyMarkup?:import('./telegram-menu.js').TelegramReplyKeyboard;
+  inlineMarkup?:import('./telegram-inline-owner.js').TelegramInlineKeyboard;
+  editMessageId?:number};
  status:'QUEUED'|'SENDING'|'SENT'|'FAILED_CONFIRMED'|'UNKNOWN_OUTCOME';
  attemptId?:string;startedAt?:number;messageId?:number;
  queuedAt?:number;redactedAt?:number;

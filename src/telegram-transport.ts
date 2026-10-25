@@ -19,6 +19,7 @@ import {menuLabels,mainMenuKeyboard,backMenuKeyboard,categoryButton,
  catalogBackToCategories,catalogBackToCategory,parseCatalogBackToCategory,
  type TelegramReplyKeyboard} from './telegram-menu.js';
 import {OwnerTelegramMenu,isOwnerMenuText} from './telegram-owner-menu.js';
+import {ownerInlineHome,ownerInlineRender,type TelegramInlineKeyboard} from './telegram-inline-owner.js';
 import {parseSearchQuery,parseSearchPageCommand,searchPageButton,
  searchResourceButton,parseSearchResourceSelection,searchResultsBreadcrumb,
  parseSearchResultsBreadcrumb} from './telegram-search.js';
@@ -53,8 +54,8 @@ interface IncomingDocument {
 }
 /** Offline B3 application adapter: creates plans, NEVER sends a message or connects to Telegram. */
 export interface TelegramReplyPlan { chatId: string; parseMode: 'HTML'; text: string;
- replyMarkup?:TelegramReplyKeyboard; }
-export interface TelegramResult { status: 'APPLIED' | 'DUPLICATE' | 'DENIED' | 'IGNORED' | 'UNKNOWN'; reason: string; plan?: TelegramReplyPlan; deliveryKey?: string; }
+ replyMarkup?:TelegramReplyKeyboard; inlineMarkup?:TelegramInlineKeyboard; editMessageId?:number; }
+export interface TelegramResult { status: 'APPLIED' | 'DUPLICATE' | 'DENIED' | 'IGNORED' | 'UNKNOWN'; reason: string; plan?: TelegramReplyPlan; deliveryKey?: string; callbackQueryId?:string; }
 type ProcessedReply={status:TelegramResult['status'];reason:string;plan?:TelegramReplyPlan;
  groupQuestionAccess?:TelegramReplyJob['groupQuestionAccess'];
  groupMenuAccess?:TelegramReplyJob['groupMenuAccess'];
@@ -69,7 +70,7 @@ export interface TelegramApplicationOptions {
   answerPreflight?:B6AnswerPreflight;
 }
 
-type Event = {updateId: number; actorId: string; chatId: string; kind: 'private' | 'group'; text: string; entities?:unknown; messageId?:number; replyTo?:unknown; document?: IncomingDocument};
+type Event = {updateId: number; actorId: string; chatId: string; kind: 'private' | 'group'; text: string; entities?:unknown; messageId?:number; replyTo?:unknown; document?: IncomingDocument; callbackData?:string; callbackQueryId?:string; callbackMessageId?:number};
 const isObject=(x:unknown):x is Record<string,unknown>=>Boolean(x)&&typeof x==='object'&&!Array.isArray(x);
 const positiveId=(x:unknown): x is number=>typeof x==='number'&&Number.isSafeInteger(x)&&x>0;
 const chatId=(x:unknown): x is number=>typeof x==='number'&&Number.isSafeInteger(x)&&x!==0;
@@ -78,6 +79,27 @@ export function escapeTelegramHtml(text:string):string {
 }
 function eventFrom(value:unknown):{event?:Event;reason:string} {
   if(!isObject(value)||!Number.isSafeInteger(value.update_id)||typeof value.update_id!=='number'||value.update_id<0)return {reason:'INVALID_UPDATE_ID'};
+  // Only a callback from an actual bot-sent message may navigate this
+  // read-only owner UI. A Telegram callback ID is ephemeral, not a grant.
+  if(value.callback_query!==undefined){
+   const cb=value.callback_query;
+   if(!isObject(cb)||!isObject(cb.from)||!positiveId(cb.from.id)||
+    cb.from.is_bot!==false||!isObject(cb.message)||!isObject(cb.message.chat)||
+    !isObject(cb.message.from)||cb.message.from.is_bot!==true||
+    !chatId(cb.message.chat.id)||!positiveId(cb.message.message_id)||
+    typeof cb.id!=='string'||!(/^[A-Za-z0-9_-]{1,128}$/u.test(cb.id))||
+    typeof cb.data!=='string'||Buffer.byteLength(cb.data,'utf8')>64||
+    cb.data.length===0||/[\u0000-\u001f\u007f]/u.test(cb.data))
+    return {reason:'INVALID_CALLBACK'};
+   const kind=cb.message.chat.type==='private'?'private':
+    cb.message.chat.type==='group'||cb.message.chat.type==='supergroup'?'group':null;
+   if(!kind||(kind==='private'&&cb.message.chat.id!==cb.from.id)||
+    (kind==='group'&&cb.message.chat.id>=0))
+    return {reason:'INVALID_CALLBACK_CHAT'};
+   return {event:{updateId:value.update_id as number,actorId:String(cb.from.id),
+    chatId:String(cb.message.chat.id),kind,text:'',
+    callbackData:cb.data,callbackQueryId:cb.id,callbackMessageId:cb.message.message_id},reason:'VALID'};
+  }
   if(!isObject(value.message))return {reason:'UNSUPPORTED_EVENT'};
   const msg=value.message;
   if(!isObject(msg.chat)||!isObject(msg.from)||!positiveId(msg.from.id)||msg.from.is_bot!==false||!chatId(msg.chat.id))return {reason:'INVALID_ACTOR_OR_CHAT'};
@@ -159,9 +181,17 @@ export class TelegramUpdateApplication {
     return 'SUBSCRIPTION_UNAVAILABLE';
    return null;
   }
-  private plan(chatId:string,text:string,replyMarkup?:TelegramReplyKeyboard):TelegramReplyPlan {
+  private plan(chatId:string,text:string,replyMarkup?:TelegramReplyKeyboard,
+    inlineMarkup?:TelegramInlineKeyboard,editMessageId?:number):TelegramReplyPlan {
     if(Buffer.byteLength(text,'utf8')>4096)throw Error('REPLY_TOO_LONG');
-    return replyMarkup?{chatId,parseMode:'HTML',text,replyMarkup}:{chatId,parseMode:'HTML',text};
+    if(replyMarkup&&inlineMarkup)throw Error('CONFLICTING_KEYBOARDS');
+    if(editMessageId!==undefined){
+     if(!Number.isSafeInteger(editMessageId)||editMessageId<=0||!inlineMarkup)
+      throw Error('INVALID_EDIT_TARGET');
+     return {chatId,parseMode:'HTML',text,inlineMarkup,editMessageId};
+    }
+    return inlineMarkup?{chatId,parseMode:'HTML',text,inlineMarkup}:
+      replyMarkup?{chatId,parseMode:'HTML',text,replyMarkup}:{chatId,parseMode:'HTML',text};
   }
   // A private chat is not proof of membership in an approved group. Group-scoped
   // libraries require a fresh trusted membership check even when opened in DM.
@@ -233,6 +263,16 @@ export class TelegramUpdateApplication {
   private async process(event:Event):Promise<ProcessedReply> {
     if(event.document)return this.handleDocument(event);
     const {actorId,chatId,kind,text}=event;
+    if(event.callbackData!==undefined){
+     // Reauthorize the real sender at every tap. Never dispatch a privileged
+     // command from untrusted callback_data or from a group context.
+     if(kind!=='private'||actorId!==chatId)return {status:'DENIED',reason:'OWNER_CALLBACK_PRIVATE_ONLY'};
+     if(!this.opts.policy.isOwner(actorId))return {status:'DENIED',reason:'OWNER_ONLY'};
+     const view=ownerInlineRender(event.callbackData);
+     if(!view)return {status:'DENIED',reason:'INVALID_OWNER_CALLBACK'};
+     return {status:'APPLIED',reason:'RESPONSE_PLANNED_ONLY',
+      plan:this.plan(chatId,view.text,undefined,view.keyboard,event.callbackMessageId)};
+    }
     if(kind==='group'&&!this.opts.policy.canUseChat(await this.opts.store.snapshot(),chatId,'navigation'))return {status:'DENIED',reason:'CHAT_NOT_AUTHORIZED'};
     const adminCtx:VerifiedAdminContext={origin:'TELEGRAM_PRIVATE',actorId,chatId,verified:true};
     const words=text.split(/\s+/u);
@@ -329,6 +369,14 @@ export class TelegramUpdateApplication {
         +'المساعد الذكي وبعض الخدمات ما زالت قيد التطوير.',
         mainMenuKeyboard(owner));
       if(cmd==='/start'||cmd==='/help'||text===m.home||text===m.back)return main();
+      // Opt-in migration path; existing authorized owner commands and legacy
+      // reply keyboards are left functional until their workflows are ported.
+      if(text==='/ownerinline'){
+       if(!owner)return {status:'DENIED',reason:'OWNER_ONLY'};
+       const view=ownerInlineHome();
+       return {status:'APPLIED',reason:'RESPONSE_PLANNED_ONLY',
+        plan:this.plan(chatId,view.text,undefined,view.keyboard)};
+      }
       if(isOwnerMenuText(text)){
         if(!owner)return {status:'DENIED',reason:'OWNER_ONLY'};
         const screen=await new OwnerTelegramMenu(
@@ -794,7 +842,8 @@ export class TelegramUpdateApplication {
      handled.groupMenuAccess,handled.privateGroupAccess);
     // Temporary actor IDs are only stored in the guarded queue, never returned.
     const {groupQuestionAccess:_,groupMenuAccess:__,privateGroupAccess:___,...publicResult}=handled;
-    return publicResult.plan?{...publicResult,deliveryKey:key}:publicResult;
+    const visible=publicResult.plan?{...publicResult,deliveryKey:key}:publicResult;
+    return event.callbackQueryId?{...visible,callbackQueryId:event.callbackQueryId}:visible;
   }
 }
 
@@ -814,7 +863,8 @@ function respond(res:ServerResponse,status:number,body:Record<string,unknown>):v
 /** Verifies Telegram's shared webhook secret and HTTP boundaries. Does not send any outbound messages. */
 export function telegramWebhookListener(app:TelegramUpdateApplication,secretToken:string,
  outbound?:TelegramReplyDispatcher,ingressOptions:IngressOptions={},
- safetyGate?:()=>Promise<boolean>):RequestListener {
+ safetyGate?:()=>Promise<boolean>,
+ callbackAcker?:{answer(callbackQueryId:string):Promise<void>}):RequestListener {
   if(!/^[A-Za-z0-9_-]{32,256}$/.test(secretToken))throw Error('INVALID_WEBHOOK_SECRET');
   const guard=new BoundedIngress(ingressOptions);
   return (req,res)=>{
@@ -845,6 +895,11 @@ export function telegramWebhookListener(app:TelegramUpdateApplication,secretToke
       // Live delivery is explicitly opt-in via a separate injected dispatcher.
       // Ambiguous outcomes remain blocked in the durable outbox: never retry
       // automatically, even if Telegram repeats the inbound webhook request.
+      // Acknowledge both authorized and denied well-formed callback queries.
+      // This is a bounded ephemeral Bot API operation, never a state change
+      // or proof of message delivery. Failure does not replay a queued send.
+      if(callbackAcker&&result.callbackQueryId)
+       await callbackAcker.answer(result.callbackQueryId);
       if(outbound&&result.plan&&result.deliveryKey)await outbound.dispatch(result.deliveryKey);
       // Keep the reply body minimal: no user text, provider errors or Bot API secret.
       respond(res,result.status==='DENIED'&&result.reason==='INVALID_UPDATE_ID'?422:200,{ok:true,status:result.status});
