@@ -47,6 +47,7 @@ const MUTE_PERMISSIONS={
 } as const;
 type JsonOutcome={status:'HTTP_OK'|'CLIENT_DENIED'|'UNKNOWN';value?:unknown};
 export class TelegramBotApiModerationGateway implements ModerationGateway{
+ readonly attemptGateway='TELEGRAM_API' as const;
  private readonly botId:number;
  constructor(private readonly token:string,private readonly request:typeof fetch=fetch,
   private readonly safetyGate:()=>Promise<boolean>=async()=>false){
