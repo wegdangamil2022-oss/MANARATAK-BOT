@@ -1,3 +1,7 @@
+## Phase 3 v0.7.69 — staff's local moderation outcome audit (read-only)
+
+In the private Telegram chat, use `/staffinline` → an authorized group → `📊 سجل حالات العقوبات`. This shows only aggregate local statuses and case ordinals for past moderation attempts, with eight per page. Stale buttons fail after operation changes; active `chat.manage` and a local moderation scope are required on every tap. **Unknown outcomes must be investigated manually; this view offers no automatic retry, no live unmute or unban, and no member or moderator identifiers.** The Phase 3 real Bot API ban/mute adapter introduced in v0.7.68 remains deliberately DISARMED in the running Telegram server. A controlled operator-approved trial and rights/reversal review are required before enabling live sanctions.
+
 ## Phase 3 v0.7.68 — Telegram moderation adapter (DISARMED, offline-tested only)
 
 The opt-in `TelegramBotApiModerationGateway` in `src/telegram-moderation-gateway.ts` can implement a future explicitly approved BAN or MUTE dispatch through the real Telegram Bot API. It requires a trusted operator-supplied safety gate returning `true` at dispatch time and again after fresh bot-administrator and protected-member checks; the default safety gate always denies. The existing `ModerationService` durable state machine records intended operations and prevents unsafe retry of uncertain outcomes. No moderator button, student command or Telegram webhook currently enables live ban/mute. **`createLiveTelegramServer` still creates `FakeModerationGateway`**, by design.
