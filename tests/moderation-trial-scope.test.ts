@@ -125,7 +125,8 @@ test('operator-facing moderation trial CLI is status-only and rejects forged gro
    status:'PASS',safety:'STOP',rollback:'MATCH',reasons:[]});
   const bad=command(OTHER);
   assert.equal(bad.status,2,bad.stderr);
-  assert.deepEqual(JSON.parse(bad.stdout).reasons,['TRIAL_GROUP_NOT_APPROVED']);
+  assert.deepEqual(JSON.parse(bad.stdout).reasons,[
+   'TRIAL_GROUP_NOT_APPROVED','OTHER_MODERATION_GROUP_APPROVED']);
   for(const invalid of ['0','-0','-01','-9999999999999999','-100123;rm /']){
    const out=command(invalid);assert.equal(out.status,1);assert.equal(out.stdout,'');
    assert.match(out.stderr,/MANARATAK_MODERATION_TRIAL_INVALID_REQUEST/);
