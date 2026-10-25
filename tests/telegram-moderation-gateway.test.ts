@@ -139,6 +139,31 @@ test('revoked rights or newly promoted target blocks outgoing ban and mute (with
   assert.deepEqual(protectedMember.calls.map(c=>c.method),['getChatMember','getChatMember']);
  }
 });
+test('STOP applied after preflight prevents a sanction even though the bot held rights',async()=>{
+ const f=fake(granted);
+ let reads=0;
+ const gateway=new TelegramBotApiModerationGateway(TOKEN,f.request,async()=>++reads===1);
+ assert.equal(await gateway.setRestriction(GROUP,MEMBER,'BAN'),'FAILED_CONFIRMED');
+ assert.deepEqual(f.calls.map(x=>x.method),['getChatMember','getChatMember']);
+ assert.equal(reads,2);
+});
+test('forged bot identity, mismatched target and malformed preflight all fail closed',async()=>{
+ const scenarios=[
+  fake((method,body)=>method==='getChatMember'&&body.user_id===BOT?
+   member('administrator',BOT+1,{can_restrict_members:true}):granted(method,body)),
+  fake((method,body)=>method==='getChatMember'&&body.user_id===BOT?
+   member('administrator',BOT,{can_restrict_members:true,user:{id:BOT,is_bot:false}}):granted(method,body)),
+  fake((method,body)=>method==='getChatMember'&&body.user_id===300?
+   member('member',301):granted(method,body)),
+  fake((method,body)=>method==='getChatMember'&&body.user_id===300?
+   new Response('bad-json',{status:200}):granted(method,body))
+ ];
+ for(const f of scenarios){
+  const gateway=new TelegramBotApiModerationGateway(TOKEN,f.request,async()=>true);
+  assert.equal(await gateway.setRestriction(GROUP,MEMBER,'BAN'),'FAILED_CONFIRMED');
+  assert.equal(f.calls.some(x=>x.method==='banChatMember'),false);
+ }
+});
 test('ambiguous API results stay UNKNOWN_OUTCOME, explicit 4xx denial stays FAILED_CONFIRMED',async()=>{
  const responses=[
   new Response('not-json',{status:200}),
