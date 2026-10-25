@@ -197,6 +197,15 @@ export class TelegramBotApiModerationGateway implements ModerationGateway{
    let current=false;
    try{current=await verifyCurrentAuthority()===true;}catch{return 'FAILED_CONFIRMED';}
    if(!current)return 'FAILED_CONFIRMED';
+   // Telegram staff/owner status and the bot's can_restrict_members right
+   // can change while the durable callback awaits disk. Never dispatch using
+   // target/rights evidence obtained before that await.
+   if(!await this.canRestrict(chatId,memberId)||
+      await this.isProtected(chatId,memberId))return 'FAILED_CONFIRMED';
+   // Local staff grants or approval may themselves change during these
+   // additional remote reads. Re-evaluate the service-owned proof again.
+   try{current=await verifyCurrentAuthority()===true;}catch{return 'FAILED_CONFIRMED';}
+   if(!current)return 'FAILED_CONFIRMED';
   }
   // The authority callback itself may await I/O while STOP is applied.
   // Read the independent operator gate once more at the final mutation
