@@ -32,3 +32,40 @@ test('invalid group makes zero HTTP requests',async()=>{
  assert.equal(await p.inspect('not-a-group'),'UNKNOWN');
  assert.deepEqual(p.methods,[]);
 });
+
+test('verified Telegram creator bot rights are GRANTED',async()=>{
+ const p=query({status:'creator',user:{id,is_bot:true}});
+ assert.equal(await p.inspect(chat),'GRANTED');
+ assert.deepEqual(p.methods,['getChatMember']);
+});
+test('bot demoted to an ordinary group member is DENIED',async()=>{
+ const p=query({status:'member',user:{id,is_bot:true}});
+ assert.equal(await p.inspect(chat),'DENIED');
+ assert.deepEqual(p.methods,['getChatMember']);
+});
+test('unrecognized provider status must not be treated as administrator authority',async()=>{
+ const p=query({status:'synthetic',user:{id,is_bot:true},can_restrict_members:true});
+ assert.equal(await p.inspect(chat),'UNKNOWN');
+ assert.deepEqual(p.methods,['getChatMember']);
+});
+test('user.is_bot false cannot impersonate an authorized bot',async()=>{
+ const p=query({status:'administrator',user:{id,is_bot:false},can_restrict_members:true});
+ assert.equal(await p.inspect(chat),'UNKNOWN');
+ assert.deepEqual(p.methods,['getChatMember']);
+});
+test('invalid grant type remains UNKNOWN, not coerced to true',async()=>{
+ const p=query({status:'administrator',user:{id,is_bot:true},can_restrict_members:'true'});
+ assert.equal(await p.inspect(chat),'UNKNOWN');
+ assert.deepEqual(p.methods,['getChatMember']);
+});
+test('provider HTTP errors and timeouts cannot grant moderation rights',async()=>{
+ const methods:string[]=[];
+ const request=(async(url:string|URL|Request)=>{
+  methods.push(String(url).split('/').at(-1)!);
+  throw Error('isolated network timeout');
+ }) as typeof fetch;
+ const gw=new TelegramBotApiModerationGateway(token,request);
+ const view=(gw as unknown as {inspectBotModerationRights:(c:string)=>Promise<string>}).inspectBotModerationRights.bind(gw);
+ assert.equal(await view(chat),'UNKNOWN');
+ assert.deepEqual(methods,['getChatMember']);
+});
