@@ -107,7 +107,7 @@ for(const engine of ['json','sqlite'] as const){
    const token=btn(list).find(x=>x.callback_data.startsWith('mi:1:d:i:'))!.callback_data;
    for(const [i,data] of ['mi:1:i:03:01','mi:1:d:p:0',token].entries()){
     for(const actor of [200,301]){
-     const outcome=await f.app().handle(cb(40+i*10+actor,data));
+     const outcome=await f.app().handle(cb(40+i*10+actor,actor,data));
      assert.equal(outcome.status,'DENIED',data);
      assert.equal(outcome.plan,undefined);
     }
