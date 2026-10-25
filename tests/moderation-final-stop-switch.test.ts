@@ -72,6 +72,6 @@ test('stable RUN and affirmative current authority still permit exactly one isol
   reads++;return true;
  }),'CONFIRMED');
  assert.deepEqual(api.sanctions(),['banChatMember']);
- assert.equal(reads,1);
+ assert.equal(reads,2,'local authority must be rechecked after fresh remote role reads');
  assert.equal(checks,3);
 });
