@@ -1,6 +1,6 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
-import {mkdtemp,rm,writeFile,chmod,readFile} from 'node:fs/promises';
+import {mkdtemp,rm,writeFile,chmod,readFile,unlink} from 'node:fs/promises';
 import {join} from 'node:path';
 import {tmpdir} from 'node:os';
 import {BotStore} from '../src/store.js';
@@ -93,6 +93,9 @@ test('STOP/RUN mismatch and second moderator-enabled group block before ALL remo
   assert.deepEqual(t.methods,[]);
   await writeFile(f.safetyFile,'STOP\n');
   await f.policy.approveChat(OWNER,OTHER,['moderation']);
+  // A backup is a non-overwritable rollback anchor. Discard only this
+  // synthetic test copy before generating the new isolated checkpoint.
+  await unlink(f.backupFile);
   await f.backup();
   r=await inspectIsolatedModerationRightsReadOnly(f.options(),t.gateway);
   assert.equal(r.status,'BLOCKED');assert.equal(r.botRights,'NOT_CHECKED');
