@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { BotStore, type BotState, type ModerationReason, type ModerationOperation, type RestrictionKind } from './store.js';
 import { Policy } from './policy.js';
+import {moderationRateFuse,moderationRateDenial} from './moderation-rate-fuse.js';
 
 export type RestrictionOutcome = 'CONFIRMED' | 'FAILED_CONFIRMED' | 'UNKNOWN_OUTCOME';
 export type ModerationResult = { status: 'APPLIED' | 'NO_CHANGE' | 'DENIED' | 'BLOCKED_PENDING' | 'BLOCKED_UNKNOWN' | 'FAILED_CONFIRMED' | 'UNKNOWN_OUTCOME'; reason: string };
@@ -52,10 +53,13 @@ export class ModerationService {
       if (!this.authorized(s, actorId, chatId, memberId)) return false;
       const existing = s.moderationReasons.find(x => byTarget(x, chatId, memberId) && x.source === 'MANUAL' && x.reference === reference);
       if (existing?.active) { if (existing.kind !== kind) throw new Error('REASON_CONFLICT'); return false; }
+      const limit=moderationRateFuse(s,actorId,chatId,this.clock());
+      if(limit)return limit;
       if (existing) { existing.kind = kind; existing.active = true; existing.createdBy = actorId; }
       else s.moderationReasons.push({ chatId, memberId, source: 'MANUAL', reference, kind, createdBy: actorId, active: true });
       return true;
     });
+    if(typeof added==='string')return {status:'DENIED',reason:moderationRateDenial(added)};
     if (!added) return { status: 'NO_CHANGE', reason: 'DUPLICATE_OR_REVOKED' };
     return this.reconcile(actorId, chatId, memberId);
   }
@@ -78,11 +82,14 @@ export class ModerationService {
           (stillCurrent && !stillCurrent(s)))return 'STALE' as const;
       const found = s.moderationReasons.find(x => byTarget(x, chatId, memberId) && x.source === 'SUBSCRIPTION' && x.reference === reference);
       if (Boolean(found?.active) === active) return 'UNCHANGED' as const;
+      if(active){const limit=moderationRateFuse(s,this.policy.ownerId,chatId,this.clock());
+       if(limit)return 'RATE_LIMIT' as const;}
       if (found) found.active = active;
       else if (active) s.moderationReasons.push({ chatId, memberId, source: 'SUBSCRIPTION', reference, kind: 'MUTE', createdBy: 'SYSTEM_SUBSCRIPTION', active: true });
       return 'CHANGED' as const;
     });
     if(change==='STALE')return {status:'DENIED',reason:'SUBSCRIPTION_EVIDENCE_STALE'};
+    if(change==='RATE_LIMIT')return {status:'DENIED',reason:'MODERATION_RATE_LIMIT_SUBSCRIPTION'};
     return change==='CHANGED'
       ?this.reconcile(this.policy.ownerId,chatId,memberId,stillCurrent)
       :{status:'NO_CHANGE',reason:'REASON_UNCHANGED'};
@@ -120,10 +127,15 @@ export class ModerationService {
       const desired = this.effective(s, chatId, memberId);
       const confirmed = operations.filter(x => x.status === 'CONFIRMED').at(-1)?.kind ?? 'NONE';
       if (desired === confirmed) return { status: 'NO_CHANGE' as const };
+      if(desired!=='NONE'){
+       const limit=moderationRateFuse(s,actorId,chatId,this.clock());
+       if(limit)return {status:'RATE_LIMIT' as const,reason:moderationRateDenial(limit)};
+      }
       const op: ModerationOperation = { id: randomUUID(), chatId, memberId, actorId, kind: desired, reasonFingerprint: fingerprint(s, chatId, memberId), policyVersion: this.policy.chatRevision(s, chatId), status: 'INTENT', createdAt: this.clock() };
       s.moderationOperations.push(op);
       return { status: 'READY' as const, id: op.id };
     });
+    if(candidate.status==='RATE_LIMIT')return {status:'DENIED',reason:candidate.reason};
     if (candidate.status !== 'READY') return { status: candidate.status, reason: 'NO_SAFE_DISPATCH' };
     if (this.beforeDispatch) await this.beforeDispatch();
     // Don't pre-mark effects. Verify both external rights and internal policy immediately before STARTED.
