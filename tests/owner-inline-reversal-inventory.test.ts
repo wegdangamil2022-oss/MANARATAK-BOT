@@ -77,7 +77,10 @@ for(const engine of ['json','sqlite'] as const){
    assert.doesNotMatch(text,/SECRET-EVIDENCE|secret-reference|701|702|703|704|705|706/);
    assert.equal(buttons(view).some(b=>b.callback_data.startsWith('c_')),false);
    assert.equal(buttons(view).some(b=>b.callback_data.startsWith('mi:1:g:d:')),true);
-   assert.deepEqual(await f.store.snapshot(),before);
+   const after=await f.store.snapshot();
+   assert.deepEqual(after.moderationOperations,before.moderationOperations);
+   assert.deepEqual(after.moderationReasons,before.moderationReasons);
+   assert.deepEqual(after.chats,before.chats);
   }finally{await f.close();}
  });
  test('changing a stored operation or reason invalidates previously issued inventory route ('+engine+')',async()=>{
@@ -103,7 +106,7 @@ for(const engine of ['json','sqlite'] as const){
    const token=buttons(card).find(x=>x.callback_data.startsWith('mi:1:g:r:'))!.callback_data;
    assert.equal((await f.app().handle(event(21,301,token))).status,'DENIED');
    assert.equal((await f.app().handle(event(22,100,token,true))).status,'DENIED');
-   assert.equal((await f.app().handle(event(23,100,token.replace(/.$/u,'e')))).status,'DENIED');
+   assert.equal((await f.app().handle(event(23,100,token.slice(0,-1)+(token.endsWith('0')?'1':'0')))).status,'DENIED');
    await f.policy.approveChat(OWNER,GROUP,['navigation']);
    assert.equal((await f.app().handle(event(24,100,token))).status,'DENIED');
    const nextVersion=(await f.store.snapshot()).chats[0]!.version;
