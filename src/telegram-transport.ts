@@ -25,6 +25,7 @@ import {OwnerInlineGroupControls} from './telegram-inline-group-controls.js';
 import {renderOwnerInlineDelegations} from './telegram-inline-delegations.js';
 import {renderStaffInline} from './telegram-inline-staff.js';
 import {ModerationUnknownOwnerReview} from './moderation-unknown-review.js';
+import {renderOwnerModerationRateStatus} from './telegram-inline-moderation-rate-status.js';
 import {renderStudentInline} from './telegram-inline-student.js';
 import {parseSearchQuery,parseSearchPageCommand,searchPageButton,
  searchResourceButton,parseSearchResourceSelection,searchResultsBreadcrumb,
@@ -288,6 +289,13 @@ export class TelegramUpdateApplication {
        plan:this.plan(chatId,screen.text,undefined,screen.keyboard,event.callbackMessageId)};
      }
      if(!this.opts.policy.isOwner(actorId))return {status:'DENIED',reason:'OWNER_ONLY'};
+     if(event.callbackData==='mi:1:i:02:15'){
+      const view=await renderOwnerModerationRateStatus(
+       this.opts.store,this.opts.policy,actorId,this.clock());
+      if(!view)return {status:'DENIED',reason:'MODERATION_RATE_STATUS_NOT_ACCESSIBLE'};
+      return {status:'APPLIED',reason:'RESPONSE_PLANNED_ONLY',
+       plan:this.plan(chatId,view.text,undefined,view.keyboard,event.callbackMessageId)};
+     }
      // UNKNOWN_OUTCOME human triage is annotation only: no retry, no unlock,
      // no Telegram effect. Owner, current policy, and one-shot nonce are
      // independently checked in a single durable transaction.
