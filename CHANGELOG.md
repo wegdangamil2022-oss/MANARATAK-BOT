@@ -1,3 +1,9 @@
+## 0.7.75 — 2026-10-26 — authenticated moderation adapter origin, never self-certified
+
+- Hardened durable moderation origin recording: a third-party or overwritten gateway cannot assign itself `TELEGRAM_API` merely by advertising an `attemptGateway` string. A genuine `TelegramBotApiModerationGateway` now carries a private runtime brand, and only an instance retaining its original enforcement and permission-check implementations can receive this *local adapter* origin hint. Other custom/modified gateways are `UNSPECIFIED`; the normal local fake is still `SIMULATION`.
+- Added 4 regression tests covering forged third-party gateway labels and overridden Telegram adapter behavior in both JSON and SQLite, including evidence quarantine before any external read. The new tests were confirmed failing on the previous behavior (RED), then fixed (GREEN).
+- **Not an enforcement receipt:** a trusted adapter identity does not prove that Telegram accepted or still enforces a restriction or establish authorship. The existing `OBSERVED_NOT_ATTRIBUTABLE` verdict and no-release/no-retry safeguards remain unchanged. No real Telegram moderation is wired into the live server.
+
 ## 0.7.74 — 2026-10-25 — distinguish simulated moderation from Bot API adapter attempts
 
 - Added a conservative optional `ModerationOperation.attemptGateway` classifier to the existing durable JSON/SQLite ledger. Every **new attempt that actually enters STARTED** records its locally injected gateway category: `SIMULATION` (the live server's currently used `FakeModerationGateway`), `TELEGRAM_API` (an explicitly wired `TelegramBotApiModerationGateway`), or `UNSPECIFIED` for any other adapter. Operations cancelled before STARTED are not falsely tagged as attempted. Existing legacy rows remain untagged; they are not silently rewritten or declared real.
