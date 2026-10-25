@@ -22,6 +22,7 @@ import {OwnerTelegramMenu,isOwnerMenuText} from './telegram-owner-menu.js';
 import {ownerInlineHome,ownerInlineRender,ownerInlineLinkedReadOnly,type TelegramInlineKeyboard} from './telegram-inline-owner.js';
 import {renderOwnerInlineGroups} from './telegram-inline-groups.js';
 import {OwnerInlineGroupControls} from './telegram-inline-group-controls.js';
+import {renderOwnerInlineDelegations} from './telegram-inline-delegations.js';
 import {parseSearchQuery,parseSearchPageCommand,searchPageButton,
  searchResourceButton,parseSearchResourceSelection,searchResultsBreadcrumb,
  parseSearchResultsBreadcrumb} from './telegram-search.js';
@@ -270,6 +271,15 @@ export class TelegramUpdateApplication {
      // command from untrusted callback_data or from a group context.
      if(kind!=='private'||actorId!==chatId)return {status:'DENIED',reason:'OWNER_CALLBACK_PRIVATE_ONLY'};
      if(!this.opts.policy.isOwner(actorId))return {status:'DENIED',reason:'OWNER_ONLY'};
+     // Delegation audit is read-only and owner-private. Paged details are
+     // independently checked against the CURRENT stored grant and status.
+     if(event.callbackData==='mi:1:i:03:01'||event.callbackData.startsWith('mi:1:d:')){
+      const screen=await renderOwnerInlineDelegations(this.opts.store,this.opts.policy,
+       actorId,event.callbackData,this.clock());
+      if(!screen)return {status:'DENIED',reason:'INVALID_OR_STALE_DELEGATION_CALLBACK'};
+      return {status:'APPLIED',reason:'RESPONSE_PLANNED_ONLY',
+       plan:this.plan(chatId,screen.text,undefined,screen.keyboard,event.callbackMessageId)};
+     }
      // Durable one-shot confirmations are owner-only, bounded to the current
      // chat policy revision and never execute live Telegram moderation.
      if(event.callbackData.startsWith('mi:1:g:v:')||
