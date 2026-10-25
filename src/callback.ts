@@ -2,7 +2,8 @@ import { randomBytes } from 'node:crypto';
 import { BotStore, type BotState } from './store.js';
 
 export interface CallbackSpec {
-  action: 'owner.dashboard' | 'education.navigate' | 'subscription.verify' | 'wizard.advance';
+  action: 'owner.dashboard' | 'education.navigate' | 'subscription.verify' | 'wizard.advance' |
+   'owner.chat.ai_off' | 'owner.chat.restrict.assistant' | 'owner.chat.restrict.publishing';
   chatId: string;
   actorId?: string;
   policyVersion: number;
