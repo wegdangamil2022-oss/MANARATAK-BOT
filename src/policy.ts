@@ -1,4 +1,4 @@
-import { BotStore, type BotState, type Capability, type GroupAIMode, type PrivateAIMode } from './store.js';
+import { BotStore, type BotState, type Chat, type Capability, type GroupAIMode, type PrivateAIMode } from './store.js';
 
 export class Policy {
   constructor(private readonly store: BotStore, readonly ownerId: string, private readonly clock: () => number = Date.now) {
@@ -11,6 +11,21 @@ export class Policy {
     return s.grants.some(g => g.actor === actor && g.capability === capability && g.chatId === chatId && !g.revoked && g.expiresAt > now);
   }
   private requireOwner(actor: string): void { if (!this.isOwner(actor)) throw new Error('OWNER_ONLY'); }
+  /** Restore-safe unique group record lookup. Never select the first, last
+   * or most permissive approval from multiple rows with the same ID.
+   * This is a read-only check; ambiguous evidence is preserved as-is.
+   */
+  private uniqueChat(s:BotState,chatId:string|undefined):Chat|undefined{
+    if(!chatId)return undefined;
+    const matches=s.chats.filter(c=>c.id===chatId);
+    return matches.length===1?matches[0]:undefined;
+  }
+  private assertUniqueChatRecord(s:BotState,chatId:string):Chat|undefined{
+    const chat=this.uniqueChat(s,chatId);
+    if(!chat&&s.chats.some(c=>c.id===chatId))
+      throw new Error('CHAT_APPROVAL_AMBIGUOUS');
+    return chat;
+  }
   /** Loss of verification authorization must invalidate stored subscriptions.
    * They must never silently reactivate if the chat or channel is re-approved.
    * This deliberately does NOT release existing moderation reasons.
@@ -35,7 +50,7 @@ export class Policy {
     if(!/^-[1-9][0-9]{0,18}$/.test(chatId)||!/^-[1-9][0-9]{0,18}$/.test(channelId))
       throw Error('INVALID_CHANNEL_ID');
     await this.store.transaction(s=>{
-      const chat=s.chats.find(c=>c.id===chatId);
+      const chat=this.uniqueChat(s,chatId);
       if(!chat?.approved||!chat.scopes.includes('verification'))throw Error('GROUP_NOT_APPROVED');
       const config=s.subscriptionRequirements.find(c=>c.chatId===chatId);
       if(!config?.channelIds.includes(channelId))throw Error('CHANNEL_NOT_REQUIRED');
@@ -54,7 +69,7 @@ export class Policy {
     expectedChatVersion:number,expectedRequirementVersion:number):Promise<void>{
     this.requireOwner(owner);
     await this.store.transaction(s=>{
-      const chat=s.chats.find(c=>c.id===chatId);
+      const chat=this.uniqueChat(s,chatId);
       if(!chat?.approved || !chat.scopes.includes('verification'))
         throw Error('CHAT_NO_VERIFICATION');
       const config=s.subscriptionRequirements.find(c=>c.chatId===chatId);
@@ -73,14 +88,14 @@ export class Policy {
     if (!/^-[0-9]+$/.test(chatId)) throw new Error('Only explicit Telegram group/channel IDs can be approved');
     if (!scopes.length || scopes.some(x => !['navigation', 'assistant', 'moderation', 'verification', 'publishing'].includes(x))) throw new Error('Invalid scopes');
     await this.store.transaction(s => {
-      const c = s.chats.find(c => c.id === chatId);
+      const c = this.assertUniqueChatRecord(s,chatId);
       if (c) { c.approved = true; c.scopes = [...new Set(scopes)]; c.version++; }
       else s.chats.push({ id: chatId, approved: true, present: false, scopes: [...new Set(scopes)], version: 1, groupAI: 'OFF' });
     });
   }
   async revokeChat(actor: string, chatId: string): Promise<void> {
     this.requireOwner(actor);
-    await this.store.transaction(s => { const c = s.chats.find(x => x.id === chatId); if (c) {
+    await this.store.transaction(s => { const c = this.assertUniqueChatRecord(s,chatId); if (c) {
       c.approved = false; c.version++;
       this.clearSubscriptionDependencies(s,chatId);
     } });
@@ -93,7 +108,7 @@ export class Policy {
   async revokeChatAtRevision(actor:string,chatId:string,expectedVersion:number):Promise<void>{
     this.requireOwner(actor);
     await this.store.transaction(s=>{
-      const c=s.chats.find(c=>c.id===chatId);
+      const c=this.uniqueChat(s,chatId);
       if(!c?.approved)throw Error('CHAT_NOT_APPROVED');
       if(!Number.isSafeInteger(expectedVersion)||expectedVersion<=0||c.version!==expectedVersion)
        throw Error('CHAT_POLICY_STALE');
@@ -108,7 +123,7 @@ export class Policy {
     if(!['navigation','assistant','moderation','verification','publishing'].includes(scope))
      throw Error('INVALID_CHAT_SCOPE');
     await this.store.transaction(s=>{
-      const c=s.chats.find(c=>c.id===chatId);
+      const c=this.uniqueChat(s,chatId);
       if(!c?.approved)throw Error('CHAT_NOT_APPROVED');
       if(!Number.isSafeInteger(expectedVersion)||expectedVersion<=0||c.version!==expectedVersion)
        throw Error('CHAT_POLICY_STALE');
@@ -124,7 +139,7 @@ export class Policy {
   async disableGroupAIAtRevision(actor:string,chatId:string,expectedVersion:number):Promise<void>{
     this.requireOwner(actor);
     await this.store.transaction(s=>{
-      const c=s.chats.find(c=>c.id===chatId);
+      const c=this.uniqueChat(s,chatId);
       if(!c?.approved)throw Error('CHAT_NOT_APPROVED');
       if(!Number.isSafeInteger(expectedVersion)||expectedVersion<=0||c.version!==expectedVersion)
        throw Error('CHAT_POLICY_STALE');
@@ -157,7 +172,7 @@ export class Policy {
         cb.expiresAt<=at||cb.policyVersion<1||
         !known.some(action=>action===cb.action)||
         !/^-[1-9][0-9]{0,18}$/u.test(cb.chatId))return null;
-      const chat=s.chats.find(c=>c.id===cb.chatId);
+      const chat=this.uniqueChat(s,cb.chatId);
       if(!chat?.approved||chat.version!==cb.policyVersion)return null;
       const action=cb.action as typeof known[number];
       const requirement=s.subscriptionRequirements.filter(r=>r.chatId===chat.id);
@@ -202,20 +217,23 @@ export class Policy {
     });
   }
   async setPresence(chatId: string, present: boolean): Promise<void> {
-    await this.store.transaction(s => { const c = s.chats.find(x => x.id === chatId); if (c) c.present = present; });
+    await this.store.transaction(s => {
+      const c=this.assertUniqueChatRecord(s,chatId);
+      if(c)c.present=present;
+    });
   }
   canUseChat(s: BotState, chatId: string | undefined, scope: string): boolean {
-    const c = s.chats.find(x => x.id === chatId);
+    const c = this.uniqueChat(s,chatId);
     return Boolean(c?.approved && c.scopes.includes(scope)); // presence alone is NEVER authorization
   }
-  chatRevision(s: BotState, chatId: string): number { return s.chats.find(x => x.id === chatId)?.version ?? 0; }
+  chatRevision(s: BotState, chatId: string): number { return this.uniqueChat(s,chatId)?.version ?? 0; }
   async configureGroupAI(actor: string, chatId: string, mode: GroupAIMode): Promise<void> {
     this.requireOwner(actor);
-    await this.store.transaction(s => { const c = s.chats.find(c => c.id === chatId); if (!c?.approved) throw new Error('Chat not approved'); c.groupAI = mode; c.version++; });
+    await this.store.transaction(s => { const c = this.uniqueChat(s,chatId); if (!c?.approved) throw new Error('Chat not approved'); c.groupAI = mode; c.version++; });
   }
   mayAskGroup(s: BotState, chatId: string, actor: string | undefined, explicitlyMentioned: boolean): boolean {
     if (!explicitlyMentioned || !this.canUseChat(s, chatId, 'assistant') || !actor) return false;
-    const mode = s.chats.find(c => c.id === chatId)?.groupAI ?? 'OFF';
+    const mode = this.uniqueChat(s,chatId)?.groupAI ?? 'OFF';
     if (mode === 'OFF') return false;
     if (mode === 'OWNER_MENTION') return this.isOwner(actor);
     if (mode === 'STAFF_MENTION') return this.has(s, actor, 'ai.ask', chatId);
