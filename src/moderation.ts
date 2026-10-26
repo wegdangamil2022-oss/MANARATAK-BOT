@@ -70,7 +70,11 @@ function quarantineModerationAttempt(s:BotState,original:ModerationOperation):vo
   do{id='recovery-'+randomUUID();}
   while(s.moderationOperations.some(o=>o?.id===id));
  }
- s.moderationOperations.push({...original,id,status:'UNKNOWN_OUTCOME',review:undefined});
+ const recovered:ModerationOperation={...original,id,status:'UNKNOWN_OUTCOME'};
+ // Review annotations on a conflicting source must never be inherited by
+ // newly appended recovery evidence.
+ delete recovered.review;
+ s.moderationOperations.push(recovered);
 }
 
 /** B2-Core simulation: no automatic Telegram mutations outside a fake gateway. */
