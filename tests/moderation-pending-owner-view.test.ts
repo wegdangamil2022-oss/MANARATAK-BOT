@@ -112,7 +112,14 @@ for(const engine of ['json','sqlite'] as const){
    assert.equal(item.status,'APPLIED');
    assert.deepEqual((await f.store.snapshot()).moderationOperations,before.moderationOperations);
    assert.deepEqual((await f.store.snapshot()).callbacks,before.callbacks);
-   assert.deepEqual((await f.store.snapshot()).audit,before.audit);
+   const after=await f.store.snapshot();
+   // Transport writes its ordinary RESPONSE_PLANNED_ONLY audit for each
+   // incoming callback. Read-only moderation navigation itself must not
+   // create any moderation decision, owner review, or mutation audit.
+   assert.deepEqual(after.audit.filter(a=>a.reason!=='RESPONSE_PLANNED_ONLY'),
+    before.audit.filter(a=>a.reason!=='RESPONSE_PLANNED_ONLY'));
+   assert.equal(after.audit.filter(a=>a.reason==='RESPONSE_PLANNED_ONLY').length,
+    before.audit.filter(a=>a.reason==='RESPONSE_PLANNED_ONLY').length+2);
    assert.deepEqual((await f.store.snapshot()).moderationReasons,before.moderationReasons);
   }finally{await f.close();}
  });
