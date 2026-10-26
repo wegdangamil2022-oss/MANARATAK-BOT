@@ -1,3 +1,11 @@
+## 0.7.85 — 2026-10-26 — no reason mutations or Bot API reads while a sanction is unresolved
+
+- Fixed a state-consistency hazard: `ModerationService.addManualReason`, `removeManualReason` and `setSubscriptionReason` previously performed remote rights checks and could change durable local moderation reasons even though the same target already had a `STARTED`, `INTENT` or `UNKNOWN_OUTCOME` sanction record. `reconcile` could obscure an existing ambiguous outcome behind an unrelated remote permission failure.
+- Added an early *authorization-scoped* durable pending check before **any** remote Telegram membership query and repeated the pending check inside each reason-edit transaction. A matched record returns `BLOCKED_UNKNOWN` or `BLOCKED_PENDING` without writes, Telegram queries, retries, unbans, unmutes or silently changing reason evidence. Unauthorized actors receive only `DENIED`, not sensitive ledger status.
+- Kept the existing atomic checks for `reconcile` itself and the conservative no-replay handling after restart. There is no automatic reconciliation or evidence overwrite.
+- Added **22 tests** across JSON and SQLite: all three unresolved states, add/remove/subscription evidence immutability, no extraneous provider queries, unauthorized non-disclosure, and persistence after reopening the store. RED CI initially found 20 failing cases while the prior 1,571 tests passed.
+- **Boundary:** these are offline mock/durable-ledger safeguards. The production server stays on `FakeModerationGateway` with no live Telegram moderation. Ambiguous sanctions still require a separate owner review and must never be blindly retried.
+
 ## 0.7.84 — 2026-10-26 — strict offline moderation trial single-chat isolation
 
 - Tightened `inspectOfflineModerationTrialScope` to require the trial chat to be the **only approved local chat**, regardless of navigation, publishing or other scope. A previously accepted second navigation-only group now returns the redacted blocker `OTHER_APPROVED_CHAT_PRESENT` (the existing `OTHER_MODERATION_GROUP_APPROVED` remains for a second moderation-enabled chat).

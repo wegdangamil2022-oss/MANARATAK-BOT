@@ -1,3 +1,9 @@
+## v0.7.85 — preserve evidence of ambiguous Telegram sanctions
+
+The moderation ledger treats `INTENT`, `STARTED` and `UNKNOWN_OUTCOME` as unresolved. All manual BAN/MUTE reason changes, reason removal, subscription-reason changes and explicit reconciliation now check this status **before** asking Telegram for bot/member rights, and check again atomically before any local reason is changed. Blocked operations return `BLOCKED_PENDING` or `BLOCKED_UNKNOWN` without sending provider requests, altering reason evidence or retrying a write whose remote result may already have taken effect. An unprivileged caller learns nothing about an existing sanction case. The rule survives a database restart.
+
+Do not manually clear uncertain records or infer a sanction's author from a local attempt label. Owner review is not permission for automatic retries, unban or unmute. Production Telegram moderation is still disconnected.
+
 ## v0.7.84 — stricter safety for isolated moderation rehearsal
 
 Before running the offline-only `telegram:moderation-trial` check, prepare a separate clean SQLite rehearsal snapshot with a private STOP switch and an independently verified recent backup. The group selected for the moderation trial must be the **only locally approved chat**. This includes all scopes: approved navigation or publishing chats elsewhere now block isolated trial acceptance too. A mere second approved chat can receive traffic when a global STOP is lifted, even when moderation scope is absent.

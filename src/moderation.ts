@@ -51,15 +51,40 @@ export class ModerationService {
       !this.policy.has(s, memberId, 'chat.manage', chatId, this.clock()) &&
       this.policy.canUseChat(s, chatId, 'moderation') && this.policy.has(s, actorId, 'chat.manage', chatId, this.clock());
   }
+  /** A pending/ambiguous sanction must be immutable until separately reviewed.
+   * Never query Telegram or edit even local reason rows while another sanction
+   * might already have reached the member. This test is repeated atomically
+   * inside every subsequent reason mutation after any asynchronous reads.
+   */
+  private unresolved(s:BotState,chatId:string,memberId:string):
+    {status:'BLOCKED_UNKNOWN'|'BLOCKED_PENDING';reason:'NO_SAFE_DISPATCH'}|null{
+    const ops=s.moderationOperations.filter(o=>byTarget(o,chatId,memberId));
+    if(ops.some(o=>o.status==='UNKNOWN_OUTCOME'))
+      return {status:'BLOCKED_UNKNOWN',reason:'NO_SAFE_DISPATCH'};
+    if(ops.some(o=>o.status==='STARTED'||o.status==='INTENT'))
+      return {status:'BLOCKED_PENDING',reason:'NO_SAFE_DISPATCH'};
+    return null;
+  }
+  /** Authorization precedes any ledger-status disclosure to callers. */
+  private async priorPending(actorId:string,chatId:string,memberId:string):Promise<ModerationResult|null>{
+    const s=await this.store.snapshot();
+    if(!this.authorized(s,actorId,chatId,memberId))
+      return {status:'DENIED',reason:'NOT_AUTHORIZED_OR_BOT_RIGHTS'};
+    return this.unresolved(s,chatId,memberId);
+  }
   private async check(actorId: string, chatId: string, memberId: string): Promise<boolean> {
     return this.authorized(await this.store.snapshot(), actorId, chatId, memberId) &&
       await this.gateway.canRestrict(chatId, memberId) && !await this.gateway.isProtected(chatId, memberId);
   }
   async addManualReason(actorId: string, chatId: string, memberId: string, reference: string, kind: 'MUTE' | 'BAN'): Promise<ModerationResult> {
     if (!reference || reference.length > 80 || !['MUTE', 'BAN'].includes(kind)) throw new Error('Invalid reason');
+    const preflight=await this.priorPending(actorId,chatId,memberId);
+    if(preflight)return preflight;
     if (!await this.check(actorId, chatId, memberId)) return { status: 'DENIED', reason: 'NOT_AUTHORIZED_OR_BOT_RIGHTS' };
     const added = await this.store.transaction(s => {
       if (!this.authorized(s, actorId, chatId, memberId)) return false;
+      const pending=this.unresolved(s,chatId,memberId);
+      if(pending)return pending.status;
       const existing = s.moderationReasons.find(x => byTarget(x, chatId, memberId) && x.source === 'MANUAL' && x.reference === reference);
       if (existing?.active) { if (existing.kind !== kind) throw new Error('REASON_CONFLICT'); return false; }
       const limit=moderationRateFuse(s,actorId,chatId,this.clock());
@@ -68,27 +93,41 @@ export class ModerationService {
       else s.moderationReasons.push({ chatId, memberId, source: 'MANUAL', reference, kind, createdBy: actorId, active: true });
       return true;
     });
+    if(added==='BLOCKED_UNKNOWN'||added==='BLOCKED_PENDING')
+      return {status:added,reason:'NO_SAFE_DISPATCH'};
     if(typeof added==='string')return {status:'DENIED',reason:moderationRateDenial(added)};
     if (!added) return { status: 'NO_CHANGE', reason: 'DUPLICATE_OR_REVOKED' };
     return this.reconcile(actorId, chatId, memberId);
   }
   async removeManualReason(actorId: string, chatId: string, memberId: string, reference: string): Promise<ModerationResult> {
+    const preflight=await this.priorPending(actorId,chatId,memberId);
+    if(preflight)return preflight;
     if (!await this.check(actorId, chatId, memberId)) return { status: 'DENIED', reason: 'NOT_AUTHORIZED_OR_BOT_RIGHTS' };
     const changed = await this.store.transaction(s => {
       if (!this.authorized(s, actorId, chatId, memberId)) return false;
+      const pending=this.unresolved(s,chatId,memberId);
+      if(pending)return pending.status;
       const found = s.moderationReasons.find(x => byTarget(x, chatId, memberId) && x.source === 'MANUAL' && x.reference === reference && x.active);
       if (!found) return false;
       found.active = false; return true;
     });
+    if(changed==='BLOCKED_UNKNOWN'||changed==='BLOCKED_PENDING')
+      return {status:changed,reason:'NO_SAFE_DISPATCH'};
     return changed ? this.reconcile(actorId, chatId, memberId) : { status: 'NO_CHANGE', reason: 'NOT_ACTIVE' };
   }
   /** Invoked only by SubscriptionGate's trusted membership reconciliation; never expose as a user command. */
   async setSubscriptionReason(chatId: string, memberId: string, reference: string, active: boolean,
     stillCurrent?: (state:BotState)=>boolean): Promise<ModerationResult> {
-    if (!reference || reference.length > 80 || !await this.check(this.policy.ownerId, chatId, memberId)) return { status: 'DENIED', reason: 'NOT_AUTHORIZED_OR_BOT_RIGHTS' };
+    if (!reference || reference.length > 80)return {status:'DENIED',reason:'NOT_AUTHORIZED_OR_BOT_RIGHTS'};
+    const preflight=await this.priorPending(this.policy.ownerId,chatId,memberId);
+    if(preflight)return preflight;
+    if(!await this.check(this.policy.ownerId, chatId, memberId))
+      return {status:'DENIED',reason:'NOT_AUTHORIZED_OR_BOT_RIGHTS'};
     const change = await this.store.transaction(s => {
       if (!this.authorized(s, this.policy.ownerId, chatId, memberId) ||
           (stillCurrent && !stillCurrent(s)))return 'STALE' as const;
+      const pending=this.unresolved(s,chatId,memberId);
+      if(pending)return pending.status;
       const found = s.moderationReasons.find(x => byTarget(x, chatId, memberId) && x.source === 'SUBSCRIPTION' && x.reference === reference);
       if (Boolean(found?.active) === active) return 'UNCHANGED' as const;
       if(active){const limit=moderationRateFuse(s,this.policy.ownerId,chatId,this.clock());
@@ -97,6 +136,8 @@ export class ModerationService {
       else if (active) s.moderationReasons.push({ chatId, memberId, source: 'SUBSCRIPTION', reference, kind: 'MUTE', createdBy: 'SYSTEM_SUBSCRIPTION', active: true });
       return 'CHANGED' as const;
     });
+    if(change==='BLOCKED_UNKNOWN'||change==='BLOCKED_PENDING')
+      return {status:change,reason:'NO_SAFE_DISPATCH'};
     if(change==='STALE')return {status:'DENIED',reason:'SUBSCRIPTION_EVIDENCE_STALE'};
     if(change==='RATE_LIMIT')return {status:'DENIED',reason:'MODERATION_RATE_LIMIT_SUBSCRIPTION'};
     return change==='CHANGED'
@@ -126,6 +167,8 @@ export class ModerationService {
   }
   async reconcile(actorId: string, chatId: string, memberId: string,
     stillCurrent?: (state:BotState)=>boolean): Promise<ModerationResult> {
+    const preflight=await this.priorPending(actorId,chatId,memberId);
+    if(preflight)return preflight;
     if (!await this.check(actorId, chatId, memberId)) return { status: 'DENIED', reason: 'NOT_AUTHORIZED_OR_BOT_RIGHTS' };
     const candidate = await this.store.transaction(s => {
       if (!this.authorized(s, actorId, chatId, memberId) ||
