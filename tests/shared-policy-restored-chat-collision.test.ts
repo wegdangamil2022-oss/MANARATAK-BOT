@@ -177,10 +177,7 @@ for(const engine of ['json','sqlite'] as const){
 
  test(engine+' restored group collision invalidates delegated and owner group-scoped capabilities',async()=>{
   const f=await fixture(engine);try{
-   await f.store.transaction(s=>s.grants.push({
-    actor:'200',capability:'chat.manage',chatId:GROUP,
-    expiresAt:NOW+60_000,grantedBy:OWNER,revoked:false
-   }));
+   await f.policy.grant(OWNER,'200','chat.manage',GROUP,NOW+60_000);
    let s=await f.store.snapshot();
    assert.equal(f.policy.has(s,'200','chat.manage',GROUP,NOW),true);
    assert.equal(f.policy.has(s,OWNER,'chat.manage',GROUP,NOW),true);
