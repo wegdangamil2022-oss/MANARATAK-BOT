@@ -174,4 +174,29 @@ for(const engine of ['json','sqlite'] as const){
    assert.equal(f.policy.mayAskGroup(s,'-100999',OWNER,true),false);
   }finally{await f.close();}
  });
+
+ test(engine+' restored group collision invalidates delegated and owner group-scoped capabilities',async()=>{
+  const f=await fixture(engine);try{
+   await f.store.transaction(s=>s.grants.push({
+    actor:'200',capability:'chat.manage',chatId:GROUP,
+    expiresAt:NOW+60_000,grantedBy:OWNER,revoked:false
+   }));
+   let s=await f.store.snapshot();
+   assert.equal(f.policy.has(s,'200','chat.manage',GROUP,NOW),true);
+   assert.equal(f.policy.has(s,OWNER,'chat.manage',GROUP,NOW),true);
+   await f.duplicate();
+   s=await f.store.snapshot();
+   assert.equal(f.policy.has(s,'200','chat.manage',GROUP,NOW),false);
+   assert.equal(f.policy.has(s,OWNER,'chat.manage',GROUP,NOW),false);
+   assert.equal(f.policy.has(s,OWNER,'chat.manage',OTHER,NOW),true);
+  }finally{await f.close();}
+ });
+ test(engine+' owner cannot add new delegated permissions to ambiguous restored group',async()=>{
+  const f=await fixture(engine);try{
+   await f.duplicate();
+   const before=await f.store.snapshot();
+   await assert.rejects(f.policy.grant(OWNER,'200','chat.manage',GROUP,NOW+60_000));
+   await f.assertPreserved(before);
+  }finally{await f.close();}
+ });
 }
