@@ -1,3 +1,11 @@
+## 0.7.95 — 2026-10-26 — fail closed on restored owner review nonce timestamps
+
+- Added **20** tests for JSON and SQLite owner confirmations. On the unpatched baseline **16 failed**, revealing acceptance of malformed/extended saved callback expiry, missing used/revoked flags, confirmation after clock rollback and backdated review annotation.
+- Review preview/nonce issuance now refuse a future-created moderation attempt and recheck chronological consistency inside the transactional callback creation boundary.
+- A restored nonce requires explicit unused/unrevoked state, safe integer expiry, and trusted time inside its original two-minute window. Valid old-format evidence and one-shot review continue to work; the nonce is never a sanction/retry authorization.
+- Confirmation refuses a timestamp earlier than operation creation and limits dates to supported storage bounds. All refusals preserve unresolved quarantine and avoid Telegram network activity.
+- No live Telegram moderation adapter was activated.
+
 ## 0.7.94 — 2026-10-26 — preserve conflicting moderation evidence during recovery
 
 - Added 14 JSON/SQLite regression tests; the unpatched implementation failed 12 of them, demonstrating that contradictory remote-return statuses, changed members/kinds and malformed concurrent restores could cause historical evidence loss or omit the original target's UNKNOWN quarantine.
