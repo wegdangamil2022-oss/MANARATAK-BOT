@@ -148,7 +148,7 @@ export function moderationLedgerSafeForDispatch(
  */
 export function moderationOwnerReviewAuditConsistency(
  state:Pick<BotState,'audit'>,op:ModerationOperation
-):'UNREVIEWED'|'REVIEWED'|'INCONSISTENT'{
+):'UNREVIEWED'|'REVIEWED'|'LEGACY_UNBOUND'|'INCONSISTENT'{
  if(!state||!Array.isArray(state.audit))return 'INCONSISTENT';
  const auditKey='owner:moderation:review:'+
   createHash('sha256').update('MODERATION:REVIEW:'+op.id).digest('hex').slice(0,32);
@@ -165,11 +165,15 @@ export function moderationOwnerReviewAuditConsistency(
     entry.policyVersion<op.policyVersion||
     (review.policyVersion!==undefined&&review.policyVersion!==entry.policyVersion))
   return 'INCONSISTENT';
- // An old, unbound review with an old, unbound audit remains readable.
- // A new review MUST carry matching bindings on BOTH records. Never
- // silently downgrade a partially restored V1-bound review to legacy.
+ // Old records lacking both evidence digests remain readable for human
+ // investigation, but have no V1-bound local review confidence.
+ // Removing BOTH digests from a new record must never preserve its trusted
+ // REVIEWED badge: it becomes LEGACY_UNBOUND. A one-sided removal remains
+ // inconsistent and is quarantined.
  const reviewEvidence=review.evidenceDigest;
  const auditEvidence=entry.moderationEvidenceDigest;
+ if(reviewEvidence===undefined&&auditEvidence===undefined)
+  return 'LEGACY_UNBOUND';
  if(reviewEvidence!==undefined||auditEvidence!==undefined){
   if(typeof reviewEvidence!=='string'||typeof auditEvidence!=='string'||
      !/^[a-f0-9]{64}$/u.test(reviewEvidence)||

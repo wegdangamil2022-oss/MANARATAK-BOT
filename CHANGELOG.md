@@ -1,3 +1,11 @@
+## 0.7.98 — 2026-10-26 — explicit unbound legacy owner-review trust tier
+
+- Added 14 JSON and SQLite restore/regression tests verifying that removing **both** the owner-review and local audit SHA-256 evidence digests never passes as a fully corroborated review.
+- Preserve legitimate legacy reviews in the owner-private read-only list, but return `LEGACY_UNBOUND` instead of `REVIEWED` for pairs without evidence digests.
+- Render warning-labeled review buttons and detail text for unbound historical annotations; separate their count from evidence-bound, locally corroborated reviews.
+- Keep one-sided digest removal and contradictory evidence blocked; do not mutate original operation, review, or audit rows. Unrelated cases remain available for review.
+- This is an unkeyed local consistency/trust indication, not proof of historical authenticity or Telegram delivery. All unresolved moderation remains permanently blocked from automatic retry. Live Telegram ban/mute is still disabled.
+
 ## 0.7.97 — 2026-10-26 — bind owner-review audit to original sanction evidence
 
 - New JSON/SQLite regression tests reproduce loss of original sanction identity after restored owner reviews. Baseline RED: 28 of 32 additional tests failed (1815 passed; 28 failed).
