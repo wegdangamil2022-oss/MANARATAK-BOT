@@ -146,6 +146,12 @@ for(const engine of ['json','sqlite'] as const){
 for(const engine of ['json','sqlite'] as const){
  test(engine+' policy callback exception inside STARTED reservation is a safe pre-send cancellation',async()=>{
   const f=await fixture(engine,'SENT');try{
+   // Without an active reason the service correctly returns NO_CHANGE and
+   // never reaches the INTENT/STARTED reservation being tested.
+   await f.store.transaction(s=>s.moderationReasons.push({
+    chatId:CHAT,memberId:TARGET,source:'MANUAL',reference:'reserved-case',
+    kind:'BAN',createdBy:OWNER,active:true
+   }));
    let evaluated=0;
    const valid=(state:Awaited<ReturnType<BotStore['snapshot']>>)=>{
     evaluated++;
