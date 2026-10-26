@@ -1,3 +1,11 @@
+## v0.7.92 — safe restored moderation data, no automatic repair
+
+A restored JSON/SQLite file can be structurally readable while containing an invalid moderation-operation row (for example an unsupported status, malformed Telegram target, unknown dispatch provenance, or an impossible owner review attached to an unstarted case). Before sanction planning, local reason edits, owner review actions or read-only recovery summaries, the bot checks the entire moderation operation ledger against its supported invariants. Any malformed row causes a fail-closed block, including when the row belongs to another group or target. The owner views display a generic data-integrity warning without exposing the corrupted evidence or offering case-selection buttons.
+
+Do **not** delete, coerce or reset invalid evidence just to continue moderation. Preserve the source database and backups for offline investigation; after any provider write attempt, a missing or contradictory receipt can still indicate an uncertain remote result. The only recovery inventory behavior on malformed data is a safe validation error, not a false PASS. A future timestamp still triggers operator attention for clock drift; negative or nonnumeric stored timestamps are rejected.
+
+No live Telegram penalty connector is enabled in the production server; all security tests use simulated gateways.
+
 ## v0.7.91 — ambiguous moderation evidence stays quarantined
 
 When moderation operation identifiers collide in the persisted store (including duplicates in different groups or records already marked CONFIRMED/CANCELLED), the owner-only `UNKNOWN_OUTCOME` review and the read-only pending INTENT/STARTED list now exclude affected cases from selectable buttons. They report a redacted count of ambiguous records. The underlying ledger is never modified or deleted. Owner review can continue normally for separate, uniquely identified cases.
