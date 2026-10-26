@@ -1,3 +1,12 @@
+## 0.7.97 — 2026-10-26 — bind owner-review audit to original sanction evidence
+
+- New JSON/SQLite regression tests reproduce loss of original sanction identity after restored owner reviews. Baseline RED: 28 of 32 additional tests failed (1815 passed; 28 failed).
+- Added additive optional `evidenceDigest` to a moderation review annotation and `moderationEvidenceDigest` to its audit record. Both are atomically written during legitimate local owner review and share a versioned 64-character SHA-256 digest of immutable attempt fields.
+- Owner views now quarantine reviewed attempts when target, initiating operator, sanction kind, reason fingerprint, original creation time, group identity or local attempt provenance differs from the reviewed event.
+- One-sided or malformed bindings are not accepted as a legacy downgrade. Exactly matching, legitimate pre-v0.7.97 audit-backed reviews without either field remain readable.
+- Independent restored operations remain reviewable, and no owner acknowledgement changes `UNKNOWN_OUTCOME` or permits sanctions to be resent.
+- The digest is an unkeyed local consistency checksum, not a signature, a security secret or proof of delivery. Telegram live moderation remains inactive.
+
 ## 0.7.96 — 2026-10-26 — restored moderation owner review/audit consistency
 
 - Added 30 JSON/SQLite regression tests for missing, mismatched, duplicated and orphan owner-review audit entries, stale selectors, race-safe nonce confirmation, independent-case isolation, and legacy/reapproved group compatibility.
