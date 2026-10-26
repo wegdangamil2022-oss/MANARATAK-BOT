@@ -154,7 +154,8 @@ export class ModerationService {
     if(preflight)return preflight;
     if (!await this.check(actorId, chatId, memberId)) return { status: 'DENIED', reason: 'NOT_AUTHORIZED_OR_BOT_RIGHTS' };
     const added = await this.store.transaction(s => {
-      if (!this.authorized(s, actorId, chatId, memberId)) return false;
+      if (!this.authorized(s, actorId, chatId, memberId))
+        return ambiguousModerationChatIds(s).has(chatId)?'DENIED' as const:false;
       const pending=this.unresolved(s,chatId,memberId);
       if(pending)return pending.status;
       const existing = s.moderationReasons.find(x => byTarget(x, chatId, memberId) && x.source === 'MANUAL' && x.reference === reference);
@@ -167,6 +168,7 @@ export class ModerationService {
     });
     if(added==='BLOCKED_UNKNOWN'||added==='BLOCKED_PENDING')
       return {status:added,reason:'NO_SAFE_DISPATCH'};
+    if(added==='DENIED')return {status:'DENIED',reason:'NOT_AUTHORIZED_OR_BOT_RIGHTS'};
     if(typeof added==='string')return {status:'DENIED',reason:moderationRateDenial(added)};
     if (!added) return { status: 'NO_CHANGE', reason: 'DUPLICATE_OR_REVOKED' };
     return this.reconcile(actorId, chatId, memberId);
@@ -176,7 +178,8 @@ export class ModerationService {
     if(preflight)return preflight;
     if (!await this.check(actorId, chatId, memberId)) return { status: 'DENIED', reason: 'NOT_AUTHORIZED_OR_BOT_RIGHTS' };
     const changed = await this.store.transaction(s => {
-      if (!this.authorized(s, actorId, chatId, memberId)) return false;
+      if (!this.authorized(s, actorId, chatId, memberId))
+        return ambiguousModerationChatIds(s).has(chatId)?'DENIED' as const:false;
       const pending=this.unresolved(s,chatId,memberId);
       if(pending)return pending.status;
       const found = s.moderationReasons.find(x => byTarget(x, chatId, memberId) && x.source === 'MANUAL' && x.reference === reference && x.active);
@@ -185,6 +188,7 @@ export class ModerationService {
     });
     if(changed==='BLOCKED_UNKNOWN'||changed==='BLOCKED_PENDING')
       return {status:changed,reason:'NO_SAFE_DISPATCH'};
+    if(changed==='DENIED')return {status:'DENIED',reason:'NOT_AUTHORIZED_OR_BOT_RIGHTS'};
     return changed ? this.reconcile(actorId, chatId, memberId) : { status: 'NO_CHANGE', reason: 'NOT_ACTIVE' };
   }
   /** Invoked only by SubscriptionGate's trusted membership reconciliation; never expose as a user command. */
