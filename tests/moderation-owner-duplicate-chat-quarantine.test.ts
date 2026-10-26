@@ -51,7 +51,9 @@ async function fixture(engine:Engine){
  const assertLocked=async()=>{
   const gateway=new FakeModerationGateway();
   const service=new ModerationService(store,policy,gateway,()=>NOW);
-  assert.equal((await service.reconcile(OWNER,A,'300')).status,'BLOCKED_UNKNOWN');
+  // Authorization must be denied before disclosing a target's unresolved status.
+  // The UNKNOWN_OUTCOME ledger record remains preserved and still cannot retry.
+  assert.equal((await service.reconcile(OWNER,A,'300')).status,'DENIED');
   assert.equal(gateway.calls.length,0);
  };
  return {store,a,b,policy,owner,pending,ownerList,pendingList,btn,issue,duplicate,
