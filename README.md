@@ -1,3 +1,11 @@
+## v0.7.98 — Legacy owner-review evidence trust shown separately
+
+Restored `UNKNOWN_OUTCOME` moderation reviews created before v0.7.97 can have a valid local audit annotation **without** the immutable SHA-256 evidence binding on both the operation and audit row. They must not be presented as equivalent to a newer, evidence-bound local review. Equally, a v0.7.97 review whose **both** digest fields disappear during restoration must not silently regain a green evidence-verified status.
+
+The owner-private review interface now classifies valid, but evidence-**unbound**, historical review/audit pairs as `LEGACY_UNBOUND`. They remain viewable **with a prominent Arabic warning** and a separate aggregate count, never a green review indicator or inclusion in the evidence-bound reviewed count. New reviews with corroborating original-attempt evidence digests display a distinct linked-review indicator. One-sided missing digests, conflicting audit metadata and duplicate operation IDs stay quarantined as before, without any data rewriting, retry or Telegram sanction.
+
+No in-database fields can distinguish a legitimately old review from a modern review stripped of **both** digest fields. Therefore this is a **truthful, downgraded trust display**, not cryptographic proof of origin. A full-database attacker could still rewrite both records or recompute unkeyed hashes; database and backup permissions, secure restore procedures, and offline investigation remain mandatory. Owner annotations never prove a Telegram restriction was applied, and `UNKNOWN_OUTCOME` cannot be automatically retried.
+
 ## v0.7.97 — durable immutable sanction identity binding for owner reviews
 
 A completed local owner review of an `UNKNOWN_OUTCOME` sanction must remain attached to the **original attempt**, not merely to its operation ID. Beginning in v0.7.97, the same full-length versioned SHA-256 **local comparison digest** of the original sanction identity is written atomically into both the owner review annotation and the appended audit record. The digest covers the original group, target member, initiating actor, kind, evidence fingerprint, policy revision, creation time, status and local gateway provenance.
