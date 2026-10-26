@@ -46,14 +46,31 @@ function sameModerationAttempt(a:ModerationOperation,b:ModerationOperation):bool
   a.policyVersion===b.policyVersion&&a.createdAt===b.createdAt&&
   a.attemptGateway===b.attemptGateway;
 }
-/** On contradictory ledger evidence, preserve a durable UNKNOWN_OUTCOME on
- * the ORIGINAL group/member. A remote request may already have been sent;
- * neither a late success nor someone else's terminal edit is reliable proof.
+/** Preserve BOTH conflicting evidence and an unresolved lock for the
+ * original target. A late provider result is not authority to overwrite
+ * another writer's status, member or sanction kind. Never silently replace
+ * a restored row merely because it happens to have the same operation ID.
+ *
+ * If the original, unique STARTED row is still intact, transitioning it to
+ * UNKNOWN_OUTCOME is safe: no contradictory evidence is destroyed.
+ * Otherwise append an independent recovery receipt with a fresh opaque ID;
+ * any remaining historical row stays byte-for-byte untouched. Recovery is
+ * deliberately permanent until manual investigation, not a retry ticket.
  */
 function quarantineModerationAttempt(s:BotState,original:ModerationOperation):void{
- const current=s.moderationOperations.find(o=>o.id===original.id);
- if(current)Object.assign(current,{...original,status:'UNKNOWN_OUTCOME'});
- else s.moderationOperations.push({...original,status:'UNKNOWN_OUTCOME'});
+ const matches=s.moderationOperations.filter(o=>o?.id===original.id);
+ if(matches.length===1&&matches[0]!.status===original.status&&
+    matches[0]!.review===undefined&&
+    sameModerationAttempt(matches[0]!,original)){
+   matches[0]!.status='UNKNOWN_OUTCOME';
+   return;
+ }
+ let id=original.id;
+ if(matches.length){
+  do{id='recovery-'+randomUUID();}
+  while(s.moderationOperations.some(o=>o?.id===id));
+ }
+ s.moderationOperations.push({...original,id,status:'UNKNOWN_OUTCOME',review:undefined});
 }
 
 /** B2-Core simulation: no automatic Telegram mutations outside a fake gateway. */
@@ -269,8 +286,10 @@ export class ModerationService {
         return {status:'BLOCKED_UNKNOWN' as const};
       }
       if(!sameModerationAttempt(op,candidate.intent)){
-        op.status='CANCELLED';
-        return {status:'DENIED' as const};
+        // The original INTENT identity was rewritten during awaited reads.
+        // No request is sent, but do not erase that contradictory row.
+        quarantineModerationAttempt(s,candidate.intent);
+        return {status:'BLOCKED_UNKNOWN' as const};
       }
       const valid = rights && this.authorized(s, actorId, chatId, memberId) &&
         (!stillCurrent||stillCurrent(s)) &&
@@ -326,10 +345,10 @@ export class ModerationService {
     const final=await this.store.transaction(s=>{
       const op=s.moderationOperations.find(x=>x.id===candidate.id);
       if(!moderationLedgerSafeForDispatch(s)){
-        // Dispatch may have already happened; only retain uncertainty for
-        // our original receipt, and never overwrite unrelated corrupt rows.
-        if(op&&sameModerationAttempt(op,started.receipt))
-          op.status='UNKNOWN_OUTCOME';
+        // A restored/malformed/colliding row may have changed our original
+        // receipt too. Always preserve independent UNKNOWN_OUTCOME evidence
+        // for the intended target, without rewriting any conflicting row.
+        quarantineModerationAttempt(s,started.receipt);
         return 'BLOCKED_UNKNOWN' as const;
       }
       if(!op||op.status!=='STARTED'||
