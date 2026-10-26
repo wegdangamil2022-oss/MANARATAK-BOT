@@ -170,3 +170,114 @@ for(const engine of ['json','sqlite'] as const){
   }finally{await f.close();}
  });
 }
+
+for(const engine of ['json','sqlite'] as const){
+ test(engine+' stale UNKNOWN detail cannot survive revoke and reapproval of same group',async()=>{
+  const f=await fixture(engine);try{
+   const list=await f.app().handle(cb(100,100,'mr:1:h'));
+   const old=select(list,'mr:1:d:');
+   await f.policy.revokeChat(OWNER,GROUP);
+   await f.policy.approveChat(OWNER,GROUP,['navigation','moderation']);
+   assert.equal((await f.app().handle(cb(101,100,old))).status,'DENIED');
+   const fresh=await f.app().handle(cb(102,100,'mr:1:h'));
+   assert.equal((await f.app().handle(cb(103,100,select(fresh,'mr:1:d:')))).status,'APPLIED');
+  }finally{await f.close();}
+ });
+ test(engine+' stale UNKNOWN preview cannot mint a fresh owner nonce after reapproval',async()=>{
+  const f=await fixture(engine);try{
+   const list=await f.app().handle(cb(110,100,'mr:1:h'));
+   const details=await f.app().handle(cb(111,100,select(list,'mr:1:d:')));
+   const old=select(details,'mr:1:v:');
+   const before=(await f.store.snapshot()).callbacks.length;
+   await f.policy.revokeChat(OWNER,GROUP);
+   await f.policy.approveChat(OWNER,GROUP,['navigation','moderation']);
+   assert.equal((await f.app().handle(cb(112,100,old))).status,'DENIED');
+   const state=await f.store.snapshot();
+   assert.equal(state.callbacks.length,before);
+   assert.equal(state.moderationOperations[0]?.review,undefined);
+   assert.equal(state.moderationOperations[0]?.status,'UNKNOWN_OUTCOME');
+  }finally{await f.close();}
+ });
+ test(engine+' old UNKNOWN selector invalidated when same scopes re-approved at new epoch',async()=>{
+  const f=await fixture(engine);try{
+   const list=await f.app().handle(cb(120,100,'mr:1:h'));
+   const old=select(list,'mr:1:d:');
+   await f.policy.approveChat(OWNER,GROUP,['navigation','moderation']);
+   assert.equal((await f.app().handle(cb(121,100,old))).status,'DENIED');
+  }finally{await f.close();}
+ });
+ test(engine+' old UNKNOWN preview cannot cross moderation removal and restoration',async()=>{
+  const f=await fixture(engine);try{
+   const list=await f.app().handle(cb(130,100,'mr:1:h'));
+   const details=await f.app().handle(cb(131,100,select(list,'mr:1:d:')));
+   const old=select(details,'mr:1:v:');
+   await f.policy.approveChat(OWNER,GROUP,['navigation']);
+   await f.policy.approveChat(OWNER,GROUP,['navigation','moderation']);
+   assert.equal((await f.app().handle(cb(132,100,old))).status,'DENIED');
+   assert.equal((await f.store.snapshot()).callbacks.length,0);
+  }finally{await f.close();}
+ });
+ test(engine+' old UNKNOWN detail selector invalidated when attempt provenance changes',async()=>{
+  const f=await fixture(engine);try{
+   const list=await f.app().handle(cb(140,100,'mr:1:h'));
+   const old=select(list,'mr:1:d:');
+   await f.store.transaction(s=>{s.moderationOperations[0]!.attemptGateway='TELEGRAM_API';});
+   assert.equal((await f.app().handle(cb(141,100,old))).status,'DENIED');
+  }finally{await f.close();}
+ });
+ test(engine+' old UNKNOWN preview cannot issue nonce after attempt provenance change',async()=>{
+  const f=await fixture(engine);try{
+   const list=await f.app().handle(cb(150,100,'mr:1:h'));
+   const details=await f.app().handle(cb(151,100,select(list,'mr:1:d:')));
+   const old=select(details,'mr:1:v:');
+   await f.store.transaction(s=>{s.moderationOperations[0]!.attemptGateway='TELEGRAM_API';});
+   assert.equal((await f.app().handle(cb(152,100,old))).status,'DENIED');
+   assert.equal((await f.store.snapshot()).callbacks.length,0);
+  }finally{await f.close();}
+ });
+ test(engine+' existing owner review token remains invalid if group revoked and reapproved',async()=>{
+  const f=await fixture(engine);try{
+   const list=await f.app().handle(cb(160,100,'mr:1:h'));
+   const details=await f.app().handle(cb(161,100,select(list,'mr:1:d:')));
+   const preview=await f.app().handle(cb(162,100,select(details,'mr:1:v:')));
+   const token=select(preview,'c_');
+   await f.policy.revokeChat(OWNER,GROUP);
+   await f.policy.approveChat(OWNER,GROUP,['navigation','moderation']);
+   assert.equal((await f.app().handle(cb(163,100,token))).status,'DENIED');
+   const s=await f.store.snapshot();
+   assert.equal(s.callbacks.find(c=>c.ref===token)?.used,false);
+   assert.equal(s.moderationOperations[0]?.review,undefined);
+  }finally{await f.close();}
+ });
+ test(engine+' unrelated group revision must not invalidate current-group owner review',async()=>{
+  const f=await fixture(engine);try{
+   await f.policy.approveChat(OWNER,'-100987',['navigation','moderation']);
+   const list=await f.app().handle(cb(170,100,'mr:1:h'));
+   const detail=select(list,'mr:1:d:');
+   await f.policy.approveChat(OWNER,'-100987',['navigation']);
+   assert.equal((await f.app().handle(cb(171,100,detail))).status,'APPLIED');
+  }finally{await f.close();}
+ });
+ test(engine+' unchanged owner review still allows a single local review without changing outcome',async()=>{
+  const f=await fixture(engine);try{
+   const list=await f.app().handle(cb(180,100,'mr:1:h'));
+   const details=await f.app().handle(cb(181,100,select(list,'mr:1:d:')));
+   const preview=await f.app().handle(cb(182,100,select(details,'mr:1:v:')));
+   const token=select(preview,'c_');
+   assert.equal((await f.app().handle(cb(183,100,token))).status,'APPLIED');
+   const s=await f.store.snapshot();
+   assert.equal(s.moderationOperations[0]?.status,'UNKNOWN_OUTCOME');
+   assert.equal(s.moderationOperations[0]?.review?.decision,'ACKNOWLEDGED_UNRESOLVED');
+  }finally{await f.close();}
+ });
+ test(engine+' stale group epoch does not expose UNKNOWN evidence to a nonowner',async()=>{
+  const f=await fixture(engine);try{
+   const list=await f.app().handle(cb(190,100,'mr:1:h'));
+   const old=select(list,'mr:1:d:');
+   await f.policy.revokeChat(OWNER,GROUP);
+   await f.policy.approveChat(OWNER,GROUP,['navigation','moderation']);
+   assert.equal((await f.app().handle(cb(191,300,old))).status,'DENIED');
+   assert.equal((await f.app().handle(cb(192,100,old,true))).status,'DENIED');
+  }finally{await f.close();}
+ });
+}
