@@ -1,3 +1,12 @@
+## 0.7.86 — 2026-10-26 — quarantine moderation state drift during awaited Telegram responses
+
+- Fixed a durable state conflict: `ModerationService.reconcile` could send a sanction with a mutated `kind` if someone changed the persisted `INTENT` after authorization; an out-of-order response could overwrite `CANCELLED`, `CONFIRMED` or `UNKNOWN_OUTCOME` with a fresh success, or throw instead of preserving a safe unknown outcome.
+- The service now binds the remote dispatch to an immutable original `INTENT` receipt (including group/target, actor, kind, policy version, reason fingerprint and creation time). It refuses dispatch if this identity changes before STARTED. If the initial status was overwritten or the intent vanished, it restores a quarantined `UNKNOWN_OUTCOME` record instead of trusting a forged terminal status.
+- After the network dispatch, it uses one durable transaction to verify that the **same** STARTED attempt remains present. A changed or missing status, member identity, sanction kind or other immutable attempt field is quarantined as `UNKNOWN_OUTCOME` against the **original** target. No late API result may overwrite contrary ledger evidence. The caller receives `BLOCKED_UNKNOWN` and normal retry paths remain locked.
+- Runtime gateway returns outside `CONFIRMED`, `FAILED_CONFIRMED` and `UNKNOWN_OUTCOME` are coerced to `UNKNOWN_OUTCOME`, never stored as invented terminal statuses.
+- Added **20 new tests** in isolated JSON and SQLite covering race changes in STARTED and INTENT, forged success strings, missing and reassigned operation records, no sends before STARTED, and no replay on conflicts. Initial RED run proved the first 14 cases failed while the existing 1,593 tests passed.
+- **Limits:** these are fail-closed local ledger safety controls, not proof of remote Telegram delivery. A committed request followed by a crash may still be ambiguous; quarantine does not undo a sanction or authorize retry. `createLiveTelegramServer` continues to use `FakeModerationGateway` with no live sanction enabled.
+
 ## 0.7.85 — 2026-10-26 — no reason mutations or Bot API reads while a sanction is unresolved
 
 - Fixed a state-consistency hazard: `ModerationService.addManualReason`, `removeManualReason` and `setSubscriptionReason` previously performed remote rights checks and could change durable local moderation reasons even though the same target already had a `STARTED`, `INTENT` or `UNKNOWN_OUTCOME` sanction record. `reconcile` could obscure an existing ambiguous outcome behind an unrelated remote permission failure.
