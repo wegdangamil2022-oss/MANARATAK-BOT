@@ -1,3 +1,11 @@
+## 0.7.94 — 2026-10-26 — preserve conflicting moderation evidence during recovery
+
+- Added 14 JSON/SQLite regression tests; the unpatched implementation failed 12 of them, demonstrating that contradictory remote-return statuses, changed members/kinds and malformed concurrent restores could cause historical evidence loss or omit the original target's UNKNOWN quarantine.
+- Replaced destructive `Object.assign` of a restored/changed operation with evidence-preserving quarantine: retain all contradictory rows and append a distinct recovery `UNKNOWN_OUTCOME` record for the original target. Only an intact, unique matching record can transition in place.
+- A forged INTENT action during pre-STARTED rights reads is now a non-dispatching `BLOCKED_UNKNOWN`, preserving the altered row instead of erasing the disagreement with a CANCELLED status.
+- After an outbound gateway returns, invalid or colliding restored ledgers always trigger original-target recovery evidence, even if the original operation identity has been rewritten. Legacy missing-attempt cases continue to be quarantined conservatively.
+- Historical evidence is never used as proof of a live ban/mute; no Telegram sanctions activated.
+
 ## 0.7.93 — 2026-10-26 — moderation restore identity and chronology guard
 
 - Reproduced nine failing security regressions before applying the fix. In addition to malformed single rows, restored ledgers containing duplicate moderation operation IDs across group/member/status boundaries could pass the basic integrity validator and allow new unrelated sanctions.
