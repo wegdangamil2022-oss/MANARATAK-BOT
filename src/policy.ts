@@ -7,6 +7,10 @@ export class Policy {
   isOwner(actor: string | undefined): boolean { return actor === this.ownerId; }
   has(s: BotState, actor: string | undefined, capability: Capability, chatId: string, now = this.clock()): boolean {
     if (!actor) return false;
+    // A group-scoped owner or delegated capability cannot turn a restored
+    // duplicate approval into authorization, including after reapproval.
+    if(chatId.startsWith('-')&&!this.uniqueChat(s,chatId)&&
+       s.chats.some(c=>c.id===chatId))return false;
     if (this.isOwner(actor)) return true;
     return s.grants.some(g => g.actor === actor && g.capability === capability && g.chatId === chatId && !g.revoked && g.expiresAt > now);
   }
@@ -261,6 +265,7 @@ export class Policy {
     await this.store.transaction(s => {
       // Delegation is OFF in B1: no recursive grants, even if staff has this capability.
       if (!this.isOwner(by)) throw new Error('Grant requires owner');
+      if(chatId.startsWith('-'))this.assertUniqueChatRecord(s,chatId);
       const existing = s.grants.find(g => g.actor === actor && g.capability === capability && g.chatId === chatId && !g.revoked);
       if (existing) throw new Error('Grant already exists');
       s.grants.push({ actor, capability, chatId, expiresAt, grantedBy: by, revoked: false });
