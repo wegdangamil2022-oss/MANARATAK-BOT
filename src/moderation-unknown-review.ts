@@ -84,6 +84,9 @@ export class ModerationUnknownOwnerReview {
    if(route.page>0)nav.push(button('⬅️ السابق','mr:1:p:'+(route.page-1)));
    if(route.page+1<pages)nav.push(button('➡️ التالي','mr:1:p:'+(route.page+1)));
    if(nav.length)rows.push(nav);
+   // Pending INTENT/STARTED rows have a separate read-only, owner-private
+   // inventory. Do not offer a resolution, retry or sanction action here.
+   rows.push([button('⏳ عرض العمليات المعلقة','mp:1:h')]);
    rows.push([button('↩️ قسم الحماية','mi:1:s:02:0'),button('🏠 لوحة المالك','mi:1:h')]);
    const pending=all.filter(o=>!o.review).length;
    return menu('<b>مراجعة العمليات مجهولة النتيجة 🛡️</b>\n'
