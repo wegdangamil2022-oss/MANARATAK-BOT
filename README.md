@@ -1,3 +1,9 @@
+## v0.7.86 — moderation request/receipt identity protection
+
+Every moderation attempt now keeps a fixed durable identity from its first `INTENT` through `STARTED` and the remote result. If another process changes its recorded target, kind, status, or deletes the row while the request is in progress, the state machine retains/restores `UNKNOWN_OUTCOME` for the original group and member. It does not claim a confirmed sanction, attempt a retry, or infer Telegram authorization from a local record. A forged gateway result is also treated as uncertain.
+
+Use the normal owner-only triage process for cases in `UNKNOWN_OUTCOME`; do not manually clear, retry or reinterpret them as failed or successful. These safeguards were tested using local JSON/SQLite and mocked transports. Production still does not wire Telegram live moderation.
+
 ## v0.7.85 — preserve evidence of ambiguous Telegram sanctions
 
 The moderation ledger treats `INTENT`, `STARTED` and `UNKNOWN_OUTCOME` as unresolved. All manual BAN/MUTE reason changes, reason removal, subscription-reason changes and explicit reconciliation now check this status **before** asking Telegram for bot/member rights, and check again atomically before any local reason is changed. Blocked operations return `BLOCKED_PENDING` or `BLOCKED_UNKNOWN` without sending provider requests, altering reason evidence or retrying a write whose remote result may already have taken effect. An unprivileged caller learns nothing about an existing sanction case. The rule survives a database restart.
