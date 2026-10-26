@@ -1,3 +1,11 @@
+## v0.7.97 — durable immutable sanction identity binding for owner reviews
+
+A completed local owner review of an `UNKNOWN_OUTCOME` sanction must remain attached to the **original attempt**, not merely to its operation ID. Beginning in v0.7.97, the same full-length versioned SHA-256 **local comparison digest** of the original sanction identity is written atomically into both the owner review annotation and the appended audit record. The digest covers the original group, target member, initiating actor, kind, evidence fingerprint, policy revision, creation time, status and local gateway provenance.
+
+When restored JSON/SQLite evidence changes any of those values, or only one side of the owner review/audit pair contains a digest, the case is quarantined from the private owner review menu with a generic redacted conflict count. Neither row is deleted, rewritten or used as remote proof. The underlying `UNKNOWN_OUTCOME` still blocks all retry attempts. Unrelated valid cases remain reviewable.
+
+Existing **legacy records without both digest fields** are intentionally accepted when their v0.7.96 reviewer, decision, date, policy epoch and audit correlation remain consistent. A partially restored digest pair cannot silently fall back to legacy. This is **not cryptographic authentication**: since SHA-256 is not keyed, someone who can maliciously rewrite the entire database can also recompute the digest. Hosts must independently protect DB files and backups. No live Telegram moderation adapter is connected.
+
 ## v0.7.96 — Owner review and audit consistency on restored moderation evidence
 
 In the owner-private `UNKNOWN_OUTCOME` review, a locally annotated review is displayed as confirmed **only if one matching local audit entry** corroborates the same operation identity, reviewer, timestamp, and decision. For reviews created from v0.7.96 onward the approval epoch is stored in the review and must also match the audit. Legacy review annotations without this epoch remain supported if their audit is otherwise consistent.

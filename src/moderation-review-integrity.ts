@@ -1,6 +1,25 @@
 import {createHash} from 'node:crypto';
 import type {BotState,ModerationOperation} from './store.js';
 
+/** Stable, versioned local evidence fingerprint for an UNKNOWN_OUTCOME
+ * attempt's immutable identity. A comparison checksum, NOT an HMAC, digital
+ * signature, remote Telegram receipt or authorization credential.
+ *
+ * Only bind fields from the operation itself: subsequent chat approval epochs,
+ * callback expiries and owner annotations must not rewrite its original
+ * dispatch identity or invalidate historical, correctly linked reviews.
+ */
+export function moderationReviewEvidenceDigest(op:ModerationOperation):string{
+ return createHash('sha256')
+  .update('MANARATAK:MODERATION:REVIEW:EVIDENCE:V1:')
+  .update(JSON.stringify([
+   op.id,op.chatId,op.memberId,op.actorId,op.kind,
+   op.reasonFingerprint,op.policyVersion,op.createdAt,
+   op.status,op.attemptGateway??null
+  ]))
+  .digest('hex');
+}
+
 /** Triage must not interpret an operation ID as unique merely because the
  * persisted schema permits an array. Restores, corrupted histories or multiple
  * writers may produce duplicate identities. Collision evidence from ANY
@@ -87,6 +106,9 @@ export function inspectModerationLedgerIntegrity(
       (review.decision!=='ACKNOWLEDGED_UNRESOLVED'&&review.decision!=='ESCALATED')||
       typeof review.reviewedBy!=='string'||!user.test(review.reviewedBy)||
       !isSafeTime(review.reviewedAt)||
+      (review.evidenceDigest!==undefined&&
+       (typeof review.evidenceDigest!=='string'||
+        !/^[a-f0-9]{64}$/u.test(review.evidenceDigest)))||
       (review.policyVersion!==undefined&&
        (typeof review.policyVersion!=='number'||
         !Number.isSafeInteger(review.policyVersion)||review.policyVersion<(op.policyVersion as number)))||
@@ -143,5 +165,18 @@ export function moderationOwnerReviewAuditConsistency(
     entry.policyVersion<op.policyVersion||
     (review.policyVersion!==undefined&&review.policyVersion!==entry.policyVersion))
   return 'INCONSISTENT';
+ // An old, unbound review with an old, unbound audit remains readable.
+ // A new review MUST carry matching bindings on BOTH records. Never
+ // silently downgrade a partially restored V1-bound review to legacy.
+ const reviewEvidence=review.evidenceDigest;
+ const auditEvidence=entry.moderationEvidenceDigest;
+ if(reviewEvidence!==undefined||auditEvidence!==undefined){
+  if(typeof reviewEvidence!=='string'||typeof auditEvidence!=='string'||
+     !/^[a-f0-9]{64}$/u.test(reviewEvidence)||
+     !/^[a-f0-9]{64}$/u.test(auditEvidence)||
+     reviewEvidence!==auditEvidence||
+     reviewEvidence!==moderationReviewEvidenceDigest(op))
+    return 'INCONSISTENT';
+ }
  return 'REVIEWED';
 }

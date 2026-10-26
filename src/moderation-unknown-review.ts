@@ -3,8 +3,8 @@ import type {BotStore,BotState,ModerationOperation} from './store.js';
 import type {Policy} from './policy.js';
 import type {OwnerInlineScreen,TelegramInlineKeyboard} from './telegram-inline-owner.js';
 import {ambiguousModerationOperationIds,uniqueModerationReviewNonce,
- inspectModerationLedgerIntegrity,moderationOwnerReviewAuditConsistency}
- from './moderation-review-integrity.js';
+ inspectModerationLedgerIntegrity,moderationOwnerReviewAuditConsistency,
+ moderationReviewEvidenceDigest} from './moderation-review-integrity.js';
 
 /** Owner-private annotation of UNKNOWN_OUTCOME. An annotation is NEVER
  * proof of delivery and MUST NOT update operation.status or permit retry.
@@ -221,15 +221,16 @@ export class ModerationUnknownOwnerReview {
    const decision:Decision=c.action==='owner.moderation.review.escalate'?
     'ESCALATED':'ACKNOWLEDGED_UNRESOLVED';
    // Atomic annotation + nonce consumption. No change to operation.status.
+   const evidenceDigest=moderationReviewEvidenceDigest(operation);
    operation.review={decision,reviewedBy:actor,reviewedAt:now,
-    policyVersion:chat.version};
+    policyVersion:chat.version,evidenceDigest};
    c.used=true;
    const auditKey=createHash('sha256').update('MODERATION:REVIEW:'+operation.id)
     .digest('hex').slice(0,32);
    state.audit.push({actorId:actor,updateKey:'owner:moderation:review:'+auditKey,
     decision:'ALLOW',reason:decision==='ESCALATED'?
      'MODERATION_UNKNOWN_OWNER_ESCALATED':'MODERATION_UNKNOWN_OWNER_ACKNOWLEDGED',
-    policyVersion:chat.version,at:now});
+    policyVersion:chat.version,at:now,moderationEvidenceDigest:evidenceDigest});
    return {chatId:chat.id,decision};
   });
   if(!completed)return null;
