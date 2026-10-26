@@ -1,3 +1,13 @@
+## v0.7.101 — Shared group-policy authorization refuses ambiguous restored approvals
+
+The `Policy` authority layer now permits group actions only when a restored group has exactly **one** approval row. Earlier moderation-specific quarantine checks already protected owner review and sanction dispatch; this release fixes the shared source used for navigation, educational resources, group AI, verification/subscriptions, publishing and other group-scoped services.
+
+`canUseChat` returns false for every scope when the group ID occurs more than once, regardless of approval flags, matching version numbers or identical records. `chatRevision` returns 0 for ambiguous groups rather than choosing the first stored epoch, preventing stale group buttons or subscription checks from relying on a forged revision. `mayAskGroup` is denied through the same check. Even previously delegated or owner group-scoped `Policy.has` capabilities fail closed on a duplicate group ID; the owner retains private/global administrative identity.
+
+Approval, ordinary revocation, restrictive owner-policy changes, group AI configuration, presence changes, subscription rule changes and one-shot owner confirmations use the same unambiguous record lookup inside durable transactions. Ambiguous authorization causes a generic rejection **without modifying either conflicting row**, consuming a callback or creating an audit entry. Granting a group-scoped capability to an ambiguous group is also rejected. Read-only inspection of the preserved evidence and actions in unrelated uniquely approved groups remain available.
+
+This is **authorization hardening**, not an automatic database repair or deletion. A restored database with duplicate group approvals must undergo independent operator investigation and explicit validated recovery. `UNKNOWN_OUTCOME` remains non-retryable; no live Telegram ban/mute is enabled.
+
 ## v0.7.100 — Duplicate restored group approvals block moderation dispatch, not only owner screens
 
 After a JSON/SQLite recovery a group may have two persisted `chats` rows with the same Telegram ID. In v0.7.99 owner-only review screens already hid such ambiguous groups; now **the moderation dispatch service itself** refuses to accept an authorization derived from either row, even if both copies have identical approval/scopes/version values.
