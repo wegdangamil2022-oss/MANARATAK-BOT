@@ -3,7 +3,8 @@ import type {BotStore,BotState,ModerationOperation} from './store.js';
 import type {Policy} from './policy.js';
 import type {OwnerInlineScreen,TelegramInlineKeyboard} from './telegram-inline-owner.js';
 import {ambiguousModerationOperationIds,uniqueModerationReviewNonce,
- inspectModerationLedgerIntegrity} from './moderation-review-integrity.js';
+ inspectModerationLedgerIntegrity,moderationOwnerReviewAuditConsistency}
+ from './moderation-review-integrity.js';
 
 /** Owner-private annotation of UNKNOWN_OUTCOME. An annotation is NEVER
  * proof of delivery and MUST NOT update operation.status or permit retry.
@@ -61,6 +62,7 @@ const opList=(s:BotState)=>{
  const ambiguous=ambiguousModerationOperationIds(s);
  return s.moderationOperations.filter(o=>
   o.status==='UNKNOWN_OUTCOME'&&!ambiguous.has(o.id)&&
+  moderationOwnerReviewAuditConsistency(s,o)!=='INCONSISTENT'&&
   s.chats.some(c=>c.id===o.chatId&&c.approved&&c.scopes.includes('moderation')))
   .sort((a,b)=>a.createdAt-b.createdAt||a.id.localeCompare(b.id));
 };
@@ -123,10 +125,15 @@ export class ModerationUnknownOwnerReview {
    const conflicting=s.moderationOperations.filter(o=>
     o.status==='UNKNOWN_OUTCOME'&&ambiguousIds.has(o.id)&&
     s.chats.some(c=>c.id===o.chatId&&c.approved&&c.scopes.includes('moderation'))).length;
+   const invalidReviewAudit=s.moderationOperations.filter(o=>
+    o.status==='UNKNOWN_OUTCOME'&&!ambiguousIds.has(o.id)&&
+    moderationOwnerReviewAuditConsistency(s,o)==='INCONSISTENT'&&
+    s.chats.some(c=>c.id===o.chatId&&c.approved&&c.scopes.includes('moderation'))).length;
    return menu('<b>مراجعة العمليات مجهولة النتيجة 🛡️</b>\n'
     +'الإجمالي القابل للعرض: '+all.length+' · بحاجة لمراجعة: '+pending+
     ' · تمت مراجعتها: '+(all.length-pending)+
-    ' · سجلات متعارضة محجوبة: '+conflicting+'\n'
+    ' · سجلات متعارضة محجوبة: '+conflicting+
+    ' · تدقيق مراجعات متعارض محجوب: '+invalidReviewAudit+'\n'
     +(all.length?'صفحة '+(route.page+1)+' من '+pages+'\n':'لا توجد عمليات مجهولة مرئية في المجموعات المعتمدة.\n')
     +'الإقرار والتصعيد توثيق محلي فقط: لا يثبتان نجاح العقوبة، ولا يزيلان منع إعادة الإرسال، ولا يفكان حظرًا أو كتمًا.',rows);
   }
@@ -163,7 +170,9 @@ export class ModerationUnknownOwnerReview {
    const found=state.moderationOperations.find(x=>x.id===op.id&&x.chatId===op.chatId);
    if(!c?.approved||!c.scopes.includes('moderation')||c.version!==chat.version||
     !found||found.status!=='UNKNOWN_OUTCOME'||found.review||
-    now<found.createdAt||opDigest(found,state)!==digest)return false;
+    now<found.createdAt||
+    moderationOwnerReviewAuditConsistency(state,found)!=='UNREVIEWED'||
+    opDigest(found,state)!==digest)return false;
    state.callbacks.push({ref,action,actorId:actor,chatId:op.chatId,
     policyVersion:c.version,moderationOperationId:op.id,
     moderationOperationDigest:digest,expiresAt:now+120000,
@@ -207,11 +216,13 @@ export class ModerationUnknownOwnerReview {
    if(!chat?.approved||!chat.scopes.includes('moderation')||chat.version!==c.policyVersion||
      !operation||operation.status!=='UNKNOWN_OUTCOME'||operation.review||
      now<operation.createdAt||
+     moderationOwnerReviewAuditConsistency(state,operation)!=='UNREVIEWED'||
      opDigest(operation,state)!==c.moderationOperationDigest||!this.validOwner(actor))return null;
    const decision:Decision=c.action==='owner.moderation.review.escalate'?
     'ESCALATED':'ACKNOWLEDGED_UNRESOLVED';
    // Atomic annotation + nonce consumption. No change to operation.status.
-   operation.review={decision,reviewedBy:actor,reviewedAt:now};
+   operation.review={decision,reviewedBy:actor,reviewedAt:now,
+    policyVersion:chat.version};
    c.used=true;
    const auditKey=createHash('sha256').update('MODERATION:REVIEW:'+operation.id)
     .digest('hex').slice(0,32);
