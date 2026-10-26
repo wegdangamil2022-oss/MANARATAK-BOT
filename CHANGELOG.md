@@ -1,3 +1,10 @@
+## 0.7.102 — 2026-10-26 — group staff delegation epoch fencing
+
+- 32 JSON/SQLite TDD regressions reproduce implicit grant revival after revoked/reapproved groups, scope/AI changes, restored duplicate cleanup, missing/malformed epochs, intentional regrant and unrelated group behavior.
+- RED baseline: 26 of 32 new tests failed against v0.7.101, while all 1,951 preexisting tests passed.
+- Store additive optional chatPolicyVersion on group grants, atomically bound to the uniquely approved group's revision at issue time.
+- Group delegated capabilities require the same safe-integer epoch and current group approval. Historical unbound group grants fail closed without evidence rewriting; owner can issue fresh delegated permissions explicitly while preserving stale grant history.
+- User/private grants remain compatible. No live Telegram sanctions or automatic retry of UNKNOWN_OUTCOME.
 ## 0.7.101 — 2026-10-26 — unique restored group approval required by shared Policy
 
 - Added 42 JSON/SQLite regression tests covering five group authorization scopes, assistant mode, group policy revisions, duplicate approvals in both permitted/revoked orderings, owner approval/revoke/restrict/AI/presence mutations, verification subscription changes, owner confirmation nonce durability, delegated grants and unaffected groups.
