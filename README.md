@@ -1,3 +1,9 @@
+## v0.7.91 — ambiguous moderation evidence stays quarantined
+
+When moderation operation identifiers collide in the persisted store (including duplicates in different groups or records already marked CONFIRMED/CANCELLED), the owner-only `UNKNOWN_OUTCOME` review and the read-only pending INTENT/STARTED list now exclude affected cases from selectable buttons. They report a redacted count of ambiguous records. The underlying ledger is never modified or deleted. Owner review can continue normally for separate, uniquely identified cases.
+
+Old selection links become invalid if a collision appears after the list was rendered. The two-stage owner review also refuses duplicated confirmation nonce references or new operation identity collisions inside its final durable transaction. This prevents an ambiguous record from being acknowledged or escalated by selecting the first accidental match. A collision is a reason for independent investigation and safe offline recovery, **not** permission to reset statuses, retry Telegram sanctions, or erase existing records. No live Telegram ban/mute connection has been enabled.
+
 ## v0.7.90 — owner review links expire when group policy changes
 
 The owner-only review screens for uncertain moderation operations use short, non-authorizing stale-route digests. Previous Telegram buttons are now rejected if the moderated group is revoked and reapproved, reapproved with the same scopes under a new policy revision, or changes membership in the moderation scope; they are also rejected if the locally recorded transport provenance of the sanction attempt changes. This prevents replay of a previous review link to mint a **new** confirmation nonce under newer approval settings. Existing confirmation nonces already require the matching group revision, operation and one-shot owner authorization.

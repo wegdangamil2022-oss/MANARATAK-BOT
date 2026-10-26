@@ -2,6 +2,7 @@ import {createHash} from 'node:crypto';
 import type {BotStore,BotState,ModerationOperation,Chat} from './store.js';
 import type {Policy} from './policy.js';
 import type {OwnerInlineScreen,TelegramInlineKeyboard} from './telegram-inline-owner.js';
+import {ambiguousModerationOperationIds} from './moderation-review-integrity.js';
 
 /** OWNER-PRIVATE READ-ONLY navigation of locally pending moderation attempts.
  * No Telegram rights call, sanction, retry, status transition, new callback
@@ -26,12 +27,18 @@ export function parseModerationPendingOwnerRoute(data:string):
 }
 const LIMIT=8;
 type PendingEntry={op:ModerationOperation;chat:Chat};
+/** Never select an ID that collides with ANY persisted attempt, including
+ * entries outside the approved group and terminal/unknown evidence. They
+ * remain durable, quarantined from actionable case selection.
+ */
 const pending=(s:BotState):PendingEntry[]=>{
  const chats=new Map(s.chats.filter(c=>c.approved&&
   c.scopes.includes('moderation')).map(c=>[c.id,c]));
+ const ambiguous=ambiguousModerationOperationIds(s);
  return s.moderationOperations.flatMap(op=>{
   const chat=chats.get(op.chatId);
-  return chat&&(op.status==='INTENT'||op.status==='STARTED')?[{op,chat}]:[];
+  return chat&&!ambiguous.has(op.id)&&
+   (op.status==='INTENT'||op.status==='STARTED')?[{op,chat}]:[];
  }).sort((a,b)=>a.op.createdAt-b.op.createdAt||a.op.id.localeCompare(b.op.id));
 };
 /** Digest is a stale selector guard, not an authorization credential. */
@@ -89,11 +96,16 @@ export class ModerationPendingOwnerView{
    rows.push([button('⚠️ مراجعة النتائج المجهولة','mr:1:h'),
     button('🏠 لوحة المالك','mi:1:h')]);
    const stale=all.filter(e=>age(e.op.createdAt,this.clock())!=='FRESH').length;
+   const ambiguous=ambiguousModerationOperationIds(s);
+   const conflicting=s.moderationOperations.filter(o=>
+    ambiguous.has(o.id)&&(o.status==='INTENT'||o.status==='STARTED')&&
+    s.chats.some(c=>c.id===o.chatId&&c.approved&&c.scopes.includes('moderation'))).length;
    return screen('<b>⏳ العمليات الإشرافية المعلقة — قراءة فقط</b>\n'
     +'الإجمالي: '+all.length+
     ' · تجهيز INTENT: '+all.filter(e=>e.op.status==='INTENT').length+
     ' · بدأ التنفيذ STARTED: '+all.filter(e=>e.op.status==='STARTED').length+
-    ' · قديمة أو بتوقيت غير موثوق: '+stale+'\n'
+    ' · قديمة أو بتوقيت غير موثوق: '+stale+
+    ' · سجلات متعارضة محجوبة: '+conflicting+'\n'
     +(all.length?'صفحة '+(route.page+1)+' من '+totalPages+'\n':
      'لا توجد عمليات معلقة مرئية في المجموعات المعتمدة للإشراف.\n')
     +'INTENT بعد التعطل لا يثبت عدم الإرسال. STARTED قد تكون وصلت إلى Telegram. '

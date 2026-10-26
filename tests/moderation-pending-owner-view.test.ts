@@ -167,3 +167,47 @@ for(const engine of ['json','sqlite'] as const){
   }finally{await f.close();}
  });
 }
+
+for(const engine of ['json','sqlite'] as const){
+ test(engine+' pending owner view quarantines duplicate identifiers without modifying ledger',async()=>{
+  const f=await fixture(engine);try{
+   await f.store.transaction(s=>s.moderationOperations.push({
+    ...s.moderationOperations[0]!,memberId:'399',kind:'MUTE'
+   }));
+   const before=await f.store.snapshot();
+   const list=await f.app().handle(cb(200,100,'mp:1:h'));
+   assert.equal(list.status,'APPLIED');
+   assert.equal(buttons(list).filter(x=>x.callback_data.startsWith('mp:1:d:')).length,1);
+   assert.match(list.plan?.text??'',/تعارض|ملتبسة|مكررة/);
+   const detail=await f.app().handle(cb(201,100,pick(list,'mp:1:d:')!));
+   assert.equal(detail.status,'APPLIED');
+   assert.deepEqual((await f.store.snapshot()).moderationOperations,before.moderationOperations);
+   assert.deepEqual((await f.store.snapshot()).moderationReasons,before.moderationReasons);
+  }finally{await f.close();}
+ });
+ test(engine+' pending selector expires if a duplicate ID appears in a different group',async()=>{
+  const f=await fixture(engine);try{
+   const list=await f.app().handle(cb(210,100,'mp:1:h'));
+   const key=pick(list,'mp:1:d:')!;
+   await f.store.transaction(s=>s.moderationOperations.push({
+    ...s.moderationOperations[0]!,chatId:OTHER,memberId:'799'
+   }));
+   assert.equal((await f.app().handle(cb(211,100,key))).status,'DENIED');
+   const refresh=await f.app().handle(cb(212,100,'mp:1:h'));
+   assert.equal(buttons(refresh).filter(x=>x.callback_data.startsWith('mp:1:d:')).length,1);
+   assert.match(refresh.plan?.text??'',/تعارض|ملتبسة|مكررة/);
+  }finally{await f.close();}
+ });
+ test(engine+' duplicate pending ID colliding with CONFIRMED or UNKNOWN is not reviewable',async()=>{
+  const f=await fixture(engine);try{
+   await f.store.transaction(s=>s.moderationOperations.push({
+    ...s.moderationOperations[0]!,id:'private-started',status:'CONFIRMED',
+    memberId:'887'
+   }));
+   const list=await f.app().handle(cb(220,100,'mp:1:h'));
+   assert.equal(list.status,'APPLIED');
+   assert.equal(buttons(list).filter(x=>x.callback_data.startsWith('mp:1:d:')).length,1);
+   assert.match(list.plan?.text??'',/تعارض|ملتبسة|مكررة/);
+  }finally{await f.close();}
+ });
+}
