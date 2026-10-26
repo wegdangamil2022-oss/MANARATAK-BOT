@@ -86,7 +86,8 @@ export function inspectModerationLedgerIntegrity(
       (review.decision!=='ACKNOWLEDGED_UNRESOLVED'&&review.decision!=='ESCALATED')||
       typeof review.reviewedBy!=='string'||!user.test(review.reviewedBy)||
       !isSafeTime(review.reviewedAt)||
-      (typeof op.createdAt==='number'&&review.reviewedAt<op.createdAt)){
+      (typeof op.createdAt==='number'&&typeof review.reviewedAt==='number'&&
+       review.reviewedAt<op.createdAt)){
     malformedRows++;
    }
   }
