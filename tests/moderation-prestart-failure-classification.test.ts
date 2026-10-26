@@ -142,3 +142,27 @@ for(const engine of ['json','sqlite'] as const){
   }finally{await f.close();}
  });
 }
+
+for(const engine of ['json','sqlite'] as const){
+ test(engine+' policy callback exception inside STARTED reservation is a safe pre-send cancellation',async()=>{
+  const f=await fixture(engine,'SENT');try{
+   let evaluated=0;
+   const valid=(state:Awaited<ReturnType<BotStore['snapshot']>>)=>{
+    evaluated++;
+    if(state.moderationOperations.some(op=>op.status==='INTENT')){
+     throw Error('PRIVATE_CONCURRENT_POLICY_EXCEPTION');
+    }
+    return true;
+   };
+   // The callback succeeds in the candidate transaction before INTENT
+   // insertion, then throws while the reservation transaction validates it.
+   const outcome=await f.service.reconcile(OWNER,CHAT,TARGET,valid);
+   assert.deepEqual(outcome,{status:'DENIED',reason:'PREFLIGHT_ABORTED_NO_SEND'});
+   assert.ok(evaluated>=2);
+   assert.equal(f.writes(),0);
+   const op=(await f.store.snapshot()).moderationOperations.at(-1)!;
+   assert.equal(op.status,'CANCELLED');
+   assert.equal(op.attemptGateway,undefined);
+  }finally{await f.close();}
+ });
+}
