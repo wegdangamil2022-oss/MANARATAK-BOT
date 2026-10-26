@@ -12,6 +12,20 @@ import {ModerationService,FakeModerationGateway} from '../src/moderation.js';
 
 const OWNER='100',GROUP='-100123',OTHER_GROUP='-100987',TARGET='300',NOW=1_700_000_000_000;
 const storage=['json','sqlite'] as const;
+// The old persisted contract has no binding fields yet; RED must compile
+// against the unpatched version, so inspect optional additions dynamically.
+const evidenceDigest=(v:unknown):unknown=>
+ v&&typeof v==='object'?(v as Record<string,unknown>).evidenceDigest:undefined;
+const setBinding=(v:unknown,value?:string)=>{
+ const row=v as Record<string,unknown>;
+ if(value===undefined)delete row.evidenceDigest;
+ else row.evidenceDigest=value;
+};
+const setAuditBinding=(v:unknown,value?:string)=>{
+ const row=v as Record<string,unknown>;
+ if(value===undefined)delete row.moderationEvidenceDigest;
+ else row.moderationEvidenceDigest=value;
+};
 
 async function fixture(engine:'json'|'sqlite'){
  const dir=await mkdtemp(join(tmpdir(),'manaratak-owner-identity-'));
@@ -67,8 +81,8 @@ for(const engine of storage){
    const s=await f.store.snapshot(),op=s.moderationOperations[0]!;
    const receipt=s.audit.find(x=>x.reason==='MODERATION_UNKNOWN_OWNER_ACKNOWLEDGED');
    assert.ok(receipt);
-   assert.match(op.review?.evidenceDigest??'',/^[a-f0-9]{64}$/);
-   assert.equal(receipt.moderationEvidenceDigest,op.review?.evidenceDigest);
+   assert.match(String(evidenceDigest(op.review)??''),/^[a-f0-9]{64}$/);
+   assert.equal((receipt as unknown as Record<string,unknown>).moderationEvidenceDigest,evidenceDigest(op.review));
    assert.equal(moderationOwnerReviewAuditConsistency(s,op),'REVIEWED');
    assert.equal((await f.checked()).selectors.length,1);
    await f.assertSafe();
@@ -99,11 +113,11 @@ for(const engine of storage){
   });
  }
  for(const [name,change] of [
-  ['review digest removed',(o:ModerationOperation,a:AuditRecord)=>{delete o.review!.evidenceDigest;void a;}],
-  ['audit digest removed',(o:ModerationOperation,a:AuditRecord)=>{delete a.moderationEvidenceDigest;void o;}],
-  ['audit digest altered',(o:ModerationOperation,a:AuditRecord)=>{a.moderationEvidenceDigest='a'.repeat(64);void o;}],
-  ['review digest malformed',(o:ModerationOperation,a:AuditRecord)=>{o.review!.evidenceDigest='malformed';void a;}],
-  ['audit digest malformed',(o:ModerationOperation,a:AuditRecord)=>{a.moderationEvidenceDigest='malformed';void o;}]
+  ['review digest removed',(o:ModerationOperation,a:AuditRecord)=>{setBinding(o.review);void a;}],
+  ['audit digest removed',(o:ModerationOperation,a:AuditRecord)=>{setAuditBinding(a);void o;}],
+  ['audit digest altered',(o:ModerationOperation,a:AuditRecord)=>{setAuditBinding(a,'a'.repeat(64));void o;}],
+  ['review digest malformed',(o:ModerationOperation,a:AuditRecord)=>{setBinding(o.review,'malformed');void a;}],
+  ['audit digest malformed',(o:ModerationOperation,a:AuditRecord)=>{setAuditBinding(a,'malformed');void o;}]
  ] as const){
   test(engine+' owner review refuses one-sided or forged '+name,async()=>{
    const f=await fixture(engine);try{
@@ -133,9 +147,9 @@ for(const engine of storage){
   const f=await fixture(engine);try{
    await f.annotate();
    await f.store.transaction(s=>{
-    delete s.moderationOperations[0]!.review!.evidenceDigest;
+    setBinding(s.moderationOperations[0]!.review);
     const rec=s.audit.find(x=>x.reason==='MODERATION_UNKNOWN_OWNER_ACKNOWLEDGED')!;
-    delete rec.moderationEvidenceDigest;
+    setAuditBinding(rec);
    });
    const x=await f.checked();
    assert.equal(x.selectors.length,1);
