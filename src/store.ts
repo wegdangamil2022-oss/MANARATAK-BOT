@@ -9,7 +9,7 @@ export type GroupAIMode = 'OFF' | 'OWNER_MENTION' | 'STAFF_MENTION' | 'ALL_MENTI
 export type PrivateAIMode = 'OFF' | 'STAFF_ONLY' | 'ALL_OPT_IN';
 export type OperationStatus = 'INTENT' | 'STARTED' | 'CONFIRMED' | 'FAILED_CONFIRMED' | 'UNKNOWN_OUTCOME' | 'CANCELLED';
 export interface Chat { id: string; approved: boolean; present: boolean; scopes: string[]; version: number; groupAI: GroupAIMode; }
-export interface Grant { actor: string; capability: Capability; chatId: string; expiresAt: number; grantedBy: string; revoked: boolean; /** Issuing group's approval revision; absent on legacy or private grants. */ chatPolicyVersion?: number; }
+export interface Grant { actor: string; capability: Capability; chatId: string; expiresAt: number; grantedBy: string; revoked: boolean; /** Issuing group's approval revision; absent on legacy or private grants. */ chatPolicyVersion?: number; /** UUID for newly issued group grant; absent on older grants. */ grantId?: string; }
 export interface CallbackRecord { ref: string; action: string; chatId: string; actorId?: string; policyVersion: number; requirementVersion?: number; moderationOperationId?:string; moderationOperationDigest?:string; expiresAt: number; oneShot: boolean; used: boolean; revoked: boolean; }
 export interface Wizard { key: string; userId: string; chatId: string; topicId: string; flow: string; step: number; version: number; expiresAt: number; policyVersion: number; status: 'ACTIVE' | 'CANCELLED'; }
 export interface ProcessedUpdate { key: string; status: 'CLAIMED' | 'DONE' | 'UNKNOWN'; leaseUntil: number; }
