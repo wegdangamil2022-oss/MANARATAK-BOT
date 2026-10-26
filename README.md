@@ -1,3 +1,10 @@
+## v0.7.103 — Restored group grant ledger collision quarantine
+
+Group-scoped delegated grants issued in v0.7.103 receive a distinct immutable UUID (`grantId`), in addition to the existing chat approval epoch. Authorization validates the current-epoch grant ledger as a whole rather than accepting the first apparently active grant. A cloned grant ID (including a copy edited to appear revoked, another actor, or another group), two simultaneously active grants for the same actor/capability/group/epoch, a malformed expiry/revocation flag/ID, or duplicated pre-ID legacy group records fail closed without rewriting database evidence.
+
+Legitimate group grant rotation is preserved: the owner can revoke and explicitly regrant the same capability in one approval epoch, or reissue it after its expiration. Each new issuance has a new unique ID, and older entries remain unmodified for audit. A single legacy epoch-bound group grant without a UUID stays supported when unambiguous. Group grants from older epochs remain rejected under the approval-epoch protection introduced in v0.7.102. Unrelated groups and distinct actors remain independent.
+
+Private/numeric user-scoped grants retain their prior semantics. Duplicate or malformed restored grants must be investigated separately; there is no automatic deletion, repair, Telegram ban/mute, or retry of an UNKNOWN_OUTCOME sanction. UUIDs and audit checks are consistency mechanisms, not tamper-proof signatures against full-database compromise.
 ## v0.7.102 — Group staff privileges cannot silently revive after reapproval
 
 Group-scoped delegated capability grants now persist the approval revision at issuance (chatPolicyVersion). A group grant is actionable only when the restored approval record is unique, approved, and retains the exact safe-integer chat revision. Revoke/reapprove cycles, changes to group scopes, and AI-policy updates invalidate old grants even if a duplicate approval was manually removed after a restore.

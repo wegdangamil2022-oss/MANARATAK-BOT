@@ -1,3 +1,10 @@
+## 0.7.103 — 2026-10-26 — preserved, collision-safe group grant ledger
+
+- Added 36 JSON/SQLite TDD regressions testing cloned grants, revoked/active forks, distinct simultaneous live grants, duplicate IDs across actors, corrupted expiries/flags/IDs, independent group isolation, old epoch-bound legacy records, safe explicit revoke/regrant and expired renewal.
+- RED baseline: 28 of 36 tests failed against v0.7.102 while all 1,981 prior tests passed.
+- New group grants include immutable UUIDs; current-epoch group-grant authorization rejects copied IDs, malformed evidence, duplicate legacy rows and multiple overlapping active credentials. All validation is read-only.
+- Explicit same-epoch revoke/regrant and post-expiration renewal retain historical records instead of overwriting evidence, with fresh distinct IDs. Single unambiguous legacy group grants without IDs remain supported.
+- Numeric private/user grants retain their prior behavior. No Telegram live sanctions and no UNKNOWN_OUTCOME automatic retries.
 ## 0.7.102 — 2026-10-26 — group staff delegation epoch fencing
 
 - 30 JSON/SQLite TDD regressions reproduce implicit grant revival after revoked/reapproved groups, scope/AI changes, restored duplicate cleanup, missing/malformed epochs, intentional regrant and unrelated group behavior.
