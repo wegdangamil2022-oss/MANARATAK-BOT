@@ -1,3 +1,12 @@
+## 0.7.100 — 2026-10-26 — reject duplicated group approvals throughout moderation dispatch
+
+- Added 30 JSON/SQLite TDD regressions: identical/conflicting approval copies, revoked-first/approved-second records, duplicates arising during remote bot-rights checks, protected-member preflight, after durable INTENT, during the last-mile provider authority callback, and after a provider appears to report success.
+- RED baseline: 24 failures from the 30 new tests while all 1,879 preexisting tests passed.
+- Reuse `ambiguousModerationChatIds` in the moderation service's shared authorization helper. Mid-preflight ambiguity now returns explicit DENIED rather than NO_CHANGE, and duplicate authorization is denied before target-status disclosure. Duplicate approvals now refuse reason changes, subscription-derived moderation actions, warning mutations and sanction preflight before Telegram reads or local writes.
+- Subsequent async/durable dispatch boundaries recheck the same authorization; a duplicate emerging after STARTED quarantines the original evidence as `UNKNOWN_OUTCOME` rather than accepting a provider-confirmed terminal state.
+- Unique unaffected groups continue to work with simulated gateways; original restored duplicate chat evidence remains preserved.
+- Real Telegram sanctions remain inactive pending explicit isolated trial authorization.
+
 ## 0.7.99 — 2026-10-26 — quarantine duplicate restored group approvals in owner moderation screens
 
 - Added 22 JSON/SQLite TDD regressions for duplicate group-approval records (even identical copies), varying approval epochs or moderation scopes, reversed authorized/revoked ordering, stale owner detail selectors and pre-issued nonce confirmation.
