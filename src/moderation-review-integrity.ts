@@ -28,3 +28,64 @@ export function uniqueModerationReviewNonce(
  }
  return count===1;
 }
+
+/**
+ * Version-compatible restored-ledger integrity check. The general BotStore
+ * schema deliberately accepts legacy moderation records, so a syntactically
+ * valid restored SQLite/JSON file may contain an invalid operation row.
+ * Unknown statuses MUST NEVER be interpreted as a finished sanction and
+ * thereby authorize another Telegram request. All moderation effects and
+ * owner review decisions fail closed when any row is malformed.
+ *
+ * This validator never mutates entries or discloses their identifying data.
+ * Identity collisions are handled separately by the owner-review quarantine:
+ * historical duplicate IDs must not be silently repaired or discarded.
+ */
+export function inspectModerationLedgerIntegrity(
+ state:Pick<BotState,'moderationOperations'>):
+ {valid:boolean;malformedRows:number}{
+ const values=state?.moderationOperations;
+ if(!Array.isArray(values))return {valid:false,malformedRows:1};
+ let malformedRows=0;
+ const user=/^[1-9][0-9]*$/u;
+ const group=/^-[1-9][0-9]*$/u;
+ const maxTime=8_640_000_000_000_000;
+ const statuses=new Set(['INTENT','STARTED','CONFIRMED',
+  'FAILED_CONFIRMED','UNKNOWN_OUTCOME','CANCELLED']);
+ const kinds=new Set(['NONE','MUTE','BAN']);
+ const gateways=new Set(['SIMULATION','TELEGRAM_API','UNSPECIFIED']);
+ for(const candidate of values){
+  if(!candidate||typeof candidate!=='object'||Array.isArray(candidate)){
+   malformedRows++;continue;
+  }
+  const op=candidate as unknown as Record<string,unknown>;
+  const isSafeTime=(v:unknown)=>typeof v==='number'&&
+   Number.isSafeInteger(v)&&v>=0&&v<=maxTime;
+  const invalid=typeof op.id!=='string'||op.id.trim()===''||
+   typeof op.chatId!=='string'||!group.test(op.chatId)||
+   typeof op.memberId!=='string'||!user.test(op.memberId)||
+   typeof op.actorId!=='string'||!user.test(op.actorId)||
+   typeof op.kind!=='string'||!kinds.has(op.kind)||
+   typeof op.reasonFingerprint!=='string'||
+   !Number.isSafeInteger(op.policyVersion)||typeof op.policyVersion!=='number'||
+   op.policyVersion<1||
+   typeof op.status!=='string'||!statuses.has(op.status)||
+   !isSafeTime(op.createdAt)||
+   (op.attemptGateway!==undefined&&
+    (typeof op.attemptGateway!=='string'||!gateways.has(op.attemptGateway)));
+  if(invalid){malformedRows++;continue;}
+  if(op.review!==undefined){
+   if(!op.review||typeof op.review!=='object'||Array.isArray(op.review)){
+    malformedRows++;continue;
+   }
+   const review=op.review as Record<string,unknown>;
+   if(op.status!=='UNKNOWN_OUTCOME'||
+      (review.decision!=='ACKNOWLEDGED_UNRESOLVED'&&review.decision!=='ESCALATED')||
+      typeof review.reviewedBy!=='string'||!user.test(review.reviewedBy)||
+      !isSafeTime(review.reviewedAt)){
+    malformedRows++;
+   }
+  }
+ }
+ return {valid:malformedRows===0,malformedRows};
+}

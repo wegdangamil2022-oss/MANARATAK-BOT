@@ -2,7 +2,7 @@ import {createHash} from 'node:crypto';
 import type {BotStore,BotState,ModerationOperation,Chat} from './store.js';
 import type {Policy} from './policy.js';
 import type {OwnerInlineScreen,TelegramInlineKeyboard} from './telegram-inline-owner.js';
-import {ambiguousModerationOperationIds} from './moderation-review-integrity.js';
+import {ambiguousModerationOperationIds,inspectModerationLedgerIntegrity} from './moderation-review-integrity.js';
 
 /** OWNER-PRIVATE READ-ONLY navigation of locally pending moderation attempts.
  * No Telegram rights call, sanction, retry, status transition, new callback
@@ -74,6 +74,14 @@ export class ModerationPendingOwnerView{
   if(!route)return null;
   const s=await this.store.snapshot();
   if(!this.policy.isOwner(actor))return null;
+  // Restoration anomalies are not permission to interpret a partly valid
+  // ledger. A read-only generic alert is safe, case details are not.
+  if(!inspectModerationLedgerIntegrity(s).valid)
+    return route.kind==='list'
+     ?screen('<b>سجلات الإشراف غير سليمة</b>\n'+
+       'تم حجب الحالات المعلقة. البيانات تتطلب مراجعة بشرية مستقلة دون أي إعادة إرسال.',
+       [[button('🏠 لوحة المالك','mi:1:h')]])
+     :null;
   const all=pending(s);
   if(route.kind==='list'){
    const totalPages=Math.max(1,Math.ceil(all.length/LIMIT));

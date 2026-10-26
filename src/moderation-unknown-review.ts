@@ -2,7 +2,8 @@ import {createHash,randomBytes} from 'node:crypto';
 import type {BotStore,BotState,ModerationOperation} from './store.js';
 import type {Policy} from './policy.js';
 import type {OwnerInlineScreen,TelegramInlineKeyboard} from './telegram-inline-owner.js';
-import {ambiguousModerationOperationIds,uniqueModerationReviewNonce} from './moderation-review-integrity.js';
+import {ambiguousModerationOperationIds,uniqueModerationReviewNonce,
+ inspectModerationLedgerIntegrity} from './moderation-review-integrity.js';
 
 /** Owner-private annotation of UNKNOWN_OUTCOME. An annotation is NEVER
  * proof of delivery and MUST NOT update operation.status or permit retry.
@@ -91,6 +92,15 @@ export class ModerationUnknownOwnerReview {
   if(!route)return null;
   const s=await this.store.snapshot();
   if(!this.validOwner(actor))return null;
+  // A malformed restored row is not a safely reviewed terminal record.
+  // Fail closed globally, with only generic owner guidance; do not expose
+  // operation selectors, identities or evidence from a partially valid DB.
+  if(!inspectModerationLedgerIntegrity(s).valid)
+    return route.kind==='list'
+      ?menu('<b>سجلات الإشراف غير سليمة</b>\n'+
+       'تم حجب مراجعة العقوبات. البيانات تتطلب مراجعة بشرية مستقلة دون إعادة إرسال أو حذف.',
+       [[button('🏠 لوحة المالك','mi:1:h')]])
+      :null;
   const all=opList(s);
   if(route.kind==='list'){
    const pages=Math.max(1,Math.ceil(all.length/BUTTON_LIMIT));
@@ -147,7 +157,7 @@ export class ModerationUnknownOwnerReview {
   const action=route.decision==='ESCALATED'?'owner.moderation.review.escalate':
    'owner.moderation.review.ack';
   const issued=await this.store.transaction(state=>{
-   if(!this.validOwner(actor))return false;
+   if(!this.validOwner(actor)||!inspectModerationLedgerIntegrity(state).valid)return false;
    if(ambiguousModerationOperationIds(state).has(op.id))return false;
    const c=state.chats.find(x=>x.id===op.chatId);
    const found=state.moderationOperations.find(x=>x.id===op.id&&x.chatId===op.chatId);
@@ -173,6 +183,7 @@ export class ModerationUnknownOwnerReview {
   const now=this.clock();
   if(!Number.isSafeInteger(now)||now<0||!this.validOwner(actor))return null;
   const completed=await this.store.transaction(state=>{
+   if(!inspectModerationLedgerIntegrity(state).valid)return null;
    if(!uniqueModerationReviewNonce(state,token))return null;
    const c=state.callbacks.find(x=>x.ref===token);
    if(!c||c.revoked||c.used||!c.oneShot||c.actorId!==actor||
