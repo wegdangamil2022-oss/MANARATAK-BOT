@@ -150,7 +150,7 @@ export class ModerationUnknownOwnerReview {
   }
   if(op.review)return null;
   const now=this.clock();
-  if(!Number.isSafeInteger(now)||now<0||now>8_640_000_000_000_000-120000)return null;
+  if(!Number.isSafeInteger(now)||now<op.createdAt||now>8_640_000_000_000_000-120000)return null;
   const chat=s.chats.find(c=>c.id===op.chatId);
   if(!chat?.approved||!chat.scopes.includes('moderation'))return null;
   const ref='c_'+randomBytes(18).toString('base64url');
@@ -163,7 +163,7 @@ export class ModerationUnknownOwnerReview {
    const found=state.moderationOperations.find(x=>x.id===op.id&&x.chatId===op.chatId);
    if(!c?.approved||!c.scopes.includes('moderation')||c.version!==chat.version||
     !found||found.status!=='UNKNOWN_OUTCOME'||found.review||
-    opDigest(found,state)!==digest)return false;
+    now<found.createdAt||opDigest(found,state)!==digest)return false;
    state.callbacks.push({ref,action,actorId:actor,chatId:op.chatId,
     policyVersion:c.version,moderationOperationId:op.id,
     moderationOperationDigest:digest,expiresAt:now+120000,
@@ -181,13 +181,22 @@ export class ModerationUnknownOwnerReview {
  }
  private async confirm(token:string,actor:string):Promise<OwnerInlineScreen|null>{
   const now=this.clock();
-  if(!Number.isSafeInteger(now)||now<0||!this.validOwner(actor))return null;
+  if(!Number.isSafeInteger(now)||now<0||now>8_640_000_000_000_000||
+     !this.validOwner(actor))return null;
   const completed=await this.store.transaction(state=>{
    if(!inspectModerationLedgerIntegrity(state).valid)return null;
    if(!uniqueModerationReviewNonce(state,token))return null;
    const c=state.callbacks.find(x=>x.ref===token);
-   if(!c||c.revoked||c.used||!c.oneShot||c.actorId!==actor||
-    c.expiresAt<=now||!c.moderationOperationId||!c.moderationOperationDigest||
+   // Only accept a durable nonce while its original 2-minute issuance
+   // window is still valid. String/NaN/fractional/extended expiration and
+   // missing one-shot state cannot be trusted after a JSON/SQLite restore.
+   if(!c||c.revoked!==false||c.used!==false||c.oneShot!==true||
+    c.actorId!==actor||
+    typeof c.expiresAt!=='number'||!Number.isSafeInteger(c.expiresAt)||
+    c.expiresAt<=now||c.expiresAt>8_640_000_000_000_000||
+    c.expiresAt-now>120000||
+    now<c.expiresAt-120000||
+    !c.moderationOperationId||!c.moderationOperationDigest||
     !['owner.moderation.review.ack','owner.moderation.review.escalate'].includes(c.action))
     return null;
    const chat=state.chats.find(x=>x.id===c.chatId);
@@ -197,6 +206,7 @@ export class ModerationUnknownOwnerReview {
     return null;
    if(!chat?.approved||!chat.scopes.includes('moderation')||chat.version!==c.policyVersion||
      !operation||operation.status!=='UNKNOWN_OUTCOME'||operation.review||
+     now<operation.createdAt||
      opDigest(operation,state)!==c.moderationOperationDigest||!this.validOwner(actor))return null;
    const decision:Decision=c.action==='owner.moderation.review.escalate'?
     'ESCALATED':'ACKNOWLEDGED_UNRESOLVED';
