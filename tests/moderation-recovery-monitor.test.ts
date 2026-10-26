@@ -25,7 +25,9 @@ const options=()=>({now:NOW,staleAfterMs:STALE});
 async function fixture(){
  const dir=await mkdtemp(join(tmpdir(),'manaratak-moderation-recovery-'));
  const file=join(dir,'bot.sqlite'),store=new BotStore(file,{engine:'sqlite'});
- await store.snapshot();
+ // SQLite snapshot() can return a synthetic empty state without persisting
+ // bot_state. Initialize a genuine stored empty ledger before CLI inspection.
+ await store.transaction(s=>{s.moderationOperations=[];});
  await chmod(file,0o600);
  return {dir,file,store,close:()=>rm(dir,{recursive:true,force:true})};
 }
