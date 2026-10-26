@@ -1,5 +1,5 @@
 import {BotStore,type BotState,type ModerationOperation} from './store.js';
-import {inspectModerationLedgerIntegrity} from './moderation-review-integrity.js';
+import {moderationLedgerSafeForDispatch} from './moderation-review-integrity.js';
 
 /**
  * A strictly local, aggregate-only report for a trusted host operator.
@@ -59,7 +59,7 @@ export function summarizeModerationRecovery(
  if(!validOptions(options))throw Error('MODERATION_RECOVERY_OPTIONS_INVALID');
  if(!s||!Array.isArray(s.moderationOperations)||
   !s.moderationOperations.every(validOp)||
-  !inspectModerationLedgerIntegrity(s).valid)
+  !moderationLedgerSafeForDispatch(s))
   throw Error('MODERATION_RECOVERY_INVALID_LEDGER');
  let intent=0,started=0,unknownOutcome=0,staleIntent=0,staleStarted=0,
   clockAnomaly=0,awaitingFirstReview=0,reviewedUnresolved=0,manualAttention=0;

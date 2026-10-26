@@ -32,7 +32,9 @@ async function fixture(engine:'json'|'sqlite', status:OperationStatus){
 }
 for(const engine of ['json','sqlite'] as const){
  for(const status of ['UNKNOWN_OUTCOME','INTENT','STARTED'] as const){
-  const blocker=status==='UNKNOWN_OUTCOME'?'BLOCKED_UNKNOWN':'BLOCKED_PENDING';
+  // An INTENT already labeled TELEGRAM_API contradicts the send lifecycle:
+  // reject as restored corruption rather than a normal pending reservation.
+  const blocker=status==='STARTED'?'BLOCKED_PENDING':'BLOCKED_UNKNOWN';
   test(engine+' '+status+' blocks new sanction reason before ANY network read',async()=>{
    const f=await fixture(engine,status);try{
     const result=await f.service.addManualReason(OWNER,GROUP,TARGET,'new-case','MUTE');

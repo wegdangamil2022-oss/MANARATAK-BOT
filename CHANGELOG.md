@@ -1,3 +1,11 @@
+## 0.7.93 — 2026-10-26 — moderation restore identity and chronology guard
+
+- Reproduced nine failing security regressions before applying the fix. In addition to malformed single rows, restored ledgers containing duplicate moderation operation IDs across group/member/status boundaries could pass the basic integrity validator and allow new unrelated sanctions.
+- Added `moderationLedgerSafeForDispatch` to block new reason mutations and all reconcile/send checkpoints when *any* durable moderation operation ID collides; check is repeated at atomic and async boundaries. The original evidence is retained for human investigation without automatic normalization.
+- The read-only recovery inventory now refuses a clean result on duplicate operation IDs; the owner review remains narrowly scoped to collision identifiers so independent unique historical records remain reviewable.
+- Rejects an INTENT with impossible existing provider provenance and owner reviews backdated before the original UNKNOWN_OUTCOME creation timestamp, while accepting valid legacy records.
+- Added 11 tests for JSON/SQLite and pure projections. Production Telegram sanction adapter remains disconnected.
+
 ## 0.7.92 — 2026-10-26 — fail closed on malformed restored moderation ledgers
 
 - Added a shared, read-only `inspectModerationLedgerIntegrity` check for JSON and SQLite moderation-operation records. Generic `BotStore` had accepted a moderation array without validating every entry, so an unsupported status such as `SENT` could be ignored by pending-operation checks and a fresh sanction reason/dispatch could proceed despite unresolved corrupted evidence.
