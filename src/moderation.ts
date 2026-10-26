@@ -56,7 +56,8 @@ export class ModerationService {
    * might already have reached the member. This test is repeated atomically
    * inside every subsequent reason mutation after any asynchronous reads.
    */
-  private unresolved(s:BotState,chatId:string,memberId:string):ModerationResult|null{
+  private unresolved(s:BotState,chatId:string,memberId:string):
+    {status:'BLOCKED_UNKNOWN'|'BLOCKED_PENDING';reason:'NO_SAFE_DISPATCH'}|null{
     const ops=s.moderationOperations.filter(o=>byTarget(o,chatId,memberId));
     if(ops.some(o=>o.status==='UNKNOWN_OUTCOME'))
       return {status:'BLOCKED_UNKNOWN',reason:'NO_SAFE_DISPATCH'};
