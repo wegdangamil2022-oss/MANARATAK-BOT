@@ -181,7 +181,7 @@ for(const engine of ['json','sqlite'] as const){
    const state=await f.store.snapshot();
    assert.equal(state.moderationReasons[0]!.active,true);
    assert.equal(state.moderationOperations.filter(o=>o.status==='INTENT').length,1);
-   assert.equal(state.moderationOperations.filter(o=>o.status==='INVALID').length,1);
+   assert.equal(state.moderationOperations.filter(o=>(o.status as string)==='INVALID').length,1);
   }finally{await f.close();}
  });
  test(engine+' malformed restored evidence after gateway invocation never creates a false success receipt',async()=>{
