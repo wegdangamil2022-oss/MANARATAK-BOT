@@ -24,7 +24,7 @@ const corruptions=[
  ['missing fingerprint',(o:ModerationOperation)=>{o.reasonFingerprint=undefined as unknown as string;}],
  ['invalid policy revision',(o:ModerationOperation)=>{o.policyVersion=0;}],
  ['unknown dispatch provenance',(o:ModerationOperation)=>{
-  o.attemptGateway='UNVERIFIED_REMOTE' as ModerationOperation['attemptGateway'];}],
+  o.attemptGateway='UNVERIFIED_REMOTE' as NonNullable<ModerationOperation['attemptGateway']>;}],
  ['review recorded on prestart intent',(o:ModerationOperation)=>{
   o.review={decision:'ESCALATED',reviewedBy:OWNER,reviewedAt:NOW};}],
  ['unknown review decision',(o:ModerationOperation)=>{
@@ -123,7 +123,7 @@ for(const engine of ['json','sqlite'] as const){
    const gateway:ModerationGateway={
     canRestrict:async()=>{
      reads++;
-     if(reads===2)await f.store.transaction(s=>s.moderationOperations.push({
+     if(reads===1)await f.store.transaction(s=>s.moderationOperations.push({
       ...base(),id:'concurrent-invalid',status:'SENT' as ModerationOperation['status']
      }));
      return true;
