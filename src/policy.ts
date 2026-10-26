@@ -1,4 +1,5 @@
-import { BotStore, type BotState, type Chat, type Capability, type GroupAIMode, type PrivateAIMode } from './store.js';
+import {randomUUID} from 'node:crypto';
+import { BotStore, type BotState, type Chat, type Grant, type Capability, type GroupAIMode, type PrivateAIMode } from './store.js';
 
 export class Policy {
   constructor(private readonly store: BotStore, readonly ownerId: string, private readonly clock: () => number = Date.now) {
@@ -19,13 +20,47 @@ export class Policy {
     // Legacy group grants without an issuing approval revision fail closed.
     if(chatIsGroup&&(!chat?.approved||!Number.isSafeInteger(chat.version)||
       chat.version<1))return false;
-    return s.grants.some(g=>g.actor===actor&&g.capability===capability&&
-      g.chatId===chatId&&!g.revoked&&g.expiresAt>now&&
-      (!chatIsGroup||(typeof g.chatPolicyVersion==='number'&&
-        Number.isSafeInteger(g.chatPolicyVersion)&&
-        g.chatPolicyVersion===chat!.version)));
+    if(!chatIsGroup)return s.grants.some(g=>g.actor===actor&&
+      g.capability===capability&&g.chatId===chatId&&!g.revoked&&g.expiresAt>now);
+    const ledger=this.groupGrantLedger(s,actor,capability,chatId,chat!.version,now);
+    return ledger.safe&&ledger.active.length===1;
   }
   private requireOwner(actor: string): void { if (!this.isOwner(actor)) throw new Error('OWNER_ONLY'); }
+  /** Group-grant evidence validator for restored JSON/SQLite databases.
+   * Revoke/regrant and expiry/renewal are legitimate distinct grant events.
+   * A copied grantId, duplicated legacy record, malformed row or multiple
+   * simultaneously active grants in ONE policy epoch is not a valid authority.
+   * Nothing in this check edits, repairs or removes the historical records.
+   */
+  private groupGrantLedger(
+    s:BotState,actor:string,capability:Capability,chatId:string,
+    epoch:number,now:number
+  ):{safe:boolean;active:Grant[]}{
+    if(!Number.isSafeInteger(now)||now<0||!Number.isSafeInteger(epoch)||epoch<1)
+      return {safe:false,active:[]};
+    const relevant=s.grants.filter(g=>g.actor===actor&&
+      g.capability===capability&&g.chatId===chatId&&
+      g.chatPolicyVersion===epoch);
+    const uuid=/^[a-f0-9]{8}-(?:[a-f0-9]{4}-){3}[a-f0-9]{12}$/u;
+    const malformed=relevant.some(g=>
+      typeof g.revoked!=='boolean'||
+      typeof g.expiresAt!=='number'||!Number.isSafeInteger(g.expiresAt)||
+      g.expiresAt<0||g.expiresAt>8_640_000_000_000_000||
+      typeof g.grantedBy!=='string'||!/^\d+$/u.test(g.grantedBy)||
+      (g.grantId!==undefined&&
+        (typeof g.grantId!=='string'||!uuid.test(g.grantId))));
+    if(malformed)return {safe:false,active:[]};
+    const legacy=relevant.filter(g=>g.grantId===undefined);
+    if(legacy.length>1)return {safe:false,active:[]};
+    // IDs are globally unique, not just within a single actor or chat:
+    // a restored copy given a different owner/target must not be usable.
+    if(relevant.some(g=>g.grantId!==undefined&&
+      s.grants.filter(other=>other.grantId===g.grantId).length!==1))
+      return {safe:false,active:[]};
+    const active=relevant.filter(g=>!g.revoked&&g.expiresAt>now);
+    if(active.length>1)return {safe:false,active:[]};
+    return {safe:true,active};
+  }
   /** Restore-safe unique group record lookup. Never select the first, last
    * or most permissive approval from multiple rows with the same ID.
    * This is a read-only check; ambiguous evidence is preserved as-is.
@@ -271,7 +306,9 @@ export class Policy {
   }
   async grant(by: string, actor: string, capability: Capability, chatId: string, expiresAt: number): Promise<void> {
     if (by === actor) throw new Error('Cannot self-grant');
-    if (!Number.isFinite(expiresAt) || expiresAt <= this.clock()) throw new Error('Invalid expiry');
+    if (!Number.isSafeInteger(expiresAt)||expiresAt<0||
+        expiresAt>8_640_000_000_000_000||expiresAt<=this.clock())
+      throw new Error('Invalid expiry');
     if (this.isOwner(actor)) throw new Error('Owner is immutable');
     await this.store.transaction(s => {
       // Delegation is OFF in B1: no recursive grants, even if staff has this capability.
@@ -280,15 +317,29 @@ export class Policy {
       const chat=groupScope?this.assertUniqueChatRecord(s,chatId):undefined;
       if(groupScope&&(!chat?.approved||!Number.isSafeInteger(chat.version)||
         chat.version<1))throw Error('GROUP_NOT_APPROVED');
-      // Historical stale grants remain preserved as evidence, not mutated
-      // or silently revived. Only a duplicate current-epoch grant blocks
-      // the owner explicitly issuing fresh authority for this epoch.
-      const existing=s.grants.find(g=>g.actor===actor&&
-        g.capability===capability&&g.chatId===chatId&&!g.revoked&&
-        (!groupScope||g.chatPolicyVersion===chat!.version));
+      // Only one active grant can exist in a group approval epoch, but
+      // explicitly revoking or expiring the prior grant permits reissuance
+      // with a NEW ID. Historical records are never rewritten or deleted.
+      const now=this.clock();
+      const ledger=groupScope?
+        this.groupGrantLedger(s,actor,capability,chatId,chat!.version,now):
+        null;
+      if(ledger&&!ledger.safe)throw Error('GRANT_LEDGER_AMBIGUOUS');
+      const existing=groupScope?ledger!.active.length>0:
+        s.grants.some(g=>g.actor===actor&&g.capability===capability&&
+          g.chatId===chatId&&!g.revoked);
       if(existing)throw new Error('Grant already exists');
+      let grantId:string|undefined;
+      if(groupScope){
+        // A random collision is extraordinarily unlikely. Preserve and
+        // refuse rather than overwriting a restored row if it occurs.
+        grantId=randomUUID();
+        if(s.grants.some(g=>g.grantId===grantId))
+          throw Error('GRANT_ID_COLLISION');
+      }
       s.grants.push({actor,capability,chatId,expiresAt,grantedBy:by,
-        revoked:false,...(groupScope?{chatPolicyVersion:chat!.version}:{})});
+        revoked:false,...(groupScope?
+          {chatPolicyVersion:chat!.version,grantId:grantId!}:{})});
     });
   }
   async revokeGrant(by: string, actor: string, capability: Capability, chatId: string): Promise<void> {
