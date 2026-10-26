@@ -1,3 +1,11 @@
+## v0.7.93 — fail-closed duplicate moderation IDs and impossible historical chronology
+
+Restored moderation-operation records can be individually well-formed yet **contradict** one another when an operation ID occurs more than once (including across different groups and outcomes). Before planning, adding a reason or dispatching a new restriction, the bot now requires the full stored moderation ledger to be both structurally valid and collision-free. This rule is rechecked after asynchronous Telegram rights reads and at durable STARTED and dispatch-authority boundaries. A duplicated ID in any group blocks all new moderation sanctions until independently investigated; no collision is silently repaired, dropped, or converted into a successful action.
+
+A restored INTENT bearing a provider dispatch label, or an UNKNOWN_OUTCOME owner review timestamp earlier than the operation's creation, also fails structural validation. Valid historical attempts with missing optional provenance remain supported. The offline read-only recovery report raises `MODERATION_RECOVERY_INVALID_LEDGER` rather than reporting OK on colliding IDs. Existing owner views continue quarantining ambiguous IDs while allowing review of *unrelated uniquely identified* cases.
+
+All checks were exercised against local JSON and SQLite without contacting Telegram. Live Telegram punishments remain disabled.
+
 ## v0.7.92 — safe restored moderation data, no automatic repair
 
 A restored JSON/SQLite file can be structurally readable while containing an invalid moderation-operation row (for example an unsupported status, malformed Telegram target, unknown dispatch provenance, or an impossible owner review attached to an unstarted case). Before sanction planning, local reason edits, owner review actions or read-only recovery summaries, the bot checks the entire moderation operation ledger against its supported invariants. Any malformed row causes a fail-closed block, including when the row belongs to another group or target. The owner views display a generic data-integrity warning without exposing the corrupted evidence or offering case-selection buttons.
