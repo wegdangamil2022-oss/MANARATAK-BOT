@@ -175,4 +175,26 @@ for(const engine of ['json','sqlite'] as const){
    await f.assertLocked();
   }finally{await f.close();}
  });
+
+ test(engine+' legacy audited review without review-time epoch stays visible',async()=>{
+  const f=await fixture(engine);try{
+   await f.confirm();
+   await f.store.transaction(s=>{
+    delete s.moderationOperations[0]!.review!.policyVersion;
+   });
+   const list=await f.list();
+   assert.equal(list?.keyboard.inline_keyboard.flat().filter(x=>x.callback_data.startsWith('mr:1:d:')).length,1);
+   assert.match(list?.text??'',/تمت مراجعتها/);
+  }finally{await f.close();}
+ });
+ test(engine+' later group approval epoch does not erase a correctly audited historical review',async()=>{
+  const f=await fixture(engine);try{
+   await f.confirm();
+   await f.policy.approveChat(OWNER,GROUP,['moderation']);
+   const list=await f.list();
+   assert.equal(list?.keyboard.inline_keyboard.flat().filter(x=>x.callback_data.startsWith('mr:1:d:')).length,1);
+   assert.match(list?.text??'',/تمت مراجعتها/);
+   await f.assertLocked();
+  }finally{await f.close();}
+ });
 }
