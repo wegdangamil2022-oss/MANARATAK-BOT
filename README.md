@@ -1,3 +1,11 @@
+## v0.7.94 — evidence-preserving moderation quarantine after interrupted writes
+
+When a moderation attempt's durable INTENT/STARTED record is changed, replaced or contradicted by a concurrent restore or writer, recovery now **preserves the conflicting historical row** instead of replacing its status, action or target with local assumptions. An independent `UNKNOWN_OUTCOME` recovery record locks the original intended target whenever a same-ID row no longer matches the trusted receipt. The new record receives a distinct opaque ID; no automatic retry, removal of evidence or Telegram mutation follows. An intact, uniquely identified STARTED row may safely be marked UNKNOWN without destroying independent evidence.
+
+The same append-only protection applies if a malformed unrelated record appears after the provider invocation: even a tampered original target cannot disappear from the no-retry ledger. Before any outbound request, altered INTENT payloads are quarantined without calling Telegram. This is deliberately a conservative safety lock, not a claim that a Telegram sanction was sent.
+
+Tests cover both JSON and SQLite, original and altered member targets, forged terminal statuses/actions, missing identifiers, corrupt restoration during a simulated network request and restart persistence. Live Telegram sanctions remain disconnected.
+
 ## v0.7.93 — fail-closed duplicate moderation IDs and impossible historical chronology
 
 Restored moderation-operation records can be individually well-formed yet **contradict** one another when an operation ID occurs more than once (including across different groups and outcomes). Before planning, adding a reason or dispatching a new restriction, the bot now requires the full stored moderation ledger to be both structurally valid and collision-free. This rule is rechecked after asynchronous Telegram rights reads and at durable STARTED and dispatch-authority boundaries. A duplicated ID in any group blocks all new moderation sanctions until independently investigated; no collision is silently repaired, dropped, or converted into a successful action.
