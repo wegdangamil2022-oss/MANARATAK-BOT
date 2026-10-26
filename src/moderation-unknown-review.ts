@@ -2,6 +2,7 @@ import {createHash,randomBytes} from 'node:crypto';
 import type {BotStore,BotState,ModerationOperation} from './store.js';
 import type {Policy} from './policy.js';
 import type {OwnerInlineScreen,TelegramInlineKeyboard} from './telegram-inline-owner.js';
+import {ambiguousModerationOperationIds,uniqueModerationReviewNonce} from './moderation-review-integrity.js';
 
 /** Owner-private annotation of UNKNOWN_OUTCOME. An annotation is NEVER
  * proof of delivery and MUST NOT update operation.status or permit retry.
@@ -52,10 +53,16 @@ const opDigest=(o:ModerationOperation,s:BotState)=>createHash('sha256')
   })()
  ]))
  .digest('hex').slice(0,12);
-const opList=(s:BotState)=>s.moderationOperations.filter(o=>
- o.status==='UNKNOWN_OUTCOME'&&
- s.chats.some(c=>c.id===o.chatId&&c.approved&&c.scopes.includes('moderation')))
- .sort((a,b)=>a.createdAt-b.createdAt||a.id.localeCompare(b.id));
+/** Collision in any group or terminal status blocks review of that ID.
+ * Ambiguous rows remain durable and visible as a redacted warning count.
+ */
+const opList=(s:BotState)=>{
+ const ambiguous=ambiguousModerationOperationIds(s);
+ return s.moderationOperations.filter(o=>
+  o.status==='UNKNOWN_OUTCOME'&&!ambiguous.has(o.id)&&
+  s.chats.some(c=>c.id===o.chatId&&c.approved&&c.scopes.includes('moderation')))
+  .sort((a,b)=>a.createdAt-b.createdAt||a.id.localeCompare(b.id));
+};
 const detailKey=(page:number,slot:number,d:string)=>'mr:1:d:'+page+':'+slot+':'+d;
 const previewKey=(page:number,slot:number,d:string,action:'a'|'e')=>
  'mr:1:v:'+page+':'+slot+':'+d+':'+action;
@@ -102,9 +109,14 @@ export class ModerationUnknownOwnerReview {
    rows.push([button('⏳ عرض العمليات المعلقة','mp:1:h')]);
    rows.push([button('↩️ قسم الحماية','mi:1:s:02:0'),button('🏠 لوحة المالك','mi:1:h')]);
    const pending=all.filter(o=>!o.review).length;
+   const ambiguousIds=ambiguousModerationOperationIds(s);
+   const conflicting=s.moderationOperations.filter(o=>
+    o.status==='UNKNOWN_OUTCOME'&&ambiguousIds.has(o.id)&&
+    s.chats.some(c=>c.id===o.chatId&&c.approved&&c.scopes.includes('moderation'))).length;
    return menu('<b>مراجعة العمليات مجهولة النتيجة 🛡️</b>\n'
-    +'الإجمالي: '+all.length+' · بحاجة لمراجعة: '+pending+
-    ' · تمت مراجعتها: '+(all.length-pending)+'\n'
+    +'الإجمالي القابل للعرض: '+all.length+' · بحاجة لمراجعة: '+pending+
+    ' · تمت مراجعتها: '+(all.length-pending)+
+    ' · سجلات متعارضة محجوبة: '+conflicting+'\n'
     +(all.length?'صفحة '+(route.page+1)+' من '+pages+'\n':'لا توجد عمليات مجهولة مرئية في المجموعات المعتمدة.\n')
     +'الإقرار والتصعيد توثيق محلي فقط: لا يثبتان نجاح العقوبة، ولا يزيلان منع إعادة الإرسال، ولا يفكان حظرًا أو كتمًا.',rows);
   }
@@ -136,6 +148,7 @@ export class ModerationUnknownOwnerReview {
    'owner.moderation.review.ack';
   const issued=await this.store.transaction(state=>{
    if(!this.validOwner(actor))return false;
+   if(ambiguousModerationOperationIds(state).has(op.id))return false;
    const c=state.chats.find(x=>x.id===op.chatId);
    const found=state.moderationOperations.find(x=>x.id===op.id&&x.chatId===op.chatId);
    if(!c?.approved||!c.scopes.includes('moderation')||c.version!==chat.version||
@@ -160,6 +173,7 @@ export class ModerationUnknownOwnerReview {
   const now=this.clock();
   if(!Number.isSafeInteger(now)||now<0||!this.validOwner(actor))return null;
   const completed=await this.store.transaction(state=>{
+   if(!uniqueModerationReviewNonce(state,token))return null;
    const c=state.callbacks.find(x=>x.ref===token);
    if(!c||c.revoked||c.used||!c.oneShot||c.actorId!==actor||
     c.expiresAt<=now||!c.moderationOperationId||!c.moderationOperationDigest||
@@ -168,6 +182,8 @@ export class ModerationUnknownOwnerReview {
    const chat=state.chats.find(x=>x.id===c.chatId);
    const operation=state.moderationOperations.find(x=>
     x.id===c.moderationOperationId&&x.chatId===c.chatId);
+   if(ambiguousModerationOperationIds(state).has(c.moderationOperationId))
+    return null;
    if(!chat?.approved||!chat.scopes.includes('moderation')||chat.version!==c.policyVersion||
      !operation||operation.status!=='UNKNOWN_OUTCOME'||operation.review||
      opDigest(operation,state)!==c.moderationOperationDigest||!this.validOwner(actor))return null;
