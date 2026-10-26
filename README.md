@@ -1,3 +1,13 @@
+## v0.7.99 — Quarantine ambiguous restored group approval records
+
+A restored JSON or SQLite bot database can contain two `chats` records with the same group ID, potentially with different scope grants, approval flags or policy revision numbers. Moderation owner screens must not choose the first matching record or accept any permissive match as group authorization.
+
+The owner-private `UNKNOWN_OUTCOME` review and read-only `INTENT`/`STARTED` owner inventory now quarantine **all moderation attempts belonging to any duplicated group ID**, including byte-identical duplicates. Existing evidence is untouched. The owner sees only **redacted aggregate counts** of affected cases, never their member IDs, original evidence or private callback selectors. Unrelated unique approved groups remain visible.
+
+For `UNKNOWN_OUTCOME`, this is checked again inside the durable transaction before minting a new owner callback nonce and before consuming a pre-existing nonce and recording a local review. Old detail callbacks and tokens minted before an ambiguous database restore fail closed without being consumed; no audit receipt or review annotation is written. The pending screen stays strictly read-only.
+
+This adds defense-in-depth to the owner triage paths. It does **not** claim all other chat authorization paths are covered. Local owner review is not proof of provider execution; `UNKNOWN_OUTCOME` remains blocked from automatic retry, and live Telegram ban/mute functions are not activated.
+
 ## v0.7.98 — Legacy owner-review evidence trust shown separately
 
 Restored `UNKNOWN_OUTCOME` moderation reviews created before v0.7.97 can have a valid local audit annotation **without** the immutable SHA-256 evidence binding on both the operation and audit row. They must not be presented as equivalent to a newer, evidence-bound local review. Equally, a v0.7.97 review whose **both** digest fields disappear during restoration must not silently regain a green evidence-verified status.
