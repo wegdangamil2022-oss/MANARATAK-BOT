@@ -1,3 +1,9 @@
+## v0.7.90 — owner review links expire when group policy changes
+
+The owner-only review screens for uncertain moderation operations use short, non-authorizing stale-route digests. Previous Telegram buttons are now rejected if the moderated group is revoked and reapproved, reapproved with the same scopes under a new policy revision, or changes membership in the moderation scope; they are also rejected if the locally recorded transport provenance of the sanction attempt changes. This prevents replay of a previous review link to mint a **new** confirmation nonce under newer approval settings. Existing confirmation nonces already require the matching group revision, operation and one-shot owner authorization.
+
+The operation outcome remains `UNKNOWN_OUTCOME` even after a valid acknowledgement/escalation. This fix affects *owner review navigation and evidence integrity only*, with no live Telegram sanction connection or permission to retry or reverse actions.
+
 ## v0.7.89 — owner pending moderation cases (read-only)
 
 In the Telegram owner-private control panel, open **🛡️ الحماية والعقوبات → ⚖️ العقوبات والأعضاء**, then choose **⏳ عرض العمليات المعلقة**. This owner-only view shows locally recorded `INTENT` and `STARTED` operations for currently approved moderation groups, with eight entries per page. Tap one for the kind, stage and age classification. The screen shows no member/actor IDs or evidence, makes no network calls, and has **no** retry, acknowledge, confirm, cancel, ban or unmute buttons. It only reads the existing database. The `UNKNOWN_OUTCOME` manual owner review remains on the original screen.
