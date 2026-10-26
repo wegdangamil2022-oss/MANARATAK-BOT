@@ -71,6 +71,9 @@ export function inspectModerationLedgerIntegrity(
    op.policyVersion<1||
    typeof op.status!=='string'||!statuses.has(op.status)||
    !isSafeTime(op.createdAt)||
+   // A newly reserved INTENT cannot carry a provider label: it has not
+   // crossed the durable STARTED dispatch boundary.
+   (op.status==='INTENT'&&op.attemptGateway!==undefined)||
    (op.attemptGateway!==undefined&&
     (typeof op.attemptGateway!=='string'||!gateways.has(op.attemptGateway)));
   if(invalid){malformedRows++;continue;}
@@ -82,10 +85,26 @@ export function inspectModerationLedgerIntegrity(
    if(op.status!=='UNKNOWN_OUTCOME'||
       (review.decision!=='ACKNOWLEDGED_UNRESOLVED'&&review.decision!=='ESCALATED')||
       typeof review.reviewedBy!=='string'||!user.test(review.reviewedBy)||
-      !isSafeTime(review.reviewedAt)){
+      !isSafeTime(review.reviewedAt)||
+      (typeof op.createdAt==='number'&&review.reviewedAt<op.createdAt)){
     malformedRows++;
    }
   }
  }
  return {valid:malformedRows===0,malformedRows};
+}
+
+/** A structurally valid restored ledger can still contain two individually
+ * valid rows with the SAME durable operation ID. Dispatch and clean recovery
+ * must fail closed globally: target-based filtering and find(id) can otherwise
+ * select conflicting evidence. Owner review may continue isolating only the
+ * colliding IDs via ambiguousModerationOperationIds.
+ *
+ * This check is read-only, has no identifier output and must be repeated at
+ * each durable mutation and async authority-check boundary.
+ */
+export function moderationLedgerSafeForDispatch(
+ state:Pick<BotState,'moderationOperations'>):boolean{
+ return inspectModerationLedgerIntegrity(state).valid&&
+  ambiguousModerationOperationIds(state).size===0;
 }
