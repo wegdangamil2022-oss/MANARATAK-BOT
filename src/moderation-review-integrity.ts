@@ -89,7 +89,7 @@ export function inspectModerationLedgerIntegrity(
       !isSafeTime(review.reviewedAt)||
       (review.policyVersion!==undefined&&
        (typeof review.policyVersion!=='number'||
-        !Number.isSafeInteger(review.policyVersion)||review.policyVersion<op.policyVersion))||
+        !Number.isSafeInteger(review.policyVersion)||review.policyVersion<(op.policyVersion as number)))||
       (typeof op.createdAt==='number'&&typeof review.reviewedAt==='number'&&
        review.reviewedAt<op.createdAt)){
     malformedRows++;
