@@ -210,9 +210,31 @@ export class ModerationService {
     });
     if(candidate.status==='RATE_LIMIT')return {status:'DENIED',reason:candidate.reason};
     if (candidate.status !== 'READY') return { status: candidate.status, reason: 'NO_SAFE_DISPATCH' };
-    if (this.beforeDispatch) await this.beforeDispatch();
+    // Until STARTED has been durably reserved, setRestriction is unreachable.
+    // Exceptions from the test-only hook or from read-only bot/target preflight
+    // can therefore be classified as a confirmed local NO-SEND. We still
+    // verify the original INTENT atomically: if another worker changed or
+    // removed it, we cannot trust that worker's activity, so quarantine.
+    let rights:boolean;
+    try{
+      if(this.beforeDispatch)await this.beforeDispatch();
+      rights=await this.gateway.canRestrict(chatId,memberId)&&
+        !await this.gateway.isProtected(chatId,memberId);
+    }catch{
+      const stopped=await this.store.transaction(s=>{
+        const op=s.moderationOperations.find(x=>x.id===candidate.id);
+        if(!op||op.status!=='INTENT'||!sameModerationAttempt(op,candidate.intent)){
+          quarantineModerationAttempt(s,candidate.intent);
+          return 'BLOCKED_UNKNOWN' as const;
+        }
+        op.status='CANCELLED';
+        return 'CANCELLED' as const;
+      });
+      return stopped==='CANCELLED'?
+        {status:'DENIED',reason:'PREFLIGHT_ABORTED_NO_SEND'}:
+        {status:'BLOCKED_UNKNOWN',reason:'LEDGER_CHANGED_BEFORE_DISPATCH'};
+    }
     // Don't pre-mark effects. Verify both external rights and internal policy immediately before STARTED.
-    const rights = await this.gateway.canRestrict(chatId, memberId) && !await this.gateway.isProtected(chatId, memberId);
     const started = await this.store.transaction(s => {
       const op = s.moderationOperations.find(x => x.id === candidate.id);
       // A concurrent process may alter or replace the original intent while
