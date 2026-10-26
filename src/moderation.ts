@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { BotStore, type BotState, type ModerationReason, type ModerationOperation, type RestrictionKind, type ModerationDispatchGateway } from './store.js';
 import { Policy } from './policy.js';
 import {moderationRateFuse,moderationRateDenial} from './moderation-rate-fuse.js';
-import {inspectModerationLedgerIntegrity} from './moderation-review-integrity.js';
+import {moderationLedgerSafeForDispatch} from './moderation-review-integrity.js';
 import {TelegramBotApiModerationGateway} from './telegram-moderation-gateway.js';
 
 export type RestrictionOutcome = 'CONFIRMED' | 'FAILED_CONFIRMED' | 'UNKNOWN_OUTCOME';
@@ -83,7 +83,7 @@ export class ModerationService {
     // Corrupt/unsupported restored statuses must NEVER be interpreted as a
     // terminal successful or failed sanction. Quarantine dispatch globally,
     // including if corruption affects another member or group.
-    if(!inspectModerationLedgerIntegrity(s).valid)
+    if(!moderationLedgerSafeForDispatch(s))
       return {status:'BLOCKED_UNKNOWN',reason:'NO_SAFE_DISPATCH'};
     const ops=s.moderationOperations.filter(o=>byTarget(o,chatId,memberId));
     if(ops.some(o=>o.status==='UNKNOWN_OUTCOME'))
@@ -107,6 +107,9 @@ export class ModerationService {
   private async closePrestartedIntent(original:ModerationOperation):
     Promise<'CANCELLED'|'BLOCKED_UNKNOWN'>{
     return this.store.transaction(s=>{
+      // A restored collision must not let closeout mutate whichever row
+      // happens to be first in the array.
+      if(!moderationLedgerSafeForDispatch(s))return 'BLOCKED_UNKNOWN' as const;
       const op=s.moderationOperations.find(x=>x.id===original.id);
       if(!op||op.status!=='INTENT'||!sameModerationAttempt(op,original)){
         quarantineModerationAttempt(s,original);
@@ -256,7 +259,7 @@ export class ModerationService {
       started=await this.store.transaction(s => {
       // A parallel restore can introduce invalid evidence after all earlier
       // checks. Reject even the STARTED reservation: no provider mutation.
-      if(!inspectModerationLedgerIntegrity(s).valid)
+      if(!moderationLedgerSafeForDispatch(s))
         return {status:'BLOCKED_UNKNOWN' as const};
       const op = s.moderationOperations.find(x => x.id === candidate.id);
       // A concurrent process may alter or replace the original intent while
@@ -302,7 +305,7 @@ export class ModerationService {
       try{
         const s=await this.store.snapshot();
         const op=s.moderationOperations.find(x=>x.id===candidate.id);
-        return inspectModerationLedgerIntegrity(s).valid&&
+        return moderationLedgerSafeForDispatch(s)&&
           op?.status==='STARTED'&&sameModerationAttempt(op,started.receipt)&&
           this.authorized(s,actorId,chatId,memberId)&&
           (!stillCurrent||stillCurrent(s))&&
@@ -322,7 +325,7 @@ export class ModerationService {
        outcome!=='UNKNOWN_OUTCOME')outcome='UNKNOWN_OUTCOME';
     const final=await this.store.transaction(s=>{
       const op=s.moderationOperations.find(x=>x.id===candidate.id);
-      if(!inspectModerationLedgerIntegrity(s).valid){
+      if(!moderationLedgerSafeForDispatch(s)){
         // Dispatch may have already happened; only retain uncertainty for
         // our original receipt, and never overwrite unrelated corrupt rows.
         if(op&&sameModerationAttempt(op,started.receipt))
