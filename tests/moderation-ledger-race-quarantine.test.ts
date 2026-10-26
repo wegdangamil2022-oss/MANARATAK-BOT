@@ -41,7 +41,10 @@ for(const engine of ['json','sqlite'] as const){
     const result=await f.service.addManualReason(OWNER,CHAT,TARGET,'case','BAN');
     assert.equal(result.status,'BLOCKED_UNKNOWN');
     assert.equal(f.sends(),1);
-    const op=(await f.store.snapshot()).moderationOperations.at(-1)!;
+    const ops=(await f.store.snapshot()).moderationOperations;
+    assert.equal(ops.length,2,'preserve raced terminal evidence and append recovery');
+    assert.equal(ops[0]!.status,raced);
+    const op=ops.at(-1)!;
     assert.equal(op.status,'UNKNOWN_OUTCOME');
     assert.equal(op.kind,'BAN');
     assert.equal(op.memberId,TARGET);
@@ -58,8 +61,11 @@ for(const engine of ['json','sqlite'] as const){
   try{
    const result=await f.service.addManualReason(OWNER,CHAT,TARGET,'case','BAN');
    assert.equal(result.status,'BLOCKED_UNKNOWN');
-   const op=(await f.store.snapshot()).moderationOperations.at(-1)!;
-   assert.equal(op.kind,'BAN','original target action must not be replaced');
+   const ops=(await f.store.snapshot()).moderationOperations;
+   assert.equal(ops.length,2);
+   assert.equal(ops[0]!.kind,'MUTE','never destroy the contradicted action');
+   const op=ops.at(-1)!;
+   assert.equal(op.kind,'BAN','the original target must stay quarantined');
    assert.equal(op.status,'UNKNOWN_OUTCOME');
    assert.equal((await f.service.reconcile(OWNER,CHAT,TARGET)).status,'BLOCKED_UNKNOWN');
    assert.equal(f.sends(),1);
@@ -84,10 +90,14 @@ for(const engine of ['json','sqlite'] as const){
     op.kind='MUTE';
    });};
    const result=await f.service.addManualReason(OWNER,CHAT,TARGET,'case','BAN');
-   assert.equal(result.status,'DENIED');
+   assert.equal(result.status,'BLOCKED_UNKNOWN');
    assert.equal(f.sends(),0);
-   const op=(await f.store.snapshot()).moderationOperations.at(-1)!;
-   assert.equal(op.status,'CANCELLED');
+   const rows=(await f.store.snapshot()).moderationOperations;
+   assert.equal(rows.length,2);
+   assert.equal(rows[0]!.status,'INTENT');
+   assert.equal(rows[0]!.kind,'MUTE');
+   assert.equal(rows[1]!.status,'UNKNOWN_OUTCOME');
+   assert.equal(rows[1]!.kind,'BAN');
   }finally{await f.close();}
  });
  test(engine+' altered INTENT status never starts or sends a forged confirmed operation',async()=>{
