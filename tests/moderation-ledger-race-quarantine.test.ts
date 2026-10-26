@@ -104,3 +104,54 @@ for(const engine of ['json','sqlite'] as const){
   }finally{await f.close();}
  });
 }
+
+for(const engine of ['json','sqlite'] as const){
+ test(engine+' restores UNKNOWN_OUTCOME receipt when STARTED row disappears during remote await',async()=>{
+  const f=await fixture(engine,store=>async()=>{
+   await store.transaction(s=>{s.moderationOperations=[];});
+   return 'CONFIRMED';
+  });
+  try{
+   const result=await f.service.addManualReason(OWNER,CHAT,TARGET,'case','BAN');
+   assert.equal(result.status,'BLOCKED_UNKNOWN');
+   const ops=(await f.store.snapshot()).moderationOperations;
+   assert.equal(ops.length,1);
+   assert.equal(ops[0]!.status,'UNKNOWN_OUTCOME');
+   assert.equal(ops[0]!.chatId,CHAT);
+   assert.equal(ops[0]!.memberId,TARGET);
+   assert.equal(ops[0]!.kind,'BAN');
+   assert.equal((await f.service.reconcile(OWNER,CHAT,TARGET)).status,'BLOCKED_UNKNOWN');
+   assert.equal(f.sends(),1);
+  }finally{await f.close();}
+ });
+ test(engine+' restores blocked original target if another actor rewrites STARTED member ID',async()=>{
+  const f=await fixture(engine,store=>async()=>{
+   await store.transaction(s=>{s.moderationOperations.at(-1)!.memberId='301';});
+   return 'FAILED_CONFIRMED';
+  });
+  try{
+   const answer=await f.service.addManualReason(OWNER,CHAT,TARGET,'case','MUTE');
+   assert.equal(answer.status,'BLOCKED_UNKNOWN');
+   const op=(await f.store.snapshot()).moderationOperations.at(-1)!;
+   assert.equal(op.memberId,TARGET);
+   assert.equal(op.kind,'MUTE');
+   assert.equal(op.status,'UNKNOWN_OUTCOME');
+   assert.equal((await f.service.reconcile(OWNER,CHAT,TARGET)).status,'BLOCKED_UNKNOWN');
+   assert.equal(f.sends(),1);
+  }finally{await f.close();}
+ });
+ test(engine+' vanished INTENT does not issue a sanction and reserves the original case',async()=>{
+  const f=await fixture(engine,_store=>async()=>{throw Error('must not send');});
+  try{
+   f.service.beforeDispatch=async()=>{
+    await f.store.transaction(s=>{s.moderationOperations=[];});
+   };
+   const answer=await f.service.addManualReason(OWNER,CHAT,TARGET,'case','BAN');
+   assert.equal(answer.status,'BLOCKED_UNKNOWN');
+   assert.equal(f.sends(),0);
+   const op=(await f.store.snapshot()).moderationOperations.at(-1)!;
+   assert.equal(op.status,'UNKNOWN_OUTCOME');
+   assert.equal(op.memberId,TARGET);
+  }finally{await f.close();}
+ });
+}
