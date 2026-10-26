@@ -1,3 +1,12 @@
+## 0.7.87 — 2026-10-26 — distinguish confirmed pre-STARTED no-send from uncertain post-STARTED delivery
+
+- Fixed a stranded moderation `INTENT`: errors from an awaited test-only `beforeDispatch` hook, `canRestrict` or `isProtected` preflight, or local policy verification during the STARTED reservation transaction previously propagated and could leave an unresolved INTENT indefinitely, even though the mutating `setRestriction` gateway had never been called.
+- The service now catches those strictly **pre-STARTED** failures and atomically confirms the original INTENT identity. An unchanged INTENT becomes `CANCELLED` with `DENIED / PREFLIGHT_ABORTED_NO_SEND`; no outbound request, retry, new attempt, or simulated confirmation occurs. Existing active local reasons remain as recorded and are not silently discarded.
+- If another writer removed the row or changed its immutable identity/status, the service does **not** certify a no-send. It restores/quarantines the original operation as `UNKNOWN_OUTCOME` and returns `BLOCKED_UNKNOWN`; this conservative state may require owner review even when the local test itself made no send.
+- Errors **after STARTED** remain `UNKNOWN_OUTCOME`, never converted to `FAILED_CONFIRMED` or automatically retried. Token strings, provider errors and internal exception details never appear in the public result.
+- Added **18 regression tests** for JSON/SQLite covering prestart hook failures, bot-rights and target lookups, throwing reservation-time policy checks, immutable-vs-raced INTENT, erased/terminalized records, persistence after restart, and contrast with an ambiguous after-STARTED outbound throw.
+- **Boundary:** “no send” is proven only within the service's pre-STARTED execution boundary while the original row is unchanged. It is not a Telegram receipt or a general statement about other workers. A crashed process with a stranded STARTED record remains unresolved and must not be retried blindly. Production still uses `FakeModerationGateway`; no live moderation has been enabled.
+
 ## 0.7.86 — 2026-10-26 — quarantine moderation state drift during awaited Telegram responses
 
 - Fixed a durable state conflict: `ModerationService.reconcile` could send a sanction with a mutated `kind` if someone changed the persisted `INTENT` after authorization; an out-of-order response could overwrite `CANCELLED`, `CONFIRMED` or `UNKNOWN_OUTCOME` with a fresh success, or throw instead of preserving a safe unknown outcome.
