@@ -36,6 +36,21 @@ export function ambiguousModerationOperationIds(
  return ambiguous;
 }
 
+/** Duplicate restored group approval records are not a source of
+ * authority. Even two byte-identical Chat rows are ambiguous: a restore
+ * cannot prove which permission epoch should govern this action.
+ * Quarantine only the affected chat IDs; do not rewrite or collapse rows.
+ */
+export function ambiguousModerationChatIds(
+ state:Pick<BotState,'chats'>):ReadonlySet<string>{
+ const seen=new Set<string>(),ambiguous=new Set<string>();
+ for(const chat of state.chats){
+  if(seen.has(chat.id))ambiguous.add(chat.id);
+  seen.add(chat.id);
+ }
+ return ambiguous;
+}
+
 /** A review confirmation nonce is actionable only if exactly one stored
  * callback has the reference. This is checked in the same transaction as
  * committing the owner annotation and consuming the nonce.
