@@ -281,3 +281,111 @@ for(const engine of ['json','sqlite'] as const){
   }finally{await f.close();}
  });
 }
+
+for(const engine of ['json','sqlite'] as const){
+ test(engine+' does not display owner review selectors for duplicate operation IDs in the same group',async()=>{
+  const f=await fixture(engine);try{
+   await f.store.transaction(s=>s.moderationOperations.push({
+    ...s.moderationOperations[0]!,memberId:'399'
+   }));
+   const list=await f.app().handle(cb(200,100,'mr:1:h'));
+   assert.equal(list.status,'APPLIED');
+   assert.equal(buttons(list).some(x=>x.callback_data.startsWith('mr:1:d:')),false);
+   assert.match(list.plan?.text??'',/تعارض|ملتبسة|مكررة/);
+   assert.doesNotMatch(list.plan?.text??'',/399|case-01|secret-target-fingerprint/);
+   const s=await f.store.snapshot();
+   assert.equal(s.moderationOperations.length,2);
+   assert.ok(s.moderationOperations.every(o=>o.status==='UNKNOWN_OUTCOME'&&!o.review));
+  }finally{await f.close();}
+ });
+ test(engine+' operation identifier collision across groups also blocks owner review selection',async()=>{
+  const f=await fixture(engine);try{
+   await f.store.transaction(s=>s.moderationOperations.push({
+    ...s.moderationOperations[0]!,chatId:'-100789',memberId:'399'
+   }));
+   const list=await f.app().handle(cb(210,100,'mr:1:h'));
+   assert.equal(list.status,'APPLIED');
+   assert.equal(buttons(list).some(x=>x.callback_data.startsWith('mr:1:d:')),false);
+   assert.match(list.plan?.text??'',/تعارض|ملتبسة|مكررة/);
+  }finally{await f.close();}
+ });
+ test(engine+' duplicate operation after listing invalidates old UNKNOWN owner detail',async()=>{
+  const f=await fixture(engine);try{
+   const list=await f.app().handle(cb(220,100,'mr:1:h'));
+   const detail=select(list,'mr:1:d:');
+   await f.store.transaction(s=>s.moderationOperations.push({
+    ...s.moderationOperations[0]!,memberId:'399',status:'CONFIRMED'
+   }));
+   assert.equal((await f.app().handle(cb(221,100,detail))).status,'DENIED');
+  }finally{await f.close();}
+ });
+ test(engine+' duplicate operation after preview never issues a review nonce',async()=>{
+  const f=await fixture(engine);try{
+   const list=await f.app().handle(cb(230,100,'mr:1:h'));
+   const details=await f.app().handle(cb(231,100,select(list,'mr:1:d:')));
+   const preview=select(details,'mr:1:v:');
+   await f.store.transaction(s=>s.moderationOperations.push({
+    ...s.moderationOperations[0]!,memberId:'399'
+   }));
+   const before=(await f.store.snapshot()).callbacks.length;
+   assert.equal((await f.app().handle(cb(232,100,preview))).status,'DENIED');
+   const state=await f.store.snapshot();
+   assert.equal(state.callbacks.length,before);
+   assert.ok(state.moderationOperations.every(o=>!o.review));
+  }finally{await f.close();}
+ });
+ test(engine+' ambiguous operation created after nonce issuance blocks atomic confirmation',async()=>{
+  const f=await fixture(engine);try{
+   const list=await f.app().handle(cb(240,100,'mr:1:h'));
+   const details=await f.app().handle(cb(241,100,select(list,'mr:1:d:')));
+   const preview=await f.app().handle(cb(242,100,select(details,'mr:1:v:')));
+   const token=select(preview,'c_');
+   await f.store.transaction(s=>s.moderationOperations.push({
+    ...s.moderationOperations[0]!,memberId:'399'
+   }));
+   assert.equal((await f.app().handle(cb(243,100,token))).status,'DENIED');
+   const state=await f.store.snapshot();
+   assert.equal(state.callbacks.find(x=>x.ref===token)?.used,false);
+   assert.ok(state.moderationOperations.every(o=>!o.review));
+   assert.equal(state.audit.some(x=>x.reason==='MODERATION_UNKNOWN_OWNER_ACKNOWLEDGED'),false);
+  }finally{await f.close();}
+ });
+ test(engine+' duplicate callback confirmation token cannot perform owner review',async()=>{
+  const f=await fixture(engine);try{
+   const list=await f.app().handle(cb(250,100,'mr:1:h'));
+   const details=await f.app().handle(cb(251,100,select(list,'mr:1:d:')));
+   const preview=await f.app().handle(cb(252,100,select(details,'mr:1:v:')));
+   const token=select(preview,'c_');
+   await f.store.transaction(s=>{
+    const old=s.callbacks.find(x=>x.ref===token)!;
+    s.callbacks.push({...old,used:true});
+   });
+   assert.equal((await f.app().handle(cb(253,100,token))).status,'DENIED');
+   const state=await f.store.snapshot();
+   assert.equal(state.moderationOperations[0]!.review,undefined);
+   assert.equal(state.callbacks.filter(x=>x.ref===token&&!x.used).length,1);
+  }finally{await f.close();}
+ });
+ test(engine+' other noncolliding UNKNOWN cases remain reviewable while duplicate evidence is quarantined',async()=>{
+  const f=await fixture(engine);try{
+   await f.store.transaction(s=>{
+    s.moderationOperations.push({...s.moderationOperations[0]!,memberId:'399'});
+    s.moderationOperations.push({...s.moderationOperations[0]!,
+     id:'safe-unique-operation',memberId:'388'});
+   });
+   const list=await f.app().handle(cb(260,100,'mr:1:h'));
+   assert.equal(buttons(list).filter(x=>x.callback_data.startsWith('mr:1:d:')).length,1);
+   assert.match(list.plan?.text??'',/تعارض|ملتبسة|مكررة/);
+   const details=await f.app().handle(cb(261,100,select(list,'mr:1:d:')));
+   assert.equal(details.status,'APPLIED');
+   const preview=await f.app().handle(cb(262,100,select(details,'mr:1:v:')));
+   assert.equal(preview.status,'APPLIED');
+   assert.equal((await f.app().handle(cb(263,100,select(preview,'c_')))).status,'APPLIED');
+   const state=await f.store.snapshot();
+   assert.equal(state.moderationOperations.filter(x=>x.id==='case-01').length,2);
+   assert.ok(state.moderationOperations.filter(x=>x.id==='case-01').every(x=>!x.review));
+   assert.equal(state.moderationOperations.find(x=>x.id==='safe-unique-operation')?.review?.decision,
+    'ACKNOWLEDGED_UNRESOLVED');
+  }finally{await f.close();}
+ });
+}
