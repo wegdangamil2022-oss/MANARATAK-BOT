@@ -1,3 +1,9 @@
+## v0.7.89 — owner pending moderation cases (read-only)
+
+In the Telegram owner-private control panel, open **🛡️ الحماية والعقوبات → ⚖️ العقوبات والأعضاء**, then choose **⏳ عرض العمليات المعلقة**. This owner-only view shows locally recorded `INTENT` and `STARTED` operations for currently approved moderation groups, with eight entries per page. Tap one for the kind, stage and age classification. The screen shows no member/actor IDs or evidence, makes no network calls, and has **no** retry, acknowledge, confirm, cancel, ban or unmute buttons. It only reads the existing database. The `UNKNOWN_OUTCOME` manual owner review remains on the original screen.
+
+A crash can occur between writing `INTENT`, marking `STARTED` and receiving a remote answer. Neither a pre-dispatch status nor a stale case gives permission to retry or clear the ledger; any apparent Telegram delivery must be verified independently by the owner in a controlled process. The production bot still does not run live sanctions.
+
 ## v0.7.88 — offline moderation crash-recovery health check
 
 A local operator can inspect durable moderation state **without Telegram credentials, network access or writes**:
