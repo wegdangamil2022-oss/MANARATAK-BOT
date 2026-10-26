@@ -58,8 +58,8 @@ test('T12-01..03 owner/staff/all group mention policy is independent, and AI sta
     await s.policy.configureGroupAI('100', '-10', 'OWNER_MENTION');
     assert.equal(s.policy.mayAskGroup(await s.store.snapshot(), '-10', '200', true), false);
     assert.equal(s.policy.mayAskGroup(await s.store.snapshot(), '-10', '100', true), true);
-    await s.policy.grant('100', '201', 'ai.ask', '-10', 9_000);
     await s.policy.configureGroupAI('100', '-10', 'STAFF_MENTION');
+    await s.policy.grant('100', '201', 'ai.ask', '-10', 9_000);
     assert.equal(s.policy.mayAskGroup(await s.store.snapshot(), '-10', '201', true), true);
     assert.equal(s.policy.has(await s.store.snapshot(), '201', 'content.publish', '-10', 1_000), false);
     await s.policy.configureGroupAI('100', '-10', 'ALL_MENTION');
@@ -86,6 +86,7 @@ test('T12-05 private AI toggle does not disable owner dashboard, verification or
 test('T12-02 scoped nondelegating grants prevent self-grant, elevation and scope bleed', async () => {
   const s = await setup();
   try {
+    await s.policy.approveChat('100','-10',['assistant']);
     await s.policy.grant('100', '201', 'ai.ask', '-10', 2_000);
     await assert.rejects(s.policy.grant('201', '201', 'content.publish', '-10', 3_000));
     await assert.rejects(s.policy.grant('201', '202', 'ai.ask', '-10', 3_000));

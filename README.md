@@ -1,3 +1,10 @@
+## v0.7.102 — Group staff privileges cannot silently revive after reapproval
+
+Group-scoped delegated capability grants now persist the approval revision at issuance (chatPolicyVersion). A group grant is actionable only when the restored approval record is unique, approved, and retains the exact safe-integer chat revision. Revoke/reapprove cycles, changes to group scopes, and AI-policy updates invalidate old grants even if a duplicate approval was manually removed after a restore.
+
+Pre-v0.7.102 group grants missing an issuance revision stay durable but fail closed: the bot cannot know what group-policy epoch originally authorized them. The owner can explicitly grant the same staff member new authority against the current unique approved group epoch, keeping the older stale grant unmodified. Two active grants for the same current epoch are still prohibited.
+
+Private/user-scoped capabilities retain historical semantics. Unrelated unique groups remain operational. All checks are local epoch consistency, not tamper-evident cryptographic proof; protect database files and backup provenance. UNKNOWN_OUTCOME sanctions remain non-retryable and live Telegram ban/mute remains disabled.
 ## v0.7.101 — Shared group-policy authorization refuses ambiguous restored approvals
 
 The `Policy` authority layer now permits group actions only when a restored group has exactly **one** approval row. Earlier moderation-specific quarantine checks already protected owner review and sanction dispatch; this release fixes the shared source used for navigation, educational resources, group AI, verification/subscriptions, publishing and other group-scoped services.

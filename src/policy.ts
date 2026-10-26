@@ -12,7 +12,18 @@ export class Policy {
     if(chatId.startsWith('-')&&!this.uniqueChat(s,chatId)&&
        s.chats.some(c=>c.id===chatId))return false;
     if (this.isOwner(actor)) return true;
-    return s.grants.some(g => g.actor === actor && g.capability === capability && g.chatId === chatId && !g.revoked && g.expiresAt > now);
+    const chatIsGroup=chatId.startsWith('-');
+    const chat=chatIsGroup?this.uniqueChat(s,chatId):undefined;
+    // A prior grant is not a durable right to regain authority after
+    // group revocation, reapproval, scope mutation or a restored cleanup.
+    // Legacy group grants without an issuing approval revision fail closed.
+    if(chatIsGroup&&(!chat?.approved||!Number.isSafeInteger(chat.version)||
+      chat.version<1))return false;
+    return s.grants.some(g=>g.actor===actor&&g.capability===capability&&
+      g.chatId===chatId&&!g.revoked&&g.expiresAt>now&&
+      (!chatIsGroup||(typeof g.chatPolicyVersion==='number'&&
+        Number.isSafeInteger(g.chatPolicyVersion)&&
+        g.chatPolicyVersion===chat!.version)));
   }
   private requireOwner(actor: string): void { if (!this.isOwner(actor)) throw new Error('OWNER_ONLY'); }
   /** Restore-safe unique group record lookup. Never select the first, last
@@ -265,10 +276,19 @@ export class Policy {
     await this.store.transaction(s => {
       // Delegation is OFF in B1: no recursive grants, even if staff has this capability.
       if (!this.isOwner(by)) throw new Error('Grant requires owner');
-      if(chatId.startsWith('-'))this.assertUniqueChatRecord(s,chatId);
-      const existing = s.grants.find(g => g.actor === actor && g.capability === capability && g.chatId === chatId && !g.revoked);
-      if (existing) throw new Error('Grant already exists');
-      s.grants.push({ actor, capability, chatId, expiresAt, grantedBy: by, revoked: false });
+      const groupScope=chatId.startsWith('-');
+      const chat=groupScope?this.assertUniqueChatRecord(s,chatId):undefined;
+      if(groupScope&&(!chat?.approved||!Number.isSafeInteger(chat.version)||
+        chat.version<1))throw Error('GROUP_NOT_APPROVED');
+      // Historical stale grants remain preserved as evidence, not mutated
+      // or silently revived. Only a duplicate current-epoch grant blocks
+      // the owner explicitly issuing fresh authority for this epoch.
+      const existing=s.grants.find(g=>g.actor===actor&&
+        g.capability===capability&&g.chatId===chatId&&!g.revoked&&
+        (!groupScope||g.chatPolicyVersion===chat!.version));
+      if(existing)throw new Error('Grant already exists');
+      s.grants.push({actor,capability,chatId,expiresAt,grantedBy:by,
+        revoked:false,...(groupScope?{chatPolicyVersion:chat!.version}:{})});
     });
   }
   async revokeGrant(by: string, actor: string, capability: Capability, chatId: string): Promise<void> {
