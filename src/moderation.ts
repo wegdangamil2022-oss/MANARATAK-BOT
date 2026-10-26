@@ -34,6 +34,27 @@ const fingerprint = (s: BotState, chatId: string, memberId: string): string =>
   JSON.stringify(s.moderationReasons.filter(x => byTarget(x, chatId, memberId) && x.active)
     .map(x => [x.source, x.reference, x.kind]).sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b))));
 
+/** Match a durable operation's immutable dispatch identity. Terminal status
+ * or owner review metadata is not evidence that a different payload may be
+ * sent. Never take the outbound kind from a mutable post-INTENT snapshot.
+ */
+function sameModerationAttempt(a:ModerationOperation,b:ModerationOperation):boolean{
+ return a.id===b.id&&a.chatId===b.chatId&&a.memberId===b.memberId&&
+  a.actorId===b.actorId&&a.kind===b.kind&&
+  a.reasonFingerprint===b.reasonFingerprint&&
+  a.policyVersion===b.policyVersion&&a.createdAt===b.createdAt&&
+  a.attemptGateway===b.attemptGateway;
+}
+/** On contradictory ledger evidence, preserve a durable UNKNOWN_OUTCOME on
+ * the ORIGINAL group/member. A remote request may already have been sent;
+ * neither a late success nor someone else's terminal edit is reliable proof.
+ */
+function quarantineModerationAttempt(s:BotState,original:ModerationOperation):void{
+ const current=s.moderationOperations.find(o=>o.id===original.id);
+ if(current)Object.assign(current,{...original,status:'UNKNOWN_OUTCOME'});
+ else s.moderationOperations.push({...original,status:'UNKNOWN_OUTCOME'});
+}
+
 /** B2-Core simulation: no automatic Telegram mutations outside a fake gateway. */
 export class ModerationService {
   /** Test-only hook models policy revocation after an intent has been written. */
@@ -185,7 +206,7 @@ export class ModerationService {
       }
       const op: ModerationOperation = { id: randomUUID(), chatId, memberId, actorId, kind: desired, reasonFingerprint: fingerprint(s, chatId, memberId), policyVersion: this.policy.chatRevision(s, chatId), status: 'INTENT', createdAt: this.clock() };
       s.moderationOperations.push(op);
-      return { status: 'READY' as const, id: op.id };
+      return { status: 'READY' as const, id: op.id, intent:{...op} };
     });
     if(candidate.status==='RATE_LIMIT')return {status:'DENIED',reason:candidate.reason};
     if (candidate.status !== 'READY') return { status: candidate.status, reason: 'NO_SAFE_DISPATCH' };
@@ -193,33 +214,42 @@ export class ModerationService {
     // Don't pre-mark effects. Verify both external rights and internal policy immediately before STARTED.
     const rights = await this.gateway.canRestrict(chatId, memberId) && !await this.gateway.isProtected(chatId, memberId);
     const started = await this.store.transaction(s => {
-      const op = s.moderationOperations.find(x => x.id === candidate.id)!;
+      const op = s.moderationOperations.find(x => x.id === candidate.id);
+      // A concurrent process may alter or replace the original intent while
+      // remote reads are pending. Do not dispatch a forged/new sanction kind.
+      if(!op||op.status!=='INTENT'){
+        quarantineModerationAttempt(s,candidate.intent);
+        return {status:'BLOCKED_UNKNOWN' as const};
+      }
+      if(!sameModerationAttempt(op,candidate.intent)){
+        op.status='CANCELLED';
+        return {status:'DENIED' as const};
+      }
       const valid = rights && this.authorized(s, actorId, chatId, memberId) &&
         (!stillCurrent||stillCurrent(s)) &&
-        this.policy.chatRevision(s, chatId) === op.policyVersion && fingerprint(s, chatId, memberId) === op.reasonFingerprint;
-      if (!valid) { op.status = 'CANCELLED'; return false; }
-      // Durable local provenance hint recorded only if a dispatch is actually
-      // about to be attempted. A fake success must never look like Telegram
-      // proof. Unknown adapters are quarantined, not inferred.
-      // Never trust a caller-supplied transport label: only the nominal,
-      // unmodified official adapter can claim an attempted Telegram API call.
-      // This remains a local attempt hint, NOT evidence of remote authorship.
+        this.policy.chatRevision(s, chatId) === op.policyVersion &&
+        fingerprint(s, chatId, memberId) === op.reasonFingerprint;
+      if (!valid) { op.status = 'CANCELLED'; return {status:'DENIED' as const}; }
+      // The attempt label is a local provenance hint, not remote proof.
       op.attemptGateway=TelegramBotApiModerationGateway.usesOfficialDispatch(this.gateway)?
         'TELEGRAM_API':this.gateway instanceof FakeModerationGateway&&
         this.gateway.setRestriction===FakeModerationGateway.prototype.setRestriction?
         'SIMULATION':'UNSPECIFIED';
-      op.status = 'STARTED'; return true;
+      op.status='STARTED';
+      return {status:'STARTED' as const, receipt:{...op}};
     });
-    if (!started) return { status: 'DENIED', reason: 'REVOKED_BEFORE_DISPATCH' };
-    // Telegram rights checks are asynchronous. Group approval, staff grants,
-    // subscription evidence and the reason set may change AFTER STARTED.
-    // The official Bot API adapter invokes this immediately before its write.
-    // It is read-only; a false/throw is a definitive no-send, never a retry.
+    if(started.status==='BLOCKED_UNKNOWN')
+      return {status:'BLOCKED_UNKNOWN',reason:'LEDGER_CHANGED_BEFORE_DISPATCH'};
+    if(started.status!=='STARTED')
+      return {status:'DENIED',reason:'REVOKED_BEFORE_DISPATCH'};
+    // Remote reads and the durable authority callback are asynchronous. An
+    // external status/identity change during that wait invalidates the attempt
+    // snapshot. The gateway must not treat it as continued authorization.
     const verifyCurrentAuthority=async():Promise<boolean>=>{
       try{
         const s=await this.store.snapshot();
         const op=s.moderationOperations.find(x=>x.id===candidate.id);
-        return op?.status==='STARTED'&&
+        return op?.status==='STARTED'&&sameModerationAttempt(op,started.receipt)&&
           this.authorized(s,actorId,chatId,memberId)&&
           (!stillCurrent||stillCurrent(s))&&
           this.policy.chatRevision(s,chatId)===op.policyVersion&&
@@ -227,15 +257,27 @@ export class ModerationService {
       }catch{return false;}
     };
     let outcome: RestrictionOutcome;
-    try { outcome = await this.gateway.setRestriction(chatId, memberId,
-      (await this.store.snapshot()).moderationOperations.find(x => x.id === candidate.id)!.kind,
-      verifyCurrentAuthority); }
-    catch { outcome = 'UNKNOWN_OUTCOME'; }
-    await this.store.transaction(s => {
-      const op = s.moderationOperations.find(x => x.id === candidate.id)!;
-      if (op.status !== 'STARTED') throw new Error('Invalid moderation operation');
-      op.status = outcome;
+    try{
+      outcome=await this.gateway.setRestriction(
+        started.receipt.chatId,started.receipt.memberId,
+        started.receipt.kind,verifyCurrentAuthority);
+    }catch{outcome='UNKNOWN_OUTCOME';}
+    // A structurally typed JavaScript gateway may return arbitrary strings
+    // at runtime. Never write an unrecognized terminal state to the ledger.
+    if(outcome!=='CONFIRMED'&&outcome!=='FAILED_CONFIRMED'&&
+       outcome!=='UNKNOWN_OUTCOME')outcome='UNKNOWN_OUTCOME';
+    const final=await this.store.transaction(s=>{
+      const op=s.moderationOperations.find(x=>x.id===candidate.id);
+      if(!op||op.status!=='STARTED'||
+         !sameModerationAttempt(op,started.receipt)){
+        quarantineModerationAttempt(s,started.receipt);
+        return 'BLOCKED_UNKNOWN' as const;
+      }
+      op.status=outcome;
+      return outcome;
     });
-    return { status: outcome === 'CONFIRMED' ? 'APPLIED' : outcome, reason: outcome };
+    if(final==='BLOCKED_UNKNOWN')
+      return {status:'BLOCKED_UNKNOWN',reason:'LEDGER_CHANGED_DURING_DISPATCH'};
+    return { status: final === 'CONFIRMED' ? 'APPLIED' : final, reason: final };
   }
 }
