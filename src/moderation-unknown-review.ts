@@ -34,10 +34,23 @@ const menu=(text:string,rows:readonly (readonly {text:string;callback_data:strin
 });
 const safe=(s:string)=>s.replace(/&/gu,'&amp;').replace(/</gu,'&lt;')
  .replace(/>/gu,'&gt;').replace(/"/gu,'&quot;').replace(/'/gu,'&#39;');
-const opDigest=(o:ModerationOperation)=>createHash('sha256')
- .update('MANARATAK:UNKNOWN:OWNER:REVIEW:V1:')
- .update(JSON.stringify([o.id,o.chatId,o.memberId,o.actorId,o.kind,
-  o.reasonFingerprint,o.policyVersion,o.createdAt,o.status,o.review??null]))
+/** Every callback selector must be bound to the CURRENT group approval
+ * epoch, not only the immutable sanction record. A revoked/reapproved chat
+ * must not grant fresh review capabilities to a button from an older epoch.
+ * Local transport provenance also affects whether this evidence is current.
+ * This digest is a freshness hint, not authorization or Telegram proof.
+ */
+const opDigest=(o:ModerationOperation,s:BotState)=>createHash('sha256')
+ .update('MANARATAK:UNKNOWN:OWNER:REVIEW:V2:')
+ .update(JSON.stringify([
+  o.id,o.chatId,o.memberId,o.actorId,o.kind,o.reasonFingerprint,
+  o.policyVersion,o.createdAt,o.status,o.attemptGateway??null,o.review??null,
+  ...(()=>{
+   const chat=s.chats.find(c=>c.id===o.chatId);
+   return [chat?.id??null,chat?.approved??null,
+    chat?.version??null,chat?.scopes??null];
+  })()
+ ]))
  .digest('hex').slice(0,12);
 const opList=(s:BotState)=>s.moderationOperations.filter(o=>
  o.status==='UNKNOWN_OUTCOME'&&
@@ -49,7 +62,7 @@ const previewKey=(page:number,slot:number,d:string,action:'a'|'e')=>
 type Selected={op:ModerationOperation;page:number;slot:number;digest:string};
 function select(s:BotState,route:Extract<ModerationOwnerReviewRoute,{slot:number}>):Selected|null{
  const all=opList(s),op=all[route.page*BUTTON_LIMIT+route.slot-1];
- if(!op||opDigest(op)!==route.digest)return null;
+ if(!op||opDigest(op,s)!==route.digest)return null;
  return {op,page:route.page,slot:route.slot,digest:route.digest};
 }
 export class ModerationUnknownOwnerReview {
@@ -79,7 +92,7 @@ export class ModerationUnknownOwnerReview {
    const rows:{text:string;callback_data:string}[][]=[];
    for(let i=0;i<current.length;i+=2)rows.push(current.slice(i,i+2).map((o,j)=>
     button((o.review?'✅ مراجعة':'⚠️ بحاجة لمراجعة')+' · '+o.kind,
-      detailKey(route.page,i+j+1,opDigest(o)))));
+      detailKey(route.page,i+j+1,opDigest(o,s)))));
    const nav:{text:string;callback_data:string}[]=[];
    if(route.page>0)nav.push(button('⬅️ السابق','mr:1:p:'+(route.page-1)));
    if(route.page+1<pages)nav.push(button('➡️ التالي','mr:1:p:'+(route.page+1)));
@@ -127,7 +140,7 @@ export class ModerationUnknownOwnerReview {
    const found=state.moderationOperations.find(x=>x.id===op.id&&x.chatId===op.chatId);
    if(!c?.approved||!c.scopes.includes('moderation')||c.version!==chat.version||
     !found||found.status!=='UNKNOWN_OUTCOME'||found.review||
-    opDigest(found)!==digest)return false;
+    opDigest(found,state)!==digest)return false;
    state.callbacks.push({ref,action,actorId:actor,chatId:op.chatId,
     policyVersion:c.version,moderationOperationId:op.id,
     moderationOperationDigest:digest,expiresAt:now+120000,
@@ -157,7 +170,7 @@ export class ModerationUnknownOwnerReview {
     x.id===c.moderationOperationId&&x.chatId===c.chatId);
    if(!chat?.approved||!chat.scopes.includes('moderation')||chat.version!==c.policyVersion||
      !operation||operation.status!=='UNKNOWN_OUTCOME'||operation.review||
-     opDigest(operation)!==c.moderationOperationDigest||!this.validOwner(actor))return null;
+     opDigest(operation,state)!==c.moderationOperationDigest||!this.validOwner(actor))return null;
    const decision:Decision=c.action==='owner.moderation.review.escalate'?
     'ESCALATED':'ACKNOWLEDGED_UNRESOLVED';
    // Atomic annotation + nonce consumption. No change to operation.status.
