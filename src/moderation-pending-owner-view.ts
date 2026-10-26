@@ -2,7 +2,8 @@ import {createHash} from 'node:crypto';
 import type {BotStore,BotState,ModerationOperation,Chat} from './store.js';
 import type {Policy} from './policy.js';
 import type {OwnerInlineScreen,TelegramInlineKeyboard} from './telegram-inline-owner.js';
-import {ambiguousModerationOperationIds,inspectModerationLedgerIntegrity} from './moderation-review-integrity.js';
+import {ambiguousModerationOperationIds,ambiguousModerationChatIds,
+ inspectModerationLedgerIntegrity} from './moderation-review-integrity.js';
 
 /** OWNER-PRIVATE READ-ONLY navigation of locally pending moderation attempts.
  * No Telegram rights call, sanction, retry, status transition, new callback
@@ -32,7 +33,9 @@ type PendingEntry={op:ModerationOperation;chat:Chat};
  * remain durable, quarantined from actionable case selection.
  */
 const pending=(s:BotState):PendingEntry[]=>{
+ const ambiguousChats=ambiguousModerationChatIds(s);
  const chats=new Map(s.chats.filter(c=>c.approved&&
+  !ambiguousChats.has(c.id)&&
   c.scopes.includes('moderation')).map(c=>[c.id,c]));
  const ambiguous=ambiguousModerationOperationIds(s);
  return s.moderationOperations.flatMap(op=>{
@@ -105,6 +108,11 @@ export class ModerationPendingOwnerView{
     button('🏠 لوحة المالك','mi:1:h')]);
    const stale=all.filter(e=>age(e.op.createdAt,this.clock())!=='FRESH').length;
    const ambiguous=ambiguousModerationOperationIds(s);
+   const ambiguousChats=ambiguousModerationChatIds(s);
+   const chatConflicts=s.moderationOperations.filter(o=>
+    (o.status==='INTENT'||o.status==='STARTED')&&
+    ambiguousChats.has(o.chatId)&&
+    s.chats.some(c=>c.id===o.chatId&&c.approved&&c.scopes.includes('moderation'))).length;
    const conflicting=s.moderationOperations.filter(o=>
     ambiguous.has(o.id)&&(o.status==='INTENT'||o.status==='STARTED')&&
     s.chats.some(c=>c.id===o.chatId&&c.approved&&c.scopes.includes('moderation'))).length;
@@ -113,7 +121,8 @@ export class ModerationPendingOwnerView{
     ' · تجهيز INTENT: '+all.filter(e=>e.op.status==='INTENT').length+
     ' · بدأ التنفيذ STARTED: '+all.filter(e=>e.op.status==='STARTED').length+
     ' · قديمة أو بتوقيت غير موثوق: '+stale+
-    ' · سجلات متعارضة محجوبة: '+conflicting+'\n'
+    ' · سجلات متعارضة محجوبة: '+conflicting+
+    ' · مجموعات متعارضة محجوبة: '+chatConflicts+'\n'
     +(all.length?'صفحة '+(route.page+1)+' من '+totalPages+'\n':
      'لا توجد عمليات معلقة مرئية في المجموعات المعتمدة للإشراف.\n')
     +'INTENT بعد التعطل لا يثبت عدم الإرسال. STARTED قد تكون وصلت إلى Telegram. '

@@ -2,7 +2,7 @@ import {createHash,randomBytes} from 'node:crypto';
 import type {BotStore,BotState,ModerationOperation} from './store.js';
 import type {Policy} from './policy.js';
 import type {OwnerInlineScreen,TelegramInlineKeyboard} from './telegram-inline-owner.js';
-import {ambiguousModerationOperationIds,uniqueModerationReviewNonce,
+import {ambiguousModerationOperationIds,ambiguousModerationChatIds,uniqueModerationReviewNonce,
  inspectModerationLedgerIntegrity,moderationOwnerReviewAuditConsistency,
  moderationReviewEvidenceDigest} from './moderation-review-integrity.js';
 
@@ -60,8 +60,10 @@ const opDigest=(o:ModerationOperation,s:BotState)=>createHash('sha256')
  */
 const opList=(s:BotState)=>{
  const ambiguous=ambiguousModerationOperationIds(s);
+ const conflictingChats=ambiguousModerationChatIds(s);
  return s.moderationOperations.filter(o=>
   o.status==='UNKNOWN_OUTCOME'&&!ambiguous.has(o.id)&&
+  !conflictingChats.has(o.chatId)&&
   moderationOwnerReviewAuditConsistency(s,o)!=='INCONSISTENT'&&
   s.chats.some(c=>c.id===o.chatId&&c.approved&&c.scopes.includes('moderation')))
   .sort((a,b)=>a.createdAt-b.createdAt||a.id.localeCompare(b.id));
@@ -129,6 +131,10 @@ export class ModerationUnknownOwnerReview {
    const reviewedBound=all.filter(o=>
     moderationOwnerReviewAuditConsistency(s,o)==='REVIEWED').length;
    const ambiguousIds=ambiguousModerationOperationIds(s);
+   const ambiguousChats=ambiguousModerationChatIds(s);
+   const chatConflicts=s.moderationOperations.filter(o=>
+    o.status==='UNKNOWN_OUTCOME'&&ambiguousChats.has(o.chatId)&&
+    s.chats.some(c=>c.id===o.chatId&&c.approved&&c.scopes.includes('moderation'))).length;
    const conflicting=s.moderationOperations.filter(o=>
     o.status==='UNKNOWN_OUTCOME'&&ambiguousIds.has(o.id)&&
     s.chats.some(c=>c.id===o.chatId&&c.approved&&c.scopes.includes('moderation'))).length;
@@ -141,6 +147,7 @@ export class ModerationUnknownOwnerReview {
     ' · تمت مراجعتها: '+reviewedBound+
     ' · مراجعات قديمة بلا بصمة: '+legacy+
     ' · سجلات متعارضة محجوبة: '+conflicting+
+    ' · مجموعات متعارضة محجوبة: '+chatConflicts+
     ' · تدقيق مراجعات متعارض محجوب: '+invalidReviewAudit+'\n'
     +(all.length?'صفحة '+(route.page+1)+' من '+pages+'\n':'لا توجد عمليات مجهولة مرئية في المجموعات المعتمدة.\n')
     +'الإقرار والتصعيد توثيق محلي فقط: لا يثبتان نجاح العقوبة، ولا يزيلان منع إعادة الإرسال، ولا يفكان حظرًا أو كتمًا.',rows);
@@ -177,7 +184,8 @@ export class ModerationUnknownOwnerReview {
    'owner.moderation.review.ack';
   const issued=await this.store.transaction(state=>{
    if(!this.validOwner(actor)||!inspectModerationLedgerIntegrity(state).valid)return false;
-   if(ambiguousModerationOperationIds(state).has(op.id))return false;
+   if(ambiguousModerationOperationIds(state).has(op.id)||
+      ambiguousModerationChatIds(state).has(op.chatId))return false;
    const c=state.chats.find(x=>x.id===op.chatId);
    const found=state.moderationOperations.find(x=>x.id===op.id&&x.chatId===op.chatId);
    if(!c?.approved||!c.scopes.includes('moderation')||c.version!==chat.version||
@@ -223,7 +231,8 @@ export class ModerationUnknownOwnerReview {
    const chat=state.chats.find(x=>x.id===c.chatId);
    const operation=state.moderationOperations.find(x=>
     x.id===c.moderationOperationId&&x.chatId===c.chatId);
-   if(ambiguousModerationOperationIds(state).has(c.moderationOperationId))
+   if(ambiguousModerationOperationIds(state).has(c.moderationOperationId)||
+      ambiguousModerationChatIds(state).has(c.chatId))
     return null;
    if(!chat?.approved||!chat.scopes.includes('moderation')||chat.version!==c.policyVersion||
      !operation||operation.status!=='UNKNOWN_OUTCOME'||operation.review||

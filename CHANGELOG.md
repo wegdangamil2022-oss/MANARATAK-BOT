@@ -1,3 +1,12 @@
+## 0.7.99 — 2026-10-26 — quarantine duplicate restored group approvals in owner moderation screens
+
+- Added 22 JSON/SQLite TDD regressions for duplicate group-approval records (even identical copies), varying approval epochs or moderation scopes, reversed authorized/revoked ordering, stale owner detail selectors and pre-issued nonce confirmation.
+- Baseline RED: all 22 new tests failed against v0.7.98, despite the pre-existing 1,857 tests passing.
+- New read-only `ambiguousModerationChatIds` check quarantines group IDs with more than one persisted approval row, preserving originals and allowing unrelated unique groups to remain reviewable.
+- Updated owner UNKNOWN review and pending owner inventory to suppress selectors and provide redacted counts for restored ambiguous group permissions; no Telegram requests or persisted mutation occur during navigation.
+- Owner review preview and confirmation repeat duplicate-approval detection inside atomic store transactions, so races, stale selectors and previously issued nonces fail closed.
+- Telegram live moderation remains disabled. Moderation status `UNKNOWN_OUTCOME` is never converted to delivery proof or a retryable operation.
+
 ## 0.7.98 — 2026-10-26 — explicit unbound legacy owner-review trust tier
 
 - Added 14 JSON and SQLite restore/regression tests verifying that removing **both** the owner-review and local audit SHA-256 evidence digests never passes as a fully corroborated review.
