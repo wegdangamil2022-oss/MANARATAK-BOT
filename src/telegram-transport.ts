@@ -25,6 +25,7 @@ import {OwnerInlineGroupControls} from './telegram-inline-group-controls.js';
 import {renderOwnerInlineDelegations} from './telegram-inline-delegations.js';
 import {renderStaffInline} from './telegram-inline-staff.js';
 import {ModerationUnknownOwnerReview} from './moderation-unknown-review.js';
+import {ModerationPendingOwnerView} from './moderation-pending-owner-view.js';
 import {renderOwnerModerationRateStatus} from './telegram-inline-moderation-rate-status.js';
 import {renderStudentInline} from './telegram-inline-student.js';
 import {parseSearchQuery,parseSearchPageCommand,searchPageButton,
@@ -299,6 +300,13 @@ export class TelegramUpdateApplication {
      // UNKNOWN_OUTCOME human triage is annotation only: no retry, no unlock,
      // no Telegram effect. Owner, current policy, and one-shot nonce are
      // independently checked in a single durable transaction.
+     if(event.callbackData.startsWith('mp:1:')){
+      const page=await new ModerationPendingOwnerView(
+       this.opts.store,this.opts.policy,this.clock).handle(event.callbackData,actorId);
+      if(!page)return {status:'DENIED',reason:'MODERATION_PENDING_UNAVAILABLE'};
+      return {status:'APPLIED',reason:'RESPONSE_PLANNED_ONLY',
+       plan:this.plan(chatId,page.text,undefined,page.keyboard,event.callbackMessageId)};
+     }
      if(event.callbackData==='mi:1:i:02:01'||event.callbackData.startsWith('mr:1:')){
       const page=await new ModerationUnknownOwnerReview(
        this.opts.store,this.opts.policy,this.clock).handle(event.callbackData,actorId);

@@ -1,3 +1,12 @@
+## 0.7.89 — 2026-10-26 — owner-private read-only pending moderation case view
+
+- Implemented a private Telegram owner screen for `INTENT` and `STARTED` moderation operations. It is linked from the existing `UNKNOWN_OUTCOME` review view. Owner-only `mp:1:h` lists pending attempts; `mp:1:p:N` paginates eight cases at a time, and `mp:1:d:PAGE:SLOT:DIGEST` shows a limited read-only summary.
+- Views are scoped to currently approved local moderation groups, check the owner and private chat authorization, and print only kind, status and age category. They deliberately omit member IDs, actor IDs, operation IDs, evidence, reasons, receipts, and Telegram tokens. A digest guards the details selector against status, target, approval/version, policy and identity drift; it is **not** a permission token.
+- Pending INTENT following a crash does **not** certify no-send; STARTED may already have reached Telegram. Old/clock-invalid cases are labelled for human review, never automatically promoted to `CONFIRMED`, `CANCELLED` or `UNKNOWN_OUTCOME`.
+- This is owner **navigation only**, not an owner acknowledgement/action workflow. No review nonce, moderation operation or reason writes, moderation decision audits, HTTP requests to Telegram, sanction retries, removals, mute/unmute or ban/unban are performed. The normal Telegram transport still records standard incoming callback `RESPONSE_PLANNED_ONLY` audit entries. The separate UNKNOWN_OUTCOME owner workflow retains its existing two-stage controls and non-resolution semantics.
+- Added **15 test cases** across JSON/SQLite for strict route parsing, owner-only/private visibility, existing owner menu integration, redacted detail display, immutable state, old selector rejection, changed membership, revoked moderation chat, pagination and stale age handling. No real Telegram actions were executed.
+- Production Telegram server still wires `FakeModerationGateway` and live moderation remains disconnected; these local views are not independent evidence of remote delivery.
+
 ## 0.7.88 — 2026-10-26 — offline moderation crash/restart recovery inventory
 
 - Introduced `src/moderation-recovery-monitor.ts` with an immutable, aggregate-only inventory of durable moderation operations: `INTENT`, `STARTED`, `UNKNOWN_OUTCOME`, stale pending attempts, bad/future timestamps, deduplicated affected member counts, and unreviewed versus owner-annotated unknown outcomes. No actor, member, group, operation ID, reason fingerprint or Telegram token is included in the report.
