@@ -1,3 +1,9 @@
+## v0.7.87 — pre-send moderation abort safety
+
+Before the durable moderation state transitions from `INTENT` to `STARTED`, only **read-only** privilege checks and local validation may occur. If they throw and the original INTENT remains intact, the service records `CANCELLED` with `PREFLIGHT_ABORTED_NO_SEND` rather than leaving a false pending request. This is not evidence of Telegram delivery or authorization for an automatic retry; reasons remain durable. If another process changes/deletes the intent while these checks await, the original attempt becomes `UNKNOWN_OUTCOME` for manual owner triage.
+
+After STARTED, including a transport timeout, dropped acknowledgement, or process crash, the result cannot be safely treated as never sent. It remains `UNKNOWN_OUTCOME` or unresolved. Test coverage uses isolated JSON/SQLite and fake providers only; real Telegram ban/mute remains unconnected to the production server.
+
 ## v0.7.86 — moderation request/receipt identity protection
 
 Every moderation attempt now keeps a fixed durable identity from its first `INTENT` through `STARTED` and the remote result. If another process changes its recorded target, kind, status, or deletes the row while the request is in progress, the state machine retains/restores `UNKNOWN_OUTCOME` for the original group and member. It does not claim a confirmed sanction, attempt a retry, or infer Telegram authorization from a local record. A forged gateway result is also treated as uncertain.
