@@ -78,15 +78,19 @@ test('unknown results stay attention-worthy even after owner acknowledgement',()
  assert.equal(JSON.stringify(x).includes('100'),false);
  assert.equal(JSON.stringify(x).includes('300'),false);
 });
-test('clock skew or invalid unresolved timestamps never become a clean pass',()=>{
+test('future timestamp is an explicit clock anomaly requiring owner attention',()=>{
  const x=summarizeModerationRecovery({moderationOperations:[
-  op('INTENT','future',NOW+1),
-  op('STARTED','negative',-1,{memberId:'301'}),
-  op('UNKNOWN_OUTCOME','nan',Number.NaN,{memberId:'302'})
+  op('INTENT','future',NOW+1)
  ]},options());
- assert.deepEqual(x,{...baseline,state:'ATTENTION_REQUIRED',totalOperations:3,
-  intent:1,started:1,unknownOutcome:1,clockAnomaly:3,
-  awaitingFirstReview:1,distinctBlockedTargets:3,manualAttention:3});
+ assert.deepEqual(x,{...baseline,state:'ATTENTION_REQUIRED',totalOperations:1,
+  intent:1,clockAnomaly:1,distinctBlockedTargets:1,manualAttention:1});
+});
+test('invalid negative and nonnumeric restored timestamps fail closed, never return a healthy report',()=>{
+ for(const createdAt of [-1,Number.NaN]){
+  assert.throws(()=>summarizeModerationRecovery({moderationOperations:[
+   op('STARTED','corrupt',createdAt)
+  ]},options()),/MODERATION_RECOVERY_INVALID_LEDGER/);
+ }
 });
 test('only unresolved attempts count toward blocked targets, deduplicated per chat/member',()=>{
  const x=summarizeModerationRecovery({moderationOperations:[
