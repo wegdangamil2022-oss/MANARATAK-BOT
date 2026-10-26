@@ -93,6 +93,23 @@ export class ModerationService {
       return {status:'DENIED',reason:'NOT_AUTHORIZED_OR_BOT_RIGHTS'};
     return this.unresolved(s,chatId,memberId);
   }
+  /** No mutating provider dispatch is reachable before STARTED. A failed
+   * read-only preflight or reservation transaction can cancel the ORIGINAL
+   * intact INTENT. If another writer changed/deleted it, quarantine instead
+   * of overwriting potentially meaningful concurrent operation evidence.
+   */
+  private async closePrestartedIntent(original:ModerationOperation):
+    Promise<'CANCELLED'|'BLOCKED_UNKNOWN'>{
+    return this.store.transaction(s=>{
+      const op=s.moderationOperations.find(x=>x.id===original.id);
+      if(!op||op.status!=='INTENT'||!sameModerationAttempt(op,original)){
+        quarantineModerationAttempt(s,original);
+        return 'BLOCKED_UNKNOWN' as const;
+      }
+      op.status='CANCELLED';
+      return 'CANCELLED' as const;
+    });
+  }
   private async check(actorId: string, chatId: string, memberId: string): Promise<boolean> {
     return this.authorized(await this.store.snapshot(), actorId, chatId, memberId) &&
       await this.gateway.canRestrict(chatId, memberId) && !await this.gateway.isProtected(chatId, memberId);
@@ -221,21 +238,16 @@ export class ModerationService {
       rights=await this.gateway.canRestrict(chatId,memberId)&&
         !await this.gateway.isProtected(chatId,memberId);
     }catch{
-      const stopped=await this.store.transaction(s=>{
-        const op=s.moderationOperations.find(x=>x.id===candidate.id);
-        if(!op||op.status!=='INTENT'||!sameModerationAttempt(op,candidate.intent)){
-          quarantineModerationAttempt(s,candidate.intent);
-          return 'BLOCKED_UNKNOWN' as const;
-        }
-        op.status='CANCELLED';
-        return 'CANCELLED' as const;
-      });
+      const stopped=await this.closePrestartedIntent(candidate.intent);
       return stopped==='CANCELLED'?
         {status:'DENIED',reason:'PREFLIGHT_ABORTED_NO_SEND'}:
         {status:'BLOCKED_UNKNOWN',reason:'LEDGER_CHANGED_BEFORE_DISPATCH'};
     }
     // Don't pre-mark effects. Verify both external rights and internal policy immediately before STARTED.
-    const started = await this.store.transaction(s => {
+    let started:{status:'STARTED';receipt:ModerationOperation}|
+      {status:'DENIED'|'BLOCKED_UNKNOWN'};
+    try{
+      started=await this.store.transaction(s => {
       const op = s.moderationOperations.find(x => x.id === candidate.id);
       // A concurrent process may alter or replace the original intent while
       // remote reads are pending. Do not dispatch a forged/new sanction kind.
@@ -259,7 +271,16 @@ export class ModerationService {
         'SIMULATION':'UNSPECIFIED';
       op.status='STARTED';
       return {status:'STARTED' as const, receipt:{...op}};
-    });
+      });
+    }catch{
+      // Validation callbacks can throw inside the SQLite/JSON transaction.
+      // It rolls back, leaving INTENT. Since setRestriction has not yet been
+      // called, cancel only a still-identical INTENT, never a replaced row.
+      const stopped=await this.closePrestartedIntent(candidate.intent);
+      return stopped==='CANCELLED'?
+        {status:'DENIED',reason:'PREFLIGHT_ABORTED_NO_SEND'}:
+        {status:'BLOCKED_UNKNOWN',reason:'LEDGER_CHANGED_BEFORE_DISPATCH'};
+    }
     if(started.status==='BLOCKED_UNKNOWN')
       return {status:'BLOCKED_UNKNOWN',reason:'LEDGER_CHANGED_BEFORE_DISPATCH'};
     if(started.status!=='STARTED')
