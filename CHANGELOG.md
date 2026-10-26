@@ -1,3 +1,12 @@
+## 0.7.101 — 2026-10-26 — unique restored group approval required by shared Policy
+
+- Added 42 JSON/SQLite regression tests covering five group authorization scopes, assistant mode, group policy revisions, duplicate approvals in both permitted/revoked orderings, owner approval/revoke/restrict/AI/presence mutations, verification subscription changes, owner confirmation nonce durability, delegated grants and unaffected groups.
+- Baseline TDD RED: 32 of the initial 38 new tests failed against v0.7.100; all 1,909 preexisting tests remained successful.
+- Replaced first-match group approval lookup with a single unambiguous `Policy.uniqueChat` authority read. `canUseChat` and `chatRevision` fail closed for duplicated IDs; group AI/navigation and services calling shared policy inherit the restriction.
+- Every group-policy mutation listed above checks uniqueness inside its durable store transaction. Ambiguous restores cannot mutate a single copy, consume a one-shot owner confirmation or increment an ambiguous version.
+- Group-scoped `Policy.has` grants, including the owner's group-scoped capability check, no longer bypass a duplicated approval, and creating fresh delegated group grants is blocked.
+- Existing evidence is preserved; unrelated unique approved groups and owner-private identity remain available. No Telegram ban/mute is enabled.
+
 ## 0.7.100 — 2026-10-26 — reject duplicated group approvals throughout moderation dispatch
 
 - Added 30 JSON/SQLite TDD regressions: identical/conflicting approval copies, revoked-first/approved-second records, duplicates arising during remote bot-rights checks, protected-member preflight, after durable INTENT, during the last-mile provider authority callback, and after a provider appears to report success.
