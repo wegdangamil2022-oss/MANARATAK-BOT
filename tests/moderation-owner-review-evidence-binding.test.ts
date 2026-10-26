@@ -162,11 +162,12 @@ for(const engine of storage){
    await f.annotate();
    await f.store.transaction(s=>{
     s.moderationOperations[0]!.memberId='301';
-    s.moderationOperations.push({
+    const other:ModerationOperation={
      ...s.moderationOperations[0]!,id:'other-case',memberId:'302',
-     status:'UNKNOWN_OUTCOME',review:undefined
-    } as ModerationOperation);
-    delete s.moderationOperations[1]!.review;
+     status:'UNKNOWN_OUTCOME'
+    };
+    delete other.review;
+    s.moderationOperations.push(other);
    });
    const x=await f.checked();
    assert.equal(x.selectors.length,1);
