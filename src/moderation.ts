@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { BotStore, type BotState, type ModerationReason, type ModerationOperation, type RestrictionKind, type ModerationDispatchGateway } from './store.js';
 import { Policy } from './policy.js';
 import {moderationRateFuse,moderationRateDenial} from './moderation-rate-fuse.js';
-import {moderationLedgerSafeForDispatch} from './moderation-review-integrity.js';
+import {moderationLedgerSafeForDispatch,ambiguousModerationChatIds} from './moderation-review-integrity.js';
 import {TelegramBotApiModerationGateway} from './telegram-moderation-gateway.js';
 
 export type RestrictionOutcome = 'CONFIRMED' | 'FAILED_CONFIRMED' | 'UNKNOWN_OUTCOME';
@@ -90,7 +90,11 @@ export class ModerationService {
     // Locally delegated chat managers are protected targets even if Telegram
     // currently reports them as ordinary members. Expired/revoked grants do
     // not shield members, and every dispatch phase reuses this same check.
-    return actorId !== memberId && memberId !== this.policy.ownerId && /^\d+$/.test(memberId) && memberId !== '0' &&
+    // Duplicated restored approval rows cannot authorize an operation.
+    // This guard is reused at the initial gate, each atomic mutation,
+    // and the awaited gateway's last-mile authority callback.
+    return !ambiguousModerationChatIds(s).has(chatId) &&
+      actorId !== memberId && memberId !== this.policy.ownerId && /^\d+$/.test(memberId) && memberId !== '0' &&
       !this.policy.has(s, memberId, 'chat.manage', chatId, this.clock()) &&
       this.policy.canUseChat(s, chatId, 'moderation') && this.policy.has(s, actorId, 'chat.manage', chatId, this.clock());
   }
@@ -352,6 +356,13 @@ export class ModerationService {
         // A restored/malformed/colliding row may have changed our original
         // receipt too. Always preserve independent UNKNOWN_OUTCOME evidence
         // for the intended target, without rewriting any conflicting row.
+        quarantineModerationAttempt(s,started.receipt);
+        return 'BLOCKED_UNKNOWN' as const;
+      }
+      // A group approval collision arising during an in-flight provider
+      // request makes even apparent success insufficient evidence of a
+      // safe terminal state. Preserve the original unresolved receipt.
+      if(ambiguousModerationChatIds(s).has(chatId)){
         quarantineModerationAttempt(s,started.receipt);
         return 'BLOCKED_UNKNOWN' as const;
       }
