@@ -1,3 +1,11 @@
+## 0.7.90 — 2026-10-26 — prevent stale owner UNKNOWN_OUTCOME review links crossing group approval epochs
+
+- Fixed a replay in the private moderation owner's `UNKNOWN_OUTCOME` detail/preview selector. The original `mr:1:d`/`mr:1:v` digest bound only the sanction record; revoking and reapproving a chat, or changing its scopes while leaving the operation unchanged, let an old review link remain valid. A replayed preview could mint a brand-new owner confirmation nonce under the *new* approval epoch.
+- The owner review digest now includes the current chat identity, approval, revision and scopes, plus the locally recorded sanction `attemptGateway`. The updated V2 fingerprint is checked when rendering details, issuing a one-shot review nonce in an atomic transaction, and confirming that nonce. An old selector is rejected after reapproval or provenance drift even if the target's `UNKNOWN_OUTCOME` record did not change.
+- Kept the existing owner-only/private-chat ingress boundary, group authorization, one-shot/expiry/revision checks and irrevocably unknown outcome. No Telegram API request, automatic penalty, retry, unban, unmute or resolution is introduced. Changes in an unrelated group's policy do not invalidate valid selectors for the current group.
+- Added **20 tests** across JSON and SQLite for reapproval, scope removal/restoration, version changes with identical scopes, changed provenance, stale preview nonce minting, preexisting nonce rejection, unrelated groups and unaffected local owner acknowledgement. TDD RED run: 12 failing cases and 1,668 passing.
+- Production Telegram server continues to use `FakeModerationGateway`; live sanctions remain disabled.
+
 ## 0.7.89 — 2026-10-26 — owner-private read-only pending moderation case view
 
 - Implemented a private Telegram owner screen for `INTENT` and `STARTED` moderation operations. It is linked from the existing `UNKNOWN_OUTCOME` review view. Owner-only `mp:1:h` lists pending attempts; `mp:1:p:N` paginates eight cases at a time, and `mp:1:d:PAGE:SLOT:DIGEST` shows a limited read-only summary.
