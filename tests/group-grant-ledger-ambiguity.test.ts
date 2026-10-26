@@ -18,7 +18,8 @@ const setId=(g:Grant,id?:string)=>{
 async function fixture(engine:Engine){
  const dir=await mkdtemp(join(tmpdir(),'manaratak-grant-ambiguity-'));
  const path=join(dir,engine==='json'?'state.json':'state.sqlite');
- const store=new BotStore(path,{engine}),policy=new Policy(store,OWNER,()=>NOW);
+ let currentTime=NOW;
+ const store=new BotStore(path,{engine}),policy=new Policy(store,OWNER,()=>currentTime);
  await policy.approveChat(OWNER,GROUP,['moderation','assistant','navigation']);
  await policy.approveChat(OWNER,OTHER,['moderation','assistant','navigation']);
  const grant=async(actor=STAFF,chat=GROUP,expiresAt=NOW+60_000)=>
@@ -36,6 +37,7 @@ async function fixture(engine:Engine){
   assert.deepEqual(await store.snapshot(),s,'deny actions must not mutate stored evidence');
  };
  return {store,policy,grant,has,copy,before,unchanged,
+  advance:(ms:number)=>{currentTime=NOW+ms;},
   close:()=>rm(dir,{recursive:true,force:true})};
 }
 for(const engine of ['json','sqlite'] as const){
@@ -142,16 +144,18 @@ for(const engine of ['json','sqlite'] as const){
   const f=await fixture(engine);try{
    await f.grant(STAFF,GROUP,NOW+10);
    assert.equal(await f.has(STAFF,GROUP,NOW+10),false);
+   f.advance(11);
    await f.grant(STAFF,GROUP,NOW+60_000);
    const snapshot=await f.before();
    assert.equal(snapshot.grants.length,2);
    assert.equal(snapshot.grants[0]?.expiresAt,NOW+10);
-   assert.equal(await f.has(),true);
+   assert.equal(await f.has(STAFF,GROUP,NOW+11),true);
   }finally{await f.close();}
  });
  test(engine+' expired and current live grants with distinct IDs are not ambiguous',async()=>{
   const f=await fixture(engine);try{
    await f.grant(STAFF,GROUP,NOW+10);
+   f.advance(11);
    await f.grant(STAFF,GROUP,NOW+60_000);
    assert.equal(await f.has(STAFF,GROUP,NOW+20),true);
   }finally{await f.close();}
