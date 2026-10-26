@@ -1,3 +1,12 @@
+## 0.7.88 — 2026-10-26 — offline moderation crash/restart recovery inventory
+
+- Introduced `src/moderation-recovery-monitor.ts` with an immutable, aggregate-only inventory of durable moderation operations: `INTENT`, `STARTED`, `UNKNOWN_OUTCOME`, stale pending attempts, bad/future timestamps, deduplicated affected member counts, and unreviewed versus owner-annotated unknown outcomes. No actor, member, group, operation ID, reason fingerprint or Telegram token is included in the report.
+- An unresolved `INTENT` is **not** asserted to be a confirmed no-send after a crash. `STARTED` indicates that a provider write **could** have happened, not that delivery is confirmed. `UNKNOWN_OUTCOME` remains attention-worthy **even after** the owner records acknowledgment or escalation. All states remain unchanged.
+- Added `inspectModerationRecoveryReadOnly`, which uses the existing private, integrity-checked, absolute-path, symlink-rejecting SQLite snapshot reader. It never opens a mutating BotStore, calls the Telegram API, retries sanctions or advances operation state. JSON and SQLite states use the same pure `summarizeModerationRecovery` projection.
+- Added the one-shot command `npm run telegram:moderation-recovery -- --state /absolute/private/bot.sqlite --stale-ms 900000` with `--once` supplied by the script. Exit 0 means no aged/unknown evidence requiring operator attention; exit 2 means attention required; exit 1 means invalid request/state. A clean report is not proof that active pending operations can be retried or that remote Telegram state is safe.
+- Added 14 tests exercising classification, age and clock anomalies, multiple group/member deduplication, review counts, invalid/malformed state, read-only file integrity, output privacy and CLI behavior.
+- The owner-private UNKNOWN_OUTCOME review UI remains a distinct existing feature; this local inventory is for a trusted machine operator with filesystem access, **not** a new remotely accessible owner API. Live moderation still uses `FakeModerationGateway` and stays disabled.
+
 ## 0.7.87 — 2026-10-26 — distinguish confirmed pre-STARTED no-send from uncertain post-STARTED delivery
 
 - Fixed a stranded moderation `INTENT`: errors from an awaited test-only `beforeDispatch` hook, `canRestrict` or `isProtected` preflight, or local policy verification during the STARTED reservation transaction previously propagated and could leave an unresolved INTENT indefinitely, even though the mutating `setRestriction` gateway had never been called.

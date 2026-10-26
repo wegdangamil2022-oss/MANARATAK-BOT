@@ -1,3 +1,17 @@
+## v0.7.88 — offline moderation crash-recovery health check
+
+A local operator can inspect durable moderation state **without Telegram credentials, network access or writes**:
+
+```sh
+npm run telegram:moderation-recovery -- --state /absolute/private/bot.sqlite --stale-ms 900000
+```
+
+The command checks a private, integrity-verified SQLite snapshot and emits a *redacted aggregate* of current `INTENT` (reserved but not STARTED), `STARTED` (provider write may have happened), and `UNKNOWN_OUTCOME` operations; aged entries, clock anomalies and how many uncertain outcomes have or have not received an owner-review annotation. No chat/member IDs, tokens, file paths, reasons or attempt IDs are printed. Exit status 0 = no attention flags; 2 = attention required; 1 = invalid state/request. The age threshold is measured from the local **INTENT creation timestamp**; it is not the actual time of the provider dispatch.
+
+A healthy report does not certify recovery, remote Telegram status or eligibility to retry. An `INTENT` seen after a crash is still unresolved until independently investigated; a `STARTED` may already have reached Telegram, and `UNKNOWN_OUTCOME` remains blocked even if an owner has acknowledged it. **Do not automatically reset, cancel, reconcile, replay, unban or unmute** based on this report. The existing owner-private review is separate; this CLI is accessible only to trusted hosts with the private database file.
+
+The production Telegram server continues using `FakeModerationGateway`; real sanctions remain disconnected.
+
 ## v0.7.87 — pre-send moderation abort safety
 
 Before the durable moderation state transitions from `INTENT` to `STARTED`, only **read-only** privilege checks and local validation may occur. If they throw and the original INTENT remains intact, the service records `CANCELLED` with `PREFLIGHT_ABORTED_NO_SEND` rather than leaving a false pending request. This is not evidence of Telegram delivery or authorization for an automatic retry; reasons remain durable. If another process changes/deletes the intent while these checks await, the original attempt becomes `UNKNOWN_OUTCOME` for manual owner triage.
