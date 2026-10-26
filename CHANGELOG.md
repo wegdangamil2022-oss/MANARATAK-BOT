@@ -1,3 +1,12 @@
+## 0.7.96 — 2026-10-26 — restored moderation owner review/audit consistency
+
+- Added 30 JSON/SQLite regression tests for missing, mismatched, duplicated and orphan owner-review audit entries, stale selectors, race-safe nonce confirmation, independent-case isolation, and legacy/reapproved group compatibility.
+- RED demonstrated 24 failing tests out of the initial 26 for the old implementation, showing unchecked audit divergence between a persisted owner review annotation and its receipt.
+- Added read-only owner-review-to-audit corroboration by operation-derived audit key, actor, decision, reason and exact timestamp; new annotations capture the review-time approval revision for a stronger exact comparison. Legacy annotations without that field remain supported.
+- Owner review screens now hide inconsistent cases with a redacted conflict count instead of treating forged or partial restored audit evidence as a completed local review.
+- Atomic owner preview issuance and confirmation refuse orphan/duplicate audit entries before consuming a nonce or appending another audit receipt. No modification of conflicting stored evidence.
+- No Telegram sanction was dispatched or live moderation gateway enabled.
+
 ## 0.7.95 — 2026-10-26 — fail closed on restored owner review nonce timestamps
 
 - Added **20** tests for JSON and SQLite owner confirmations. On the unpatched baseline **16 failed**, revealing acceptance of malformed/extended saved callback expiry, missing used/revoked flags, confirmation after clock rollback and backdated review annotation.

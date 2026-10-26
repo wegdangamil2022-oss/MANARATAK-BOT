@@ -1,3 +1,11 @@
+## v0.7.96 — Owner review and audit consistency on restored moderation evidence
+
+In the owner-private `UNKNOWN_OUTCOME` review, a locally annotated review is displayed as confirmed **only if one matching local audit entry** corroborates the same operation identity, reviewer, timestamp, and decision. For reviews created from v0.7.96 onward the approval epoch is stored in the review and must also match the audit. Legacy review annotations without this epoch remain supported if their audit is otherwise consistent.
+
+Missing, mismatched, duplicated or orphan review audit entries are quarantined **only for the affected operation**: the original records and audit trail are not altered or deleted; unrelated uniquely identified cases remain available. The owner list shows only aggregate redacted counts for quarantined review-audit conflicts, not target identities or evidence. A stale detail button is denied if conflicting audit evidence appears after list generation. New review nonce issuance and atomic nonce consumption also check the audit slot to prevent a conflicting second review.
+
+Audit entries are *local correlation evidence, not cryptographic proof of identity and never proof of Telegram delivery*. `UNKNOWN_OUTCOME` remains an unresolved, non-retryable sanction after legitimate owner review. Both JSON and SQLite restores are tested; real Telegram moderation remains disconnected.
+
 ## v0.7.95 — restored owner review nonce and clock-safety
 
 Owner acknowledgement/escalation of `UNKNOWN_OUTCOME` moderation evidence is still a strictly local annotation, never proof of delivery or authority to retry. A restored JSON or SQLite confirmation callback is now actionable only when its `used` and `revoked` fields are explicitly `false`, its expiry is a valid bounded integer, and the trusted current clock lies **inside the original 120-second issuance window**. Missing flags, malformed/fractional expiry, an artificially extended expiry, and clock rollback before issuance all deny confirmation without changing the moderation record, callback or audit.

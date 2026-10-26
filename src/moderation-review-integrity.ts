@@ -1,4 +1,5 @@
-import type {BotState} from './store.js';
+import {createHash} from 'node:crypto';
+import type {BotState,ModerationOperation} from './store.js';
 
 /** Triage must not interpret an operation ID as unique merely because the
  * persisted schema permits an array. Restores, corrupted histories or multiple
@@ -86,6 +87,9 @@ export function inspectModerationLedgerIntegrity(
       (review.decision!=='ACKNOWLEDGED_UNRESOLVED'&&review.decision!=='ESCALATED')||
       typeof review.reviewedBy!=='string'||!user.test(review.reviewedBy)||
       !isSafeTime(review.reviewedAt)||
+      (review.policyVersion!==undefined&&
+       (typeof review.policyVersion!=='number'||
+        !Number.isSafeInteger(review.policyVersion)||review.policyVersion<(op.policyVersion as number)))||
       (typeof op.createdAt==='number'&&typeof review.reviewedAt==='number'&&
        review.reviewedAt<op.createdAt)){
     malformedRows++;
@@ -108,4 +112,36 @@ export function moderationLedgerSafeForDispatch(
  state:Pick<BotState,'moderationOperations'>):boolean{
  return inspectModerationLedgerIntegrity(state).valid&&
   ambiguousModerationOperationIds(state).size===0;
+}
+
+/** Strict LOCAL corroboration of a moderation owner review with its appended
+ * audit receipt. The SHA-256 audit key is a correlation identifier, NOT a
+ * cryptographic signature or proof of an external moderation outcome.
+ *
+ * Legacy review records have no stored review-time group epoch; their audit
+ * policyVersion is checked for safe chronology only. Newly created records
+ * pin that epoch for an exact audit comparison. Inconsistent rows are left
+ * untouched and hidden from owner-action selectors, so independent cases
+ * remain reviewable without trusting restored, partial evidence.
+ */
+export function moderationOwnerReviewAuditConsistency(
+ state:Pick<BotState,'audit'>,op:ModerationOperation
+):'UNREVIEWED'|'REVIEWED'|'INCONSISTENT'{
+ if(!state||!Array.isArray(state.audit))return 'INCONSISTENT';
+ const auditKey='owner:moderation:review:'+
+  createHash('sha256').update('MODERATION:REVIEW:'+op.id).digest('hex').slice(0,32);
+ const records=state.audit.filter(a=>a&&a.updateKey===auditKey);
+ if(!op.review)return records.length===0?'UNREVIEWED':'INCONSISTENT';
+ if(records.length!==1)return 'INCONSISTENT';
+ const entry=records[0]!,review=op.review;
+ const expectedReason=review.decision==='ESCALATED'?
+  'MODERATION_UNKNOWN_OWNER_ESCALATED':'MODERATION_UNKNOWN_OWNER_ACKNOWLEDGED';
+ if(entry.decision!=='ALLOW'||entry.reason!==expectedReason||
+    entry.actorId!==review.reviewedBy||entry.at!==review.reviewedAt||
+    typeof entry.policyVersion!=='number'||
+    !Number.isSafeInteger(entry.policyVersion)||
+    entry.policyVersion<op.policyVersion||
+    (review.policyVersion!==undefined&&review.policyVersion!==entry.policyVersion))
+  return 'INCONSISTENT';
+ return 'REVIEWED';
 }
