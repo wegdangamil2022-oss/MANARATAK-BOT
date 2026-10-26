@@ -109,9 +109,12 @@ export class ModerationUnknownOwnerReview {
    if(route.page>=pages)return null;
    const current=all.slice(route.page*BUTTON_LIMIT,(route.page+1)*BUTTON_LIMIT);
    const rows:{text:string;callback_data:string}[][]=[];
-   for(let i=0;i<current.length;i+=2)rows.push(current.slice(i,i+2).map((o,j)=>
-    button((o.review?'✅ مراجعة':'⚠️ بحاجة لمراجعة')+' · '+o.kind,
-      detailKey(route.page,i+j+1,opDigest(o,s)))));
+   for(let i=0;i<current.length;i+=2)rows.push(current.slice(i,i+2).map((o,j)=>{
+    const trust=moderationOwnerReviewAuditConsistency(s,o);
+    const label=trust==='LEGACY_UNBOUND'?'⚠️ مراجعة قديمة بلا بصمة':
+     trust==='REVIEWED'?'✅ مراجعة مرتبطة بالبصمة':'⚠️ بحاجة لمراجعة';
+    return button(label+' · '+o.kind,detailKey(route.page,i+j+1,opDigest(o,s)));
+   }));
    const nav:{text:string;callback_data:string}[]=[];
    if(route.page>0)nav.push(button('⬅️ السابق','mr:1:p:'+(route.page-1)));
    if(route.page+1<pages)nav.push(button('➡️ التالي','mr:1:p:'+(route.page+1)));
@@ -121,6 +124,10 @@ export class ModerationUnknownOwnerReview {
    rows.push([button('⏳ عرض العمليات المعلقة','mp:1:h')]);
    rows.push([button('↩️ قسم الحماية','mi:1:s:02:0'),button('🏠 لوحة المالك','mi:1:h')]);
    const pending=all.filter(o=>!o.review).length;
+   const legacy=all.filter(o=>
+    moderationOwnerReviewAuditConsistency(s,o)==='LEGACY_UNBOUND').length;
+   const reviewedBound=all.filter(o=>
+    moderationOwnerReviewAuditConsistency(s,o)==='REVIEWED').length;
    const ambiguousIds=ambiguousModerationOperationIds(s);
    const conflicting=s.moderationOperations.filter(o=>
     o.status==='UNKNOWN_OUTCOME'&&ambiguousIds.has(o.id)&&
@@ -131,7 +138,8 @@ export class ModerationUnknownOwnerReview {
     s.chats.some(c=>c.id===o.chatId&&c.approved&&c.scopes.includes('moderation'))).length;
    return menu('<b>مراجعة العمليات مجهولة النتيجة 🛡️</b>\n'
     +'الإجمالي القابل للعرض: '+all.length+' · بحاجة لمراجعة: '+pending+
-    ' · تمت مراجعتها: '+(all.length-pending)+
+    ' · تمت مراجعتها: '+reviewedBound+
+    ' · مراجعات قديمة بلا بصمة: '+legacy+
     ' · سجلات متعارضة محجوبة: '+conflicting+
     ' · تدقيق مراجعات متعارض محجوب: '+invalidReviewAudit+'\n'
     +(all.length?'صفحة '+(route.page+1)+' من '+pages+'\n':'لا توجد عمليات مجهولة مرئية في المجموعات المعتمدة.\n')
@@ -141,6 +149,9 @@ export class ModerationUnknownOwnerReview {
   if(!chosen)return null;
   const {op,page,slot,digest}=chosen;
   if(route.kind==='details'){
+   const trust=moderationOwnerReviewAuditConsistency(s,op);
+   const legacyWarning=trust==='LEGACY_UNBOUND'?
+    '⚠️ مراجعة قديمة غير مربوطة ببصمة العقوبة الأصلية؛ تحتاج تحقق بشري مستقل. ليست مراجعة موثقة بالبصمة.\n':'';
    const rows=op.review?
     [[button('↩️ قائمة المراجعة','mr:1:p:'+page),button('🏠 لوحة المالك','mi:1:h')]]:
     [[button('📌 إقرار دون حسم',previewKey(page,slot,digest,'a')),
@@ -153,6 +164,7 @@ export class ModerationUnknownOwnerReview {
     +'المراجعة: '+(op.review?
      op.review.decision==='ESCALATED'?'تم التصعيد':'إقرار بالمراجعة دون حسم':
      'لم تراجع بعد')+'\n'
+    +legacyWarning
     +'هوية المستهدف والدليل لا يعرضان هنا. لا تُعدّل حالة العقوبة ولا تعيد إرسالها.',rows);
   }
   if(op.review)return null;
