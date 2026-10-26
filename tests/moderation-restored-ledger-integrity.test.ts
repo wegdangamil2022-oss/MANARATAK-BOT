@@ -151,3 +151,61 @@ for(const engine of ['json','sqlite'] as const){
   }finally{await f.close();}
  });
 }
+
+for(const engine of ['json','sqlite'] as const){
+ test(engine+' corruption after INTENT before STARTED must suppress the provider send',async()=>{
+  const f=await fixture(engine);try{
+   await f.store.transaction(s=>{
+    s.moderationOperations=[];
+    s.moderationReasons.push({chatId:GROUP,memberId:TARGET,
+     source:'MANUAL',reference:'existing',kind:'BAN',createdBy:OWNER,active:true});
+   });
+   let reads=0,sends=0;
+   const transport:ModerationGateway={
+    canRestrict:async()=>{
+     reads++;
+     if(reads===2)await f.store.transaction(s=>{
+      s.moderationOperations.push({...base(),id:'corrupt-restoration',
+       memberId:'399',status:'INVALID' as ModerationOperation['status']});
+     });
+     return true;
+    },
+    isProtected:async()=>false,
+    setRestriction:async()=>{sends++;return 'CONFIRMED';}
+   };
+   const result=await new ModerationService(f.store,f.policy,transport,()=>NOW)
+    .reconcile(OWNER,GROUP,TARGET);
+   assert.equal(result.status,'BLOCKED_UNKNOWN');
+   assert.equal(reads,2);
+   assert.equal(sends,0);
+   const state=await f.store.snapshot();
+   assert.equal(state.moderationReasons[0]!.active,true);
+   assert.equal(state.moderationOperations.filter(o=>o.status==='INTENT').length,1);
+   assert.equal(state.moderationOperations.filter(o=>o.status==='INVALID').length,1);
+  }finally{await f.close();}
+ });
+ test(engine+' malformed restored evidence after gateway invocation never creates a false success receipt',async()=>{
+  const f=await fixture(engine);try{
+   await f.store.transaction(s=>s.moderationOperations=[]);
+   let attempts=0;
+   const transport:ModerationGateway={
+    canRestrict:async()=>true,isProtected:async()=>false,
+    setRestriction:async()=>{
+     attempts++;
+     await f.store.transaction(s=>s.moderationOperations.push({
+      ...base(),id:'bad-parallel-row',memberId:'399',
+      kind:'SILENCE' as ModerationOperation['kind']
+     }));
+     return 'CONFIRMED';
+    }
+   };
+   const result=await new ModerationService(f.store,f.policy,transport,()=>NOW)
+    .addManualReason(OWNER,GROUP,TARGET,'case','BAN');
+   assert.equal(result.status,'BLOCKED_UNKNOWN');
+   assert.equal(attempts,1);
+   const state=await f.store.snapshot();
+   assert.equal(state.moderationOperations.find(o=>o.memberId===TARGET)?.status,'UNKNOWN_OUTCOME');
+   assert.equal(state.moderationOperations.find(o=>o.id==='bad-parallel-row')?.kind,'SILENCE');
+  }finally{await f.close();}
+ });
+}
