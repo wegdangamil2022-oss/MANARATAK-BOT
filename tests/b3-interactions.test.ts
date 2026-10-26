@@ -20,9 +20,9 @@ async function setup() {
   const admin=new EducationAdminFacade(store,policy,education);
   await policy.approveChat(OWNER,GROUP,['navigation','assistant']);
   await policy.approveChat(OWNER,OTHER,['navigation','assistant']);
+  await policy.configureGroupAI(OWNER,GROUP,'ALL_MENTION');
   await policy.grant(OWNER,UPLOADER,'content.upload',GROUP,20_000);
   await policy.grant(OWNER,PUBLISHER,'content.publish',GROUP,20_000);
-  await policy.configureGroupAI(OWNER,GROUP,'ALL_MENTION');
   await education.createCategory(OWNER,{id:'scholarships',scope:GROUP,title:'المنح',order:1});
   await education.createCategory(OWNER,{id:'private-resources',scope:'private',title:'دليل خاص',order:1});
   const csv='title,university,cycle\nScholarship A,University One,2026\n';
@@ -85,6 +85,8 @@ test('FAQ automatically ceases after archived source, category disable or chat r
     await c.policy.revokeChat(OWNER,GROUP);
     assert.equal((await c.faq.answerGroup(STUDENT,GROUP,'Where?',true)).status,'DISABLED');
     await c.policy.approveChat(OWNER,GROUP,['navigation','assistant']);
+    // Explicitly re-delegate after reapproval; old role may not revive.
+    await c.policy.grant(OWNER,PUBLISHER,'content.publish',GROUP,20_000);
     await c.education.archiveResource(PUBLISHER,c.resource.id);
     assert.equal((await c.faq.answerGroup(STUDENT,GROUP,'Where?',true)).status,'NO_MATCH');
   } finally {await c.close();}
