@@ -7,6 +7,7 @@ import {BotStore} from '../src/store.js';
 import {Policy} from '../src/policy.js';
 import {inspectOfflineModerationTrialScope} from '../src/moderation-trial-scope.js';
 import {inspectIsolatedModerationRightsReadOnly} from '../src/moderation-trial-rights.js';
+import {TelegramBotApiModerationGateway} from '../src/telegram-moderation-gateway.js';
 
 const OWNER='100',TRIAL='-100123';
 async function fixture(){
@@ -43,18 +44,25 @@ test('an aliased STOP file cannot certify a clean isolated trial as safe',async(
 
 test('rights preflight refuses a hard-linked switch before ANY Telegram read',async()=>{
  const f=await fixture();try{
-  let calls=0;
-  const gateway={inspectBotModerationRights:async(_chatId:string)=>{
-   calls++;return 'GRANTED' as const;
-  }};
+  const methods:string[]=[];
+  const token='123456789:ABCDEFGHIJKLMNOPQRSTUVWXYZabcde';
+  const gateway=new TelegramBotApiModerationGateway(token,(async(url:string|URL|Request,init?:RequestInit)=>{
+   const method=String(url).split('/').at(-1)!;
+   methods.push(method);
+   assert.equal(method,'getChatMember');
+   assert.deepEqual(JSON.parse(String(init?.body)),{chat_id:TRIAL,user_id:123456789});
+   return new Response(JSON.stringify({ok:true,result:{
+    status:'administrator',user:{id:123456789,is_bot:true},can_restrict_members:true
+   }}),{status:200,headers:{'content-type':'application/json'}});
+  }) as typeof fetch);
   await link(f.safetyFile,f.alias);
   await assert.rejects(inspectIsolatedModerationRightsReadOnly(f.options(),gateway),
    /TRIAL_ACCEPTANCE_INVALID_SAFETY/);
-  assert.equal(calls,0);
+  assert.deepEqual(methods,[]);
   await unlink(f.alias);
   const report=await inspectIsolatedModerationRightsReadOnly(f.options(),gateway);
   assert.equal(report.status,'PASS');
   assert.equal(report.botRights,'GRANTED');
-  assert.equal(calls,2);
+  assert.deepEqual(methods,['getChatMember','getChatMember']);
  }finally{await f.close();}
 });
