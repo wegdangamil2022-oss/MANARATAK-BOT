@@ -1,3 +1,12 @@
+## 0.7.106 — 2026-10-27 — fail-closed restored group owner views and late reversal integrity
+
+- Added 26 JSON and SQLite TDD regressions covering identical, revoked and divergent group approval collisions in BOTH owner group menu surfaces, stale owner detail/reversal callbacks, aggregate redacted conflict counts, independent unique groups and authorization checks.
+- RED baseline: 20 of 26 new tests failed against v0.7.105 while the previous 2,101 tests passed.
+- Owner inline and reply-keyboard group browsers now isolate duplicated restored group IDs instead of choosing one approval record. Stale owner callbacks are invalidated and conflicting ID counts are shown only in aggregate.
+- The owner reversal inventory requires a unique current group approval and refuses to claim an empty ledger when the supplied group record is ambiguous or stale.
+- The read-only reversal preflight rechecks global ledger safety after an awaited observation, preventing a corruption in another member's or group's operation records from being treated as a reliable external observation.
+- No live Telegram mutation, no automatic unknown-outcome retry and no release permission.
+
 ## 0.7.105 — 2026-10-27 — read-only reversal chronology and isolated trial restore safety
 
 - 34 new JSON/SQLite TDD regressions exercise reordered local sanctions, equal-time ambiguity, colliding operation IDs, restored malformed ledgers, read-only observer drift and duplicated trial-group or unrelated approval records.
