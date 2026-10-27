@@ -69,13 +69,17 @@ async function fixture(engine:'json'|'sqlite'){
  const links=new ResourceLinkService(store,policy);
  const app=()=>new TelegramUpdateApplication({store,policy,education,admin,faq,links,
   botId:'bot-main',botUsername:'ManaratakBot',membership:async()=> 'UNKNOWN'});
- const details=()=>app().handle(event(80,'mi:1:g:d:'+GROUP+':'+group.version+':0'));
+ // The real update adapter durably deduplicates Telegram update_id. A test
+ // must NEVER replay event(80) after an old callback: use ascending IDs.
+ let updateId=100;
+ const call=(key:string)=>app().handle(event(++updateId,key));
+ const details=()=>call('mi:1:g:d:'+GROUP+':'+group.version+':0');
  const token=async()=>{
   const card=await details();
   const value=buttons(card).find(x=>x.callback_data.startsWith('mi:1:g:r:'))?.callback_data;
   assert.ok(value);return value;
  };
- return {store,policy,group,now,appendReview,app,details,token,
+ return {store,policy,group,now,appendReview,app,call,details,token,
   close:()=>rm(dir,{force:true,recursive:true})};
 }
 
@@ -93,7 +97,7 @@ for(const engine of ['json','sqlite'] as const){
    assert.match(message,/نقص أدلة: 1/);
    assert.doesNotMatch(message,/PRIVATE_HIDDEN_REASON|PRIVATE_CONFIRMED_FINGERPRINT|399/);
    const old=await f.token();
-   const screen=await f.app().handle(event(81,old));
+   const screen=await f.call(old);
    assert.equal(screen.status,'APPLIED');
    assert.match(screen.plan?.text??'',/مرشحة لفحص خارجي: 0/);
    assert.match(screen.plan?.text??'',/نقص أدلة: 1/);
@@ -121,7 +125,7 @@ for(const engine of ['json','sqlite'] as const){
   const f=await fixture(engine);try{
    await f.appendReview(f.now-1000);
    const old=await f.token();
-   const original=await f.app().handle(event(90,old));
+   const original=await f.call(old);
    assert.equal(original.status,'APPLIED');
    assert.match(original.plan?.text??'',/مرشحة لفحص خارجي: 1/);
    const before=await f.store.snapshot();
@@ -133,11 +137,11 @@ for(const engine of ['json','sqlite'] as const){
    assert.deepEqual(after.moderationOperations,before.moderationOperations);
    assert.deepEqual(after.chats,before.chats);
    assert.deepEqual(after.moderationReasons,before.moderationReasons);
-   const stale=await f.app().handle(event(91,old));
+   const stale=await f.call(old);
    assert.equal(stale.status,'DENIED');
    const next=await f.token();
    assert.notEqual(old,next);
-   const fresh=await f.app().handle(event(92,next));
+   const fresh=await f.call(next);
    assert.equal(fresh.status,'APPLIED');
    assert.match(fresh.plan?.text??'',/مرشحة لفحص خارجي: 0/);
    assert.match(fresh.plan?.text??'',/نقص أدلة: 1/);
@@ -151,8 +155,8 @@ for(const engine of ['json','sqlite'] as const){
    const old=await f.token();
    await f.store.transaction(s=>s.audit=s.audit.filter(a=>
     a.reason!=='MODERATION_UNKNOWN_OWNER_ACKNOWLEDGED'));
-   assert.equal((await f.app().handle(event(101,old))).status,'DENIED');
-   const fresh=await f.app().handle(event(102,await f.token()));
+   assert.equal((await f.call(old)).status,'DENIED');
+   const fresh=await f.call(await f.token());
    assert.match(fresh.plan?.text??'',/مرشحة لفحص خارجي: 0/);
   }finally{await f.close();}
  });
@@ -179,6 +183,6 @@ test('expired permission cannot turn a rejected inventory route into a release a
   await f.appendReview(f.now+3_600_000);
   const button=await f.token();
   await f.policy.approveChat(OWNER,GROUP,['navigation']);
-  assert.equal((await f.app().handle(event(110,button))).status,'DENIED');
+  assert.equal((await f.call(button)).status,'DENIED');
  }finally{await f.close();}
 });
