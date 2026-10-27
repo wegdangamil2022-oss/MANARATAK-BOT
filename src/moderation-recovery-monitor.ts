@@ -1,6 +1,7 @@
 import {BotStore,type BotState,type ModerationOperation} from './store.js';
 import {moderationLedgerSafeForDispatch,
- moderationOwnerReviewAuditConsistency,orphanModerationReviewAuditReceipts} from './moderation-review-integrity.js';
+ moderationOwnerReviewAuditConsistency,orphanModerationReviewAuditReceipts,
+ conflictingModerationReviewAuditOperations} from './moderation-review-integrity.js';
 
 /**
  * A strictly local, aggregate-only report for a trusted host operator.
@@ -27,6 +28,8 @@ export interface ModerationRecoveryReport{
  readonly untrustedReviewEvidence:number;
  /** Owner-review audit receipts whose matching UNKNOWN_OUTCOME operation vanished. */
  readonly orphanReviewAuditReceipts:number;
+ /** Existing UNKNOWN_OUTCOME operations with contradictory local review audits. */
+ readonly conflictingReviewAuditOperations:number;
  readonly distinctBlockedTargets:number;
  readonly manualAttention:number;
 }
@@ -113,13 +116,18 @@ export function summarizeModerationRecovery(
  // Do not report a clean database merely because the operation disappeared
  // while its owner's review audit survived a partial restore.
  const orphanReviewAuditReceipts=orphanModerationReviewAuditReceipts(s);
+ // Keep diagnostic recovery readable even when dispatch must fail closed:
+ // the ledger-only validation above deliberately excludes audit mismatches.
+ const conflictingReviewAuditOperations=conflictingModerationReviewAuditOperations(s);
  return {
   stage:'OFFLINE_MODERATION_RECOVERY',
-  state:manualAttention||orphanReviewAuditReceipts?'ATTENTION_REQUIRED':'OK',
+  state:manualAttention||orphanReviewAuditReceipts||
+   conflictingReviewAuditOperations?'ATTENTION_REQUIRED':'OK',
   totalOperations:s.moderationOperations.length,
   intent,started,unknownOutcome,staleIntent,staleStarted,
   clockAnomaly,awaitingFirstReview,reviewedUnresolved,untrustedReviewEvidence,
-  orphanReviewAuditReceipts,distinctBlockedTargets:blockedTargets.size,manualAttention
+  orphanReviewAuditReceipts,conflictingReviewAuditOperations,
+  distinctBlockedTargets:blockedTargets.size,manualAttention
  };
 }
 /** Read-only SQLite snapshot with the existing path, mode, symlink and DB
