@@ -40,12 +40,13 @@ const command=(file:string,extra:string[]=[])=>spawnSync(process.execPath,[
 test('pure recovery projection treats a clean ledger as healthy without inventing activity',()=>{
  assert.deepEqual(summarizeModerationRecovery({moderationOperations:[]},options()),baseline);
 });
-test('fresh INTENT and STARTED stay pending, never magically become confirmed no-send or success',()=>{
+test('fresh INTENT and STARTED need human attention after restart, without guessing provider delivery',()=>{
  const x=summarizeModerationRecovery({moderationOperations:[
   op('INTENT','i',NOW-1000),op('STARTED','s',NOW-1000,{memberId:'301'})
  ]},options());
- assert.deepEqual(x,{...baseline,totalOperations:2,intent:1,started:1,
-  distinctBlockedTargets:2});
+ assert.deepEqual(x,{...baseline,state:'ATTENTION_REQUIRED',
+  totalOperations:2,intent:1,started:1,manualAttention:2,
+  staleIntent:0,staleStarted:0,distinctBlockedTargets:2});
 });
 test('stale INTENT is attention-worthy but remains a pending case, NOT proof of no-send',()=>{
  const x=summarizeModerationRecovery({moderationOperations:[
@@ -103,7 +104,7 @@ test('only unresolved attempts count toward blocked targets, deduplicated per ch
  ]},options());
  assert.equal(x.totalOperations,6);
  assert.equal(x.distinctBlockedTargets,2);
- assert.equal(x.manualAttention,1);
+ assert.equal(x.manualAttention,3,'fresh pending attempts are not proven active workers');
  assert.equal(x.state,'ATTENTION_REQUIRED');
 });
 test('strict options reject arbitrary properties, negative clock, unsafe windows, or malformed selectors',()=>{
