@@ -182,6 +182,11 @@ export class TelegramBotApiModerationGateway implements ModerationGateway{
   if(!await this.canRestrict(chatId,memberId))return 'NO_RIGHTS';
   const member=await this.getMember(chatId,memberId);
   if(!member)return 'UNKNOWN';
+  // Bot authority was checked before the external member observation.
+  // A demotion or can_restrict_members revocation during that awaited read
+  // invalidates even a matching BAN/MUTE observation. This is advisory-only:
+  // no sequence of separate Telegram reads is an atomic authority proof.
+  if(!await this.canRestrict(chatId,memberId))return 'NO_RIGHTS';
   if(member.user.is_bot!==false||member.status==='creator'||
     member.status==='administrator')return 'PROTECTED';
   if(member.status==='kicked')return 'BAN_PRESENT';
