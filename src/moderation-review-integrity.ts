@@ -167,6 +167,30 @@ export function orphanModerationReviewAuditReceipts(
  return missing;
 }
 
+/** Count UNKNOWN_OUTCOME records whose owner-review annotation and
+ * durable audit are contradictory, missing, duplicated, or one-sided.
+ * Unlike legacy unbound (digest-free) records, INCONSISTENT evidence is a
+ * global dispatch hazard even when the original operation still exists:
+ * a partial restore cannot prove the unaffected groups have a sound ledger.
+ *
+ * A missing audit property is allowed for older pure projections; every
+ * writable BotStore snapshot supplies an audit collection. This function
+ * is observational and never edits evidence or discloses record identities.
+ */
+export function conflictingModerationReviewAuditOperations(
+ state:Pick<BotState,'moderationOperations'>&Partial<Pick<BotState,'audit'>>
+):number{
+ if(state.audit===undefined)return 0;
+ if(!Array.isArray(state.audit))return 1;
+ let count=0;
+ for(const op of state.moderationOperations){
+  if(op?.status==='UNKNOWN_OUTCOME'&&
+   moderationOwnerReviewAuditConsistency({audit:state.audit},op)==='INCONSISTENT')
+   count++;
+ }
+ return count;
+}
+
 /** A structurally valid restored ledger can still contain two individually
  * valid rows with the SAME durable operation ID. Dispatch and clean recovery
  * must fail closed globally: target-based filtering and find(id) can otherwise
@@ -180,7 +204,8 @@ export function moderationLedgerSafeForDispatch(
  state:Pick<BotState,'moderationOperations'>&Partial<Pick<BotState,'audit'>>):boolean{
  return inspectModerationLedgerIntegrity(state).valid&&
   ambiguousModerationOperationIds(state).size===0&&
-  orphanModerationReviewAuditReceipts(state)===0;
+  orphanModerationReviewAuditReceipts(state)===0&&
+  conflictingModerationReviewAuditOperations(state)===0;
 }
 
 /** Strict LOCAL corroboration of a moderation owner review with its appended

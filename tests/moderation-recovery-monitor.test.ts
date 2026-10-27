@@ -19,7 +19,8 @@ const baseline={
  totalOperations:0,intent:0,started:0,unknownOutcome:0,
  staleIntent:0,staleStarted:0,clockAnomaly:0,
  awaitingFirstReview:0,reviewedUnresolved:0,untrustedReviewEvidence:0,
- orphanReviewAuditReceipts:0,distinctBlockedTargets:0,manualAttention:0
+ orphanReviewAuditReceipts:0,conflictingReviewAuditOperations:0,
+ distinctBlockedTargets:0,manualAttention:0
 } as const;
 const options=()=>({now:NOW,staleAfterMs:STALE});
 async function fixture(){
