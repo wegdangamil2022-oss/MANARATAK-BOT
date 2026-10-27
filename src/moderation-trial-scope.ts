@@ -17,7 +17,8 @@ export type ModerationTrialBlocker=
  'OTHER_MODERATION_REASONS'|'OTHER_MODERATION_WARNINGS'|
  'TRIAL_GROUP_HAS_MODERATION_HISTORY'|'TRIAL_GROUP_HAS_MODERATION_REASONS'|
  'TRIAL_GROUP_HAS_WARNINGS'|'TRIAL_GROUP_HAS_MODERATION_GRANTS'|
- 'OTHER_MODERATION_GRANTS';
+ 'OTHER_MODERATION_GRANTS'|'TRIAL_GROUP_APPROVAL_AMBIGUOUS'|
+ 'OTHER_CHAT_APPROVAL_AMBIGUOUS';
 export interface OfflineModerationTrialReport{
  readonly stage:'OFFLINE_MODERATION_TRIAL';
  readonly status:'PASS'|'BLOCKED';
@@ -36,7 +37,20 @@ const FIELDS=['stateFile','backupFile','safetyFile','now','staleAfterMs','trialC
  */
 export function localModerationTrialBlockers(s:BotState,trialChatId:string):ModerationTrialBlocker[]{
  const reasons:ModerationTrialBlocker[]=[];
- const chat=s.chats.find(c=>c.id===trialChatId);
+ // Restored approval collisions must never be treated as a safe isolated
+ // test scope, including identical trial rows and revoked/never-approved
+ // duplicate records elsewhere. Do not choose the first approved copy.
+ const seen=new Set<string>(),duplicateIds=new Set<string>();
+ for(const row of s.chats){
+  if(seen.has(row.id))duplicateIds.add(row.id);
+  seen.add(row.id);
+ }
+ if(duplicateIds.has(trialChatId))
+  reasons.push('TRIAL_GROUP_APPROVAL_AMBIGUOUS');
+ if([...duplicateIds].some(id=>id!==trialChatId))
+  reasons.push('OTHER_CHAT_APPROVAL_AMBIGUOUS');
+ const rows=s.chats.filter(c=>c.id===trialChatId);
+ const chat=rows.length===1?rows[0]:undefined;
  if(!chat?.approved)reasons.push('TRIAL_GROUP_NOT_APPROVED');
  else{
   if(!chat.present)reasons.push('TRIAL_GROUP_NOT_PRESENT');
