@@ -58,13 +58,13 @@ const opDigest=(o:ModerationOperation,s:BotState)=>createHash('sha256')
 /** Collision in any group or terminal status blocks review of that ID.
  * Ambiguous rows remain durable and visible as a redacted warning count.
  */
-const opList=(s:BotState)=>{
+const opList=(s:BotState,now:number)=>{
  const ambiguous=ambiguousModerationOperationIds(s);
  const conflictingChats=ambiguousModerationChatIds(s);
  return s.moderationOperations.filter(o=>
   o.status==='UNKNOWN_OUTCOME'&&!ambiguous.has(o.id)&&
   !conflictingChats.has(o.chatId)&&
-  moderationOwnerReviewAuditConsistency(s,o)!=='INCONSISTENT'&&
+  moderationOwnerReviewAuditConsistency(s,o,now)!=='INCONSISTENT'&&
   s.chats.some(c=>c.id===o.chatId&&c.approved&&c.scopes.includes('moderation')))
   .sort((a,b)=>a.createdAt-b.createdAt||a.id.localeCompare(b.id));
 };
@@ -72,8 +72,9 @@ const detailKey=(page:number,slot:number,d:string)=>'mr:1:d:'+page+':'+slot+':'+
 const previewKey=(page:number,slot:number,d:string,action:'a'|'e')=>
  'mr:1:v:'+page+':'+slot+':'+d+':'+action;
 type Selected={op:ModerationOperation;page:number;slot:number;digest:string};
-function select(s:BotState,route:Extract<ModerationOwnerReviewRoute,{slot:number}>):Selected|null{
- const all=opList(s),op=all[route.page*BUTTON_LIMIT+route.slot-1];
+function select(s:BotState,route:Extract<ModerationOwnerReviewRoute,{slot:number}>,
+ now:number):Selected|null{
+ const all=opList(s,now),op=all[route.page*BUTTON_LIMIT+route.slot-1];
  if(!op||opDigest(op,s)!==route.digest)return null;
  return {op,page:route.page,slot:route.slot,digest:route.digest};
 }
@@ -105,14 +106,17 @@ export class ModerationUnknownOwnerReview {
        'تم حجب مراجعة العقوبات. البيانات تتطلب مراجعة بشرية مستقلة دون إعادة إرسال أو حذف.',
        [[button('🏠 لوحة المالك','mi:1:h')]])
       :null;
-  const all=opList(s);
+  // A single observation clock also prevents restored FUTURE review receipts
+  // from being shown as valid during an owner navigation.
+  const now=this.clock();
+  const all=opList(s,now);
   if(route.kind==='list'){
    const pages=Math.max(1,Math.ceil(all.length/BUTTON_LIMIT));
    if(route.page>=pages)return null;
    const current=all.slice(route.page*BUTTON_LIMIT,(route.page+1)*BUTTON_LIMIT);
    const rows:{text:string;callback_data:string}[][]=[];
    for(let i=0;i<current.length;i+=2)rows.push(current.slice(i,i+2).map((o,j)=>{
-    const trust=moderationOwnerReviewAuditConsistency(s,o);
+    const trust=moderationOwnerReviewAuditConsistency(s,o,now);
     const label=trust==='LEGACY_UNBOUND'?'⚠️ مراجعة قديمة بلا بصمة':
      trust==='REVIEWED'?'✅ مراجعة مرتبطة بالبصمة':'⚠️ بحاجة لمراجعة';
     return button(label+' · '+o.kind,detailKey(route.page,i+j+1,opDigest(o,s)));
@@ -127,9 +131,9 @@ export class ModerationUnknownOwnerReview {
    rows.push([button('↩️ قسم الحماية','mi:1:s:02:0'),button('🏠 لوحة المالك','mi:1:h')]);
    const pending=all.filter(o=>!o.review).length;
    const legacy=all.filter(o=>
-    moderationOwnerReviewAuditConsistency(s,o)==='LEGACY_UNBOUND').length;
+    moderationOwnerReviewAuditConsistency(s,o,now)==='LEGACY_UNBOUND').length;
    const reviewedBound=all.filter(o=>
-    moderationOwnerReviewAuditConsistency(s,o)==='REVIEWED').length;
+    moderationOwnerReviewAuditConsistency(s,o,now)==='REVIEWED').length;
    const ambiguousIds=ambiguousModerationOperationIds(s);
    const ambiguousChats=ambiguousModerationChatIds(s);
    const chatConflicts=s.moderationOperations.filter(o=>
@@ -140,7 +144,7 @@ export class ModerationUnknownOwnerReview {
     s.chats.some(c=>c.id===o.chatId&&c.approved&&c.scopes.includes('moderation'))).length;
    const invalidReviewAudit=s.moderationOperations.filter(o=>
     o.status==='UNKNOWN_OUTCOME'&&!ambiguousIds.has(o.id)&&
-    moderationOwnerReviewAuditConsistency(s,o)==='INCONSISTENT'&&
+    moderationOwnerReviewAuditConsistency(s,o,now)==='INCONSISTENT'&&
     s.chats.some(c=>c.id===o.chatId&&c.approved&&c.scopes.includes('moderation'))).length;
    return menu('<b>مراجعة العمليات مجهولة النتيجة 🛡️</b>\n'
     +'الإجمالي القابل للعرض: '+all.length+' · بحاجة لمراجعة: '+pending+
@@ -152,11 +156,11 @@ export class ModerationUnknownOwnerReview {
     +(all.length?'صفحة '+(route.page+1)+' من '+pages+'\n':'لا توجد عمليات مجهولة مرئية في المجموعات المعتمدة.\n')
     +'الإقرار والتصعيد توثيق محلي فقط: لا يثبتان نجاح العقوبة، ولا يزيلان منع إعادة الإرسال، ولا يفكان حظرًا أو كتمًا.',rows);
   }
-  const chosen=select(s,route);
+  const chosen=select(s,route,now);
   if(!chosen)return null;
   const {op,page,slot,digest}=chosen;
   if(route.kind==='details'){
-   const trust=moderationOwnerReviewAuditConsistency(s,op);
+   const trust=moderationOwnerReviewAuditConsistency(s,op,now);
    const legacyWarning=trust==='LEGACY_UNBOUND'?
     '⚠️ مراجعة قديمة غير مربوطة ببصمة العقوبة الأصلية؛ تحتاج تحقق بشري مستقل. ليست مراجعة موثقة بالبصمة.\n':'';
    const rows=op.review?
@@ -175,7 +179,6 @@ export class ModerationUnknownOwnerReview {
     +'هوية المستهدف والدليل لا يعرضان هنا. لا تُعدّل حالة العقوبة ولا تعيد إرسالها.',rows);
   }
   if(op.review)return null;
-  const now=this.clock();
   if(!Number.isSafeInteger(now)||now<op.createdAt||now>8_640_000_000_000_000-120000)return null;
   const chat=s.chats.find(c=>c.id===op.chatId);
   if(!chat?.approved||!chat.scopes.includes('moderation'))return null;
@@ -191,7 +194,7 @@ export class ModerationUnknownOwnerReview {
    if(!c?.approved||!c.scopes.includes('moderation')||c.version!==chat.version||
     !found||found.status!=='UNKNOWN_OUTCOME'||found.review||
     now<found.createdAt||
-    moderationOwnerReviewAuditConsistency(state,found)!=='UNREVIEWED'||
+    moderationOwnerReviewAuditConsistency(state,found,now)!=='UNREVIEWED'||
     opDigest(found,state)!==digest)return false;
    state.callbacks.push({ref,action,actorId:actor,chatId:op.chatId,
     policyVersion:c.version,moderationOperationId:op.id,
@@ -237,7 +240,7 @@ export class ModerationUnknownOwnerReview {
    if(!chat?.approved||!chat.scopes.includes('moderation')||chat.version!==c.policyVersion||
      !operation||operation.status!=='UNKNOWN_OUTCOME'||operation.review||
      now<operation.createdAt||
-     moderationOwnerReviewAuditConsistency(state,operation)!=='UNREVIEWED'||
+     moderationOwnerReviewAuditConsistency(state,operation,now)!=='UNREVIEWED'||
      opDigest(operation,state)!==c.moderationOperationDigest||!this.validOwner(actor))return null;
    const decision:Decision=c.action==='owner.moderation.review.escalate'?
     'ESCALATED':'ACKNOWLEDGED_UNRESOLVED';
