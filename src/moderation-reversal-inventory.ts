@@ -19,8 +19,18 @@ export interface ReversalInventory {
 const zero=():ReversalInventory=>({
  total:0,unknown:0,pending:0,activeReasons:0,unproven:0,stale:0,inspect:0
 });
+/** The displayed Chat must be the current uniquely stored approval. Do not
+ * treat an old caller-supplied Chat object as permission after a restore.
+ * Keep this read-only and fail closed for even identical duplicate IDs.
+ */
+function currentApprovedModerationGroup(s:BotState,policy:Policy,chat:Chat):boolean{
+ const current=s.chats.filter(c=>c.id===chat.id);
+ return current.length===1&&
+  JSON.stringify(current[0])===JSON.stringify(chat)&&
+  policy.canUseChat(s,chat.id,'moderation');
+}
 export function groupReversalInventory(s:BotState,policy:Policy,chat:Chat):ReversalInventory{
- if(!chat.approved||!chat.scopes.includes('moderation'))return zero();
+ if(!currentApprovedModerationGroup(s,policy,chat))return zero();
  const actors=new Set<string>();
  for(const operation of s.moderationOperations)
   if(operation.chatId===chat.id)actors.add(operation.memberId);
@@ -52,6 +62,12 @@ export function reversalInventoryDigest(s:BotState,chat:Chat):string{
    operations,reasons])).digest('hex').slice(0,12);
 }
 export function renderReversalInventory(s:BotState,policy:Policy,chat:Chat):string{
+ if(!currentApprovedModerationGroup(s,policy,chat))
+  return '<b>🧭 عوائق التراجع — فحص محلي محجوب</b>\n'
+   +'⚠️ تعذر فحص هذه المجموعة بسبب غياب تصريح فريد موثوق '
+   +'أو تعارض بيانات صلاحيات المجموعة المستعادة.\n'
+   +'لن تُعرض أعداد الأعضاء أو العقوبات من بيانات ملتبسة.\n'
+   +'لا يوجد أي إجراء لفك الحظر أو الكتم؛ لم يُجر اتصال بـTelegram.';
  const v=groupReversalInventory(s,policy,chat);
  return '<b>🧭 عوائق التراجع عن العقوبات — بيانات محلية</b>\n'
   +'المجموعة: <code>'+chat.id+'</code>\n'
