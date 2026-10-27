@@ -154,7 +154,7 @@ for(const engine of ['json','sqlite'] as const){
   const f=await fixture(engine);try{
    await f.store.transaction(s=>{
     for(let i=2;i<=19;i++)s.moderationOperations.push({
-     ...s.moderationOperations[0]!,id:'case-'+String(i),createdAt:1700000000000+i
+     ...s.moderationOperations[0]!,id:'case-'+String(i),createdAt:f.now()-100+i
     });
    });
    const one=await f.app().handle(cb(50,100,'mr:1:p:1'));
