@@ -56,14 +56,23 @@ async function fixture(engine:Engine){
 for(const engine of ['json','sqlite'] as const){
  test(engine+' refuses to mint owner-review nonce for future-dated restored recovery',async()=>{
   const f=await fixture(engine);try{
-   await f.store.transaction(s=>{s.moderationOperations[0]!.createdAt=NOW+60_000;});
    const action=await f.route();
+   // A state restore may move the original case into the future AFTER a
+   // previously valid selector was minted. Refuse both old preview and
+   // fresh list entries until a credible observation time catches up.
+   await f.store.transaction(s=>{s.moderationOperations[0]!.createdAt=NOW+60_000;});
    const before=(await f.store.snapshot()).callbacks;
+   const listing=await f.screen.handle('mr:1:h',OWNER);
+   assert.equal(listing?.keyboard.inline_keyboard.flat()
+    .some(x=>x.callback_data.startsWith('mr:1:d:')),false);
+   assert.match(listing?.text??'',/عمليات مستقبلية محجوبة: 1/);
    const preview=await f.screen.handle(action,OWNER);
    assert.equal(preview,null);
    assert.deepEqual((await f.store.snapshot()).callbacks,before);
    f.advance(60_001);
-   const valid=await f.screen.handle(action,OWNER);
+   const currentAction=await f.route();
+   assert.notEqual(currentAction,action,'old digest must expire after history changed');
+   const valid=await f.screen.handle(currentAction,OWNER);
    assert.ok(valid,'future timestamp eventually becomes reviewable without changing it');
   }finally{await f.close();}
  });
