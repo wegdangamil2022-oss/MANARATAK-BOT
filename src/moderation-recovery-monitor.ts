@@ -6,7 +6,9 @@ import {moderationLedgerSafeForDispatch} from './moderation-review-integrity.js'
  * It does not require a Telegram token, touch an outbound gateway or write
  * any state. A status of INTENT is not a proof of safe cancellation: after
  * a crash, externally changed ledger evidence may be incomplete.
- * STARTED and UNKNOWN_OUTCOME never authorize a retry or automatic review.
+ * Even a fresh INTENT or STARTED may be orphaned by a restart. A detached
+ * one-shot monitor has no trusted process-liveness proof, so ALL unresolved
+ * attempts require operator attention; none authorize retry or auto-review.
  */
 export interface ModerationRecoveryReport{
  readonly stage:'OFFLINE_MODERATION_RECOVERY';
@@ -84,7 +86,10 @@ export function summarizeModerationRecovery(
    if(o.review)reviewedUnresolved++;
    else awaitingFirstReview++;
   }
-  if(invalidTime||stale||o.status==='UNKNOWN_OUTCOME')manualAttention++;
+  // A fresh timestamp does not prove the process that reserved INTENT or
+  // STARTED is still alive. Reporting OK could hide a crash or power loss.
+  // Every unresolved receipt needs a human decision, never an auto-retry.
+  manualAttention++;
  }
  return {
   stage:'OFFLINE_MODERATION_RECOVERY',
