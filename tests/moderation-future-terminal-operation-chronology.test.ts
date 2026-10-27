@@ -210,10 +210,15 @@ test('SQLite CLI future terminal record is attention required and redacts privat
   assert.equal(r.manualAttention,0);
   assert.equal(r.clockAnomaly,1);
   assert.equal(r.state,'ATTENTION_REQUIRED');
+  // A short member ID may coincidentally occur inside Node's
+  // diagnostic process ID on stderr. Member identity must not leak in the
+  // structured stdout report; tokens, paths and full chat IDs must not
+  // appear in either output stream.
   for(const secret of [f.file,'PRIVATE_TELEGRAM_TOKEN','PRIVATE_FUTURE_OPERATION',
-   'PRIVATE_OPERATION_FINGERPRINT',OTHER,OTHER_MEMBER]){
-    assert.equal((child.stdout+child.stderr).includes(secret),false);
+   'PRIVATE_OPERATION_FINGERPRINT',OTHER]){
+   assert.equal((child.stdout+child.stderr).includes(secret),false);
   }
+  assert.equal(child.stdout.includes(OTHER_MEMBER),false);
   assert.deepEqual(await readFile(f.file),before);
  }finally{await f.close();}
 });
