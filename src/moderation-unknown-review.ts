@@ -62,7 +62,11 @@ const opList=(s:BotState,now:number)=>{
  const ambiguous=ambiguousModerationOperationIds(s);
  const conflictingChats=ambiguousModerationChatIds(s);
  return s.moderationOperations.filter(o=>
-  o.status==='UNKNOWN_OUTCOME'&&!ambiguous.has(o.id)&&
+  // A restored UNKNOWN row claiming creation after the current clock
+  // cannot be an actionable owner-review selector. It stays in the ledger
+  // until human investigation, but is hidden from details and nonce issue.
+  o.status==='UNKNOWN_OUTCOME'&&o.createdAt<=now&&
+  !ambiguous.has(o.id)&&
   !conflictingChats.has(o.chatId)&&
   moderationOwnerReviewAuditConsistency(s,o,now)!=='INCONSISTENT'&&
   s.chats.some(c=>c.id===o.chatId&&c.approved&&c.scopes.includes('moderation')))
@@ -109,6 +113,15 @@ export class ModerationUnknownOwnerReview {
   // A single observation clock also prevents restored FUTURE review receipts
   // from being shown as valid during an owner navigation.
   const now=this.clock();
+  // Reject invalid time at the navigation boundary, including read-only
+  // details. Preview/confirm already check their time, but a forged clock
+  // must not turn a stale detail selector into an apparently usable case.
+  if(!Number.isSafeInteger(now)||now<0||now>8_640_000_000_000_000)
+   return route.kind==='list'
+     ?menu('<b>وقت النظام غير موثوق</b>\n'+
+      'تم حجب اختيار مراجعات العقوبات إلى حين التحقق من ساعة الخادم والأدلة، دون أي إعادة إرسال.',
+      [[button('🏠 لوحة المالك','mi:1:h')]])
+     :null;
   const all=opList(s,now);
   if(route.kind==='list'){
    const pages=Math.max(1,Math.ceil(all.length/BUTTON_LIMIT));
@@ -146,6 +159,10 @@ export class ModerationUnknownOwnerReview {
     o.status==='UNKNOWN_OUTCOME'&&!ambiguousIds.has(o.id)&&
     moderationOwnerReviewAuditConsistency(s,o,now)==='INCONSISTENT'&&
     s.chats.some(c=>c.id===o.chatId&&c.approved&&c.scopes.includes('moderation'))).length;
+   const futureCreated=s.moderationOperations.filter(o=>
+    o.status==='UNKNOWN_OUTCOME'&&o.createdAt>now&&
+    !ambiguousIds.has(o.id)&&!ambiguousChats.has(o.chatId)&&
+    s.chats.some(c=>c.id===o.chatId&&c.approved&&c.scopes.includes('moderation'))).length;
    return menu('<b>مراجعة العمليات مجهولة النتيجة 🛡️</b>\n'
     +'الإجمالي القابل للعرض: '+all.length+' · بحاجة لمراجعة: '+pending+
     ' · تمت مراجعتها: '+reviewedBound+
@@ -153,6 +170,7 @@ export class ModerationUnknownOwnerReview {
     ' · سجلات متعارضة محجوبة: '+conflicting+
     ' · مجموعات متعارضة محجوبة: '+chatConflicts+
     ' · تدقيق مراجعات متعارض محجوب: '+invalidReviewAudit+
+    ' · عمليات مستقبلية محجوبة: '+futureCreated+
     ' · إيصالات مراجعة يتيمة دون سجل عقوبة: '+orphanModerationReviewAuditReceipts(s)+'\n'
     +(all.length?'صفحة '+(route.page+1)+' من '+pages+'\n':'لا توجد عمليات مجهولة مرئية في المجموعات المعتمدة.\n')
     +'الإقرار والتصعيد توثيق محلي فقط: لا يثبتان نجاح العقوبة، ولا يزيلان منع إعادة الإرسال، ولا يفكان حظرًا أو كتمًا.',rows);
