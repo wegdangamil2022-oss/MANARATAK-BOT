@@ -38,17 +38,25 @@ export class Policy {
   ):{safe:boolean;active:Grant[]}{
     if(!Number.isSafeInteger(now)||now<0||!Number.isSafeInteger(epoch)||epoch<1)
       return {safe:false,active:[]};
-    const relevant=s.grants.filter(g=>g.actor===actor&&
-      g.capability===capability&&g.chatId===chatId&&
-      g.chatPolicyVersion===epoch);
+    // A restored row with a malformed approval epoch is a collision in
+    // THIS actor+capability+group ledger, even if an unrelated valid row
+    // happens to match the current revision. A previous-epoch grant with
+    // valid metadata is historical evidence and does not confer access.
+    const history=s.grants.filter(g=>g.actor===actor&&
+      g.capability===capability&&g.chatId===chatId);
     const uuid=/^[a-f0-9]{8}-(?:[a-f0-9]{4}-){3}[a-f0-9]{12}$/u;
-    const malformed=relevant.some(g=>
+    const malformed=history.some(g=>
+      (g.chatPolicyVersion!==undefined&&
+        (typeof g.chatPolicyVersion!=='number'||
+         !Number.isSafeInteger(g.chatPolicyVersion)||g.chatPolicyVersion<1))||
+      (g.grantId!==undefined&&g.chatPolicyVersion===undefined)||
       typeof g.revoked!=='boolean'||
       typeof g.expiresAt!=='number'||!Number.isSafeInteger(g.expiresAt)||
       g.expiresAt<0||g.expiresAt>8_640_000_000_000_000||
       typeof g.grantedBy!=='string'||!/^\d+$/u.test(g.grantedBy)||
       (g.grantId!==undefined&&
         (typeof g.grantId!=='string'||!uuid.test(g.grantId))));
+    const relevant=history.filter(g=>g.chatPolicyVersion===epoch);
     if(malformed)return {safe:false,active:[]};
     const legacy=relevant.filter(g=>g.grantId===undefined);
     if(legacy.length>1)return {safe:false,active:[]};
@@ -344,6 +352,22 @@ export class Policy {
   }
   async revokeGrant(by: string, actor: string, capability: Capability, chatId: string): Promise<void> {
     this.requireOwner(by);
-    await this.store.transaction(s => { for (const g of s.grants) if (g.actor === actor && g.capability === capability && g.chatId === chatId) g.revoked = true; });
+    await this.store.transaction(s => {
+      if(chatId.startsWith('-')){
+        // Restrictive operations may NOT silently overwrite a corrupt
+        // restored history. They must be investigated through an explicit
+        // maintenance/recovery workflow, rather than normal owner buttons.
+        const chat=this.assertUniqueChatRecord(s,chatId);
+        if(chat){
+          const ledger=this.groupGrantLedger(s,actor,capability,chatId,
+            chat.version,this.clock());
+          if(!ledger.safe)throw Error('GRANT_LEDGER_AMBIGUOUS');
+        }
+      }
+      for(const g of s.grants){
+        if(g.actor===actor&&g.capability===capability&&g.chatId===chatId)
+          g.revoked=true;
+      }
+    });
   }
 }
