@@ -37,8 +37,8 @@ for(const status of ['CONFIRMED','FAILED_CONFIRMED','CANCELLED'] as const){
  });
 }
 test('future INTENT and STARTED still get one clock anomaly per operation',()=>{
- const rows=[{...op('INTENT'),attemptGateway:undefined},
-  op('STARTED',NOW+2_000,'PRIVATE_PENDING_ID')];
+ const intent=op('INTENT');delete intent.attemptGateway;
+ const rows=[intent,op('STARTED',NOW+2_000,'PRIVATE_PENDING_ID')];
  const r=recovery(rows);
  assert.equal(r.state,'ATTENTION_REQUIRED');
  assert.equal(r.clockAnomaly,2);
