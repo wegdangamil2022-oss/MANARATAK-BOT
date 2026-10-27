@@ -163,7 +163,7 @@ for(const engine of ['json','sqlite'] as const){
    const reopened=f.reopen();
    const service=new ModerationService(reopened,new Policy(reopened,OWNER,()=>NOW),gateway,()=>NOW);
    const result=await service.addManualReason(OWNER,OTHER_CHAT,TARGET,'fresh-case','BAN');
-   assert.equal(result.status,'CONFIRMED');
+   assert.equal(result.status,'APPLIED');
    assert.equal(gateway.calls.length,1);
   }finally{await f.close();}
  });
