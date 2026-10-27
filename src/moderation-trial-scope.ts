@@ -1,4 +1,5 @@
 import {BotStore,type BotState} from './store.js';
+import {orphanModerationReviewAuditReceipts} from './moderation-review-integrity.js';
 import {inspectTelegramTrialAcceptanceReadOnly,
  type TelegramTrialAcceptanceOptions,type TelegramTrialAcceptanceReport} from './telegram-trial-acceptance.js';
 
@@ -18,7 +19,7 @@ export type ModerationTrialBlocker=
  'TRIAL_GROUP_HAS_MODERATION_HISTORY'|'TRIAL_GROUP_HAS_MODERATION_REASONS'|
  'TRIAL_GROUP_HAS_WARNINGS'|'TRIAL_GROUP_HAS_MODERATION_GRANTS'|
  'OTHER_MODERATION_GRANTS'|'TRIAL_GROUP_APPROVAL_AMBIGUOUS'|
- 'OTHER_CHAT_APPROVAL_AMBIGUOUS';
+ 'OTHER_CHAT_APPROVAL_AMBIGUOUS'|'ORPHAN_MODERATION_REVIEW_AUDIT';
 export interface OfflineModerationTrialReport{
  readonly stage:'OFFLINE_MODERATION_TRIAL';
  readonly status:'PASS'|'BLOCKED';
@@ -75,6 +76,11 @@ export function localModerationTrialBlockers(s:BotState,trialChatId:string):Mode
   reasons.push('TRIAL_GROUP_HAS_WARNINGS');
  if(s.moderationOperations.some(o=>o.chatId!==trialChatId))
   reasons.push('OTHER_MODERATION_HISTORY');
+ // The original operation can vanish while owner audit receipts survive a
+ // partial restore. A clean trial must have neither known moderation history
+ // nor orphaned evidence; audit-only evidence is a separate blocker.
+ if(orphanModerationReviewAuditReceipts(s)>0)
+  reasons.push('ORPHAN_MODERATION_REVIEW_AUDIT');
  if(s.moderationReasons.some(o=>o.chatId!==trialChatId))
   reasons.push('OTHER_MODERATION_REASONS');
  if(s.warnings.some(w=>w.chatId!==trialChatId))
