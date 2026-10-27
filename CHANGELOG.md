@@ -1,3 +1,11 @@
+## 0.7.105 — 2026-10-27 — read-only reversal chronology and isolated trial restore safety
+
+- 34 new JSON/SQLite TDD regressions exercise reordered local sanctions, equal-time ambiguity, colliding operation IDs, restored malformed ledgers, read-only observer drift and duplicated trial-group or unrelated approval records.
+- Baseline RED: 22 new cases failed on v0.7.104, while 2,079 tests passed.
+- Moderation reversal now refuses malformed or duplicate-ID persisted sanction ledgers, then determines latest operation chronologically. Equal creation-time attempts are unproven; only unambiguous latest confirmed Telegram API-labelled attempts permit a **non-authoritative read-only observation**.
+- Single-group moderation trial scope now rejects duplicate restored chat approvals, including identical records or revoked copies elsewhere, with dedicated local warning reasons.
+- Existing safety STOP, permissions, Telegram isolation and no automatic UNKNOWN_OUTCOME retry remain unchanged. No live Telegram sanction wiring or unban/unmute capability is added.
+
 ## 0.7.104 — 2026-10-27 — quarantine malformed historical group-grant epochs
 
 - 50 new JSON/SQLite TDD cases prove stale corrupted grant history cannot be bypassed by selecting a currently valid-looking group grant, or laundered through ordinary owner regrant/revoke.
