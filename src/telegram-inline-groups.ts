@@ -2,6 +2,7 @@ import type {BotStore,Chat,SubscriptionRequirement} from './store.js';
 import type {Policy} from './policy.js';
 import type {OwnerInlineScreen,TelegramInlineKeyboard} from './telegram-inline-owner.js';
 import {reversalInventoryDigest,renderReversalInventory} from './moderation-reversal-inventory.js';
+import {ambiguousModerationChatIds} from './moderation-review-integrity.js';
 
 /** Read-only owner group browser. The selector is NEVER a permission token.
  * All screens are rebuilt from current durable state after checking the owner.
@@ -57,7 +58,11 @@ export async function renderOwnerInlineGroups(store:BotStore,policy:Policy,actor
  // This defensive second check follows the durable await; it is not the sole
  // authorization gate (Telegram's private identity check lives upstream).
  if(!policy.isOwner(actorId))return null;
- const approved=[...state.chats].filter(c=>c.approved &&
+ // Owner selectors are never group authority. A restored duplicate ID,
+ // including an identical or revoked copy, cannot be shown as an approved
+ // distinct group or used by an existing detail/reversal callback.
+ const conflictingChats=ambiguousModerationChatIds(state);
+ const approved=[...state.chats].filter(c=>c.approved &&!conflictingChats.has(c.id)&&
   /^-[1-9][0-9]{0,18}$/u.test(c.id)&&Number.isSafeInteger(c.version)&&
   c.version>=1&&c.version<=9_999_999_999)
   .sort((a,b)=>a.id.localeCompare(b.id));
@@ -77,6 +82,7 @@ export async function renderOwnerInlineGroups(store:BotStore,policy:Policy,actor
   rows.push(footer('mi:1:s:01:0'));
   return {text:'<b>المجموعات المعتمدة 👥</b>\n'
    +'عدد المجموعات المصرح لها محليًا: '+approved.length+'\n'
+   +'مجموعات متعارضة محجوبة: '+conflictingChats.size+'\n'
    +(pages?'صفحة '+(route.page+1)+' من '+pages+'\n':'لا توجد مجموعات معتمدة حاليًا.\n')
    +'اختر مجموعة لعرض النطاقات والإعدادات المحفوظة.\n'
    +'هذا ليس فحصًا حيًا من Telegram؛ لا تُنفّذ أي تعديلات أو عقوبات من هنا.',
