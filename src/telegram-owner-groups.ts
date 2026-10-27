@@ -2,6 +2,7 @@ import type {BotStore,BotState,Chat,SubscriptionRequirement} from './store.js';
 import type {Policy} from './policy.js';
 import type {VerifiedAdminContext} from './education-admin.js';
 import {menuLabels,type TelegramReplyKeyboard} from './telegram-menu.js';
+import {ambiguousModerationChatIds} from './moderation-review-integrity.js';
 
 export const groupMenuLabel='👥 المجموعات المعتمدة';
 type GroupScope='navigation'|'assistant'|'moderation'|'verification'|'publishing';
@@ -109,9 +110,13 @@ export class OwnerTelegramGroupMenu{
   if(ctx.origin!=='TELEGRAM_PRIVATE'||!ctx.verified||
     ctx.chatId!==ctx.actorId||!this.policy.isOwner(ctx.actorId))return null;
   const snapshot:BotState=await this.store.snapshot();
+  // Restored duplicate approvals (even byte-identical or fully revoked)
+  // are not a reliable source for owner selectors or preview text.
+  const conflictingChats=ambiguousModerationChatIds(snapshot);
   const page=pageRe.exec(value);
   if(value===groupMenuLabel||page){
-   const all=[...snapshot.chats].sort((a,b)=>Number(b.approved)-Number(a.approved)||a.id.localeCompare(b.id));
+   const all=[...snapshot.chats].filter(c=>!conflictingChats.has(c.id))
+    .sort((a,b)=>Number(b.approved)-Number(a.approved)||a.id.localeCompare(b.id));
    const position=page?Number(page[2]!):0, pages=Math.ceil(all.length/10);
    const direction=page?(page[1]==='➡️ التالي'?'next':'previous'):undefined;
    if(page&&(!pages||position>=pages||(direction==='next'&&position===0)||
@@ -125,13 +130,14 @@ export class OwnerTelegramGroupMenu{
    return screen('<b>المجموعات المعتمدة 👥</b>\n'
     +'عدد المحادثات المحفوظة: '+all.length+'\n'
     +'المصرّح لها: '+all.filter(c=>c.approved).length+'\n'
+    +'مجموعات متعارضة محجوبة: '+conflictingChats.size+'\n'
     +(pages?'صفحة '+(position+1)+' من '+pages+'\n':'')
     +'اضغط على محادثة لمراجعة السياسة أو تقييدها.\n'
     +'لا تُرسل أوامر حية لإضافة البوت أو مغادرة المجموعة.',
     choices,navigation);
   }
   const action=parseOwnerGroupAction(value);
-  if(!action)return null;
+  if(!action||conflictingChats.has(action.chatId))return null;
   const chat=snapshot.chats.find(c=>c.id===action.chatId);
   if(!chat)return null;
   const subscription=snapshot.subscriptionRequirements.find(c=>c.chatId===chat.id);
