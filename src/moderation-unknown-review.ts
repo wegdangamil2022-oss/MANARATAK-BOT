@@ -205,6 +205,14 @@ export class ModerationUnknownOwnerReview {
   const action=route.decision==='ESCALATED'?'owner.moderation.review.escalate':
    'owner.moderation.review.ack';
   const issued=await this.store.transaction(state=>{
+   // The read-only selector was observed BEFORE waiting for the storage
+   // transaction. Re-read time under the durable lock to reject rollback,
+   // queue stalls, and already-expired local confirmation capabilities.
+   // This clock is the issuance time of the nonce; never backdate it.
+   const issuedAt=this.clock();
+   if(!Number.isSafeInteger(issuedAt)||issuedAt<now||
+      issuedAt>now+120000||issuedAt>8_640_000_000_000_000-120000)
+     return false;
    if(!this.validOwner(actor)||!inspectModerationLedgerIntegrity(state).valid)return false;
    if(ambiguousModerationOperationIds(state).has(op.id)||
       ambiguousModerationChatIds(state).has(op.chatId))return false;
@@ -212,12 +220,12 @@ export class ModerationUnknownOwnerReview {
    const found=state.moderationOperations.find(x=>x.id===op.id&&x.chatId===op.chatId);
    if(!c?.approved||!c.scopes.includes('moderation')||c.version!==chat.version||
     !found||found.status!=='UNKNOWN_OUTCOME'||found.review||
-    now<found.createdAt||
-    moderationOwnerReviewAuditConsistency(state,found,now)!=='UNREVIEWED'||
+    issuedAt<found.createdAt||
+    moderationOwnerReviewAuditConsistency(state,found,issuedAt)!=='UNREVIEWED'||
     opDigest(found,state)!==digest)return false;
    state.callbacks.push({ref,action,actorId:actor,chatId:op.chatId,
     policyVersion:c.version,moderationOperationId:op.id,
-    moderationOperationDigest:digest,expiresAt:now+120000,
+    moderationOperationDigest:digest,expiresAt:issuedAt+120000,
     oneShot:true,revoked:false,used:false});
    return true;
   });
@@ -235,6 +243,12 @@ export class ModerationUnknownOwnerReview {
   if(!Number.isSafeInteger(now)||now<0||now>8_640_000_000_000_000||
      !this.validOwner(actor))return null;
   const completed=await this.store.transaction(state=>{
+   // A valid token at entry may expire while a concurrent writer holds
+   // the transaction lock. Compare AGAIN at the exact atomic annotation
+   // boundary and use this time for BOTH review and audit evidence.
+   const committedAt=this.clock();
+   if(!Number.isSafeInteger(committedAt)||committedAt<now||
+      committedAt>8_640_000_000_000_000)return null;
    if(!inspectModerationLedgerIntegrity(state).valid)return null;
    if(!uniqueModerationReviewNonce(state,token))return null;
    const c=state.callbacks.find(x=>x.ref===token);
@@ -244,9 +258,9 @@ export class ModerationUnknownOwnerReview {
    if(!c||c.revoked!==false||c.used!==false||c.oneShot!==true||
     c.actorId!==actor||
     typeof c.expiresAt!=='number'||!Number.isSafeInteger(c.expiresAt)||
-    c.expiresAt<=now||c.expiresAt>8_640_000_000_000_000||
-    c.expiresAt-now>120000||
-    now<c.expiresAt-120000||
+    c.expiresAt<=committedAt||c.expiresAt>8_640_000_000_000_000||
+    c.expiresAt-committedAt>120000||
+    committedAt<c.expiresAt-120000||
     !c.moderationOperationId||!c.moderationOperationDigest||
     !['owner.moderation.review.ack','owner.moderation.review.escalate'].includes(c.action))
     return null;
@@ -258,14 +272,14 @@ export class ModerationUnknownOwnerReview {
     return null;
    if(!chat?.approved||!chat.scopes.includes('moderation')||chat.version!==c.policyVersion||
      !operation||operation.status!=='UNKNOWN_OUTCOME'||operation.review||
-     now<operation.createdAt||
-     moderationOwnerReviewAuditConsistency(state,operation,now)!=='UNREVIEWED'||
+     committedAt<operation.createdAt||
+     moderationOwnerReviewAuditConsistency(state,operation,committedAt)!=='UNREVIEWED'||
      opDigest(operation,state)!==c.moderationOperationDigest||!this.validOwner(actor))return null;
    const decision:Decision=c.action==='owner.moderation.review.escalate'?
     'ESCALATED':'ACKNOWLEDGED_UNRESOLVED';
    // Atomic annotation + nonce consumption. No change to operation.status.
    const evidenceDigest=moderationReviewEvidenceDigest(operation);
-   operation.review={decision,reviewedBy:actor,reviewedAt:now,
+   operation.review={decision,reviewedBy:actor,reviewedAt:committedAt,
     policyVersion:chat.version,evidenceDigest};
    c.used=true;
    const auditKey=createHash('sha256').update('MODERATION:REVIEW:'+operation.id)
@@ -273,7 +287,7 @@ export class ModerationUnknownOwnerReview {
    state.audit.push({actorId:actor,updateKey:'owner:moderation:review:'+auditKey,
     decision:'ALLOW',reason:decision==='ESCALATED'?
      'MODERATION_UNKNOWN_OWNER_ESCALATED':'MODERATION_UNKNOWN_OWNER_ACKNOWLEDGED',
-    policyVersion:chat.version,at:now,moderationEvidenceDigest:evidenceDigest});
+    policyVersion:chat.version,at:committedAt,moderationEvidenceDigest:evidenceDigest});
    return {chatId:chat.id,decision};
   });
   if(!completed)return null;
