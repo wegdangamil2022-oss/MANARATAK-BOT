@@ -146,7 +146,7 @@ for(const engine of ['json','sqlite'] as const){
    let remote=0;
    const observer={observeRestriction:async()=>{remote++;return 'BAN_PRESENT' as const;}};
    const Preflight=ModerationReversalPreflight as unknown as
-    new(store:BotStore,policy:Policy,observer:typeof observer,clock:()=>number)=>ModerationReversalPreflight;
+    new(store:BotStore,policy:Policy,observer:{observeRestriction:(chat:string,member:string)=>Promise<'BAN_PRESENT'>},clock:()=>number)=>ModerationReversalPreflight;
    const result=await new Preflight(f.store,f.policy,observer,f.clock).assess(OWNER,GOOD_CHAT,TARGET);
    assert.equal(result.status,'BLOCKED_UNPROVEN');
    assert.equal(remote,0);
