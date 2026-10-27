@@ -1,6 +1,6 @@
 import {BotStore,type BotState,type ModerationOperation} from './store.js';
 import {moderationLedgerSafeForDispatch,
- moderationOwnerReviewAuditConsistency} from './moderation-review-integrity.js';
+ moderationOwnerReviewAuditConsistency,orphanModerationReviewAuditReceipts} from './moderation-review-integrity.js';
 
 /**
  * A strictly local, aggregate-only report for a trusted host operator.
@@ -25,6 +25,8 @@ export interface ModerationRecoveryReport{
  readonly reviewedUnresolved:number;
  /** Review exists but its matching local audit or V1 evidence binding is untrusted. */
  readonly untrustedReviewEvidence:number;
+ /** Owner-review audit receipts whose matching UNKNOWN_OUTCOME operation vanished. */
+ readonly orphanReviewAuditReceipts:number;
  readonly distinctBlockedTargets:number;
  readonly manualAttention:number;
 }
@@ -64,7 +66,9 @@ export function summarizeModerationRecovery(
  if(!validOptions(options))throw Error('MODERATION_RECOVERY_OPTIONS_INVALID');
  if(!s||!Array.isArray(s.moderationOperations)||
   !s.moderationOperations.every(validOp)||
-  !moderationLedgerSafeForDispatch(s))
+  !moderationLedgerSafeForDispatch({
+   moderationOperations:s.moderationOperations
+  }))
   throw Error('MODERATION_RECOVERY_INVALID_LEDGER');
  let intent=0,started=0,unknownOutcome=0,staleIntent=0,staleStarted=0,
   clockAnomaly=0,awaitingFirstReview=0,reviewedUnresolved=0,
@@ -106,13 +110,16 @@ export function summarizeModerationRecovery(
   // Every unresolved receipt needs a human decision, never an auto-retry.
   manualAttention++;
  }
+ // Do not report a clean database merely because the operation disappeared
+ // while its owner's review audit survived a partial restore.
+ const orphanReviewAuditReceipts=orphanModerationReviewAuditReceipts(s);
  return {
   stage:'OFFLINE_MODERATION_RECOVERY',
-  state:manualAttention?'ATTENTION_REQUIRED':'OK',
+  state:manualAttention||orphanReviewAuditReceipts?'ATTENTION_REQUIRED':'OK',
   totalOperations:s.moderationOperations.length,
   intent,started,unknownOutcome,staleIntent,staleStarted,
   clockAnomaly,awaitingFirstReview,reviewedUnresolved,untrustedReviewEvidence,
-  distinctBlockedTargets:blockedTargets.size,manualAttention
+  orphanReviewAuditReceipts,distinctBlockedTargets:blockedTargets.size,manualAttention
  };
 }
 /** Read-only SQLite snapshot with the existing path, mode, symlink and DB
