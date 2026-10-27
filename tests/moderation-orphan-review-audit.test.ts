@@ -68,7 +68,7 @@ test('non-moderation audits and optional audit omission do not fabricate orphan 
  const r=report([],[other]);
  assert.equal(r.state,'OK');
  assert.equal(orphans(r),0);
- assert.equal(summarizeModerationRecovery({moderationOperations:[]},opts()).orphanReviewAuditReceipts,0);
+ assert.equal(orphans(summarizeModerationRecovery({moderationOperations:[]},opts())),0);
 });
 test('a matching UNKNOWN receipt, even unreviewed, is not an orphan audit key',()=>{
  const r=report([op()],[audit()]);
@@ -148,7 +148,7 @@ test('CLI after orphan audit restore exits 2 with only aggregate data, no Telegr
    TELEGRAM_BOT_TOKEN:'PRIVATE_TELEGRAM_TOKEN',TELEGRAM_ENABLED:'false'}});
   assert.equal(child.status,2,child.stderr);
   const r=JSON.parse(child.stdout) as {orphanReviewAuditReceipts:number;totalOperations:number;state:string};
-  assert.equal(orphans(r),1);
+  assert.equal(r.orphanReviewAuditReceipts,1);
   assert.equal(r.totalOperations,0);
   assert.equal(r.state,'ATTENTION_REQUIRED');
   for(const secret of ['PRIVATE_TELEGRAM_TOKEN',f.file,
