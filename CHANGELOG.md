@@ -1,3 +1,11 @@
+## 0.7.104 — 2026-10-27 — quarantine malformed historical group-grant epochs
+
+- 50 new JSON/SQLite TDD cases prove stale corrupted grant history cannot be bypassed by selecting a currently valid-looking group grant, or laundered through ordinary owner regrant/revoke.
+- RED before fix: 36 of 50 new regressions failed; all 2,017 existing tests passed.
+- Validate the complete group-scoped actor/capability/target history for safe, positive approval revisions and consistent historical grant metadata before authorizing a current-epoch action.
+- Reject grant records with a UUID but missing group approval epoch, while still supporting genuinely old unbound records without both values. Protect independent groups and valid historical epoch transitions.
+- Group-scoped owner revoke now checks approval uniqueness and tuple ledger integrity before an atomic mutation, preserving conflicting restored evidence for manual investigation.
+- Phase 3 security only; no Telegram live sanctions and no automatic retry of unknown provider outcomes.
 ## 0.7.103 — 2026-10-26 — preserved, collision-safe group grant ledger
 
 - Added 36 JSON/SQLite TDD regressions testing cloned grants, revoked/active forks, distinct simultaneous live grants, duplicate IDs across actors, corrupted expiries/flags/IDs, independent group isolation, old epoch-bound legacy records, safe explicit revoke/regrant and expired renewal.
