@@ -10,7 +10,7 @@ import {ModerationService,FakeModerationGateway} from '../src/moderation.js';
 const OWNER='100',STAFF='200',OTHER_STAFF='201';
 const GROUP='-100123',OTHER='-100456',NOW=1_700_000_000_000,UNTIL=NOW+90_000;
 type Engine='json'|'sqlite';
-type MutableGrant=Grant&{chatPolicyVersion?:unknown;grantId?:unknown};
+type MutableGrant=Omit<Grant,'chatPolicyVersion'|'grantId'>&{chatPolicyVersion?:unknown;grantId?:unknown};
 
 async function fixture(engine:Engine){
  const dir=await mkdtemp(join(tmpdir(),'manaratak-grant-history-'));
