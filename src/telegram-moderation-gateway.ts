@@ -69,6 +69,23 @@ export class TelegramBotApiModerationGateway implements ModerationGateway{
    adapter.getMember===prototype.getMember&&
    adapter.allowed===prototype.allowed;
  }
+ /** Advisory read-only identity check, distinct from dispatch provenance.
+  * Typescript structural probes, subclass overrides and mutable public
+  * methods must never certify 'GRANTED' without the official getChatMember
+  * implementation. This validates adapter provenance, NOT Telegram authorship.
+  */
+ static usesOfficialRightsRead(gateway:unknown):boolean{
+  try{
+   if(typeof gateway!=='object'||gateway===null||
+     !(#officialAdapterBrand in gateway))return false;
+   const adapter=gateway as TelegramBotApiModerationGateway;
+   const prototype=TelegramBotApiModerationGateway.prototype;
+   return Object.getPrototypeOf(adapter)===prototype&&
+    adapter.inspectBotModerationRights===prototype.inspectBotModerationRights&&
+    adapter.getMember===prototype.getMember&&
+    adapter.call===prototype.call;
+  }catch{return false;}
+ }
  private readonly botId:number;
  constructor(private readonly token:string,private readonly request:typeof fetch=fetch,
   private readonly safetyGate:()=>Promise<boolean>=async()=>false){
