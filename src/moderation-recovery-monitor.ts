@@ -77,7 +77,11 @@ export function summarizeModerationRecovery(
   blockedTargets.add(JSON.stringify([o.chatId,o.memberId]));
   const invalidTime=!Number.isSafeInteger(o.createdAt)||
    o.createdAt<0||o.createdAt>options.now;
-  if(invalidTime)clockAnomaly++;
+  // Restored review notes and audit may be identical yet claim a review
+  // in the future. Count chronology anomalies per operation, not per field.
+  const futureReview=o.status==='UNKNOWN_OUTCOME'&&
+   o.review!==undefined&&o.review.reviewedAt>options.now;
+  if(invalidTime||futureReview)clockAnomaly++;
   const stale=!invalidTime&&options.now-o.createdAt>=options.staleAfterMs;
   if(o.status==='INTENT'){
    intent++;
@@ -92,7 +96,7 @@ export function summarizeModerationRecovery(
    // check, not a cryptographic signature or Telegram delivery receipt.
    // Missing, duplicated, mismatched and legacy-unbound audit records
    // must not inflate the corroborated-review counter.
-   const trust=moderationOwnerReviewAuditConsistency({audit:s.audit??[]},o);
+   const trust=moderationOwnerReviewAuditConsistency({audit:s.audit??[]},o,options.now);
    if(trust==='REVIEWED')reviewedUnresolved++;
    else if(trust==='UNREVIEWED')awaitingFirstReview++;
    else untrustedReviewEvidence++;

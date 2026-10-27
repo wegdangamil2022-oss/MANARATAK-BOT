@@ -162,7 +162,7 @@ export function moderationLedgerSafeForDispatch(
  * remain reviewable without trusting restored, partial evidence.
  */
 export function moderationOwnerReviewAuditConsistency(
- state:Pick<BotState,'audit'>,op:ModerationOperation
+ state:Pick<BotState,'audit'>,op:ModerationOperation,asOf?:number
 ):'UNREVIEWED'|'REVIEWED'|'LEGACY_UNBOUND'|'INCONSISTENT'{
  if(!state||!Array.isArray(state.audit))return 'INCONSISTENT';
  const auditKey='owner:moderation:review:'+
@@ -171,6 +171,15 @@ export function moderationOwnerReviewAuditConsistency(
  if(!op.review)return records.length===0?'UNREVIEWED':'INCONSISTENT';
  if(records.length!==1)return 'INCONSISTENT';
  const entry=records[0]!,review=op.review;
+ // The checksum and audit row can match while their review timestamp is
+ // still in the FUTURE after a clock rollback or database restore.
+ // Callers with a trusted observation clock must not label such evidence as
+ // REVIEWED or legacy corroborated until that time has actually arrived.
+ // This is a local temporal consistency check, not proof of Telegram delivery.
+ if(asOf!==undefined&&(!Number.isSafeInteger(asOf)||asOf<0||
+    asOf>8_640_000_000_000_000||
+    typeof review.reviewedAt!=='number'||!Number.isSafeInteger(review.reviewedAt)||
+    review.reviewedAt>asOf))return 'INCONSISTENT';
  const expectedReason=review.decision==='ESCALATED'?
   'MODERATION_UNKNOWN_OWNER_ESCALATED':'MODERATION_UNKNOWN_OWNER_ACKNOWLEDGED';
  if(entry.decision!=='ALLOW'||entry.reason!==expectedReason||
