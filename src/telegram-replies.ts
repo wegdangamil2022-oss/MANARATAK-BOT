@@ -184,6 +184,21 @@ export function validTelegramReplyJob(v:unknown):v is TelegramReplyJob{
    (j.manualReview as Record<string,unknown>).attemptId===j.attemptId
   ));
 }
+/** Local snapshot integrity for trial readiness. A restored duplicate key or
+ * malformed row is not an independent successful delivery receipt.
+ * This is a pure test of durable local evidence, never a Telegram result.
+ */
+export function telegramReplyLedgerSafeForTrial(
+ jobs:readonly TelegramReplyJob[]|undefined):boolean{
+ if(jobs===undefined)return true;
+ if(!Array.isArray(jobs))return false;
+ const seen=new Set<string>();
+ for(const job of jobs){
+  if(!validTelegramReplyJob(job)||seen.has(job.updateKey))return false;
+  seen.add(job.updateKey);
+ }
+ return true;
+}
 /**
  * Durable, one-shot outbound dispatch. Claim is committed before the external
  * call. If an API response is ambiguous or the process crashes in SENDING,
@@ -203,8 +218,11 @@ export class TelegramReplyDispatcher {
   {access:NonNullable<TelegramReplyJob['groupQuestionAccess']>;
    kind:'FAQ'|'MENU'|'PRIVATE_GROUP';allowed:boolean}|undefined>{
   const snap=await this.store.snapshot();
-  const job=snap.telegramReplyJobs?.find(j=>j.updateKey===updateKey);
-  if(!job||job.status!=='QUEUED')return undefined;
+  const matches=snap.telegramReplyJobs?.filter(j=>j.updateKey===updateKey)??[];
+  // Never initiate remote membership reads from an ambiguous restored key.
+  if(matches.length!==1)return undefined;
+  const job=matches[0]!;
+  if(job.status!=='QUEUED')return undefined;
   if(!validTelegramReplyJob(job))throw Error('INVALID_REPLY_JOB');
   const kind=job.groupQuestionAccess?'FAQ' as const:
    job.groupMenuAccess?'MENU' as const:job.privateGroupAccess?'PRIVATE_GROUP' as const:null;
@@ -243,7 +261,12 @@ export class TelegramReplyDispatcher {
   try{groupPrecheck=await this.checkGroupEligibility(updateKey);}
   catch{/* invalid state gets revalidated inside the transactional claim */}
   const claim=await this.store.transaction(async s=>{
-   const job=s.telegramReplyJobs?.find(j=>j.updateKey===updateKey);
+   const matches=s.telegramReplyJobs?.filter(j=>j.updateKey===updateKey)??[];
+   // A duplicate key can otherwise select a different queued/terminal receipt.
+   // Reject without consuming or scrubbing either entry, inside the durable
+   // claim, even if the earlier read saw only one record.
+   if(matches.length>1)throw Error('REPLY_DUPLICATE_UPDATE_KEY');
+   const job=matches[0];
    if(!job)return {status:'NO_REPLY' as const};
    if(!validTelegramReplyJob(job))throw new Error('INVALID_REPLY_JOB');
    if(job.status==='SENDING')return {status:'UNKNOWN_OUTCOME' as const};
@@ -306,7 +329,12 @@ export class TelegramReplyDispatcher {
   try{result=await this.sender.send(claim.plan);}catch{result={status:'UNKNOWN_OUTCOME'};}
   const terminal=result.status==='CONFIRMED'?'SENT':result.status;
   await this.store.transaction(s=>{
-   const job=s.telegramReplyJobs?.find(j=>j.updateKey===updateKey);
+   const matches=s.telegramReplyJobs?.filter(j=>j.updateKey===updateKey)??[];
+   // The provider may have returned success, but a restore/other writer may
+   // have inserted conflicting local evidence while the network was awaited.
+   // Never certify SENT against an ambiguous durable identity.
+   if(matches.length>1)throw Error('REPLY_DUPLICATE_UPDATE_KEY');
+   const job=matches[0];
    if(!job||job.status!=='SENDING'||job.attemptId!==claim.attemptId)
     throw new Error('REPLY_ATTEMPT_FENCED');
    job.status=terminal;
