@@ -1,5 +1,6 @@
 import type {BotStore,BotState,RestrictionKind} from './store.js';
 import type {Policy} from './policy.js';
+import {moderationLedgerSafeForDispatch} from './moderation-review-integrity.js';
 
 /** Telegram getChatMember cannot identify WHO imposed a past restriction.
  * Thus even an exact observed match is NOT release permission.
@@ -32,14 +33,25 @@ export function inspectLocalReversal(s:BotState,policy:Policy,chat:string,
  member:string):LocalReversalAssessment{
  if(!validChat(chat)||!validMember(member)||member===policy.ownerId||
    !policy.canUseChat(s,chat,'moderation'))return {status:'DENIED'};
+ // A restored array's order is not dispatch chronology. Reject malformed
+ // or duplicated operation identities before reading a potentially forged
+ // "last" record; this is the same global fail-closed ledger rule used by
+ // moderation dispatch. No remote observation or mutation is attempted.
+ if(!moderationLedgerSafeForDispatch(s))return {status:'BLOCKED_UNPROVEN'};
  const all=s.moderationOperations.filter(o=>o.chatId===chat&&o.memberId===member);
  if(all.some(o=>o.status==='UNKNOWN_OUTCOME'))return {status:'BLOCKED_UNKNOWN'};
  if(all.some(o=>o.status==='INTENT'||o.status==='STARTED'))
   return {status:'BLOCKED_PENDING'};
  if(s.moderationReasons.some(r=>r.chatId===chat&&r.memberId===member&&r.active))
   return {status:'BLOCKED_ACTIVE_REASON'};
- const last=all.at(-1);
- if(!last||last.status!=='CONFIRMED'||(last.kind!=='BAN'&&last.kind!=='MUTE'))
+ if(!all.length)return {status:'BLOCKED_UNPROVEN'};
+ const latestTime=Math.max(...all.map(o=>o.createdAt));
+ const candidates=all.filter(o=>o.createdAt===latestTime);
+ // Equal timestamps cannot establish which attempt most recently affected
+ // the target; refusing is safer than arbitrarily choosing array position.
+ if(candidates.length!==1)return {status:'BLOCKED_UNPROVEN'};
+ const last=candidates[0]!;
+ if(last.status!=='CONFIRMED'||(last.kind!=='BAN'&&last.kind!=='MUTE'))
   return {status:'BLOCKED_UNPROVEN'};
  if(last.policyVersion!==policy.chatRevision(s,chat))return {status:'BLOCKED_STALE'};
  // Local fake successes and legacy/unidentified gateways are never
