@@ -63,7 +63,7 @@ test('v0.7.83 read-only restriction observation still reports a full mute, witho
  };
  const g=gatewayWithResponses(()=>target('restricted',{is_member:true,...denied}));
  assert.equal(await g.gateway.observeRestriction(GROUP,TARGET),'MUTE_PRESENT');
- assert.deepEqual(g.calls,['getChatMember','getChatMember']);
+ assert.deepEqual(g.calls,['getChatMember','getChatMember','getChatMember']);
 });
 
 for(const engine of ['json','sqlite'] as const){
