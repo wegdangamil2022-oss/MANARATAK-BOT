@@ -30,14 +30,14 @@ export type LocalReversalAssessment=
    'BLOCKED_ACTIVE_REASON'|'BLOCKED_UNPROVEN'|'BLOCKED_STALE'}
  |{status:'MAY_INSPECT';kind:'BAN'|'MUTE'};
 export function inspectLocalReversal(s:BotState,policy:Policy,chat:string,
- member:string):LocalReversalAssessment{
+ member:string,asOf?:number):LocalReversalAssessment{
  if(!validChat(chat)||!validMember(member)||member===policy.ownerId||
    !policy.canUseChat(s,chat,'moderation'))return {status:'DENIED'};
  // A restored array's order is not dispatch chronology. Reject malformed
  // or duplicated operation identities before reading a potentially forged
  // "last" record; this is the same global fail-closed ledger rule used by
  // moderation dispatch. No remote observation or mutation is attempted.
- if(!moderationLedgerSafeForDispatch(s))return {status:'BLOCKED_UNPROVEN'};
+ if(!moderationLedgerSafeForDispatch(s,asOf))return {status:'BLOCKED_UNPROVEN'};
  const all=s.moderationOperations.filter(o=>o.chatId===chat&&o.memberId===member);
  if(all.some(o=>o.status==='UNKNOWN_OUTCOME'))return {status:'BLOCKED_UNKNOWN'};
  if(all.some(o=>o.status==='INTENT'||o.status==='STARTED'))
@@ -71,7 +71,8 @@ const localEpoch=(s:BotState,chat:string,member:string)=>JSON.stringify([
  */
 export class ModerationReversalPreflight {
  constructor(private readonly store:BotStore,private readonly policy:Policy,
-  private readonly observer:RestrictionObserver){}
+  private readonly observer:RestrictionObserver,
+  private readonly clock:()=>number=Date.now){}
  async assess(actor:string,chat:string,member:string):Promise<ReversalPreflightResult>{
   if(!this.policy.isOwner(actor)||!validChat(chat)||!validMember(member)||
    member===actor||member===this.policy.ownerId)
@@ -79,7 +80,7 @@ export class ModerationReversalPreflight {
   const before=await this.store.snapshot();
   if(!this.policy.isOwner(actor)||!this.policy.canUseChat(before,chat,'moderation'))
    return {status:'DENIED'};
-  const local=inspectLocalReversal(before,this.policy,chat,member);
+  const local=inspectLocalReversal(before,this.policy,chat,member,this.clock());
   if(local.status!=='MAY_INSPECT')return local;
   const expected=local.kind;
   const epoch=localEpoch(before,chat,member);
@@ -94,7 +95,7 @@ export class ModerationReversalPreflight {
   // durable ID during the awaited Telegram observation. That corruption is
   // not included in the target-only epoch above. Recheck the same GLOBAL
   // moderation-ledger integrity that authorized the original read.
-  const rechecked=inspectLocalReversal(after,this.policy,chat,member);
+  const rechecked=inspectLocalReversal(after,this.policy,chat,member,this.clock());
   if(rechecked.status!=='MAY_INSPECT'||rechecked.kind!==expected)
    return {status:'BLOCKED_STALE'};
   if(remote==='NO_RIGHTS')return {status:'BLOCKED_RIGHTS'};
