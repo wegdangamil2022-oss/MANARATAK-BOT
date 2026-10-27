@@ -25,6 +25,9 @@ async function fixture(engine:Engine){
   await store.transaction(s=>{
    const grant=s.grants.find(g=>g.chatId===GROUP&&g.actor===STAFF)!;
    const historic=structuredClone(grant);
+   // A distinct historical receipt isolates invalid stored policy epochs
+   // from the older, already-covered duplicate-grant-ID guard.
+   historic.grantId='123e4567-e89b-42d3-a456-426614174000';
    historic.chatPolicyVersion=0;
    historic.revoked=true;
    mutator(historic as MutableGrant);
