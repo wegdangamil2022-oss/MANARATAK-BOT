@@ -169,7 +169,7 @@ for(const engine of ['json','sqlite'] as const){
   const f=await fixture(engine);try{
    await f.store.transaction(t=>{t.moderationOperations=[];});
    const reasons=localModerationTrialBlockers(await f.store.snapshot(),CHAT);
-   assert.equal(reasons.includes('TRIAL_GROUP_APPROVAL_AMBIGUOUS'),false);
+   assert.equal(reasons.map(String).includes('TRIAL_GROUP_APPROVAL_AMBIGUOUS'),false);
    assert.equal(reasons.map(String).includes('OTHER_CHAT_APPROVAL_AMBIGUOUS'),false);
   }finally{await f.close();}
  });
