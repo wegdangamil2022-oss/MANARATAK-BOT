@@ -1,6 +1,6 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
-import {mkdtemp,rm,readFile} from 'node:fs/promises';
+import {mkdtemp,rm,readFile,chmod} from 'node:fs/promises';
 import {join} from 'node:path';
 import {tmpdir} from 'node:os';
 import {spawnSync} from 'node:child_process';
@@ -77,6 +77,7 @@ async function fixture(engine:'json'|'sqlite'){
  const store=new BotStore(file,{engine}),policy=new Policy(store,OWNER,()=>NOW);
  await policy.approveChat(OWNER,CHAT,['moderation']);
  await policy.approveChat(OWNER,OTHER,['moderation']);
+ if(engine==='sqlite')await chmod(file,0o600);
  const revisions=await store.snapshot();
  const revision=policy.chatRevision(revisions,OTHER);
  const targetRevision=policy.chatRevision(revisions,CHAT);
@@ -123,8 +124,10 @@ for(const engine of ['json','sqlite'] as const){
    const after=await f.store.snapshot();
    assert.equal(after.moderationOperations.filter(o=>o.status==='CONFIRMED'&&
     o.chatId===OTHER).length,1);
+   // Before STARTED no provider request was possible; the intact INTENT
+   // remains unresolved for operator recovery, not falsely marked as sent.
    assert.equal(after.moderationOperations.some(o=>o.memberId===TARGET&&
-    o.status==='UNKNOWN_OUTCOME'),true);
+    (o.status==='INTENT'||o.status==='UNKNOWN_OUTCOME')),true);
   }finally{await f.close();}
  });
  test(engine+' future completed row injected AFTER STARTED blocks gateway authority callback',async()=>{
