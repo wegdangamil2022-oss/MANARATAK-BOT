@@ -58,7 +58,7 @@ test('exact review-time boundary restores local confidence without changing the 
 });
 test('future legacy-unbound review is inconsistent, not a trusted or legacy-only badge',()=>{
  const e=reviewed(op(),NOW+MINUTE,true);
- assert.equal(moderationOwnerReviewAuditConsistency({audit:[e.audit]},e.record),'INCONSISTENT');
+ assert.equal(moderationOwnerReviewAuditConsistency({audit:[e.audit]},e.record,NOW),'INCONSISTENT');
  const r=report(e.record,e.audit);
  assert.equal(r.untrustedReviewEvidence,1);
  assert.equal(r.reviewedUnresolved,0);
