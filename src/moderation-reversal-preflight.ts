@@ -90,6 +90,13 @@ export class ModerationReversalPreflight {
   if(!this.policy.isOwner(actor)||!this.policy.canUseChat(after,chat,'moderation')||
    epoch!==localEpoch(after,chat,member))
    return {status:'BLOCKED_STALE'};
+  // A different group's operation may become corrupt or acquire a duplicate
+  // durable ID during the awaited Telegram observation. That corruption is
+  // not included in the target-only epoch above. Recheck the same GLOBAL
+  // moderation-ledger integrity that authorized the original read.
+  const rechecked=inspectLocalReversal(after,this.policy,chat,member);
+  if(rechecked.status!=='MAY_INSPECT'||rechecked.kind!==expected)
+   return {status:'BLOCKED_STALE'};
   if(remote==='NO_RIGHTS')return {status:'BLOCKED_RIGHTS'};
   if(remote==='UNKNOWN')return {status:'BLOCKED_OBSERVATION_UNKNOWN'};
   if(remote!==(expected==='BAN'?'BAN_PRESENT':'MUTE_PRESENT'))
