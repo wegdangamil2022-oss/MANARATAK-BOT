@@ -146,7 +146,7 @@ for(const engine of ['json','sqlite'] as const){
     await mutate(f);
     const before=await f.store.snapshot();
     const reasons=localModerationTrialBlockers(before,CHAT);
-    assert.ok(reasons.includes('TRIAL_GROUP_APPROVAL_AMBIGUOUS'),
+    assert.ok(reasons.map(String).includes('TRIAL_GROUP_APPROVAL_AMBIGUOUS'),
       'duplicated restored trial group must never PASS');
     assert.deepEqual(await f.store.snapshot(),before);
    }finally{await f.close();}
@@ -161,7 +161,7 @@ for(const engine of ['json','sqlite'] as const){
     t.chats.push({...c,scopes:[...c.scopes]});
    });
    const s=await f.store.snapshot();
-   assert.ok(localModerationTrialBlockers(s,CHAT)
+   assert.ok(localModerationTrialBlockers(s,CHAT).map(String)
     .includes('OTHER_CHAT_APPROVAL_AMBIGUOUS'));
   }finally{await f.close();}
  });
@@ -170,7 +170,7 @@ for(const engine of ['json','sqlite'] as const){
    await f.store.transaction(t=>{t.moderationOperations=[];});
    const reasons=localModerationTrialBlockers(await f.store.snapshot(),CHAT);
    assert.equal(reasons.includes('TRIAL_GROUP_APPROVAL_AMBIGUOUS'),false);
-   assert.equal(reasons.includes('OTHER_CHAT_APPROVAL_AMBIGUOUS'),false);
+   assert.equal(reasons.map(String).includes('OTHER_CHAT_APPROVAL_AMBIGUOUS'),false);
   }finally{await f.close();}
  });
 }
