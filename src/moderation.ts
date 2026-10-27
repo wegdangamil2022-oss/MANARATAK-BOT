@@ -46,6 +46,33 @@ function sameModerationAttempt(a:ModerationOperation,b:ModerationOperation):bool
   a.policyVersion===b.policyVersion&&a.createdAt===b.createdAt&&
   a.attemptGateway===b.attemptGateway;
 }
+/** Snapshot only the original target's OTHER durable operations.
+ * This prevents an in-flight sanction from ignoring a different writer's
+ * completed/cancelled attempt for the same member while Telegram reads wait.
+ * The candidate INTENT itself is tracked separately by sameModerationAttempt.
+ * Rows from other members must not spuriously invalidate this operation.
+ * This string never enters Telegram or public audit/owner output.
+ */
+function targetOperationHistory(s:BotState,chatId:string,memberId:string,
+ candidateId:string):string{
+ return JSON.stringify(s.moderationOperations.filter(o=>
+  byTarget(o,chatId,memberId)&&o.id!==candidateId));
+}
+
+/** Restored array position does NOT prove dispatch chronology. An equal
+ * latest timestamp among confirmed sanctions is ambiguous even if kinds
+ * match: never select an arbitrary tail and dispatch on that basis.
+ */
+function latestConfirmedKind(operations:ModerationOperation[]):
+ {status:'CLEAR';kind:RestrictionKind}|{status:'AMBIGUOUS'}{
+ const confirmed=operations.filter(o=>o.status==='CONFIRMED');
+ if(!confirmed.length)return {status:'CLEAR',kind:'NONE'};
+ const lastTime=Math.max(...confirmed.map(o=>o.createdAt));
+ const latest=confirmed.filter(o=>o.createdAt===lastTime);
+ return latest.length===1?
+  {status:'CLEAR',kind:latest[0]!.kind}:{status:'AMBIGUOUS'};
+}
+
 /** Preserve BOTH conflicting evidence and an unresolved lock for the
  * original target. A late provider result is not authority to overwrite
  * another writer's status, member or sanction kind. Never silently replace
@@ -253,15 +280,18 @@ export class ModerationService {
       if(pending)return {status:pending.status};
       const operations = s.moderationOperations.filter(x => byTarget(x, chatId, memberId));
       const desired = this.effective(s, chatId, memberId);
-      const confirmed = operations.filter(x => x.status === 'CONFIRMED').at(-1)?.kind ?? 'NONE';
-      if (desired === confirmed) return { status: 'NO_CHANGE' as const };
+      const confirmed=latestConfirmedKind(operations);
+      if(confirmed.status==='AMBIGUOUS')
+       return {status:'BLOCKED_UNKNOWN' as const};
+      if(desired===confirmed.kind)return {status:'NO_CHANGE' as const};
       if(desired!=='NONE'){
        const limit=moderationRateFuse(s,actorId,chatId,this.clock());
        if(limit)return {status:'RATE_LIMIT' as const,reason:moderationRateDenial(limit)};
       }
       const op: ModerationOperation = { id: randomUUID(), chatId, memberId, actorId, kind: desired, reasonFingerprint: fingerprint(s, chatId, memberId), policyVersion: this.policy.chatRevision(s, chatId), status: 'INTENT', createdAt: this.clock() };
       s.moderationOperations.push(op);
-      return { status: 'READY' as const, id: op.id, intent:{...op} };
+      return {status:'READY' as const,id:op.id,intent:{...op},
+       targetHistory:targetOperationHistory(s,chatId,memberId,op.id)};
     });
     if(candidate.status==='RATE_LIMIT')return {status:'DENIED',reason:candidate.reason};
     if (candidate.status !== 'READY') return { status: candidate.status, reason: 'NO_SAFE_DISPATCH' };
@@ -294,6 +324,14 @@ export class ModerationService {
       // A concurrent process may alter or replace the original intent while
       // remote reads are pending. Do not dispatch a forged/new sanction kind.
       if(!op||op.status!=='INTENT'){
+        quarantineModerationAttempt(s,candidate.intent);
+        return {status:'BLOCKED_UNKNOWN' as const};
+      }
+      // A different worker may have inserted/changed a confirmed or failed
+      // attempt for this same target while we awaited remote bot rights.
+      // Even with our INTENT intact, the original dispatch decision is stale.
+      if(targetOperationHistory(s,chatId,memberId,candidate.id)!==
+          candidate.targetHistory){
         quarantineModerationAttempt(s,candidate.intent);
         return {status:'BLOCKED_UNKNOWN' as const};
       }
@@ -337,6 +375,8 @@ export class ModerationService {
         const s=await this.store.snapshot();
         const op=s.moderationOperations.find(x=>x.id===candidate.id);
         return moderationLedgerSafeForDispatch(s,this.clock())&&
+          targetOperationHistory(s,chatId,memberId,candidate.id)===
+            candidate.targetHistory&&
           op?.status==='STARTED'&&sameModerationAttempt(op,started.receipt)&&
           this.authorized(s,actorId,chatId,memberId)&&
           (!stillCurrent||stillCurrent(s))&&
@@ -371,7 +411,9 @@ export class ModerationService {
         return 'BLOCKED_UNKNOWN' as const;
       }
       if(!op||op.status!=='STARTED'||
-         !sameModerationAttempt(op,started.receipt)){
+         !sameModerationAttempt(op,started.receipt)||
+         targetOperationHistory(s,chatId,memberId,candidate.id)!==
+           candidate.targetHistory){
         quarantineModerationAttempt(s,started.receipt);
         return 'BLOCKED_UNKNOWN' as const;
       }
