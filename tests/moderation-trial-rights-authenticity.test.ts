@@ -10,7 +10,7 @@ import {inspectIsolatedModerationRightsReadOnly} from '../src/moderation-trial-r
 
 const OWNER='100',GROUP='-100123',BOT=123456789;
 const TOKEN='123456789:ABCDEFGHIJKLMNOPQRSTUVWXYZabcde';
-const validBot=new Response(JSON.stringify({ok:true,result:{
+const validBot=()=>new Response(JSON.stringify({ok:true,result:{
  status:'administrator',user:{id:BOT,is_bot:true},can_restrict_members:true
 }}),{status:200,headers:{'content-type':'application/json'}});
 
@@ -56,7 +56,7 @@ test('a subclass overriding the rights method is not a trusted observation sourc
    }
   }
   const gateway=new ForgedRights(TOKEN,(async()=>{
-   remoteCalls++;return validBot;
+   remoteCalls++;return validBot();
   }) as typeof fetch);
   const r=await inspectIsolatedModerationRightsReadOnly(f.options(),gateway);
   assert.deepEqual(r,blocked);
@@ -69,7 +69,7 @@ test('monkey-patched official rights reader cannot yield advisory PASS',async()=
  const f=await fixture();try{
   let calls=0;
   const gateway=new TelegramBotApiModerationGateway(TOKEN,(async()=>{
-   calls++;return validBot;
+   calls++;return validBot();
   }) as typeof fetch);
   gateway.inspectBotModerationRights=async()=> 'GRANTED';
   const r=await inspectIsolatedModerationRightsReadOnly(f.options(),gateway);
@@ -88,7 +88,7 @@ test('a trusted adapter that changes while the first Telegram read awaits is qua
    assert.equal(method,'getChatMember');
    assert.deepEqual(JSON.parse(String(init?.body)),{chat_id:GROUP,user_id:BOT});
    gateway.inspectBotModerationRights=async()=> 'GRANTED';
-   return validBot;
+   return validBot();
   }) as typeof fetch;
   gateway=new TelegramBotApiModerationGateway(TOKEN,request);
   const r=await inspectIsolatedModerationRightsReadOnly(f.options(),gateway);
@@ -102,7 +102,7 @@ test('a normal official read-only gateway remains usable for two isolated rights
   const calls:string[]=[];
   const gateway=new TelegramBotApiModerationGateway(TOKEN,(async(url:string|URL|Request)=>{
    calls.push(String(url).split('/').at(-1)!);
-   return validBot;
+   return validBot();
   }) as typeof fetch);
   const r=await inspectIsolatedModerationRightsReadOnly(f.options(),gateway);
   assert.deepEqual(r,{stage:'READ_ONLY_MODERATION_RIGHTS',status:'PASS',
