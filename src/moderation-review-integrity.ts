@@ -136,6 +136,37 @@ export function inspectModerationLedgerIntegrity(
  return {valid:malformedRows===0,malformedRows};
 }
 
+/** An owner review receipt survives as an audit row after its original
+ * UNKNOWN_OUTCOME attempt has been lost in a restore. A missing original is
+ * NOT proof of safe cancellation or a clean moderation history. Match only
+ * the official, namespace-prefixed local correlation key; unrelated audit
+ * domains must never trigger quarantine. Duplicate unmatched receipts count
+ * individually. No identities, hashes or raw evidence leave this function.
+ *
+ * An optional absent audit collection keeps legacy pure projections usable.
+ * A present but unreadable audit collection is anomalous and fails closed.
+ */
+export function orphanModerationReviewAuditReceipts(
+ state:Pick<BotState,'moderationOperations'>&Partial<Pick<BotState,'audit'>>
+):number{
+ if(state.audit===undefined)return 0;
+ if(!Array.isArray(state.audit))return 1;
+ const prefix='owner:moderation:review:';
+ const existing=new Set<string>();
+ for(const op of state.moderationOperations){
+  if(op?.status!=='UNKNOWN_OUTCOME'||typeof op.id!=='string')continue;
+  existing.add(prefix+createHash('sha256')
+   .update('MODERATION:REVIEW:'+op.id).digest('hex').slice(0,32));
+ }
+ let missing=0;
+ for(const row of state.audit){
+  if(row&&typeof row.updateKey==='string'&&
+    row.updateKey.startsWith(prefix)&&!existing.has(row.updateKey))
+    missing++;
+ }
+ return missing;
+}
+
 /** A structurally valid restored ledger can still contain two individually
  * valid rows with the SAME durable operation ID. Dispatch and clean recovery
  * must fail closed globally: target-based filtering and find(id) can otherwise
@@ -146,9 +177,10 @@ export function inspectModerationLedgerIntegrity(
  * each durable mutation and async authority-check boundary.
  */
 export function moderationLedgerSafeForDispatch(
- state:Pick<BotState,'moderationOperations'>):boolean{
+ state:Pick<BotState,'moderationOperations'>&Partial<Pick<BotState,'audit'>>):boolean{
  return inspectModerationLedgerIntegrity(state).valid&&
-  ambiguousModerationOperationIds(state).size===0;
+  ambiguousModerationOperationIds(state).size===0&&
+  orphanModerationReviewAuditReceipts(state)===0;
 }
 
 /** Strict LOCAL corroboration of a moderation owner review with its appended

@@ -4,7 +4,7 @@ import type {Policy} from './policy.js';
 import type {OwnerInlineScreen,TelegramInlineKeyboard} from './telegram-inline-owner.js';
 import {ambiguousModerationOperationIds,ambiguousModerationChatIds,uniqueModerationReviewNonce,
  inspectModerationLedgerIntegrity,moderationOwnerReviewAuditConsistency,
- moderationReviewEvidenceDigest} from './moderation-review-integrity.js';
+ moderationReviewEvidenceDigest,orphanModerationReviewAuditReceipts} from './moderation-review-integrity.js';
 
 /** Owner-private annotation of UNKNOWN_OUTCOME. An annotation is NEVER
  * proof of delivery and MUST NOT update operation.status or permit retry.
@@ -152,7 +152,8 @@ export class ModerationUnknownOwnerReview {
     ' · مراجعات قديمة بلا بصمة: '+legacy+
     ' · سجلات متعارضة محجوبة: '+conflicting+
     ' · مجموعات متعارضة محجوبة: '+chatConflicts+
-    ' · تدقيق مراجعات متعارض محجوب: '+invalidReviewAudit+'\n'
+    ' · تدقيق مراجعات متعارض محجوب: '+invalidReviewAudit+
+    ' · إيصالات مراجعة يتيمة دون سجل عقوبة: '+orphanModerationReviewAuditReceipts(s)+'\n'
     +(all.length?'صفحة '+(route.page+1)+' من '+pages+'\n':'لا توجد عمليات مجهولة مرئية في المجموعات المعتمدة.\n')
     +'الإقرار والتصعيد توثيق محلي فقط: لا يثبتان نجاح العقوبة، ولا يزيلان منع إعادة الإرسال، ولا يفكان حظرًا أو كتمًا.',rows);
   }
