@@ -45,7 +45,8 @@ export function inspectLocalReversal(s:BotState,policy:Policy,chat:string,
  if(s.moderationReasons.some(r=>r.chatId===chat&&r.memberId===member&&r.active))
   return {status:'BLOCKED_ACTIVE_REASON'};
  if(!all.length)return {status:'BLOCKED_UNPROVEN'};
- const latestTime=Math.max(...all.map(o=>o.createdAt));
+ const latestTime=all.reduce((latest,o)=>
+  Math.max(latest,o.createdAt),0);
  const candidates=all.filter(o=>o.createdAt===latestTime);
  // Equal timestamps cannot establish which attempt most recently affected
  // the target; refusing is safer than arbitrarily choosing array position.
