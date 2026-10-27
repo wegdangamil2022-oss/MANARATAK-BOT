@@ -3,6 +3,7 @@ import {lstat} from 'node:fs/promises';
 import {BotStore,type BotState} from './store.js';
 import {readTelegramSafetySwitch} from './telegram-safety-switch.js';
 import {summarizeSubscriptionIntegrity} from './subscription-integrity.js';
+import {orphanModerationReviewAuditReceipts} from './moderation-review-integrity.js';
 
 /** Offline-only advisory review. PASS is NOT permission to start Telegram,
  * does NOT authorize changing STOP to RUN and does NOT prove TLS or delivery.
@@ -14,7 +15,8 @@ export interface TelegramTrialAcceptanceReport{
   'SAFETY_NOT_STOP'|'BACKUP_STATE_MISMATCH'|'PENDING_REPLIES'|
   'UNRESOLVED_REPLIES'|'UNRESOLVED_UPDATES'|'UNRESOLVED_OPERATIONS'|
   'UNRESOLVED_PUBLICATIONS'|'ACTIVE_PURGE'|'INVALID_SUBSCRIPTION_REQUIREMENTS'|
-  'BACKUP_TOO_OLD'|'BACKUP_TIMESTAMP_IN_FUTURE'
+  'BACKUP_TOO_OLD'|'BACKUP_TIMESTAMP_IN_FUTURE'|
+  'ORPHAN_MODERATION_REVIEW_AUDIT'
  )[];
 }
 export interface TelegramTrialAcceptanceOptions{
@@ -92,6 +94,13 @@ export async function inspectTelegramTrialAcceptanceReadOnly(
  if(live.operations.some(o=>unresolvedOps.has(o.status))||
    live.moderationOperations.some(o=>unresolvedOps.has(o.status)))
   reasons.push('UNRESOLVED_OPERATIONS');
+ // A fully matching, recent backup can preserve the SAME partially restored
+ // evidence gap: owner-review audit exists but its original UNKNOWN_OUTCOME
+ // operation vanished. Even without any remaining sanction rows this is NOT
+ // a clean trial state; the live moderation ledger would refuse dispatch.
+ // Report only one static reason; never expose counts or correlation keys.
+ if(orphanModerationReviewAuditReceipts(live)>0)
+  reasons.push('ORPHAN_MODERATION_REVIEW_AUDIT');
  if(live.deliveries.some(d=>unresolvedDelivery.has(d.status)||
    d.multipart?.parts.some(p=>unresolvedDelivery.has(p.status))))
   reasons.push('UNRESOLVED_PUBLICATIONS');
