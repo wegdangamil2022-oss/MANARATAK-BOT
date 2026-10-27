@@ -29,7 +29,8 @@ function currentApprovedModerationGroup(s:BotState,policy:Policy,chat:Chat):bool
   JSON.stringify(current[0])===JSON.stringify(chat)&&
   policy.canUseChat(s,chat.id,'moderation');
 }
-export function groupReversalInventory(s:BotState,policy:Policy,chat:Chat):ReversalInventory{
+export function groupReversalInventory(s:BotState,policy:Policy,chat:Chat,
+ asOf:number=Date.now()):ReversalInventory{
  if(!currentApprovedModerationGroup(s,policy,chat))return zero();
  const actors=new Set<string>();
  for(const operation of s.moderationOperations)
@@ -38,7 +39,7 @@ export function groupReversalInventory(s:BotState,policy:Policy,chat:Chat):Rever
   if(reason.chatId===chat.id)actors.add(reason.memberId);
  let unknown=0,pending=0,activeReasons=0,unproven=0,stale=0,inspect=0;
  for(const member of actors){
-  const result=inspectLocalReversal(s,policy,chat.id,member);
+  const result=inspectLocalReversal(s,policy,chat.id,member,asOf);
   switch(result.status){
    case 'BLOCKED_UNKNOWN':unknown++;break;
    case 'BLOCKED_PENDING':pending++;break;
@@ -50,25 +51,31 @@ export function groupReversalInventory(s:BotState,policy:Policy,chat:Chat):Rever
  }
  return {total:actors.size,unknown,pending,activeReasons,unproven,stale,inspect};
 }
-/** A change in ANY current local reason or operation invalidates old buttons,
- * without disclosing even a stable truncated member identity to Telegram.
- * SHA-256 truncation is a freshness hint, never an authorization token.
+/** A group reversal inventory depends on the GLOBAL moderation ledger
+ * and owner-review audit consistency, not just this group's target records.
+ * Any cross-chat restore/review change that can affect the fail-closed
+ * classification must also invalidate previously rendered owner buttons.
+ * Unrelated FAQ and educational audit rows are intentionally excluded.
+ * The truncated digest is only a stale-view hint, NEVER a permission token.
  */
 export function reversalInventoryDigest(s:BotState,chat:Chat):string{
- const operations=s.moderationOperations.filter(o=>o.chatId===chat.id);
  const reasons=s.moderationReasons.filter(r=>r.chatId===chat.id);
- return createHash('sha256').update('MANARATAK:REVERSAL:GROUP:V1:')
+ const ownerReviewAudit=s.audit.filter(a=>
+  a&&typeof a.updateKey==='string'&&
+  a.updateKey.startsWith('owner:moderation:review:'));
+ return createHash('sha256').update('MANARATAK:REVERSAL:GROUP:V2:')
   .update(JSON.stringify([chat.id,chat.version,chat.approved,chat.scopes,
-   operations,reasons])).digest('hex').slice(0,12);
+   s.moderationOperations,reasons,ownerReviewAudit])).digest('hex').slice(0,12);
 }
-export function renderReversalInventory(s:BotState,policy:Policy,chat:Chat):string{
+export function renderReversalInventory(s:BotState,policy:Policy,chat:Chat,
+ asOf:number=Date.now()):string{
  if(!currentApprovedModerationGroup(s,policy,chat))
   return '<b>🧭 عوائق التراجع — فحص محلي محجوب</b>\n'
    +'⚠️ تعذر فحص هذه المجموعة بسبب غياب تصريح فريد موثوق '
    +'أو تعارض بيانات صلاحيات المجموعة المستعادة.\n'
    +'لن تُعرض أعداد الأعضاء أو العقوبات من بيانات ملتبسة.\n'
    +'لا يوجد أي إجراء لفك الحظر أو الكتم؛ لم يُجر اتصال بـTelegram.';
- const v=groupReversalInventory(s,policy,chat);
+ const v=groupReversalInventory(s,policy,chat,asOf);
  return '<b>🧭 عوائق التراجع عن العقوبات — بيانات محلية</b>\n'
   +'المجموعة: <code>'+chat.id+'</code>\n'
   +(v.total===0?'لا توجد سجلات عقوبات أو أسباب مرتبطة بأعضاء هذه المجموعة.\n':
