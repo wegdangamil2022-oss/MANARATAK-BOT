@@ -152,11 +152,11 @@ test('Telegram live observer requires bot admin rights and only reads getChatMem
  assert.deepEqual(denied.calls,['getChatMember']);
  const banned=api({status:'kicked'});
  assert.equal(await banned.gateway.observeRestriction(CHAT,TARGET),'BAN_PRESENT');
- assert.deepEqual(banned.calls,['getChatMember','getChatMember']);
+ assert.deepEqual(banned.calls,['getChatMember','getChatMember','getChatMember']);
  const mute=api({status:'restricted',is_member:true,
   ...Object.fromEntries(permissionFields.map(x=>[x,false]))});
  assert.equal(await mute.gateway.observeRestriction(CHAT,TARGET),'MUTE_PRESENT');
- assert.deepEqual(mute.calls,['getChatMember','getChatMember']);
+ assert.deepEqual(mute.calls,['getChatMember','getChatMember','getChatMember']);
 });
 test('Telegram observer fails closed for admins, bots, incomplete mute or uncertain states',async()=>{
  for(const [entry,result] of [
