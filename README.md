@@ -1,3 +1,11 @@
+## v0.7.105 — Phase 3: safe reversal chronology and restore-proof isolated trial readiness
+
+The owner's moderation-reversal assessment is **read-only** and never provides a "safe to unban/unmute" result. A restored JSON/SQLite ledger may reorder operation rows or contain colliding durable operation IDs. The assessment now rejects malformed or duplicate-ID moderation ledgers before contacting a Telegram observation port, and selects the most recent target-specific attempt by validated `createdAt`, not the last array element. Multiple candidate attempts with the exact same latest timestamp are ambiguous and fail closed as `BLOCKED_UNPROVEN`. A genuinely later `CANCELLED` or `FAILED_CONFIRMED` blocks a false positive even when an older `CONFIRMED` row was appended last. A confirmed latest attempt with a distinctly older failed record remains locally eligible for **read-only observation only**, which does not establish who authored the restriction.
+
+The strictly offline, one-group moderation trial checklist now rejects **duplicate group approval records** for the trial group and duplicate approval IDs on other chats, even if the rows are identical or revoked. The separate `TRIAL_GROUP_APPROVAL_AMBIGUOUS` and `OTHER_CHAT_APPROVAL_AMBIGUOUS` blockers are purely local status results; they never merge or delete restoration evidence. This is defense-in-depth before any authorized live trial, not permission to switch to RUN.
+
+The owner and the safety process still require separate explicit permission and an isolated Telegram test group before any live sanctions. The Telegram moderation gateway remains unconnected to the live server, `UNKNOWN_OUTCOME` never retries automatically, and these tests use JSON/SQLite and offline observer doubles, not real provider mutations.
+
 ## v0.7.104 — restored historical grant epoch integrity in Phase 3
 
 Continuing the approved master plan's **Phase 3 (moderation and security)**, this release extends the v0.7.102–v0.7.103 staff delegation checks. The previous group grant validator inspected records only in the currently approved chat revision; restored grant history containing a malformed revision or forged old metadata could be skipped while a newer legitimate-looking record still authorized a staff action. This is unsafe on an ambiguously restored database.
