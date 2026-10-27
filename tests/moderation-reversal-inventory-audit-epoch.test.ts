@@ -146,7 +146,16 @@ for(const engine of ['json','sqlite'] as const){
    assert.match(fresh.plan?.text??'',/مرشحة لفحص خارجي: 0/);
    assert.match(fresh.plan?.text??'',/نقص أدلة: 1/);
    assert.doesNotMatch(fresh.plan?.text??'',/PRIVATE_|secret-unknown|399|401/);
-   assert.deepEqual(await f.store.snapshot(),after);
+   const final=await f.store.snapshot();
+   // A rejected stale callback deliberately appends a local DENY audit.
+   // Preserve the original moderation and owner-review evidence unchanged.
+   assert.deepEqual(final.moderationOperations,after.moderationOperations);
+   assert.deepEqual(final.moderationReasons,after.moderationReasons);
+   assert.deepEqual(final.chats,after.chats);
+   assert.deepEqual(final.audit.filter(a=>
+    a.updateKey.startsWith('owner:moderation:review:')),
+    after.audit.filter(a=>a.updateKey.startsWith('owner:moderation:review:')));
+   assert.equal(final.audit.some(a=>a.reason==='INVALID_OR_STALE_GROUP_CALLBACK'),true);
   }finally{await f.close();}
  });
  test(engine+' losing external audit evidence invalidates group token even if group operations stay unchanged',async()=>{
