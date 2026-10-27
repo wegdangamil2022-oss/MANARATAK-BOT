@@ -21,12 +21,6 @@ async function fixture(engine:'json'|'sqlite'){
  await policy.approveChat(OWNER,CHAT,['moderation']);
  await policy.approveChat(OWNER,OTHER,['moderation']);
  let now=NOW;
- const op=(id:string,memberId:string,createdAt:number,chatId=CHAT):ModerationOperation=>({
-  id,chatId,memberId,actorId:OWNER,kind:'MUTE',
-  reasonFingerprint:'PRIVATE_FUTURE_OPERATION_EVIDENCE',
-  policyVersion:policy.chatRevisionSnapshot(),status:'UNKNOWN_OUTCOME',
-  createdAt,attemptGateway:'TELEGRAM_API'
- });
  const version=(await store.snapshot()).chats.find(c=>c.id===CHAT)!.version;
  const add=async(id:string,memberId:string,createdAt:number,chatId=CHAT)=>{
   const o:ModerationOperation={
