@@ -38,7 +38,7 @@ const report=(record:ModerationOperation,audit:AuditRecord,now=NOW)=>summarizeMo
 
 test('a V1 digest-matched future-dated review is NOT verified before its audit timestamp',()=>{
  const e=reviewed(op());
- assert.equal(moderationOwnerReviewAuditConsistency({audit:[e.audit]},e.record),'INCONSISTENT');
+ assert.equal(moderationOwnerReviewAuditConsistency({audit:[e.audit]},e.record,NOW),'INCONSISTENT');
  const r=report(e.record,e.audit);
  assert.equal(r.reviewedUnresolved,0);
  assert.equal(r.untrustedReviewEvidence,1);
@@ -49,7 +49,7 @@ test('a V1 digest-matched future-dated review is NOT verified before its audit t
 });
 test('exact review-time boundary restores local confidence without changing the ledger',()=>{
  const e=reviewed(op());
- assert.equal(moderationOwnerReviewAuditConsistency({audit:[e.audit]},e.record),'REVIEWED');
+ assert.equal(moderationOwnerReviewAuditConsistency({audit:[e.audit]},e.record,NOW+MINUTE),'REVIEWED');
  const r=report(e.record,e.audit,NOW+MINUTE);
  assert.equal(r.reviewedUnresolved,1);
  assert.equal(r.untrustedReviewEvidence,0);
