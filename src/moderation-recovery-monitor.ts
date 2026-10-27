@@ -1,5 +1,6 @@
 import {BotStore,type BotState,type ModerationOperation} from './store.js';
-import {moderationLedgerSafeForDispatch} from './moderation-review-integrity.js';
+import {moderationLedgerSafeForDispatch,
+ moderationOwnerReviewAuditConsistency} from './moderation-review-integrity.js';
 
 /**
  * A strictly local, aggregate-only report for a trusted host operator.
@@ -22,6 +23,8 @@ export interface ModerationRecoveryReport{
  readonly clockAnomaly:number;
  readonly awaitingFirstReview:number;
  readonly reviewedUnresolved:number;
+ /** Review exists but its matching local audit or V1 evidence binding is untrusted. */
+ readonly untrustedReviewEvidence:number;
  readonly distinctBlockedTargets:number;
  readonly manualAttention:number;
 }
@@ -56,7 +59,7 @@ const validOp=(v:ModerationOperation):boolean=>
  * Telegram request duration or evidence of provider delivery.
  */
 export function summarizeModerationRecovery(
- s:Pick<BotState,'moderationOperations'>,
+ s:Pick<BotState,'moderationOperations'>&Partial<Pick<BotState,'audit'>>,
  options:ModerationRecoveryOptions):ModerationRecoveryReport{
  if(!validOptions(options))throw Error('MODERATION_RECOVERY_OPTIONS_INVALID');
  if(!s||!Array.isArray(s.moderationOperations)||
@@ -64,7 +67,8 @@ export function summarizeModerationRecovery(
   !moderationLedgerSafeForDispatch(s))
   throw Error('MODERATION_RECOVERY_INVALID_LEDGER');
  let intent=0,started=0,unknownOutcome=0,staleIntent=0,staleStarted=0,
-  clockAnomaly=0,awaitingFirstReview=0,reviewedUnresolved=0,manualAttention=0;
+  clockAnomaly=0,awaitingFirstReview=0,reviewedUnresolved=0,
+  untrustedReviewEvidence=0,manualAttention=0;
  const blockedTargets=new Set<string>();
  for(const o of s.moderationOperations){
   const pending=o.status==='INTENT'||o.status==='STARTED'||
@@ -83,8 +87,15 @@ export function summarizeModerationRecovery(
    if(stale)staleStarted++;
   }else{
    unknownOutcome++;
-   if(o.review)reviewedUnresolved++;
-   else awaitingFirstReview++;
+   // A restored review annotation alone is NOT evidence that the owner
+   // actually completed a matching audit. This is a local consistency
+   // check, not a cryptographic signature or Telegram delivery receipt.
+   // Missing, duplicated, mismatched and legacy-unbound audit records
+   // must not inflate the corroborated-review counter.
+   const trust=moderationOwnerReviewAuditConsistency({audit:s.audit??[]},o);
+   if(trust==='REVIEWED')reviewedUnresolved++;
+   else if(trust==='UNREVIEWED')awaitingFirstReview++;
+   else untrustedReviewEvidence++;
   }
   // A fresh timestamp does not prove the process that reserved INTENT or
   // STARTED is still alive. Reporting OK could hide a crash or power loss.
@@ -96,7 +107,7 @@ export function summarizeModerationRecovery(
   state:manualAttention?'ATTENTION_REQUIRED':'OK',
   totalOperations:s.moderationOperations.length,
   intent,started,unknownOutcome,staleIntent,staleStarted,
-  clockAnomaly,awaitingFirstReview,reviewedUnresolved,
+  clockAnomaly,awaitingFirstReview,reviewedUnresolved,untrustedReviewEvidence,
   distinctBlockedTargets:blockedTargets.size,manualAttention
  };
 }
