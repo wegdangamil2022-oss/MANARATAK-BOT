@@ -1,11 +1,11 @@
-## 0.7.106 — 2026-10-27 — fail-closed restored group owner views and late reversal integrity
-
 ## v0.7.107 — موثوقية ملف الإيقاف الآمن وجاهزية تجربة الإشراف (27 أكتوبر 2026)
 
 - أغلقت ثغرة قبول مفتاح `STOP/RUN` الذي يملك روابط صلبة متعددة إلى نفس الملف؛ كانت اختبارات TDD الحمراء تعيد إنتاج قبول هذا الملف في الإصدار السابق.
 - أصبح التحقق يقرأ محتوى الملف عبر واصف مفتوح بـ`O_NOFOLLOW` و`O_NONBLOCK` مع مطابقة inode وحالة الملف قبل وبعد القراءة؛ تغير الحالة أو صلاحيات غير آمنة يرفض التشغيل.
 - اختبارات التهيئة والتكامل تؤكد منع فحص حقوق Telegram عند عدم سلامة ملف الإيقاف، واستمرار عمل التحديث الذري الموثوق بالاستبدال.
 - ضوابط التشغيل: `docs/MODERATION_TRIAL_SAFETY_V0.7.107_AR.md`؛ لا تفعيل لأي عقوبات Telegram حية.
+
+## 0.7.106 — 2026-10-27 — fail-closed restored group owner views and late reversal integrity
 
 
 - Added 26 JSON and SQLite TDD regressions covering identical, revoked and divergent group approval collisions in BOTH owner group menu surfaces, stale owner detail/reversal callbacks, aggregate redacted conflict counts, independent unique groups and authorization checks.
