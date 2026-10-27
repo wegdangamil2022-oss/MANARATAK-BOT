@@ -81,8 +81,9 @@ test('orphan review audit globally blocks new moderation dispatch before adding 
  assert.equal(moderationLedgerSafeForDispatch(s),false);
  const unrelated={moderationOperations:[],audit:[other]};
  assert.equal(moderationLedgerSafeForDispatch(unrelated),true);
- const matched={moderationOperations:[op()],audit:[audit()]};
- assert.equal(moderationLedgerSafeForDispatch(matched),true);
+ const matchedButNotReviewed={moderationOperations:[op()],audit:[audit()]};
+ assert.equal(moderationLedgerSafeForDispatch(matchedButNotReviewed),false,
+  'matching operation ID is not enough: the review annotation must also exist');
 });
 
 async function fixture(engine:'json'|'sqlite'){
