@@ -28,6 +28,8 @@ function audit(id='original-private-id'):AuditRecord{
 const other:AuditRecord={updateKey:'telegram:other-business-event',
  reason:'RESPONSE_PLANNED_ONLY',policyVersion:1,at:NOW-100,
  decision:'ALLOW'};
+const orphans=(r:ReturnType<typeof summarizeModerationRecovery>):number|undefined=>
+ Reflect.get(r,'orphanReviewAuditReceipts') as number|undefined;
 function report(operations:ModerationOperation[],audits:AuditRecord[]){
  return summarizeModerationRecovery({moderationOperations:operations,audit:audits},opts());
 }
@@ -38,14 +40,14 @@ test('orphan owner-review audit with empty moderation ledger is NOT a clean reco
  assert.equal(r.totalOperations,0);
  assert.equal(r.unknownOutcome,0);
  assert.equal(r.manualAttention,0,'do not fabricate a moderation operation');
- assert.equal(r.orphanReviewAuditReceipts,1);
+ assert.equal(orphans(r),1);
  assert.equal(r.untrustedReviewEvidence,0);
  assert.equal(r.distinctBlockedTargets,0);
 });
 test('duplicate missing-history receipts count individually with no invented Telegram delivery',()=>{
  const a=audit();
  const r=report([],[a,{...a},audit('another-private-id')]);
- assert.equal(r.orphanReviewAuditReceipts,3);
+ assert.equal(orphans(r),3);
  assert.equal(r.state,'ATTENTION_REQUIRED');
  assert.equal(r.totalOperations,0);
 });
@@ -53,32 +55,34 @@ test('mismatched or malformed owner-review correlation hashes cannot hide as cle
  for(const updateKey of ['owner:moderation:review:'+'0'.repeat(32),
   'owner:moderation:review:TAMPERED_PRIVATE_CORRELATION']){
   const r=report([op()],[{...audit(),updateKey}]);
-  assert.equal(r.orphanReviewAuditReceipts,1);
+  assert.equal(orphans(r),1);
   assert.equal(r.state,'ATTENTION_REQUIRED');
  }
 });
 test('an owner review bound to terminal CONFIRMED after restoring a changed status is orphaned',()=>{
  const r=report([op('original-private-id','CONFIRMED')],[audit()]);
- assert.equal(r.orphanReviewAuditReceipts,1);
+ assert.equal(orphans(r),1);
  assert.equal(r.state,'ATTENTION_REQUIRED');
 });
 test('non-moderation audits and optional audit omission do not fabricate orphan records',()=>{
  const r=report([],[other]);
  assert.equal(r.state,'OK');
- assert.equal(r.orphanReviewAuditReceipts,0);
+ assert.equal(orphans(r),0);
  assert.equal(summarizeModerationRecovery({moderationOperations:[]},opts()).orphanReviewAuditReceipts,0);
 });
 test('a matching UNKNOWN receipt, even unreviewed, is not an orphan audit key',()=>{
  const r=report([op()],[audit()]);
- assert.equal(r.orphanReviewAuditReceipts,0);
+ assert.equal(orphans(r),0);
  assert.equal(r.untrustedReviewEvidence,1,'the unreviewed operation still conflicts with existing audit');
  assert.equal(r.unknownOutcome,1);
 });
 test('orphan review audit globally blocks new moderation dispatch before adding reason',()=>{
  const s={moderationOperations:[],audit:[audit()]};
  assert.equal(moderationLedgerSafeForDispatch(s),false);
- assert.equal(moderationLedgerSafeForDispatch({moderationOperations:[],audit:[other]}),true);
- assert.equal(moderationLedgerSafeForDispatch({moderationOperations:[op()],audit:[audit()]}),true);
+ const unrelated={moderationOperations:[],audit:[other]};
+ assert.equal(moderationLedgerSafeForDispatch(unrelated),true);
+ const matched={moderationOperations:[op()],audit:[audit()]};
+ assert.equal(moderationLedgerSafeForDispatch(matched),true);
 });
 
 async function fixture(engine:'json'|'sqlite'){
@@ -128,7 +132,7 @@ test('SQLite read-only recovery reports orphan audit without writes or fabricate
  const f=await fixture('sqlite');try{
   const before=await readFile(f.file);
   const r=await inspectModerationRecoveryReadOnly(f.file,opts());
-  assert.equal(r.orphanReviewAuditReceipts,1);
+  assert.equal(orphans(r),1);
   assert.equal(r.totalOperations,0);
   assert.equal(r.state,'ATTENTION_REQUIRED');
   assert.deepEqual(await readFile(f.file),before);
@@ -144,7 +148,7 @@ test('CLI after orphan audit restore exits 2 with only aggregate data, no Telegr
    TELEGRAM_BOT_TOKEN:'PRIVATE_TELEGRAM_TOKEN',TELEGRAM_ENABLED:'false'}});
   assert.equal(child.status,2,child.stderr);
   const r=JSON.parse(child.stdout) as {orphanReviewAuditReceipts:number;totalOperations:number;state:string};
-  assert.equal(r.orphanReviewAuditReceipts,1);
+  assert.equal(orphans(r),1);
   assert.equal(r.totalOperations,0);
   assert.equal(r.state,'ATTENTION_REQUIRED');
   for(const secret of ['PRIVATE_TELEGRAM_TOKEN',f.file,
