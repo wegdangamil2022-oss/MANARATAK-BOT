@@ -1,5 +1,6 @@
 import {isAbsolute,resolve} from 'node:path';
 import {lstat} from 'node:fs/promises';
+import type {BigIntStats} from 'node:fs';
 import {BotStore,type BotState} from './store.js';
 import {readTelegramSafetySwitch} from './telegram-safety-switch.js';
 import {summarizeSubscriptionIntegrity} from './subscription-integrity.js';
@@ -70,8 +71,13 @@ export async function inspectTelegramTrialAcceptanceReadOnly(
    throw Error('TRIAL_ACCEPTANCE_INVALID_BACKUP');
  }catch{throw Error('TRIAL_ACCEPTANCE_INVALID_BACKUP');}
  let safety:'RUN'|'STOP';
- try{safety=await readTelegramSafetySwitch(options.safetyFile);}
- catch{throw Error('TRIAL_ACCEPTANCE_INVALID_SAFETY');}
+ let safetyMeta:BigIntStats;
+ try{
+  safety=await readTelegramSafetySwitch(options.safetyFile);
+  // Remember the exact STOP file epoch, not just its bytes. A later
+  // replacement with another valid STOP must invalidate this checkpoint.
+  safetyMeta=await lstat(options.safetyFile,{bigint:true});
+ }catch{throw Error('TRIAL_ACCEPTANCE_INVALID_SAFETY');}
  // The gate does not manufacture an empty state or allow a backup from an
  // arbitrary different dataset to count as a verified rollback anchor.
  const same=JSON.stringify(live)===JSON.stringify(backup);
@@ -122,24 +128,41 @@ export async function inspectTelegramTrialAcceptanceReadOnly(
 
  // Race-aware advisory check: a state mutation or switch change observed
  // during inspection fails CLOSED, never reports a clean release rehearsal.
- let latest:BotState,latestSwitch:'RUN'|'STOP';
+ let latest:BotState,latestBackup:BotState,latestSwitch:'RUN'|'STOP';
  try{
   latest=await BotStore.snapshotSqliteReadOnly(options.stateFile);
+  // Inode, size and mtime alone cannot certify the original logical backup:
+  // an in-place rewrite can restore both size and modification timestamp.
+  latestBackup=await BotStore.snapshotSqliteReadOnly(options.backupFile);
   latestSwitch=await readTelegramSafetySwitch(options.safetyFile);
  }catch{throw Error('TRIAL_ACCEPTANCE_STATE_CHANGED');}
  // A backup replaced/re-timestamped while the asynchronous checks were
  // running must not inherit the earlier age/independence decision.
  let currentState:Awaited<ReturnType<typeof lstat>>;
  let currentBackup:Awaited<ReturnType<typeof lstat>>;
+ let currentSafety:BigIntStats;
  try{
-  [currentState,currentBackup]=await Promise.all([
-   lstat(options.stateFile),lstat(options.backupFile)]);
+  [currentState,currentBackup,currentSafety]=await Promise.all([
+   lstat(options.stateFile),lstat(options.backupFile),
+   lstat(options.safetyFile,{bigint:true})]);
  }catch{throw Error('TRIAL_ACCEPTANCE_STATE_CHANGED');}
- if(JSON.stringify(latest)!==JSON.stringify(live)||latestSwitch!==safety||
+ if(JSON.stringify(latest)!==JSON.stringify(live)||
+    JSON.stringify(latestBackup)!==JSON.stringify(backup)||
+    latestSwitch!==safety||
     currentState.dev!==sourceMeta.dev||currentState.ino!==sourceMeta.ino||
+    currentState.size!==sourceMeta.size||
+    currentState.mtimeMs!==sourceMeta.mtimeMs||
+    currentState.ctimeMs!==sourceMeta.ctimeMs||
     currentBackup.dev!==backupMeta.dev||currentBackup.ino!==backupMeta.ino||
     currentBackup.size!==backupMeta.size||
-    currentBackup.mtimeMs!==backupMeta.mtimeMs)
+    currentBackup.mtimeMs!==backupMeta.mtimeMs||
+    currentBackup.ctimeMs!==backupMeta.ctimeMs||
+    currentSafety.dev!==safetyMeta.dev||currentSafety.ino!==safetyMeta.ino||
+    currentSafety.size!==safetyMeta.size||
+    currentSafety.mode!==safetyMeta.mode||
+    currentSafety.nlink!==safetyMeta.nlink||
+    currentSafety.mtimeNs!==safetyMeta.mtimeNs||
+    currentSafety.ctimeNs!==safetyMeta.ctimeNs)
   throw Error('TRIAL_ACCEPTANCE_STATE_CHANGED');
  return {stage:'OFFLINE_ONLY',status:reasons.length?'BLOCKED':'PASS',
   safety,rollback:same?'MATCH':'MISMATCH',reasons};
