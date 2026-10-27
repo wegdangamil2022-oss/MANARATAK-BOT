@@ -38,7 +38,7 @@ const report=(record:ModerationOperation,audit:AuditRecord,now=NOW)=>summarizeMo
 
 test('a V1 digest-matched future-dated review is NOT verified before its audit timestamp',()=>{
  const e=reviewed(op());
- assert.equal(moderationOwnerReviewAuditConsistency({audit:[e.audit]},e.record,NOW),'INCONSISTENT');
+ assert.equal(moderationOwnerReviewAuditConsistency({audit:[e.audit]},e.record),'INCONSISTENT');
  const r=report(e.record,e.audit);
  assert.equal(r.reviewedUnresolved,0);
  assert.equal(r.untrustedReviewEvidence,1);
@@ -49,7 +49,7 @@ test('a V1 digest-matched future-dated review is NOT verified before its audit t
 });
 test('exact review-time boundary restores local confidence without changing the ledger',()=>{
  const e=reviewed(op());
- assert.equal(moderationOwnerReviewAuditConsistency({audit:[e.audit]},e.record,NOW+MINUTE),'REVIEWED');
+ assert.equal(moderationOwnerReviewAuditConsistency({audit:[e.audit]},e.record),'REVIEWED');
  const r=report(e.record,e.audit,NOW+MINUTE);
  assert.equal(r.reviewedUnresolved,1);
  assert.equal(r.untrustedReviewEvidence,0);
@@ -58,7 +58,7 @@ test('exact review-time boundary restores local confidence without changing the 
 });
 test('future legacy-unbound review is inconsistent, not a trusted or legacy-only badge',()=>{
  const e=reviewed(op(),NOW+MINUTE,true);
- assert.equal(moderationOwnerReviewAuditConsistency({audit:[e.audit]},e.record,NOW),'INCONSISTENT');
+ assert.equal(moderationOwnerReviewAuditConsistency({audit:[e.audit]},e.record),'INCONSISTENT');
  const r=report(e.record,e.audit);
  assert.equal(r.untrustedReviewEvidence,1);
  assert.equal(r.reviewedUnresolved,0);
@@ -142,9 +142,13 @@ test('CLI on restored future audit returns attention status with aggregate-only 
   // CLI uses actual local Date.now, so shift the test review beyond wall time.
   const tomorrow=Date.now()+86_400_000;
   await f.store.transaction(s=>{
-   s.moderationOperations[0]!.review!.reviewedAt=tomorrow;
+   const original=s.moderationOperations[0]!;
+   original.createdAt=Date.now()-5000;
+   original.review!.reviewedAt=tomorrow;
+   original.review!.evidenceDigest=moderationReviewEvidenceDigest(original);
    const receipt=s.audit.find(a=>a.reason==='MODERATION_UNKNOWN_OWNER_ACKNOWLEDGED')!;
    receipt.at=tomorrow;
+   receipt.moderationEvidenceDigest=moderationReviewEvidenceDigest(original);
   });
   const before=await readFile(f.file);
   const proc=spawnSync(process.execPath,[
