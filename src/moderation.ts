@@ -67,7 +67,9 @@ function latestConfirmedKind(operations:ModerationOperation[]):
  {status:'CLEAR';kind:RestrictionKind}|{status:'AMBIGUOUS'}{
  const confirmed=operations.filter(o=>o.status==='CONFIRMED');
  if(!confirmed.length)return {status:'CLEAR',kind:'NONE'};
- const lastTime=Math.max(...confirmed.map(o=>o.createdAt));
+ // Avoid Math.max(...largeArray) argument overflow for restored histories
+ // with many confirmed entries. Keep the ledger untouched and count ties.
+ const lastTime=confirmed.reduce((time,o)=>Math.max(time,o.createdAt),0);
  const latest=confirmed.filter(o=>o.createdAt===lastTime);
  return latest.length===1?
   {status:'CLEAR',kind:latest[0]!.kind}:{status:'AMBIGUOUS'};
