@@ -53,7 +53,7 @@ export class Policy {
       typeof g.revoked!=='boolean'||
       typeof g.expiresAt!=='number'||!Number.isSafeInteger(g.expiresAt)||
       g.expiresAt<0||g.expiresAt>8_640_000_000_000_000||
-      typeof g.grantedBy!=='string'||!/^\\d+$/u.test(g.grantedBy)||
+      typeof g.grantedBy!=='string'||!/^\d+$/u.test(g.grantedBy)||
       (g.grantId!==undefined&&
         (typeof g.grantId!=='string'||!uuid.test(g.grantId))));
     const relevant=history.filter(g=>g.chatPolicyVersion===epoch);
