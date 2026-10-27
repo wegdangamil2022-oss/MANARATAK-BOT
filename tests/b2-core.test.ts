@@ -15,11 +15,17 @@ async function context() {
   const store = new BotStore(file);
   const policy = new Policy(store, OWNER, () => 1_000);
   const gateway = new FakeModerationGateway();
-  const moderation = new ModerationService(store, policy, gateway, () => 1_000);
+  // Give successive simulated operations an explicit chronology when a
+  // test exercises multiple sanctions against the same member. In production
+  // Date.now advances; a frozen clock is deliberately ambiguous after restore.
+  let now=1_000;
+  const moderation = new ModerationService(store, policy, gateway, () => now);
   const members = new FakeMembershipGateway();
   const subscription = new SubscriptionGate(store, policy, members, moderation, () => 1_000);
   await policy.approveChat(OWNER, GROUP, ['moderation', 'verification', 'assistant']);
-  return { dir, file, store, policy, gateway, moderation, members, subscription, close: () => rm(dir, { recursive: true, force: true }) };
+  return { dir, file, store, policy, gateway, moderation, members, subscription,
+    advance: () => { now += 1; },
+    close: () => rm(dir, { recursive: true, force: true }) };
 }
 
 test('B2 MOD-004 default-deny, target protection and actual bot rights trump internal grants', async () => {
@@ -55,7 +61,9 @@ test('B2 MOD-005 overlapping ban and mute downgrades to mute only after ban remo
   const c = await context();
   try {
     await c.moderation.addManualReason(OWNER, GROUP, MEMBER, 'spam-1', 'MUTE');
+    c.advance(); // confirmed MUTE predates confirmed BAN
     await c.moderation.addManualReason(OWNER, GROUP, MEMBER, 'fraud-1', 'BAN');
+    c.advance(); // no fabricated equal-time order after a later downgrade
     assert.equal((await c.moderation.removeManualReason(OWNER, GROUP, MEMBER, 'fraud-1')).status, 'APPLIED');
     assert.equal(c.moderation.effective(await c.store.snapshot(), GROUP, MEMBER), 'MUTE');
     assert.deepEqual(c.gateway.calls.map(x => x.kind), ['MUTE', 'BAN', 'MUTE']);
