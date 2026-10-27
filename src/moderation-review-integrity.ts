@@ -219,8 +219,7 @@ export function moderationLedgerSafeForDispatch(
  if(!inspectModerationLedgerIntegrity(state).valid)return false;
  if(asOf!==undefined&&state.moderationOperations.some(op=>op.createdAt>asOf))
   return false;
- return
-  ambiguousModerationOperationIds(state).size===0&&
+ return ambiguousModerationOperationIds(state).size===0&&
   orphanModerationReviewAuditReceipts(state)===0&&
   conflictingModerationReviewAuditOperations(state,asOf)===0;
 }
