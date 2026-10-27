@@ -159,24 +159,28 @@ async function reversalFixture(engine:Engine){
 for(const engine of ['json','sqlite'] as const){
  test(engine+' global duplicate operation ID injected while Telegram observer awaits blocks stale read',async()=>{
   const f=await reversalFixture(engine);try{
-   f.during(()=>f.store.transaction(s=>s.moderationOperations.push(
-    f.operation('confirmed-A'))));
+   f.during(async()=>{await f.store.transaction(s=>{
+    s.moderationOperations.push(f.operation('confirmed-A'));
+   });});
    assert.equal((await f.inspect()).status,'BLOCKED_STALE');
    assert.equal(f.reads(),1);
   }finally{await f.close();}
  });
  test(engine+' malformed unrelated moderation outcome injected during observer blocks stale read',async()=>{
   const f=await reversalFixture(engine);try{
-   f.during(()=>f.store.transaction(s=>s.moderationOperations.push(
-    {...f.operation('corrupt-elsewhere'),status:'NOT_REAL' as ModerationOperation['status']})));
+   f.during(async()=>{await f.store.transaction(s=>{
+    s.moderationOperations.push({...f.operation('corrupt-elsewhere'),
+     status:'NOT_REAL' as ModerationOperation['status']});
+   });});
    assert.equal((await f.inspect()).status,'BLOCKED_STALE');
    assert.equal(f.reads(),1);
   }finally{await f.close();}
  });
  test(engine+' valid unrelated moderation operation during observer does not unnecessarily hide independent evidence',async()=>{
   const f=await reversalFixture(engine);try{
-   f.during(()=>f.store.transaction(s=>s.moderationOperations.push(
-    f.operation('unrelated-unique'))));
+   f.during(async()=>{await f.store.transaction(s=>{
+    s.moderationOperations.push(f.operation('unrelated-unique'));
+   });});
    assert.deepEqual(await f.inspect(),
     {status:'OBSERVED_NOT_ATTRIBUTABLE',kind:'BAN'});
    assert.equal(f.reads(),1);
