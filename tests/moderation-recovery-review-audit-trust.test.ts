@@ -28,9 +28,10 @@ const auditFor=(op:ModerationOperation,legacy=false):AuditRecord=>({
  policyVersion:1,at:NOW-100,
  ...(legacy?{}:{moderationEvidenceDigest:moderationReviewEvidenceDigest(op)})
 });
-const inspect=(ops:ModerationOperation[],audit?:AuditRecord[])=>
- summarizeModerationRecovery(audit===undefined?{moderationOperations:ops}:
-  {moderationOperations:ops,audit},options());
+const inspect=(ops:ModerationOperation[],audit?:AuditRecord[])=>{
+ const state=audit===undefined?{moderationOperations:ops}:{moderationOperations:ops,audit};
+ return summarizeModerationRecovery(state,options());
+};
 const counters=(r:ReturnType<typeof inspect>)=>({
  reviewed:r.reviewedUnresolved,awaiting:r.awaitingFirstReview,
  untrusted:Reflect.get(r,'untrustedReviewEvidence')
@@ -107,8 +108,7 @@ test('SQLite recovery inventory accepts properly linked audit without changing e
 test('CLI after restart reports untrusted review evidence only as aggregate and exits attention code',async()=>{
  const f=await fixture();try{
   await f.store.transaction(s=>s.moderationOperations.push(withReview({
-   ...record(),createdAt:Date.now()-5000,
-   review:undefined
+   ...record(),createdAt:Date.now()-5000
   })));
   const before=await readFile(f.file);
   const cmd=spawnSync(process.execPath,[
