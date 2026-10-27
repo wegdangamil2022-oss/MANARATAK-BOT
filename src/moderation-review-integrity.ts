@@ -178,14 +178,15 @@ export function orphanModerationReviewAuditReceipts(
  * is observational and never edits evidence or discloses record identities.
  */
 export function conflictingModerationReviewAuditOperations(
- state:Pick<BotState,'moderationOperations'>&Partial<Pick<BotState,'audit'>>
+ state:Pick<BotState,'moderationOperations'>&Partial<Pick<BotState,'audit'>>,
+ asOf?:number
 ):number{
  if(state.audit===undefined)return 0;
  if(!Array.isArray(state.audit))return 1;
  let count=0;
  for(const op of state.moderationOperations){
   if(op?.status==='UNKNOWN_OUTCOME'&&
-   moderationOwnerReviewAuditConsistency({audit:state.audit},op)==='INCONSISTENT')
+   moderationOwnerReviewAuditConsistency({audit:state.audit},op,asOf)==='INCONSISTENT')
    count++;
  }
  return count;
@@ -201,11 +202,19 @@ export function conflictingModerationReviewAuditOperations(
  * each durable mutation and async authority-check boundary.
  */
 export function moderationLedgerSafeForDispatch(
- state:Pick<BotState,'moderationOperations'>&Partial<Pick<BotState,'audit'>>):boolean{
+ state:Pick<BotState,'moderationOperations'>&Partial<Pick<BotState,'audit'>>,
+ asOf?:number
+):boolean{
+ // An in-flight dispatch must not rely on an owner review that allegedly
+ // happened in the future, including after a restored system clock rollback.
+ // Callers may omit asOf only for legacy / purely structural projections;
+ // every actual dispatch supplies its current trusted observation clock.
+ if(asOf!==undefined&&(!Number.isSafeInteger(asOf)||asOf<0||
+   asOf>8_640_000_000_000_000))return false;
  return inspectModerationLedgerIntegrity(state).valid&&
   ambiguousModerationOperationIds(state).size===0&&
   orphanModerationReviewAuditReceipts(state)===0&&
-  conflictingModerationReviewAuditOperations(state)===0;
+  conflictingModerationReviewAuditOperations(state,asOf)===0;
 }
 
 /** Strict LOCAL corroboration of a moderation owner review with its appended
