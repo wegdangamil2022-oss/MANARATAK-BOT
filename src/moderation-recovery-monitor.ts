@@ -80,8 +80,9 @@ export function summarizeModerationRecovery(
  for(const o of s.moderationOperations){
   const pending=o.status==='INTENT'||o.status==='STARTED'||
    o.status==='UNKNOWN_OUTCOME';
-  if(!pending)continue;
-  blockedTargets.add(JSON.stringify([o.chatId,o.memberId]));
+  // A confirmed, failed or cancelled attempt dated *after* this report's
+  // observation clock is an anomalous restored history too. Count it without
+  // fabricating an unresolved target or claiming it was sent to Telegram.
   const invalidTime=!Number.isSafeInteger(o.createdAt)||
    o.createdAt<0||o.createdAt>options.now;
   // Restored review notes and audit may be identical yet claim a review
@@ -89,6 +90,8 @@ export function summarizeModerationRecovery(
   const futureReview=o.status==='UNKNOWN_OUTCOME'&&
    o.review!==undefined&&o.review.reviewedAt>options.now;
   if(invalidTime||futureReview)clockAnomaly++;
+  if(!pending)continue;
+  blockedTargets.add(JSON.stringify([o.chatId,o.memberId]));
   const stale=!invalidTime&&options.now-o.createdAt>=options.staleAfterMs;
   if(o.status==='INTENT'){
    intent++;
@@ -121,7 +124,7 @@ export function summarizeModerationRecovery(
  const conflictingReviewAuditOperations=conflictingModerationReviewAuditOperations(s);
  return {
   stage:'OFFLINE_MODERATION_RECOVERY',
-  state:manualAttention||orphanReviewAuditReceipts||
+  state:manualAttention||clockAnomaly||orphanReviewAuditReceipts||
    conflictingReviewAuditOperations?'ATTENTION_REQUIRED':'OK',
   totalOperations:s.moderationOperations.length,
   intent,started,unknownOutcome,staleIntent,staleStarted,

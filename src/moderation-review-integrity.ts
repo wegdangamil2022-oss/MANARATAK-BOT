@@ -211,8 +211,15 @@ export function moderationLedgerSafeForDispatch(
  // every actual dispatch supplies its current trusted observation clock.
  if(asOf!==undefined&&(!Number.isSafeInteger(asOf)||asOf<0||
    asOf>8_640_000_000_000_000))return false;
- return inspectModerationLedgerIntegrity(state).valid&&
-  ambiguousModerationOperationIds(state).size===0&&
+ // A restored terminal row may be structurally valid and audit-free yet
+ // claim a sanction from the future. Do not treat that outcome as
+ // authoritative for this or any other group's pending dispatch.
+ // Run structural integrity first: corrupted rows cannot be trusted to
+ // provide a numeric timestamp at all.
+ if(!inspectModerationLedgerIntegrity(state).valid)return false;
+ if(asOf!==undefined&&state.moderationOperations.some(op=>op.createdAt>asOf))
+  return false;
+ return ambiguousModerationOperationIds(state).size===0&&
   orphanModerationReviewAuditReceipts(state)===0&&
   conflictingModerationReviewAuditOperations(state,asOf)===0;
 }
