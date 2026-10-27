@@ -18,7 +18,7 @@ const baseline={
  stage:'OFFLINE_MODERATION_RECOVERY',state:'OK',
  totalOperations:0,intent:0,started:0,unknownOutcome:0,
  staleIntent:0,staleStarted:0,clockAnomaly:0,
- awaitingFirstReview:0,reviewedUnresolved:0,
+ awaitingFirstReview:0,reviewedUnresolved:0,untrustedReviewEvidence:0,
  distinctBlockedTargets:0,manualAttention:0
 } as const;
 const options=()=>({now:NOW,staleAfterMs:STALE});
@@ -73,7 +73,7 @@ test('unknown results stay attention-worthy even after owner acknowledgement',()
   }})
  ]},options());
  assert.deepEqual(x,{...baseline,state:'ATTENTION_REQUIRED',totalOperations:3,
-  unknownOutcome:3,awaitingFirstReview:1,reviewedUnresolved:2,
+  unknownOutcome:3,awaitingFirstReview:1,untrustedReviewEvidence:2,
   distinctBlockedTargets:1,manualAttention:3});
  assert.equal(JSON.stringify(x).includes('u1'),false);
  assert.equal(JSON.stringify(x).includes('100'),false);
