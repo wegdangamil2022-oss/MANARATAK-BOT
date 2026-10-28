@@ -55,7 +55,11 @@ for(const engine of ['json','sqlite'] as const){
    assert.equal((await new ModerationService(store,policy,gateway,()=>NOW)
     .addManualReason(OWNER,CHAT,TARGET,'private-helper-overridden','BAN')).status,'APPLIED');
    assert.equal((await store.snapshot()).moderationOperations.at(-1)?.attemptGateway,'UNSPECIFIED');
-   assert.deepEqual(calls,['banChatMember']);
+   // Native-private internal reads ignore the forged getMember property.
+   // The proof remains UNTRUSTED even though the actual official calls
+   // recheck Telegram rights/target via the injected network port.
+   assert.ok(calls.filter(x=>x==='getChatMember').length>=6);
+   assert.equal(calls.filter(x=>x==='banChatMember').length,1);
   }finally{await rm(dir,{force:true,recursive:true});}
  });
 }
