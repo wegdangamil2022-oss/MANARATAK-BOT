@@ -419,6 +419,26 @@ export class ModerationService {
         quarantineModerationAttempt(s,started.receipt);
         return 'BLOCKED_UNKNOWN' as const;
       }
+      // The provider response can arrive AFTER the actor grant, target
+      // protection, approved group, subscription witness or reason set
+      // changed. Its HTTP acknowledgement alone cannot certify that the
+      // original local authority remained valid throughout the attempt.
+      // Preserve the potentially sent effect as UNKNOWN_OUTCOME instead of
+      // publishing APPLIED against revoked authorization. A confirmed 4xx
+      // provider refusal is still an explicit no-effect result.
+      if(outcome!=='FAILED_CONFIRMED'){
+        let stillAuthorized=false;
+        try{
+          stillAuthorized=this.authorized(s,actorId,chatId,memberId)&&
+            (!stillCurrent||stillCurrent(s))&&
+            this.policy.chatRevision(s,chatId)===started.receipt.policyVersion&&
+            fingerprint(s,chatId,memberId)===started.receipt.reasonFingerprint;
+        }catch{/* Unreliable witness/clock/policy fails closed. */}
+        if(!stillAuthorized){
+          quarantineModerationAttempt(s,started.receipt);
+          return 'BLOCKED_UNKNOWN' as const;
+        }
+      }
       op.status=outcome;
       return outcome;
     });
