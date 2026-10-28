@@ -88,6 +88,23 @@ export class TelegramBotApiModerationGateway implements ModerationGateway{
     !('call' in adapter)&&!('getMember' in adapter);
   }catch{return false;}
  }
+ /** Trusted provenance for the specifically audited read-only getChat probe.
+  * This is a JavaScript method identity check, NOT proof of Telegram truth.
+  * Never authenticate against methods freshly read from a mutable prototype.
+  */
+ static usesOfficialTrialGroupRead(gateway:unknown):boolean{
+  try{
+   if(typeof gateway!=='object'||gateway===null||
+      !(#officialAdapterBrand in gateway))return false;
+   const adapter=gateway as TelegramBotApiModerationGateway;
+   const prototype=TelegramBotApiModerationGateway.prototype;
+   return Object.isFrozen(TelegramBotApiModerationGateway)&&
+    Object.getPrototypeOf(adapter)===prototype&&
+    prototype.inspectTrialGroupKind===officialGatewayMethods.inspectTrialGroupKind&&
+    adapter.inspectTrialGroupKind===officialGatewayMethods.inspectTrialGroupKind&&
+    !('call' in adapter);
+  }catch{return false;}
+ }
  // Native # fields are inaccessible to Object.assign/proxy-style changes
  // of ordinary TypeScript-private constructor parameter properties. The
  // emergency STOP gate, transport and bot identity stay bound to the
@@ -134,6 +151,23 @@ export class TelegramBotApiModerationGateway implements ModerationGateway{
   if(response.status>=400&&response.status<500&&v.ok===false)
    return {status:'CLIENT_DENIED'};
   return {status:'UNKNOWN'};
+ }
+ /** Read-only Telegram getChat probe: verify exact numeric chat identity
+  * and supported group topology, rejecting channels/private chats and
+  * former basic groups with a migration marker. Never exposes a title
+  * or makes any mutation. 'UNKNOWN' never authorizes a trial.
+  */
+ async inspectTrialGroupKind(chatId:string):Promise<'GROUP'|'SUPERGROUP'|'NOT_GROUP'|'UNKNOWN'>{
+  if(!validGroup(chatId))return 'UNKNOWN';
+  const reply=await this.#call('getChat',{chat_id:chatId});
+  if(reply.status!=='HTTP_OK'||!object(reply.value))return 'UNKNOWN';
+  const info=reply.value;
+  if(info.id!==Number(chatId)||'migrated_to_chat_id' in info)
+   return 'UNKNOWN';
+  if(info.type==='group')return 'GROUP';
+  if(info.type==='supergroup')return 'SUPERGROUP';
+  if(info.type==='private'||info.type==='channel')return 'NOT_GROUP';
+  return 'UNKNOWN';
  }
  async #getMember(group:string,user:string):Promise<Member|null>{
   if(!validGroup(group)||!validUser(user))return null;
@@ -273,7 +307,8 @@ const officialGatewayMethods=Object.freeze({
  setRestriction:TelegramBotApiModerationGateway.prototype.setRestriction,
  canRestrict:TelegramBotApiModerationGateway.prototype.canRestrict,
  isProtected:TelegramBotApiModerationGateway.prototype.isProtected,
- inspectBotModerationRights:TelegramBotApiModerationGateway.prototype.inspectBotModerationRights
+ inspectBotModerationRights:TelegramBotApiModerationGateway.prototype.inspectBotModerationRights,
+ inspectTrialGroupKind:TelegramBotApiModerationGateway.prototype.inspectTrialGroupKind
 });
 // Prevent rebinding the static origin-check functions after their definition.
 Object.freeze(TelegramBotApiModerationGateway);
