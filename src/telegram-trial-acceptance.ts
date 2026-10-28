@@ -4,6 +4,7 @@ import type {BigIntStats} from 'node:fs';
 import {BotStore,type BotState} from './store.js';
 import {readTelegramSafetySwitch} from './telegram-safety-switch.js';
 import {summarizeSubscriptionIntegrity} from './subscription-integrity.js';
+import {telegramReplyLedgerSafeForTrial} from './telegram-replies.js';
 import {orphanModerationReviewAuditReceipts,moderationLedgerSafeForDispatch} from './moderation-review-integrity.js';
 
 /** Offline-only advisory review. PASS is NOT permission to start Telegram,
@@ -17,7 +18,8 @@ export interface TelegramTrialAcceptanceReport{
   'UNRESOLVED_REPLIES'|'UNRESOLVED_UPDATES'|'UNRESOLVED_OPERATIONS'|
   'UNRESOLVED_PUBLICATIONS'|'ACTIVE_PURGE'|'INVALID_SUBSCRIPTION_REQUIREMENTS'|
   'BACKUP_TOO_OLD'|'BACKUP_TIMESTAMP_IN_FUTURE'|
-  'ORPHAN_MODERATION_REVIEW_AUDIT'|'UNSAFE_MODERATION_LEDGER'
+  'ORPHAN_MODERATION_REVIEW_AUDIT'|'UNSAFE_MODERATION_LEDGER'|
+  'UNSAFE_REPLY_LEDGER'
  )[];
 }
 export interface TelegramTrialAcceptanceOptions{
@@ -96,6 +98,12 @@ export async function inspectTelegramTrialAcceptanceReadOnly(
  if(!same)reasons.push('BACKUP_STATE_MISMATCH');
  if(pendingReply(live))reasons.push('PENDING_REPLIES');
  if(uncertainReply(live))reasons.push('UNRESOLVED_REPLIES');
+ // Completed local reply receipts are not automatically trustworthy. A
+ // duplicate update key or malformed historical row must not turn a copied
+ // rollback snapshot into a false PASS. Use the same structural validator as
+ // the live reply dispatcher and keep the public reason constant/redacted.
+ if(!telegramReplyLedgerSafeForTrial(live.telegramReplyJobs))
+  reasons.push('UNSAFE_REPLY_LEDGER');
  if(live.updates.some(u=>u.status!=='DONE'))reasons.push('UNRESOLVED_UPDATES');
  if(live.operations.some(o=>unresolvedOps.has(o.status))||
    live.moderationOperations.some(o=>unresolvedOps.has(o.status)))
