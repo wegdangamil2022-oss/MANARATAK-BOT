@@ -51,7 +51,7 @@ test('isolated STOP-backed target eligibility completes with double member and f
  const f=await fixture();try{
   const port=gateway(body=>body.user_id===BOT?bot():member());
   const before=await Promise.all([readFile(f.stateFile),readFile(f.backupFile),readFile(f.safetyFile)]);
-  const result=await inspectIsolatedModerationTargetReadOnly(f.options(),TARGET,port.gateway);
+  const result=await inspectIsolatedModerationTargetReadOnly(f.options(),TARGET,port.gateway,OWNER);
   assert.deepEqual(result,{stage:'READ_ONLY_MODERATION_TARGET',
    status:'PASS',safety:'STOP',rollback:'MATCH',botRights:'GRANTED',
    target:'ELIGIBLE',reasons:[]});
@@ -63,7 +63,7 @@ test('isolated STOP-backed target eligibility completes with double member and f
 test('administrator target is protected and never yields advisory eligibility',async()=>{
  const f=await fixture();try{
   const port=gateway(body=>body.user_id===BOT?bot():member('administrator'));
-  const result=await inspectIsolatedModerationTargetReadOnly(f.options(),TARGET,port.gateway);
+  const result=await inspectIsolatedModerationTargetReadOnly(f.options(),TARGET,port.gateway,OWNER);
   assert.equal(result.status,'BLOCKED');
   assert.equal(result.target,'PROTECTED_OR_UNVERIFIED');
   assert.deepEqual(result.reasons,['TRIAL_TARGET_NOT_VERIFIED_MEMBER']);
@@ -74,7 +74,7 @@ test('target status change between two Telegram reads is blocked',async()=>{
  const f=await fixture();try{
   let reads=0;
   const port=gateway(body=>body.user_id===BOT?bot():member(++reads===1?'member':'administrator'));
-  const result=await inspectIsolatedModerationTargetReadOnly(f.options(),TARGET,port.gateway);
+  const result=await inspectIsolatedModerationTargetReadOnly(f.options(),TARGET,port.gateway,OWNER);
   assert.equal(result.status,'BLOCKED');
   assert.equal(result.target,'CHANGED');
   assert.deepEqual(result.reasons,['TRIAL_TARGET_STATUS_CHANGED']);
@@ -88,7 +88,7 @@ test('unverified network response for target fails closed even if second read ap
    if(body.user_id===BOT)return bot();
    return ++targetReads===1?new Response('server error',{status:503}):member();
   });
-  const result=await inspectIsolatedModerationTargetReadOnly(f.options(),TARGET,port.gateway);
+  const result=await inspectIsolatedModerationTargetReadOnly(f.options(),TARGET,port.gateway,OWNER);
   assert.equal(result.status,'BLOCKED');
   assert.equal(result.target,'CHANGED');
   assert.deepEqual(result.reasons,['TRIAL_TARGET_STATUS_CHANGED']);
@@ -98,7 +98,7 @@ test('bot permission revoked after first member read blocks before another targe
  const f=await fixture();try{
   let rightsReads=0;
   const port=gateway(body=>body.user_id===BOT?bot(++rightsReads<=2):member());
-  const result=await inspectIsolatedModerationTargetReadOnly(f.options(),TARGET,port.gateway);
+  const result=await inspectIsolatedModerationTargetReadOnly(f.options(),TARGET,port.gateway,OWNER);
   assert.equal(result.status,'BLOCKED');
   assert.equal(result.target,'NOT_CHECKED');
   assert.deepEqual(result.reasons,['BOT_MODERATION_RIGHTS_CHANGED']);
@@ -111,7 +111,7 @@ test('STOP flipped while reading target stops all subsequent Telegram calls',asy
    if(body.user_id===Number(TARGET))await writeFile(f.safetyFile,'RUN\n');
    return body.user_id===BOT?bot():member();
   });
-  const result=await inspectIsolatedModerationTargetReadOnly(f.options(),TARGET,port.gateway);
+  const result=await inspectIsolatedModerationTargetReadOnly(f.options(),TARGET,port.gateway,OWNER);
   assert.equal(result.status,'BLOCKED');
   assert.equal(result.target,'NOT_CHECKED');
   assert.ok(result.reasons.includes('SAFETY_NOT_STOP'));
@@ -128,7 +128,7 @@ test('replaced same-content STOP inode during member read cannot inherit PASS',a
    }
    return body.user_id===BOT?bot():member();
   });
-  const result=await inspectIsolatedModerationTargetReadOnly(f.options(),TARGET,port.gateway);
+  const result=await inspectIsolatedModerationTargetReadOnly(f.options(),TARGET,port.gateway,OWNER);
   assert.equal(result.status,'BLOCKED');
   assert.equal(result.target,'NOT_CHECKED');
   assert.deepEqual(result.reasons,['TRIAL_CHECKPOINT_CHANGED']);
@@ -139,7 +139,7 @@ test('extra approved group forbids every Telegram rights and member read',async(
  const f=await fixture();try{
   await f.policy.approveChat(OWNER,'-100456',['moderation']);
   const port=gateway(()=>{throw Error('must not read');});
-  const result=await inspectIsolatedModerationTargetReadOnly(f.options(),TARGET,port.gateway);
+  const result=await inspectIsolatedModerationTargetReadOnly(f.options(),TARGET,port.gateway,OWNER);
   assert.equal(result.status,'BLOCKED');
   assert.equal(result.target,'NOT_CHECKED');
   assert.deepEqual(port.calls,[]);
@@ -154,7 +154,7 @@ test('untrusted structural fake cannot produce target eligibility or remote requ
    attemptGateway:'TELEGRAM_API'
   };
   const result=await inspectIsolatedModerationTargetReadOnly(f.options(),TARGET,
-    spoof as unknown as TelegramBotApiModerationGateway);
+    spoof as unknown as TelegramBotApiModerationGateway,OWNER);
   assert.equal(result.status,'BLOCKED');
   assert.equal(result.target,'NOT_CHECKED');
   assert.equal(invoked,0);
@@ -166,8 +166,22 @@ test('invalid member ID is rejected before reading filesystem or contacting Tele
   await assert.rejects(()=>inspectIsolatedModerationTargetReadOnly({
    stateFile:'/never/sent.sqlite',backupFile:'/never/backup.sqlite',
    safetyFile:'/never/stop.flag',trialChatId:CHAT,
-   staleAfterMs:900_000,now:Date.now()},bad,port.gateway),
+   staleAfterMs:900_000,now:Date.now()},bad,port.gateway,OWNER),
    /MODERATION_TRIAL_INVALID_TARGET/);
  }
+ assert.deepEqual(port.calls,[]);
+});
+
+test('owner identity is required and owner cannot be a selected target even if remote says member',async()=>{
+ const port=gateway(()=>{throw Error('remote should not happen');});
+ const options={stateFile:'/never/sent.sqlite',backupFile:'/never/backup.sqlite',
+  safetyFile:'/never/stop.flag',trialChatId:CHAT,staleAfterMs:900_000,
+  now:Date.now()};
+ for(const owner of ['', '00','-100']){
+  await assert.rejects(()=>inspectIsolatedModerationTargetReadOnly(options,
+   TARGET,port.gateway,owner),/MODERATION_TRIAL_INVALID_TARGET/);
+ }
+ await assert.rejects(()=>inspectIsolatedModerationTargetReadOnly(options,
+  OWNER,port.gateway,OWNER),/MODERATION_TRIAL_INVALID_TARGET/);
  assert.deepEqual(port.calls,[]);
 });
