@@ -1,10 +1,9 @@
-import {inspectIsolatedModerationTargetReadOnly} from './moderation-trial-target.js';
-import {inspectIsolatedModerationGroupReadOnly} from './moderation-trial-group.js';
+import {inspectContinuousModerationTrialReadOnly} from './moderation-trial-continuous.js';
 import {TelegramBotApiModerationGateway} from './telegram-moderation-gateway.js';
 
 /** One-shot, explicitly selected READ-ONLY operator trial. The token is
  * accepted ONLY from the process environment, never a command-line arg.
- * Every provider request is getChatMember. No Telegram mutations, no writes
+ * Every provider request is getChatMember or getChat. No Telegram mutations, no writes
  * to SQLite or the STOP flag, no automatic trial authorization.
  */
 const args=process.argv.slice(2);
@@ -43,14 +42,10 @@ void (async()=>{
    stateFile:args[2]!,backupFile:args[4]!,safetyFile:args[6]!,
    now:Date.now(),staleAfterMs,trialChatId:args[10]!
   };
-  // A channel/private chat or a migrated/mismatched group must not be
-  // "validated" solely by ordinary member status. Fail before any target read.
-  const group=await inspectIsolatedModerationGroupReadOnly(options,gateway);
-  if(group.status!=='PASS'){
-   process.stdout.write(JSON.stringify(group)+'\n');
-   process.exitCode=2;return;
-  }
-  const report=await inspectIsolatedModerationTargetReadOnly(
+  // One anchored GROUP -> TARGET -> GROUP sequence, not two unrelated
+  // PASS snapshots. Group migration or STOP/backup drift after checking a
+  // member must not authorize a stale advisory trial result.
+  const report=await inspectContinuousModerationTrialReadOnly(
    options,args[12]!,gateway,process.env.BOT_OWNER_ID!);
   process.stdout.write(JSON.stringify(report)+'\n');
   process.exitCode=report.status==='PASS'?0:2;
