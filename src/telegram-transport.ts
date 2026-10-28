@@ -27,6 +27,7 @@ import {renderStaffInline} from './telegram-inline-staff.js';
 import {ModerationUnknownOwnerReview} from './moderation-unknown-review.js';
 import {ModerationPendingOwnerView} from './moderation-pending-owner-view.js';
 import {renderOwnerModerationRateStatus} from './telegram-inline-moderation-rate-status.js';
+import {renderOwnerModerationEmergencyStatus} from './telegram-inline-moderation-emergency.js';
 import {renderStudentInline} from './telegram-inline-student.js';
 import {parseSearchQuery,parseSearchPageCommand,searchPageButton,
  searchResourceButton,parseSearchResourceSelection,searchResultsBreadcrumb,
@@ -76,6 +77,8 @@ export interface TelegramApplicationOptions {
   platformCatalog?:PlatformCatalogPreviewService;
   /** B6 offline approved-knowledge-only planner; no AI configured by default. */
   answerPreflight?:B6AnswerPreflight;
+  /** Optional trusted operator STOP/RUN file for owner-private emergency view. */
+  moderationSafetyFile?:string;
 }
 
 type Event = {updateId: number; actorId: string; chatId: string; kind: 'private' | 'group'; text: string; entities?:unknown; messageId?:number; replyTo?:unknown; document?: IncomingDocument; callbackData?:string; callbackQueryId?:string; callbackMessageId?:number};
@@ -290,6 +293,15 @@ export class TelegramUpdateApplication {
        plan:this.plan(chatId,screen.text,undefined,screen.keyboard,event.callbackMessageId)};
      }
      if(!this.opts.policy.isOwner(actorId))return {status:'DENIED',reason:'OWNER_ONLY'};
+     // The owner-private emergency/status screen never permits mutation.
+     if(event.callbackData==='mi:1:i:02:16'){
+      const view=await renderOwnerModerationEmergencyStatus(
+       this.opts.store,this.opts.policy,actorId,this.clock(),
+       this.opts.moderationSafetyFile);
+      if(!view)return {status:'DENIED',reason:'MODERATION_EMERGENCY_STATUS_UNAVAILABLE'};
+      return {status:'APPLIED',reason:'RESPONSE_PLANNED_ONLY',
+       plan:this.plan(chatId,view.text,undefined,view.keyboard,event.callbackMessageId)};
+     }
      if(event.callbackData==='mi:1:i:02:15'){
       const view=await renderOwnerModerationRateStatus(
        this.opts.store,this.opts.policy,actorId,this.clock());
