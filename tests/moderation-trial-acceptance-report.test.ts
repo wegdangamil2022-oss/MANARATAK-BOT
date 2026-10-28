@@ -131,7 +131,7 @@ test('late Telegram group conversion to channel blocks unified report, without e
   let reads=0;
   const t=gateway((method,user)=>method==='getChat'?
    json({id:Number(CHAT),type:++reads>2?'channel':'supergroup',title:'SECRET CHANNEL'}):
-   member(user!));
+   member(user!,user===BOT?'administrator':'member'));
   const report=await inspectModerationTrialAcceptanceReadOnly(
    f.options(),TARGET,t.gateway,OWNER);
   assert.equal(report.status,'BLOCKED');
