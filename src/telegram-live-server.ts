@@ -171,7 +171,8 @@ export async function createLiveTelegramServer(config:LiveTelegramConfig,
   new ModerationService(store,policy,new FakeModerationGateway()));
  const app=new TelegramUpdateApplication({store,policy,education,admin,faq,links,
   botId:check.botId,botUsername:check.botUsername,
-  membership:(chatId,actorId)=>membership.verifyMembership(chatId,actorId),subscription});
+  membership:(chatId,actorId)=>membership.verifyMembership(chatId,actorId),subscription,
+  moderationSafetyFile:check.safetySwitchFile});
  const dispatcher=new TelegramReplyDispatcher(store,policy,
   new TelegramBotApiTextSender(check.token,request),Date.now,safetyGate,subscription,
   (chatId,actorId)=>membership.verifyMembership(chatId,actorId));
