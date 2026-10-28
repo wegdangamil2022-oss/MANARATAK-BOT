@@ -52,7 +52,7 @@ function gateway(callback:(method:string,user:number|undefined,n:number)=>Promis
 }
 const stable=()=>gateway((method,user)=>method==='getChat'?
  json({id:Number(CHAT),type:'supergroup',title:'PRIVATE TRIAL GROUP'}):
- member(user!));
+ member(user!,user===BOT?'administrator':'member'));
 const PASS:ContinuousModerationTrialReadOnlyReport={
  stage:'READ_ONLY_MODERATION_TRIAL',status:'PASS',
  safety:'STOP',rollback:'MATCH',botRights:'GRANTED',
@@ -173,7 +173,7 @@ test('STOP inode replacement while target is probed blocks the receipt',async()=
     await writeFile(tmp,'STOP\n',{mode:0o600});
     await rename(tmp,f.safetyFile);
    }
-   return method==='getChat'?json({id:Number(CHAT),type:'supergroup'}):member(user!);
+   return method==='getChat'?json({id:Number(CHAT),type:'supergroup'}):member(user!,user===BOT?'administrator':'member');
   });
   const report=await inspectModerationTrialAcceptanceReadOnly(
    f.options(),TARGET,t.gateway,OWNER);
