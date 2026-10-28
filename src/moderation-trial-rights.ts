@@ -30,7 +30,7 @@ const sameFileEpoch=(a:BigIntStats,b:BigIntStats):boolean=>
  a.isFile()&&b.isFile()&&a.dev===b.dev&&a.ino===b.ino&&
  a.mode===b.mode&&a.nlink===b.nlink&&a.size===b.size&&
  a.mtimeNs===b.mtimeNs&&a.ctimeNs===b.ctimeNs;
-async function checkpoint(o:OfflineModerationTrialOptions):Promise<Checkpoint|null>{
+export async function checkpoint(o:OfflineModerationTrialOptions):Promise<Checkpoint|null>{
  try{
   const [state,backup,safety]=await Promise.all([
    lstat(o.stateFile,{bigint:true}),
@@ -41,7 +41,7 @@ async function checkpoint(o:OfflineModerationTrialOptions):Promise<Checkpoint|nu
    {state,backup,safety}:null;
  }catch{return null;}
 }
-const sameCheckpoint=(a:Checkpoint,b:Checkpoint):boolean=>
+export const sameCheckpoint=(a:Checkpoint,b:Checkpoint):boolean=>
  sameFileEpoch(a.state,b.state)&&sameFileEpoch(a.backup,b.backup)&&
  sameFileEpoch(a.safety,b.safety);
 
