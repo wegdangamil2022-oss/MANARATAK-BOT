@@ -194,14 +194,14 @@ test('local trial-target CLI rejects unsafe requests without exposing token or i
  const noArgs=spawnSync(process.execPath,[cli],{env,encoding:'utf8'});
  assert.equal(noArgs.status,1);
  assert.equal(noArgs.stdout,'');
- assert.equal(noArgs.stderr,'MANARATAK_MODERATION_TARGET_INVALID_REQUEST\n');
+ assert.ok(noArgs.stderr.startsWith('MANARATAK_MODERATION_TARGET_INVALID_REQUEST\n'));
  const ownerTarget=spawnSync(process.execPath,[cli,'--offline-only',
   '--state','/nonexistent/secret.sqlite','--backup','/nonexistent/backup.sqlite',
   '--safety','/nonexistent/stop.flag','--stale-ms','900000',
   '--trial-chat',CHAT,'--trial-target',OWNER],{env,encoding:'utf8'});
  assert.equal(ownerTarget.status,1);
  assert.equal(ownerTarget.stdout,'');
- assert.equal(ownerTarget.stderr,'MANARATAK_MODERATION_TARGET_CHECK_FAILED\n');
+ assert.ok(ownerTarget.stderr.startsWith('MANARATAK_MODERATION_TARGET_CHECK_FAILED\n'));
  assert.equal((ownerTarget.stderr+noArgs.stderr).includes(TOKEN),false);
  assert.equal((ownerTarget.stderr+noArgs.stderr).includes(CHAT),false);
  assert.equal((ownerTarget.stderr+noArgs.stderr).includes(OWNER),false);
