@@ -36,9 +36,14 @@ const validMember=(value:unknown):value is string=>
 export async function inspectIsolatedModerationTargetReadOnly(
  options:OfflineModerationTrialOptions,
  targetMemberId:string,
- gateway:TelegramBotApiModerationGateway
+ gateway:TelegramBotApiModerationGateway,
+ protectedOwnerId:string
 ):Promise<ReadOnlyModerationTargetReport>{
- if(!validMember(targetMemberId))
+ // The owner is protected locally regardless of what Telegram happens
+ // to report for their group membership at this moment. This preflight
+ // cannot even contact Telegram without an explicit valid owner identity.
+ if(!validMember(targetMemberId)||!validMember(protectedOwnerId)||
+    targetMemberId===protectedOwnerId)
   throw Error('MODERATION_TRIAL_INVALID_TARGET');
 
  const initialCheckpoint=await checkpoint(options);
