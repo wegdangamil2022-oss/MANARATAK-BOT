@@ -3,6 +3,8 @@ import assert from 'node:assert/strict';
 import {mkdtemp,rm,chmod,writeFile,readFile,rename} from 'node:fs/promises';
 import {join} from 'node:path';
 import {tmpdir} from 'node:os';
+import {spawnSync} from 'node:child_process';
+import {fileURLToPath} from 'node:url';
 import {BotStore} from '../src/store.js';
 import {Policy} from '../src/policy.js';
 import {TelegramBotApiModerationGateway} from '../src/telegram-moderation-gateway.js';
@@ -184,4 +186,44 @@ test('owner identity is required and owner cannot be a selected target even if r
  await assert.rejects(()=>inspectIsolatedModerationTargetReadOnly(options,
   OWNER,port.gateway,OWNER),/MODERATION_TRIAL_INVALID_TARGET/);
  assert.deepEqual(port.calls,[]);
+});
+
+test('local trial-target CLI rejects unsafe requests without exposing token or identifiers',()=>{
+ const cli=fileURLToPath(new URL('../src/moderation-trial-target-cli.js',import.meta.url));
+ const env={...process.env,TELEGRAM_BOT_TOKEN:TOKEN,BOT_OWNER_ID:OWNER};
+ const noArgs=spawnSync(process.execPath,[cli],{env,encoding:'utf8'});
+ assert.equal(noArgs.status,1);
+ assert.equal(noArgs.stdout,'');
+ assert.equal(noArgs.stderr,'MANARATAK_MODERATION_TARGET_INVALID_REQUEST\\n'.replace('\\n','\n'));
+ const ownerTarget=spawnSync(process.execPath,[cli,'--offline-only',
+  '--state','/nonexistent/secret.sqlite','--backup','/nonexistent/backup.sqlite',
+  '--safety','/nonexistent/stop.flag','--stale-ms','900000',
+  '--trial-chat',CHAT,'--trial-target',OWNER],{env,encoding:'utf8'});
+ assert.equal(ownerTarget.status,1);
+ assert.equal(ownerTarget.stdout,'');
+ assert.equal(ownerTarget.stderr,'MANARATAK_MODERATION_TARGET_CHECK_FAILED\n');
+ assert.equal((ownerTarget.stderr+noArgs.stderr).includes(TOKEN),false);
+ assert.equal((ownerTarget.stderr+noArgs.stderr).includes(CHAT),false);
+ assert.equal((ownerTarget.stderr+noArgs.stderr).includes(OWNER),false);
+});
+test('a replaced target reader cannot produce a false PASS during Telegram member reads',async()=>{
+ const f=await fixture();try{
+  let api:TelegramBotApiModerationGateway;
+  const calls:number[]=[];
+  const request=(async(_url:string|URL|Request,init?:RequestInit)=>{
+   const body=JSON.parse(String(init?.body)) as {user_id:number};
+   calls.push(body.user_id);
+   if(body.user_id===Number(TARGET)){
+    api.isProtected=async()=>false;
+    return member();
+   }
+   return bot();
+  }) as typeof fetch;
+  api=new TelegramBotApiModerationGateway(TOKEN,request);
+  const report=await inspectIsolatedModerationTargetReadOnly(f.options(),TARGET,api,OWNER);
+  assert.equal(report.status,'BLOCKED');
+  assert.equal(report.target,'NOT_CHECKED');
+  assert.deepEqual(report.reasons,['BOT_MODERATION_GATEWAY_UNTRUSTED']);
+  assert.deepEqual(calls,ids.slice(0,3));
+ }finally{await f.close();}
 });
