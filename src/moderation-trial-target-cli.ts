@@ -21,7 +21,7 @@ void (async()=>{
    !args[2]||!args[4]||!args[6]||
    !/^[1-9][0-9]{4,9}$/u.test(args[8]??'')||
    !validChat(args[10])||!validMember(args[12])||
-   !process.env.TELEGRAM_BOT_TOKEN){
+   !process.env.TELEGRAM_BOT_TOKEN||!validMember(process.env.BOT_OWNER_ID)){
   process.stderr.write('MANARATAK_MODERATION_TARGET_INVALID_REQUEST\n');
   process.exitCode=1;return;
  }
@@ -38,7 +38,7 @@ void (async()=>{
   const report=await inspectIsolatedModerationTargetReadOnly({
    stateFile:args[2]!,backupFile:args[4]!,safetyFile:args[6]!,
    now:Date.now(),staleAfterMs,trialChatId:args[10]!
-  },args[12]!,gateway);
+  },args[12]!,gateway,process.env.BOT_OWNER_ID!);
   process.stdout.write(JSON.stringify(report)+'\n');
   process.exitCode=report.status==='PASS'?0:2;
  }catch{
