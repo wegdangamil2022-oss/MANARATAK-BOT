@@ -137,3 +137,16 @@ test('owner can navigate review buttons from emergency panel, but cannot mutate 
   assert.deepEqual(await f.store.snapshot(),initial);
  }finally{await f.close();}
 });
+
+test('pending moderation navigation grammar is bounded and rejects fabricated detail selectors',()=>{
+ const check=(callback_data:string)=>isValidTelegramInlineKeyboard({
+  inline_keyboard:[[{text:'⏳ الحالة',callback_data}]]
+ });
+ assert.equal(check('mp:1:h'),true);
+ assert.equal(check('mp:1:p:0'),true);
+ assert.equal(check('mp:1:d:12:8:abcdef123456'),true);
+ for(const bad of ['mp:1:p:01','mp:1:d:0:0:abcdef123456',
+   'mp:1:d:0:9:abcdef123456','mp:1:d:0:1:PRIVATE_ID',
+   'mp:1:d:0:1:abcdef123456:extra','mp:1:h\n','mp:2:h'])
+  assert.equal(check(bad),false,bad);
+});
