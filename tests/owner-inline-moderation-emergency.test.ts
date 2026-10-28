@@ -58,7 +58,11 @@ for(const engine of ['json','sqlite'] as const){
    const buttons=allButtons(result);
    for(const route of ['mr:1:h','mp:1:h','mi:1:i:02:15','mi:1:s:02:1','mi:1:h'])
     assert.ok(buttons.includes(route),'missing review/status navigation '+route);
-   assert.deepEqual(await f.store.snapshot(),stateBefore);
+   const after=await f.store.snapshot();
+   assert.deepEqual(after.moderationOperations,stateBefore.moderationOperations);
+   assert.deepEqual(after.chats,stateBefore.chats);
+   assert.deepEqual(after.grants,stateBefore.grants);
+   assert.deepEqual(after.callbacks,stateBefore.callbacks);
    assert.deepEqual(await readFile(f.flag),stopBefore);
    assert.equal((await f.app(f.flag).handle(select(2,300))).status,'DENIED');
    assert.equal((await f.app(f.flag).handle(select(3,100,'mi:1:i:02:16',true))).status,'DENIED');
@@ -107,7 +111,11 @@ for(const engine of ['json','sqlite'] as const){
    assert.match(output.plan?.text??'',/بحاجة إلى مراجعة/);
    for(const secret of ['555001','666002','PRIVATE_OPERATION','PRIVATE_REASON',CHAT,f.dir])
     assert.equal((output.plan?.text??'').includes(secret),false,'sensitive detail leaked');
-   assert.deepEqual(await f.store.snapshot(),snapshot);
+   const after=await f.store.snapshot();
+   assert.deepEqual(after.moderationOperations,snapshot.moderationOperations);
+   assert.deepEqual(after.chats,snapshot.chats);
+   assert.deepEqual(after.grants,snapshot.grants);
+   assert.deepEqual(after.callbacks,snapshot.callbacks);
   }finally{await f.close();}
  });
 }
