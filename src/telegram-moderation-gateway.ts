@@ -86,21 +86,31 @@ export class TelegramBotApiModerationGateway implements ModerationGateway{
     adapter.call===prototype.call;
   }catch{return false;}
  }
- private readonly botId:number;
- constructor(private readonly token:string,private readonly request:typeof fetch=fetch,
-  private readonly safetyGate:()=>Promise<boolean>=async()=>false){
+ // Native # fields are inaccessible to Object.assign/proxy-style changes
+ // of ordinary TypeScript-private constructor parameter properties. The
+ // emergency STOP gate, transport and bot identity stay bound to the
+ // originally validated constructor inputs for the entire attempt lifetime.
+ readonly #token:string;
+ readonly #request:typeof fetch;
+ readonly #safetyGate:()=>Promise<boolean>;
+ readonly #botId:number;
+ constructor(token:string,request:typeof fetch=fetch,
+  safetyGate:()=>Promise<boolean>=async()=>false){
   if(!TOKEN.test(token))throw Error('INVALID_TELEGRAM_TOKEN');
   const id=token.slice(0,token.indexOf(':'));
   if(!validUser(id))throw Error('INVALID_TELEGRAM_TOKEN');
-  this.botId=Number(id);
+  this.#botId=Number(id);
+  this.#token=token;
+  this.#request=request;
+  this.#safetyGate=safetyGate;
  }
  private async allowed():Promise<boolean>{
-  try{return await this.safetyGate()===true;}catch{return false;}
+  try{return await this.#safetyGate()===true;}catch{return false;}
  }
  private async call(method:string,body:ObjectValue):Promise<JsonOutcome>{
   let response:Response;
   try{
-   response=await this.request('https://api.telegram.org/bot'+this.token+'/'+method,{
+   response=await this.#request('https://api.telegram.org/bot'+this.#token+'/'+method,{
     method:'POST',headers:{'content-type':'application/json'},
     body:JSON.stringify(body),redirect:'error',signal:AbortSignal.timeout(8000)
    });
@@ -135,8 +145,8 @@ export class TelegramBotApiModerationGateway implements ModerationGateway{
   */
  async canRestrict(chatId:string,memberId:string):Promise<boolean>{
   if(!validGroup(chatId)||!validUser(memberId)||
-    Number(memberId)===this.botId)return false;
-  const bot=await this.getMember(chatId,String(this.botId));
+    Number(memberId)===this.#botId)return false;
+  const bot=await this.getMember(chatId,String(this.#botId));
   return bot!==null&&bot.user.is_bot===true&&
    (bot.status==='creator'||bot.status==='administrator'&&bot.can_restrict_members===true);
  }
@@ -147,7 +157,7 @@ export class TelegramBotApiModerationGateway implements ModerationGateway{
   */
  async inspectBotModerationRights(chatId:string):Promise<'GRANTED'|'DENIED'|'UNKNOWN'>{
   if(!validGroup(chatId))return 'UNKNOWN';
-  const bot=await this.getMember(chatId,String(this.botId));
+  const bot=await this.getMember(chatId,String(this.#botId));
   if(!bot||bot.user.is_bot!==true)return 'UNKNOWN';
   if(bot.status==='creator')return 'GRANTED';
   if(bot.status==='administrator'){
@@ -166,7 +176,7 @@ export class TelegramBotApiModerationGateway implements ModerationGateway{
   * Only a verified ordinary human member is an eligible target.
   */
  async isProtected(chatId:string,memberId:string):Promise<boolean>{
-  if(!validGroup(chatId)||!validUser(memberId)||Number(memberId)===this.botId)return true;
+  if(!validGroup(chatId)||!validUser(memberId)||Number(memberId)===this.#botId)return true;
   const member=await this.getMember(chatId,memberId);
   if(!member||member.user.is_bot!==false)return true;
   return member.status!=='member';
@@ -177,7 +187,7 @@ export class TelegramBotApiModerationGateway implements ModerationGateway{
   * Only getChatMember is sent. No mutating Bot API operation is reachable here.
   */
  async observeRestriction(chatId:string,memberId:string):Promise<RestrictionObservation>{
-  if(!validGroup(chatId)||!validUser(memberId)||Number(memberId)===this.botId)
+  if(!validGroup(chatId)||!validUser(memberId)||Number(memberId)===this.#botId)
    return 'UNKNOWN';
   if(!await this.canRestrict(chatId,memberId))return 'NO_RIGHTS';
   const member=await this.getMember(chatId,memberId);
@@ -207,7 +217,7 @@ export class TelegramBotApiModerationGateway implements ModerationGateway{
  }
  async setRestriction(chatId:string,memberId:string,
   kind:RestrictionKind,verifyCurrentAuthority?:()=>Promise<boolean>):Promise<RestrictionOutcome>{
-  if(!validGroup(chatId)||!validUser(memberId)||Number(memberId)===this.botId||
+  if(!validGroup(chatId)||!validUser(memberId)||Number(memberId)===this.#botId||
     (kind!=='BAN'&&kind!=='MUTE'))return 'FAILED_CONFIRMED';
   if(!await this.allowed())return 'FAILED_CONFIRMED';
   if(!await this.canRestrict(chatId,memberId)||await this.isProtected(chatId,memberId))
