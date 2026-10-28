@@ -55,16 +55,20 @@ export class TelegramBotApiModerationGateway implements ModerationGateway{
   if(typeof gateway!=='object'||gateway===null||
     !(#officialAdapterBrand in gateway))return false;
   const adapter=gateway as TelegramBotApiModerationGateway;
-  // The official implementation is pinned at module initialization.
-  // A dynamically rewritten prototype must never authenticate itself merely
-  // because comparisons were made against that same rewritten prototype.
+  // Compare against module-initialized immutable function REFERENCES,
+  // never a dynamically replaced prototype method. A helper shadow is still
+  // considered untrusted even though native # methods ignore it for safety.
   const prototype=TelegramBotApiModerationGateway.prototype;
   return Object.isFrozen(TelegramBotApiModerationGateway)&&
-   Object.isFrozen(prototype)&&
    Object.getPrototypeOf(adapter)===prototype&&
-   adapter.setRestriction===prototype.setRestriction&&
-   adapter.canRestrict===prototype.canRestrict&&
-   adapter.isProtected===prototype.isProtected;
+   prototype.setRestriction===officialGatewayMethods.setRestriction&&
+   prototype.canRestrict===officialGatewayMethods.canRestrict&&
+   prototype.isProtected===officialGatewayMethods.isProtected&&
+   adapter.setRestriction===officialGatewayMethods.setRestriction&&
+   adapter.canRestrict===officialGatewayMethods.canRestrict&&
+   adapter.isProtected===officialGatewayMethods.isProtected&&
+   !('allowed' in adapter)&&!('call' in adapter)&&
+   !('getMember' in adapter);
  }
  /** Advisory read-only identity check, distinct from dispatch provenance.
   * Typescript structural probes, subclass overrides and mutable public
@@ -78,9 +82,10 @@ export class TelegramBotApiModerationGateway implements ModerationGateway{
    const adapter=gateway as TelegramBotApiModerationGateway;
    const prototype=TelegramBotApiModerationGateway.prototype;
    return Object.isFrozen(TelegramBotApiModerationGateway)&&
-    Object.isFrozen(prototype)&&
     Object.getPrototypeOf(adapter)===prototype&&
-    adapter.inspectBotModerationRights===prototype.inspectBotModerationRights;
+    prototype.inspectBotModerationRights===officialGatewayMethods.inspectBotModerationRights&&
+    adapter.inspectBotModerationRights===officialGatewayMethods.inspectBotModerationRights&&
+    !('call' in adapter)&&!('getMember' in adapter);
   }catch{return false;}
  }
  // Native # fields are inaccessible to Object.assign/proxy-style changes
@@ -261,8 +266,14 @@ export class TelegramBotApiModerationGateway implements ModerationGateway{
  }
 }
 
-// The dispatch and provenance checks share a stable implementation epoch.
-// Instance-level overrides remain detectable by the public identity checks;
-// all safety-critical self-calls above use native private methods instead.
-Object.freeze(TelegramBotApiModerationGateway.prototype);
+// Capture the ORIGINAL functions. The prototype remains mutable for isolated
+// test doubles and compatibility, but a mutation never becomes the reference
+// against which the module authenticates itself.
+const officialGatewayMethods=Object.freeze({
+ setRestriction:TelegramBotApiModerationGateway.prototype.setRestriction,
+ canRestrict:TelegramBotApiModerationGateway.prototype.canRestrict,
+ isProtected:TelegramBotApiModerationGateway.prototype.isProtected,
+ inspectBotModerationRights:TelegramBotApiModerationGateway.prototype.inspectBotModerationRights
+});
+// Prevent rebinding the static origin-check functions after their definition.
 Object.freeze(TelegramBotApiModerationGateway);
