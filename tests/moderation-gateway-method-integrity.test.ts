@@ -70,17 +70,23 @@ test('read-only reversal observation cannot be forged through public method shad
  assert.equal(await gateway.observeRestriction(CHAT,TARGET),'NO_RIGHTS');
  assert.deepEqual(network.methods,['getChatMember']);
 });
-test('official gateway prototype methods are immutable after module initialization',()=>{
+test('rewriting an official prototype method cannot redefine its trusted origin',()=>{
  const proto=TelegramBotApiModerationGateway.prototype;
  const original=Object.getOwnPropertyDescriptor(proto,'setRestriction')!;
- assert.equal(Object.isFrozen(proto),true,'prototype mutation could spoof official provenance');
+ const gateway=new TelegramBotApiModerationGateway(TOKEN,port().request);
+ assert.equal(TelegramBotApiModerationGateway.usesOfficialDispatch(gateway),true);
  try{
-  assert.throws(()=>Object.defineProperty(proto,'setRestriction',{
+  Object.defineProperty(proto,'setRestriction',{
    ...original,value:async()=> 'CONFIRMED'
-  }),TypeError);
+  });
+  assert.equal(TelegramBotApiModerationGateway.usesOfficialDispatch(gateway),false,
+   'a rewritten prototype must not become its own authentication reference');
  }finally{
-  if(!Object.isFrozen(proto))Object.defineProperty(proto,'setRestriction',original);
+  Object.defineProperty(proto,'setRestriction',original);
  }
+ assert.equal(TelegramBotApiModerationGateway.usesOfficialDispatch(gateway),true);
+ assert.equal(Object.isFrozen(TelegramBotApiModerationGateway),true,
+  'static origin-check methods must not be rebindable');
 });
 for(const engine of ['json','sqlite'] as const){
  test(engine+' owner sanction with shadowed STOP and fake confirmation cannot produce APPLIED',async()=>{
