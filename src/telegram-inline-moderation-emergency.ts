@@ -39,6 +39,7 @@ export async function renderOwnerModerationEmergencyStatus(
  const approved=Array.isArray(state.chats)?
   state.chats.filter(c=>c?.approved&&c.scopes?.includes('moderation')).length:null;
  const safeLedger=moderationLedgerSafeForDispatch(state,now);
+ const needsReview=(unknown??0)>0||(pending??0)>0;
 
  const switchLabel=safety==='STOP'?'STOP — إيقاف الحركة عبر مفتاح الطوارئ':
   safety==='RUN'?'RUN — المفتاح يسمح بالتشغيل المشروط، ولا يفعّل العقوبات':
@@ -47,7 +48,8 @@ export async function renderOwnerModerationEmergencyStatus(
 
  const text='<b>📋 السجلات والطوارئ — إشراف منارتك</b>\n'
   +'حالة المفتاح: '+switchLabel+'\n'
-  +'سجل العقوبات: '+(safeLedger?'سليم للفحص المحلي':'بحاجة إلى مراجعة؛ لا تُرسل عقوبات')+'\n'
+  +'سجل العقوبات: '+(!safeLedger?'غير سليم؛ بحاجة إلى مراجعة قبل أي إرسال':
+   needsReview?'سليم بنيويًا؛ توجد عمليات بحاجة إلى مراجعة':'سليم للفحص المحلي')+'\n'
   +'المجموعات ذات نطاق الإشراف المعتمد محليًا: '+count(approved)+'\n'
   +'مجهولة النتيجة: '+count(unknown)+'\n'
   +'معلقة: '+count(pending)+'\n\n'
