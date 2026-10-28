@@ -55,19 +55,20 @@ export class TelegramBotApiModerationGateway implements ModerationGateway{
   if(typeof gateway!=='object'||gateway===null||
     !(#officialAdapterBrand in gateway))return false;
   const adapter=gateway as TelegramBotApiModerationGateway;
-  // A subclass or monkey-patched adapter that replaces the rights checks or
-  // outbound implementation no longer gets to claim this origin.
-  // TypeScript "private" is not a JavaScript private brand: an instance or
-  // subclass can replace these internal transport/STOP methods at runtime
-  // while leaving all three public entry points unchanged.
+  // Compare against module-initialized immutable function REFERENCES,
+  // never a dynamically replaced prototype method. A helper shadow is still
+  // considered untrusted even though native # methods ignore it for safety.
   const prototype=TelegramBotApiModerationGateway.prototype;
-  return Object.getPrototypeOf(adapter)===prototype&&
-   adapter.setRestriction===prototype.setRestriction&&
-   adapter.canRestrict===prototype.canRestrict&&
-   adapter.isProtected===prototype.isProtected&&
-   adapter.call===prototype.call&&
-   adapter.getMember===prototype.getMember&&
-   adapter.allowed===prototype.allowed;
+  return Object.isFrozen(TelegramBotApiModerationGateway)&&
+   Object.getPrototypeOf(adapter)===prototype&&
+   prototype.setRestriction===officialGatewayMethods.setRestriction&&
+   prototype.canRestrict===officialGatewayMethods.canRestrict&&
+   prototype.isProtected===officialGatewayMethods.isProtected&&
+   adapter.setRestriction===officialGatewayMethods.setRestriction&&
+   adapter.canRestrict===officialGatewayMethods.canRestrict&&
+   adapter.isProtected===officialGatewayMethods.isProtected&&
+   !('allowed' in adapter)&&!('call' in adapter)&&
+   !('getMember' in adapter);
  }
  /** Advisory read-only identity check, distinct from dispatch provenance.
   * Typescript structural probes, subclass overrides and mutable public
@@ -80,10 +81,11 @@ export class TelegramBotApiModerationGateway implements ModerationGateway{
      !(#officialAdapterBrand in gateway))return false;
    const adapter=gateway as TelegramBotApiModerationGateway;
    const prototype=TelegramBotApiModerationGateway.prototype;
-   return Object.getPrototypeOf(adapter)===prototype&&
-    adapter.inspectBotModerationRights===prototype.inspectBotModerationRights&&
-    adapter.getMember===prototype.getMember&&
-    adapter.call===prototype.call;
+   return Object.isFrozen(TelegramBotApiModerationGateway)&&
+    Object.getPrototypeOf(adapter)===prototype&&
+    prototype.inspectBotModerationRights===officialGatewayMethods.inspectBotModerationRights&&
+    adapter.inspectBotModerationRights===officialGatewayMethods.inspectBotModerationRights&&
+    !('call' in adapter)&&!('getMember' in adapter);
   }catch{return false;}
  }
  // Native # fields are inaccessible to Object.assign/proxy-style changes
@@ -104,10 +106,10 @@ export class TelegramBotApiModerationGateway implements ModerationGateway{
   this.#request=request;
   this.#safetyGate=safetyGate;
  }
- private async allowed():Promise<boolean>{
+ async #allowed():Promise<boolean>{
   try{return await this.#safetyGate()===true;}catch{return false;}
  }
- private async call(method:string,body:ObjectValue):Promise<JsonOutcome>{
+ async #call(method:string,body:ObjectValue):Promise<JsonOutcome>{
   let response:Response;
   try{
    response=await this.#request('https://api.telegram.org/bot'+this.#token+'/'+method,{
@@ -133,9 +135,9 @@ export class TelegramBotApiModerationGateway implements ModerationGateway{
    return {status:'CLIENT_DENIED'};
   return {status:'UNKNOWN'};
  }
- private async getMember(group:string,user:string):Promise<Member|null>{
+ async #getMember(group:string,user:string):Promise<Member|null>{
   if(!validGroup(group)||!validUser(user))return null;
-  const read=await this.call('getChatMember',{
+  const read=await this.#call('getChatMember',{
    chat_id:group,user_id:Number(user)
   });
   return read.status==='HTTP_OK'?readMember(read.value,Number(user)):null;
@@ -144,9 +146,12 @@ export class TelegramBotApiModerationGateway implements ModerationGateway{
   * can_restrict_members. Chat creator status is inherently privileged.
   */
  async canRestrict(chatId:string,memberId:string):Promise<boolean>{
+  return this.#canRestrict(chatId,memberId);
+ }
+ async #canRestrict(chatId:string,memberId:string):Promise<boolean>{
   if(!validGroup(chatId)||!validUser(memberId)||
     Number(memberId)===this.#botId)return false;
-  const bot=await this.getMember(chatId,String(this.#botId));
+  const bot=await this.#getMember(chatId,String(this.#botId));
   return bot!==null&&bot.user.is_bot===true&&
    (bot.status==='creator'||bot.status==='administrator'&&bot.can_restrict_members===true);
  }
@@ -157,7 +162,7 @@ export class TelegramBotApiModerationGateway implements ModerationGateway{
   */
  async inspectBotModerationRights(chatId:string):Promise<'GRANTED'|'DENIED'|'UNKNOWN'>{
   if(!validGroup(chatId))return 'UNKNOWN';
-  const bot=await this.getMember(chatId,String(this.#botId));
+  const bot=await this.#getMember(chatId,String(this.#botId));
   if(!bot||bot.user.is_bot!==true)return 'UNKNOWN';
   if(bot.status==='creator')return 'GRANTED';
   if(bot.status==='administrator'){
@@ -176,8 +181,11 @@ export class TelegramBotApiModerationGateway implements ModerationGateway{
   * Only a verified ordinary human member is an eligible target.
   */
  async isProtected(chatId:string,memberId:string):Promise<boolean>{
+  return this.#isProtected(chatId,memberId);
+ }
+ async #isProtected(chatId:string,memberId:string):Promise<boolean>{
   if(!validGroup(chatId)||!validUser(memberId)||Number(memberId)===this.#botId)return true;
-  const member=await this.getMember(chatId,memberId);
+  const member=await this.#getMember(chatId,memberId);
   if(!member||member.user.is_bot!==false)return true;
   return member.status!=='member';
  }
@@ -189,14 +197,14 @@ export class TelegramBotApiModerationGateway implements ModerationGateway{
  async observeRestriction(chatId:string,memberId:string):Promise<RestrictionObservation>{
   if(!validGroup(chatId)||!validUser(memberId)||Number(memberId)===this.#botId)
    return 'UNKNOWN';
-  if(!await this.canRestrict(chatId,memberId))return 'NO_RIGHTS';
-  const member=await this.getMember(chatId,memberId);
+  if(!await this.#canRestrict(chatId,memberId))return 'NO_RIGHTS';
+  const member=await this.#getMember(chatId,memberId);
   if(!member)return 'UNKNOWN';
   // Bot authority was checked before the external member observation.
   // A demotion or can_restrict_members revocation during that awaited read
   // invalidates even a matching BAN/MUTE observation. This is advisory-only:
   // no sequence of separate Telegram reads is an atomic authority proof.
-  if(!await this.canRestrict(chatId,memberId))return 'NO_RIGHTS';
+  if(!await this.#canRestrict(chatId,memberId))return 'NO_RIGHTS';
   if(member.user.is_bot!==false||member.status==='creator'||
     member.status==='administrator')return 'PROTECTED';
   if(member.status==='kicked')return 'BAN_PRESENT';
@@ -219,11 +227,11 @@ export class TelegramBotApiModerationGateway implements ModerationGateway{
   kind:RestrictionKind,verifyCurrentAuthority?:()=>Promise<boolean>):Promise<RestrictionOutcome>{
   if(!validGroup(chatId)||!validUser(memberId)||Number(memberId)===this.#botId||
     (kind!=='BAN'&&kind!=='MUTE'))return 'FAILED_CONFIRMED';
-  if(!await this.allowed())return 'FAILED_CONFIRMED';
-  if(!await this.canRestrict(chatId,memberId)||await this.isProtected(chatId,memberId))
+  if(!await this.#allowed())return 'FAILED_CONFIRMED';
+  if(!await this.#canRestrict(chatId,memberId)||await this.#isProtected(chatId,memberId))
    return 'FAILED_CONFIRMED';
   // A STOP triggered during the rights/target lookups must win before write.
-  if(!await this.allowed())return 'FAILED_CONFIRMED';
+  if(!await this.#allowed())return 'FAILED_CONFIRMED';
   // Service-owned durable grant/scope/operation evidence may have changed
   // during these remote reads. False, throwing or ambiguous => no mutation.
   // Direct standalone callers still require an independently armed safetyGate.
@@ -234,8 +242,8 @@ export class TelegramBotApiModerationGateway implements ModerationGateway{
    // Telegram staff/owner status and the bot's can_restrict_members right
    // can change while the durable callback awaits disk. Never dispatch using
    // target/rights evidence obtained before that await.
-   if(!await this.canRestrict(chatId,memberId)||
-      await this.isProtected(chatId,memberId))return 'FAILED_CONFIRMED';
+   if(!await this.#canRestrict(chatId,memberId)||
+      await this.#isProtected(chatId,memberId))return 'FAILED_CONFIRMED';
    // Local staff grants or approval may themselves change during these
    // additional remote reads. Re-evaluate the service-owned proof again.
    try{current=await verifyCurrentAuthority()===true;}catch{return 'FAILED_CONFIRMED';}
@@ -244,12 +252,12 @@ export class TelegramBotApiModerationGateway implements ModerationGateway{
   // The authority callback itself may await I/O while STOP is applied.
   // Read the independent operator gate once more at the final mutation
   // boundary; a failed/throwing gate is a definitive NO-SEND.
-  if(!await this.allowed())return 'FAILED_CONFIRMED';
+  if(!await this.#allowed())return 'FAILED_CONFIRMED';
   const result=kind==='BAN'?
-   await this.call('banChatMember',{
+   await this.#call('banChatMember',{
     chat_id:chatId,user_id:Number(memberId),revoke_messages:false
    }):
-   await this.call('restrictChatMember',{
+   await this.#call('restrictChatMember',{
     chat_id:chatId,user_id:Number(memberId),
     permissions:MUTE_PERMISSIONS,use_independent_chat_permissions:true
    });
@@ -257,3 +265,15 @@ export class TelegramBotApiModerationGateway implements ModerationGateway{
    result.status==='CLIENT_DENIED'?'FAILED_CONFIRMED':'UNKNOWN_OUTCOME';
  }
 }
+
+// Capture the ORIGINAL functions. The prototype remains mutable for isolated
+// test doubles and compatibility, but a mutation never becomes the reference
+// against which the module authenticates itself.
+const officialGatewayMethods=Object.freeze({
+ setRestriction:TelegramBotApiModerationGateway.prototype.setRestriction,
+ canRestrict:TelegramBotApiModerationGateway.prototype.canRestrict,
+ isProtected:TelegramBotApiModerationGateway.prototype.isProtected,
+ inspectBotModerationRights:TelegramBotApiModerationGateway.prototype.inspectBotModerationRights
+});
+// Prevent rebinding the static origin-check functions after their definition.
+Object.freeze(TelegramBotApiModerationGateway);
