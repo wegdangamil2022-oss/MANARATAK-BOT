@@ -48,7 +48,7 @@ void (async()=>{
   const report=await inspectModerationTrialAcceptanceReadOnly(
    options,args[12]!,gateway,process.env.BOT_OWNER_ID!);
   process.stdout.write(JSON.stringify(report)+'\n');
-  process.exitCode=report.status==='PASS'?0:2;
+  process.exitCode=report.status==='TECHNICAL_PASS'?0:2;
  }catch{
   // Fail with one static error without exposing token, paths, chat/member
   // IDs, network error messages, or provider response bodies.
