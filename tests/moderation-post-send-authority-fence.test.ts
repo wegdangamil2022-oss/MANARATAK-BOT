@@ -72,7 +72,7 @@ async function exercise(engine:'json'|'sqlite',scenario:Scenario){
   if(shouldQuarantine){
    // Failed/blocked repeated requests cannot replay a possibly sent action.
    assert.equal((await service.reconcile(OWNER,CHAT,TARGET)).status,
-    scenario==='REVOKE_GROUP'?'DENIED':'BLOCKED_UNKNOWN');
+    scenario==='REVOKE_GROUP'||scenario==='PROTECT_TARGET'?'DENIED':'BLOCKED_UNKNOWN');
    assert.equal(sends,1);
    assert.equal(JSON.stringify(result).includes('edited-in-flight'),false);
   }
