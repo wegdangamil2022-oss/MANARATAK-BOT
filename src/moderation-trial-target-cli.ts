@@ -1,4 +1,5 @@
 import {inspectIsolatedModerationTargetReadOnly} from './moderation-trial-target.js';
+import {inspectIsolatedModerationGroupReadOnly} from './moderation-trial-group.js';
 import {TelegramBotApiModerationGateway} from './telegram-moderation-gateway.js';
 
 /** One-shot, explicitly selected READ-ONLY operator trial. The token is
@@ -34,11 +35,23 @@ void (async()=>{
  try{
   // Constructor validates token format and bot identity. No network call
   // precedes the existing STOP/isolated-group/offline backup preflight.
+  // Check protected owner BEFORE even read-only Bot API calls.
+  if(args[12]===process.env.BOT_OWNER_ID)
+   throw Error('MODERATION_TRIAL_INVALID_TARGET');
   const gateway=new TelegramBotApiModerationGateway(process.env.TELEGRAM_BOT_TOKEN);
-  const report=await inspectIsolatedModerationTargetReadOnly({
+  const options={
    stateFile:args[2]!,backupFile:args[4]!,safetyFile:args[6]!,
    now:Date.now(),staleAfterMs,trialChatId:args[10]!
-  },args[12]!,gateway,process.env.BOT_OWNER_ID!);
+  };
+  // A channel/private chat or a migrated/mismatched group must not be
+  // "validated" solely by ordinary member status. Fail before any target read.
+  const group=await inspectIsolatedModerationGroupReadOnly(options,gateway);
+  if(group.status!=='PASS'){
+   process.stdout.write(JSON.stringify(group)+'\n');
+   process.exitCode=2;return;
+  }
+  const report=await inspectIsolatedModerationTargetReadOnly(
+   options,args[12]!,gateway,process.env.BOT_OWNER_ID!);
   process.stdout.write(JSON.stringify(report)+'\n');
   process.exitCode=report.status==='PASS'?0:2;
  }catch{
