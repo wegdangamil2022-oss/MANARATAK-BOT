@@ -33,7 +33,7 @@ async function fixture(){
   options:()=>({stateFile,backupFile,safetyFile,trialChatId:CHAT,now:Date.now(),staleAfterMs:900_000}),
   close:()=>rm(dir,{force:true,recursive:true})};
 }
-type Call={method:string;user?:number};
+type Call={method:string;user:number|undefined};
 function port(handler:(method:string,user:number|undefined,call:Call[])=>Promise<Response>|Response){
  const calls:Call[]=[];
  const request=(async(url:string|URL|Request,init?:RequestInit)=>{
