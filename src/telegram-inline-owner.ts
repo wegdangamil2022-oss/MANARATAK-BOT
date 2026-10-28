@@ -676,6 +676,7 @@ export function isValidTelegramInlineKeyboard(input:unknown):input is TelegramIn
      !/^ms:1:(?:h|p:(?:0|[1-9][0-9]{0,2})|g:-[1-9][0-9]{0,18}:[1-9][0-9]{0,9}:(?:0|[1-9][0-9]{0,2}))$/u.test(button.callback_data)&&
      !/^ms:1:o:-[1-9][0-9]{0,18}:[1-9][0-9]{0,9}:(?:0|[1-9][0-9]{0,2}):(?:0|[1-9][0-9]{0,2}):[a-f0-9]{12}$/u.test(button.callback_data)&&
      !/^mr:1:(?:h|p:(?:0|[1-9][0-9]{0,2})|d:(?:0|[1-9][0-9]{0,2}):[1-8]:[a-f0-9]{12}|v:(?:0|[1-9][0-9]{0,2}):[1-8]:[a-f0-9]{12}:[ae])$/u.test(button.callback_data)&&
+     !/^mp:1:(?:h|p:(?:0|[1-9][0-9]{0,2})|d:(?:0|[1-9][0-9]{0,2}):[1-8]:[a-f0-9]{12})$/u.test(button.callback_data)&&
      !/^si:1:(?:h|p:(?:0|[1-9][0-9]{0,2})|c:(?:0|[1-9][0-9]{0,2}):[1-8]:[a-f0-9]{12}|l:(?:0|[1-9][0-9]{0,2}):[1-8]:[a-f0-9]{12}:(?:0|[1-9][0-9]{0,2})|r:(?:0|[1-9][0-9]{0,2}):[1-8]:[a-f0-9]{12}:(?:0|[1-9][0-9]{0,2}):[1-8]:[a-f0-9]{12})$/u.test(button.callback_data))
     return false;
   }
@@ -713,7 +714,7 @@ function sectionScreen(sectionIndex:number,page:number):OwnerInlineScreen|null{
   rows.push(Array.from({length:Math.min(2,end-i)},(_,j)=>{
    const itemIndex=i+j;
    const selector='mi:1:i:'+number(sectionIndex+1)+':'+number(itemIndex+1);
-   const browsable=ownerInlineLinkedReadOnly(selector)!==null||selector==='mi:1:i:03:01'||selector==='mi:1:i:02:01'||selector==='mi:1:i:02:15';
+   const browsable=ownerInlineLinkedReadOnly(selector)!==null||selector==='mi:1:i:03:01'||selector==='mi:1:i:02:01'||selector==='mi:1:i:02:15'||selector==='mi:1:i:02:16';
    // Read-only connected views are different from design-only placeholders.
    return callback((browsable?'👁️ ':'⌛ ')+section.items[itemIndex],selector);
   }));
