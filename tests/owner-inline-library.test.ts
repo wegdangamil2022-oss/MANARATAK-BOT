@@ -81,6 +81,20 @@ for(const engine of ['json','sqlite'] as const){
    assert.equal((await f.app().handle(event(36,'ol:1:p:00'))).status,'DENIED');
   }finally{await f.close();}
  });
+ test('library displays every long escaped metadata page within transport limits ('+engine+')',async()=>{
+  const f=await fixture();try{
+   await f.store.transaction(s=>{s.educationResources[0]!.title='ع<&😀'.repeat(300);s.educationResources[0]!.university='الجامعة '.repeat(70);});
+   const home=await f.app().handle(event(60,'mi:1:i:10:09'));
+   let current=await f.app().handle(event(61,select(home,'ol:1:d:'))),seen='',i=62;
+   for(;;){
+    assert.equal(current.status,'APPLIED');assert.ok(Buffer.byteLength(current.plan!.text)<4096);assert.ok(isValidTelegramInlineKeyboard(current.plan?.inlineMarkup));
+    seen+=current.plan!.text.split('):\n')[1]!.replace(/&lt;/gu,'<').replace(/&amp;/gu,'&');
+    const next=buttons(current).find(b=>b.text==='➡️ بقية التفاصيل');if(!next)break;
+    current=await f.app().handle(event(i++,next.callback_data));assert.ok(i<100);
+   }
+   const r=(await f.store.snapshot()).educationResources[0]!;assert.ok(seen.includes(r.title));assert.ok(seen.includes(r.university));assert.ok(seen.includes(r.id));
+  }finally{await f.close();}
+ });
  test('library blocks duplicate resource identities and clock rollback ('+engine+')',async()=>{
   const f=await fixture();try{
    const home=await f.app().handle(event(50,'mi:1:i:10:09'));

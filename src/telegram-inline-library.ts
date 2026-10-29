@@ -7,16 +7,17 @@ import type {OwnerInlineScreen} from './telegram-inline-owner.js';
 const page='(0|[1-9][0-9]{0,2})';
 const list=new RegExp('^ol:1:p:'+page+'$','u');
 const item=new RegExp('^ol:1:([da]):'+page+':([1-8]):([a-f0-9]{12})$','u');
+const detailPage=new RegExp('^ol:1:v:'+page+':([1-8]):([a-f0-9]{12}):'+page+'$','u');
 const confirmation=/^ol:1:c:([A-Za-z0-9_-]{24})$/u;
 export function validOwnerLibraryInlineRoute(data:string):boolean{
- return typeof data==='string'&&Buffer.byteLength(data)<=64&&[list,item,confirmation].some(re=>{const m=re.exec(data);return m?.[0]===data;});
+ return typeof data==='string'&&Buffer.byteLength(data)<=64&&[list,item,detailPage,confirmation].some(re=>{const m=re.exec(data);return m?.[0]===data;});
 }
 const b=(text:string,callback_data:string)=>({text,callback_data});
 const ui=(text:string,rows:{text:string;callback_data:string}[][]):OwnerInlineScreen=>({text,keyboard:{inline_keyboard:rows}});
 const epoch=(s:BotState,p:Policy,r:EducationResource)=>r.scope==='private'?0:p.chatRevision(s,r.scope);
 const proof=(s:BotState,p:Policy,r:EducationResource)=>createHash('sha256').update(resourceArchiveFingerprint(r)+':'+epoch(s,p,r)).digest('hex').slice(0,12);
 const key=(action:string,page:number,slot:number,digest:string)=>'ol:1:'+action+':'+page+':'+slot+':'+digest;
-const safe=(text:string)=>Array.from(text).slice(0,500).join('').replace(/[\u0000-\u001f\u007f\u202a-\u202e\u2066-\u2069]/gu,' ').replace(/&/gu,'&amp;').replace(/</gu,'&lt;').replace(/>/gu,'&gt;').replace(/"/gu,'&quot;').replace(/'/gu,'&#39;');
+const safe=(text:string)=>text.replace(/[\u0000-\u001f\u007f\u202a-\u202e\u2066-\u2069]/gu,' ').replace(/&/gu,'&amp;').replace(/</gu,'&lt;').replace(/>/gu,'&gt;').replace(/"/gu,'&quot;').replace(/'/gu,'&#39;');
 function entries(s:BotState,p:Policy):EducationResource[]{
  const counts=new Map<string,number>();for(const r of s.educationResources)counts.set(r.id,(counts.get(r.id)??0)+1);
  return s.educationResources.filter(r=>counts.get(r.id)===1&&r.status==='PUBLISHED'&&(r.scope==='private'||p.canUseChat(s,r.scope,'navigation')))
@@ -39,11 +40,15 @@ export async function renderOwnerInlineLibrary(store:BotStore,policy:Policy,acto
   rows.push([b('↩️ التعليم والمكتبة','mi:1:s:10:0'),b('🏠 لوحة المالك','mi:1:h')]);
   return ui('<b>إدارة المكتبة 📚</b>\nالموارد المنشورة المتاحة: '+all.length+'\nصفحة '+(current+1)+' من '+pages,rows);
  }
- const selected=item.exec(data);if(!selected||selected[0]!==data)return null;
+ const view=detailPage.exec(data);
+ const selected=view&&view[0]===data?['','d',view[1]!,view[2]!,view[3]!] :item.exec(data);if(!selected||!view&&selected[0]!==data)return null;
  const current=Number(selected[2]),slot=Number(selected[3]),r=all[current*8+slot-1];if(!r||proof(state,policy,r)!==selected[4])return null;
  const back=[b('↩️ صفحة المكتبة','ol:1:p:'+current),b('🏠 لوحة المالك','mi:1:h')];
- const text='<b>مراجعة المورد 📋</b>\nالعنوان: '+safe(r.title)+'\nالجامعة: '+safe(r.university)+'\nالتصنيف: '+safe(r.categoryId)+'\nالنطاق: '+safe(r.scope)+'\nالمعرف: <code>'+safe(r.id)+'</code>';
- if(selected[1]==='d')return ui(text,[[b('🗃️ معاينة الأرشفة',key('a',current,slot,selected[4]!))],back]);
+ const chars=Array.from('العنوان: '+r.title+'\nالجامعة: '+r.university+'\nالتصنيف: '+r.categoryId+'\nالنطاق: '+r.scope+'\nالمعرف: '+r.id),index=view?Number(view[4]):0,pages=Math.max(1,Math.ceil(chars.length/200));
+ if(pages>1000||index>=pages)return null;
+ const text='<b>مراجعة المورد 📋</b>\nالتفاصيل ('+(index+1)+' من '+pages+'):\n'+safe(chars.slice(index*200,index*200+200).join(''));
+ const nav=[];if(index>0)nav.push(b('⬅️ التفاصيل السابقة',key('v',current,slot,selected[4]!)+':'+(index-1)));if(index+1<pages)nav.push(b('➡️ بقية التفاصيل',key('v',current,slot,selected[4]!)+':'+(index+1)));
+ if(selected[1]==='d')return ui(text,[...(nav.length?[nav]:[]),[b('🗃️ معاينة الأرشفة',key('a',current,slot,selected[4]!))],back]);
  try{
   const ref=await service.issueInlineArchive(actor,r.id,resourceArchiveFingerprint(r),epoch(state,policy,r),current);
   return ui(text+'\n\nستُؤرشف هذه النسخة من المورد. التأكيد صالح لدقيقتين ولمرة واحدة.',[[b('✅ تأكيد الأرشفة','ol:1:c:'+ref.slice(2))],[b('↩️ إلغاء والعودة',key('d',current,slot,selected[4]!))],back]);
