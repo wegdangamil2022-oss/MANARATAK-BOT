@@ -700,7 +700,7 @@ function home(page:0|1):OwnerInlineScreen{
  return {text:'<b>لوحة مالك منارتك 🔐 — '+(page===0?'الصفحة الأولى':'الصفحة الثانية')+'</b>\n'
   +'اختر القسم المعتمد. هذه واجهة تصفح آمنة للكتالوج؛ ميزات لم يتم ربطها بعد '
   +'تظهر بوصفها قيد التطوير، ولا تنفذ أوامر الإدارة.\n'
-  +'الوظائف التشغيلية الحالية متاحة من لوحة المالك القديمة.',
+  +'تتوفر بعض شاشات البيانات والإجراءات المحلية هنا، وتبقى وظائف أخرى في لوحة المالك القديمة.',
   keyboard:keyboard(rows)};
 }
 export function ownerInlineHome():OwnerInlineScreen{return home(0);}
@@ -726,8 +726,8 @@ function sectionScreen(sectionIndex:number,page:number):OwnerInlineScreen|null{
  rows.push(navigation('mi:1:p:'+(sectionIndex<8?0:1)));
  return {text:'<b>'+esc(section.title)+'</b>\n'
   +'صفحة '+(page+1)+' من '+pages+' · '+section.items.length+' ميزة معتمدة في التصميم.\n'
-  +'⌛ الأزرار أدناه لعرض وصف الميزة فقط، وليست لتنفيذها. '
-  +'الإجراءات الفعلية تُربط تدريجيًا بعد الاختبارات والصلاحيات.',
+  +'👁️ يعرض بيانات محلية أو شاشة مرتبطة؛ قد تتوفر إجراءات محلية داخل بعض الشاشات.\n'
+  +'⌛ يعرض وصف الميزة فقط. تُربط الوظائف تدريجيًا بعد الاختبارات والصلاحيات.',
   keyboard:keyboard(rows)};
 }
 function itemScreen(sectionIndex:number,itemIndex:number):OwnerInlineScreen{
