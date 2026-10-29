@@ -3,9 +3,9 @@
 export type ProtectionAction='REVIEW'|'WARN'|'DELETE'|'MUTE';
 export type ProtectionMessageType='TEXT'|'PHOTO'|'VIDEO'|'ANIMATION'|'STICKER'|'DOCUMENT'|'AUDIO'|'VOICE'|'VIDEO_NOTE'|'CONTACT'|'LOCATION'|'POLL';
 type BaseRule={id:string;enabled:boolean;action:ProtectionAction};
-export type ProtectionRule=BaseRule & ({kind:'WORD'|'PHRASE';value:string}|{kind:'TYPE';type:ProtectionMessageType}|{kind:'LINK';hosts:'*'|string[]});
+export type ProtectionRule=BaseRule & ({kind:'WORD'|'PHRASE';value:string}|{kind:'TYPE';type:ProtectionMessageType}|{kind:'LINK';hosts:'*'|string[]}|{kind:'FORWARD'});
 export interface ProtectionPolicy{chatId:string;revision:number;mode:'OFF'|'MONITOR'|'ENFORCE';rules:ProtectionRule[];allowedDomains:string[];allowedPhrases:string[];exemptMemberIds:string[];}
-export interface ProtectionMessage{chatId:string;memberId:string;type:ProtectionMessageType;text?:string;caption?:string;links?:string[];}
+export interface ProtectionMessage{chatId:string;memberId:string;type:ProtectionMessageType;text?:string;caption?:string;links?:string[];forwarded?:boolean;}
 export interface ProtectionEvaluation{status:'INVALID_POLICY'|'INVALID_MESSAGE'|'OFF'|'EXEMPT'|'CLEAR'|'MATCH';matchedRuleIds:string[];proposedAction:ProtectionAction|null;authorizedToSend:false;}
 const object=(v:unknown):v is Record<string,unknown>=>v!==null&&typeof v==='object'&&!Array.isArray(v);
 const keys=(v:Record<string,unknown>,expected:string[])=>Object.keys(v).length===expected.length&&expected.every(k=>Object.hasOwn(v,k));
@@ -34,14 +34,16 @@ export function isValidProtectionPolicy(v:unknown):v is ProtectionPolicy{
   seen.add(r.id);
   if(r.kind==='WORD'||r.kind==='PHRASE')return keys(r,['id','enabled','action','kind','value'])&&phrase(r.value)&&
    (r.kind!=='WORD'||!normalizeProtectionText(r.value).includes(' '));
+  if(r.kind==='FORWARD')return keys(r,['id','enabled','action','kind']);
   if(r.kind==='TYPE')return keys(r,['id','enabled','action','kind','type'])&&typeof r.type==='string'&&typeNames.includes(r.type);
   return r.kind==='LINK'&&keys(r,['id','enabled','action','kind','hosts'])&&
    (r.hosts==='*'||stringList(r.hosts,host,100)&&r.hosts.length>0);
  });
 }
 function validMessage(v:unknown,chatId:string):v is ProtectionMessage{
- if(!object(v)||Object.keys(v).some(k=>!['chatId','memberId','type','text','caption','links'].includes(k))||v.chatId!==chatId||
+ if(!object(v)||Object.keys(v).some(k=>!['chatId','memberId','type','text','caption','links','forwarded'].includes(k))||v.chatId!==chatId||
   !member(v.memberId)||typeof v.type!=='string'||!typeNames.includes(v.type)||v.text!==undefined&&v.caption!==undefined)return false;
+ if(v.forwarded!==undefined&&typeof v.forwarded!=='boolean')return false;
  if(v.text!==undefined&&(v.type!=='TEXT'||typeof v.text!=='string'||v.text.length>4096||v.text.includes('\0')))return false;
  if(v.caption!==undefined&&(v.type==='TEXT'||typeof v.caption!=='string'||v.caption.length>4096||v.caption.includes('\0')))return false;
  return v.links===undefined||stringList(v.links,x=>typeof x==='string'&&x.length>=1&&x.length<=2048&&urlHost(x)!==null,100);
@@ -71,6 +73,7 @@ export function evaluateProtectionRules(config:unknown,input:unknown):Protection
  const matches=config.rules.filter(r=>{
   if(!r.enabled)return false;
   if(r.kind==='WORD'||r.kind==='PHRASE')return contains(lexicalBody,r.value);
+  if(r.kind==='FORWARD')return input.forwarded===true;
   if(r.kind==='TYPE')return r.type===input.type;
   if(r.kind!=='LINK')return false;
   const targets=r.hosts;

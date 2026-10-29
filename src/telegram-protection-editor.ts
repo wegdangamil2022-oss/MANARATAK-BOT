@@ -17,7 +17,7 @@ const btn=(text:string,callback_data:string):Button=>({text,callback_data});
 const screen=(text:string,rows:Button[][]):OwnerInlineScreen=>({text,keyboard:{inline_keyboard:rows}});
 const types:Record<ProtectionMessageType,string>={TEXT:'نصوص',PHOTO:'صور',VIDEO:'فيديو',ANIMATION:'GIF',STICKER:'ملصقات',DOCUMENT:'مستندات',AUDIO:'صوتيات',VOICE:'رسائل صوتية',VIDEO_NOTE:'دوائر مرئية',CONTACT:'جهات اتصال',LOCATION:'مواقع',POLL:'استطلاعات'};
 function ruleName(r:ProtectionRule):string{
- switch(r.kind){case 'WORD':case 'PHRASE':return r.value;case 'TYPE':return types[r.type];case 'LINK':return r.hosts==='*'?'جميع الروابط':r.hosts.slice(0,3).join('، ')+(r.hosts.length>3?' …':'');}
+ switch(r.kind){case 'WORD':case 'PHRASE':return r.value;case 'TYPE':return types[r.type];case 'FORWARD':return 'رسالة معاد توجيهها';case 'LINK':return r.hosts==='*'?'جميع الروابط':r.hosts.slice(0,3).join('، ')+(r.hosts.length>3?' …':'');}
 }
 const newRuleId=(config:ProtectionPolicy)=>{let id:string;do{id='r_'+randomBytes(8).toString('hex');}while(config.rules.some(r=>r.id===id));return id;};
 const actions={REVIEW:'مراجعة',WARN:'تحذير',DELETE:'حذف',MUTE:'كتم'} as const;
@@ -122,11 +122,11 @@ export class TelegramProtectionEditor{
   if(route.kind==='j')return this.begin(actor,f,'LINK');
   if(route.kind==='b')return this.addRule(actor,f,{id:newRuleId(f.config),kind:'LINK',hosts:'*',enabled:false,action:'REVIEW'});
   if(route.kind==='y'||route.kind==='n'){
-   const entries=Object.entries(types) as [ProtectionMessageType,string][],page=route.rulePage??0;
+   const entries:[ProtectionMessageType|'FORWARDED',string][]=[...(Object.entries(types) as [ProtectionMessageType,string][]),['FORWARDED','إعادة توجيه']],page=route.rulePage??0;
    if(page>=Math.ceil(entries.length/8))return null;
    if(route.kind==='n'){
     const type=entries[page*8+(route.ruleSlot??1)-1]?.[0];
-    return type?this.addRule(actor,f,{id:newRuleId(f.config),kind:'TYPE',type,enabled:false,action:'REVIEW'}):null;
+    return type?this.addRule(actor,f,type==='FORWARDED'?{id:newRuleId(f.config),kind:'FORWARD',enabled:false,action:'REVIEW'}:{id:newRuleId(f.config),kind:'TYPE',type,enabled:false,action:'REVIEW'}):null;
    }
    const rows=entries.slice(page*8,page*8+8).map(([_,label],i)=>[btn(label,key('n',f,':'+page+':'+(i+1)))]);
    if(page>0)rows.push([btn('⬅️ السابق',key('y',f,':'+(page-1)))]);
@@ -168,7 +168,7 @@ export class TelegramProtectionEditor{
   return saved.status==='SAVED'?this.fresh(actor,f.chat.id,'حُفظ تعديل القاعدة.'):null;
  }
  private async addRule(actor:string,f:Frame,rule:ProtectionRule):Promise<OwnerInlineScreen|null>{
-  const duplicate=f.config.rules.some(r=>r.kind===rule.kind&&(r.kind==='TYPE'&&rule.kind==='TYPE'?r.type===rule.type:r.kind==='LINK'&&rule.kind==='LINK'?JSON.stringify(r.hosts)===JSON.stringify(rule.hosts):false));
+  const duplicate=f.config.rules.some(r=>r.kind===rule.kind&&(r.kind==='TYPE'&&rule.kind==='TYPE'?r.type===rule.type:r.kind==='LINK'&&rule.kind==='LINK'?JSON.stringify(r.hosts)===JSON.stringify(rule.hosts):r.kind==='FORWARD'&&rule.kind==='FORWARD'));
   if(duplicate)return this.groupScreen(actor,f,'توجد قاعدة لهذا الهدف؛ عدّلها من قائمة القواعد.');
   if(f.config.rules.length>=100)return this.groupScreen(actor,f,'بلغت السياسة الحد الحالي: 100 قاعدة.');
   const saved=await this.service.save(actor,{...f.config,revision:f.config.revision+1,rules:[...f.config.rules,rule]},f.epoch,f.config.revision);
@@ -264,7 +264,7 @@ export class TelegramProtectionEditor{
    const matched=f.config.rules.filter(r=>result.matchedRuleIds.includes(r.id));
    const explanations=matched.slice(0,6).map(r=>{
     const name=Array.from(ruleName(r)).slice(0,45).join('');
-    const reason=r.kind==='WORD'?'كلمة كاملة':r.kind==='PHRASE'?'عبارة متجاورة':r.kind==='TYPE'?'نوع رسالة':'سياسة روابط';
+    const reason=r.kind==='WORD'?'كلمة كاملة':r.kind==='PHRASE'?'عبارة متجاورة':r.kind==='TYPE'?'نوع رسالة':r.kind==='FORWARD'?'إعادة توجيه':'سياسة روابط';
     return '• '+escape(name)+' — '+reason+'؛ '+actions[r.action];
    }).join('\n');
    return {status:'APPLIED',reason:'PROTECTION_DRY_RUN_ONLY',screen:screen('نتيجة الاختبار المحلي: '+(result.status==='MATCH'?'مطابقة':'لا مطابقة')+'\nنسخة الاختبار: '+f.config.revision+'\nالقواعد المطابقة: '+result.matchedRuleIds.length+'\nالإجراء المقترح: '+(result.proposedAction?actions[result.proposedAction]:'لا شيء')+'\n'+explanations+(matched.length>6?'\nتوجد مطابقات إضافية؛ راجع قائمة القواعد.':'')+'\nلم تُحفظ العينة أو تُفعّل عقوبة.',[[btn('↩️ إعدادات المجموعة',key('g',f))]])};

@@ -81,3 +81,13 @@ test('evaluation never mutates the policy and never returns message contents',()
  const result=evaluateProtectionRules(cfg,message('spam PRIVATE_STUDENT_TEXT'));
  assert.deepEqual(cfg,before);assert.equal(JSON.stringify(result).includes('PRIVATE_STUDENT_TEXT'),false);
 });
+
+test('forward rules preserve content-type filtering and do not treat allow-listed text as permission to forward',()=>{
+ const cfg=policy([{id:'forward',kind:'FORWARD',action:'WARN',enabled:true},{id:'photo',kind:'TYPE',type:'PHOTO',action:'DELETE',enabled:true}]);
+ cfg.allowedPhrases=['درس طبي'];
+ const result=evaluateProtectionRules(cfg,{chatId:'-100',memberId:'300',type:'PHOTO',caption:'درس طبي',forwarded:true});
+ assert.deepEqual(result.matchedRuleIds,['forward','photo']);assert.equal(result.proposedAction,'DELETE');
+ assert.deepEqual(evaluateProtectionRules(cfg,{chatId:'-100',memberId:'300',type:'PHOTO',caption:'درس طبي'}).matchedRuleIds,['photo']);
+ assert.equal(evaluateProtectionRules(cfg,{...message('درس طبي'),forwarded:'yes'}).status,'INVALID_MESSAGE');
+ assert.equal(evaluateProtectionRules({...cfg,rules:[{...cfg.rules[0],source:'*'}]},message('x')).status,'INVALID_POLICY');
+});

@@ -98,7 +98,7 @@ export interface TelegramApplicationOptions {
   purge?:ModerationPurgeService;
 }
 
-type Event = {updateId: number; actorId: string; chatId: string; kind: 'private' | 'group'; text: string; entities?:unknown; messageId?:number; replyTo?:unknown; document?: IncomingDocument; protectionMedia?:ProtectionMedia; edited?:true; callbackData?:string; callbackQueryId?:string; callbackMessageId?:number};
+type Event = {updateId: number; actorId: string; chatId: string; kind: 'private' | 'group'; text: string; entities?:unknown; messageId?:number; replyTo?:unknown; document?: IncomingDocument; protectionMedia?:ProtectionMedia; edited?:true; forwarded?:true; callbackData?:string; callbackQueryId?:string; callbackMessageId?:number};
 const isObject=(x:unknown):x is Record<string,unknown>=>Boolean(x)&&typeof x==='object'&&!Array.isArray(x);
 const positiveId=(x:unknown): x is number=>typeof x==='number'&&Number.isSafeInteger(x)&&x>0;
 const chatId=(x:unknown): x is number=>typeof x==='number'&&Number.isSafeInteger(x)&&x!==0;
@@ -139,13 +139,21 @@ function eventFrom(value:unknown):{event?:Event;reason:string} {
   if(!isObject(value.message))return {reason:'UNSUPPORTED_EVENT'};
   const msg=value.message;
   if(!isObject(msg.chat)||!isObject(msg.from)||!positiveId(msg.from.id)||msg.from.is_bot!==false||!chatId(msg.chat.id))return {reason:'INVALID_ACTOR_OR_CHAT'};
-  if(msg.sender_chat!==undefined||msg.via_bot!==undefined||msg.forward_origin!==undefined||msg.forward_date!==undefined||msg.is_automatic_forward===true)return {reason:'UNTRUSTED_FORWARD'};
+  if(msg.sender_chat!==undefined||msg.via_bot!==undefined||msg.is_automatic_forward===true)return {reason:'UNTRUSTED_FORWARD'};
+  const forwarded=msg.forward_origin!==undefined||msg.forward_date!==undefined;
+  if(forwarded){
+   if(msg.chat.type!=='group'&&msg.chat.type!=='supergroup')return {reason:'UNTRUSTED_FORWARD'};
+   if(msg.forward_origin!==undefined&&(!isObject(msg.forward_origin)||typeof msg.forward_origin.type!=='string'||
+    !['user','hidden_user','chat','channel'].includes(msg.forward_origin.type)||!positiveId(msg.forward_origin.date)))return {reason:'UNTRUSTED_FORWARD'};
+   if(msg.forward_date!==undefined&&(!positiveId(msg.forward_date)||isObject(msg.forward_origin)&&msg.forward_origin.date!==msg.forward_date))return {reason:'UNTRUSTED_FORWARD'};
+  }
+
   const kind=msg.chat.type==='private'?'private':msg.chat.type==='group'||msg.chat.type==='supergroup'?'group':null;
   if(!kind || (kind==='private'&&(msg.chat.id!==msg.from.id))||(kind==='group'&&msg.chat.id>=0))return {reason:'INVALID_CHAT_CONTEXT'};
   if(kind==='group'){
    const decoded=protectionMediaFromMessage(msg);
    if(decoded.status==='INVALID')return {reason:'INVALID_GROUP_MEDIA'};
-   if(decoded.status==='MEDIA')return {event:{updateId:value.update_id as number,actorId:String(msg.from.id),chatId:String(msg.chat.id),kind,text:'',protectionMedia:decoded.media},reason:'VALID'};
+   if(decoded.status==='MEDIA')return {event:{updateId:value.update_id as number,actorId:String(msg.from.id),chatId:String(msg.chat.id),kind,text:'',protectionMedia:decoded.media,...(forwarded?{forwarded:true as const}:{})},reason:'VALID'};
   }
   if(msg.document!==undefined){
     // Telegram must not attach both an ordinary text command and a document.
@@ -166,7 +174,7 @@ function eventFrom(value:unknown):{event?:Event;reason:string} {
   }
   if(typeof msg.text!=='string'||msg.text.length<1||msg.text.length>4096)return {reason:'UNSUPPORTED_MESSAGE'};
   if(/\u0000/u.test(msg.text))return {reason:'INVALID_TEXT'};
-  return {event:{updateId:value.update_id as number,actorId:String(msg.from.id),chatId:String(msg.chat.id),kind,text:msg.text,
+  return {event:{updateId:value.update_id as number,actorId:String(msg.from.id),chatId:String(msg.chat.id),kind,text:msg.text,...(forwarded?{forwarded:true as const}:{}),
    ...(msg.entities!==undefined?{entities:msg.entities}:{}),
    ...(msg.message_id!==undefined?{messageId:msg.message_id as number}:{}),
    ...(msg.reply_to_message!==undefined?{replyTo:msg.reply_to_message}:{})},reason:'VALID'};
@@ -305,8 +313,13 @@ export class TelegramUpdateApplication {
     if(event.protectionMedia){
      const media=event.protectionMedia;
      await new GroupProtectionPolicyService(this.opts.store,this.opts.policy,this.clock).observeIncomingMessage(
-      {chatId:event.chatId,memberId:event.actorId,type:media.type,caption:media.caption},media.entities,'b3-webhook:'+this.opts.botId+':'+event.updateId);
+      {chatId:event.chatId,memberId:event.actorId,type:media.type,caption:media.caption,...(event.forwarded?{forwarded:true}:{})},media.entities,'b3-webhook:'+this.opts.botId+':'+event.updateId);
      return media.type==='DOCUMENT'?{status:'DENIED',reason:'PRIVATE_ADMIN_UPLOAD_ONLY'}:{status:'IGNORED',reason:'PROTECTION_MEDIA_MONITOR_ONLY'};
+    }
+    if(event.forwarded){
+     await new GroupProtectionPolicyService(this.opts.store,this.opts.policy,this.clock).observeIncomingMessage(
+      {chatId:event.chatId,memberId:event.actorId,type:'TEXT',text:event.text,forwarded:true},event.entities,'b3-webhook:'+this.opts.botId+':'+event.updateId);
+     return {status:'DENIED',reason:'UNTRUSTED_FORWARD'};
     }
     if(event.edited){
      await new GroupProtectionPolicyService(this.opts.store,this.opts.policy,this.clock).observeIncomingText(

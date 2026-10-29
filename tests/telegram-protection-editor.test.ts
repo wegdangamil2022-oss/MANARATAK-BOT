@@ -88,7 +88,7 @@ for(const engine of ['json','sqlite'] as const){
    const next=first.plan!.inlineMarkup!.inline_keyboard.flat().find(b=>b.callback_data.startsWith('pr:1:y:')&&b.callback_data.endsWith(':1'))!;
    assert.ok(next);const second=await f.app().handle(cb(4,next.callback_data));
    const choices=second.plan!.inlineMarkup!.inline_keyboard.flat().filter(b=>b.callback_data.startsWith('pr:1:n:'));
-   assert.equal(choices.length,4);assert.ok(isValidTelegramInlineKeyboard(second.plan!.inlineMarkup));
+   assert.equal(choices.length,5);assert.ok(isValidTelegramInlineKeyboard(second.plan!.inlineMarkup));
    const contact=choices[1]!;assert.match(contact.text,/اتصال/);
    const added=await f.app().handle(cb(5,contact.callback_data));
    assert.equal(added.status,'APPLIED');
@@ -523,6 +523,51 @@ for(const engine of ['json','sqlite'] as const){
     {edited_message:base,message:{...base,text:'/start'}},{edited_message:base,callback_query:{id:'fake'}}];
    for(const [i,body] of bodies.entries())assert.equal((await f.app().handle({update_id:1010+i,...body})).status,'DENIED');
    assert.equal((await f.store.snapshot()).audit.filter(a=>a.reason.startsWith('PROTECTION_MONITOR_')).length,0);
+  }finally{await f.close();}
+ });
+ test('a forwarded command is monitored only and retains its original content type ('+engine+')',async()=>{
+  const f=await fixture();try{
+   await new GroupProtectionPolicyService(f.store,f.policy,()=>NOW).save('100',{
+    chatId:CHAT,revision:1,mode:'MONITOR',rules:[{id:'forward',kind:'FORWARD',enabled:true,action:'REVIEW'},{id:'photo',kind:'TYPE',type:'PHOTO',enabled:true,action:'DELETE'}],allowedDomains:[],allowedPhrases:[],exemptMemberIds:[]
+   },f.policy.chatRevision(await f.store.snapshot(),CHAT),0);
+   const base={message_id:1100,chat:{id:Number(CHAT),type:'supergroup'},from:{id:300,is_bot:false}};
+   const origins=[{type:'user',date:1700000000,sender_user:{id:400,first_name:'PRIVATE_FORWARD_NAME'}},{type:'hidden_user',date:1700000000,sender_user_name:'PRIVATE_FORWARD_NAME'},
+    {type:'chat',date:1700000000,sender_chat:{id:-100400,title:'PRIVATE_CHAT_TITLE'}},{type:'channel',date:1700000000,chat:{id:-100400,title:'PRIVATE_CHAT_TITLE'},message_id:1}];
+   for(const [i,origin] of origins.entries()){
+    const result=await f.app().handle({update_id:1100+i,message:{...base,text:'/ban private-case',forward_origin:origin}});
+    assert.equal(result.status,'DENIED');assert.equal(result.plan,undefined);
+   }
+   await f.app().handle({update_id:1105,message:{...base,photo:[{file_id:'PRIVATE_FORWARD_PHOTO'}],forward_date:1700000000}});
+   const state=await f.store.snapshot(),matches=state.audit.filter(a=>a.reason.startsWith('PROTECTION_MONITOR_MATCH'));
+   assert.equal(matches.length,5);assert.ok(matches.some(a=>a.reason.endsWith('action=DELETE;rules=2')));
+   assert.equal(state.moderationOperations.length,0);
+   for(const secret of ['PRIVATE_FORWARD_NAME','PRIVATE_CHAT_TITLE','PRIVATE_FORWARD_PHOTO'])assert.equal(JSON.stringify(state).includes(secret),false);
+  }finally{await f.close();}
+ });
+ test('forward monitoring refuses malformed origins, private forwards and linked-channel automatic forwards ('+engine+')',async()=>{
+  const f=await fixture();try{
+   const base={message_id:1200,chat:{id:Number(CHAT),type:'supergroup'},from:{id:300,is_bot:false},text:'sample'};
+   for(const [i,extra] of [{forward_origin:{}},{forward_origin:{type:'unknown',date:1}},{forward_origin:{type:'user',date:-1}},
+    {forward_date:'today'},{forward_origin:{type:'user',date:1},forward_date:2},{forward_date:1,is_automatic_forward:true},
+    {forward_date:1,chat:{id:300,type:'private'}},{forward_date:1,sender_chat:{id:-100400}},{forward_date:1,via_bot:{id:400}}].entries()){
+    assert.equal((await f.app().handle({update_id:1200+i,message:{...base,...extra}})).status,'DENIED');
+   }
+  }finally{await f.close();}
+ });
+ test('the forwarding policy is configurable from the scoped type picker ('+engine+')',async()=>{
+  const f=await fixture();try{
+   const root=await f.app().handle(cb(1,'pr:1:h'));
+   const group=await f.app().handle(cb(2,route(root,'pr:1:g:')));
+   const first=await f.app().handle(cb(3,route(group,'pr:1:y:')));
+   const next=first.plan!.inlineMarkup!.inline_keyboard.flat().find(b=>b.text.includes('التالي'))!;
+   const second=await f.app().handle(cb(4,next.callback_data));
+   const forward=second.plan!.inlineMarkup!.inline_keyboard.flat().find(b=>b.text==='إعادة توجيه')!;
+   const added=await f.app().handle(cb(5,forward.callback_data));assert.equal(added.status,'APPLIED');
+   const rule=(await f.store.snapshot()).protectionPolicies![0]!.policy.rules[0]!;
+   assert.equal(rule.kind,'FORWARD');assert.equal(rule.enabled,false);assert.equal(rule.action,'REVIEW');
+   const list=await f.app().handle(cb(6,route(added,'pr:1:l:')));
+   const detail=await f.app().handle(cb(7,route(list,'pr:1:r:')));
+   assert.match(detail.plan!.text,/معاد توجيهها/);
   }finally{await f.close();}
  });
  test('home cancels a pending editor before further private text ('+engine+')',async()=>{
