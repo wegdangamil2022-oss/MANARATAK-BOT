@@ -5,6 +5,7 @@ import { publicEducationResource, type PublicEducationResource } from './educati
 import {faqReviewFingerprint} from './faq-review.js';
 import {normalizeEducationDiscovery} from './education-search-normalization.js';
 import {subscriptionRequirementMode,acceptsActiveSubscriptionEvidence} from './subscription-integrity.js';
+import {visibleEducationCategory} from './education-category-policy.js';
 
 /** Only a trusted Telegram adapter may attest the chat membership status; user-provided claims are not evidence. */
 export type MembershipStatus = 'VERIFIED' | 'NOT_MEMBER' | 'UNKNOWN';
@@ -20,18 +21,10 @@ const questionKey=(text:string):string=>text.normalize('NFKC').toLocaleLowerCase
  */
 const validText=(text:string,max:number):boolean=>typeof text==='string' && text.trim().length>0 && text.length<=max && !/[\u0000-\u001F\u007F]/u.test(text);
 function hasApprovedSource(s:BotState, scope:string, id:string):boolean {
-  const resource=s.educationResources.find(r=>r.id===id && r.scope===scope && r.status==='PUBLISHED');
-  if(!resource) return false;
-  const category=s.educationCategories.find(c=>c.id===resource.categoryId && c.scope===scope);
-  if(!category || !category.enabled) return false;
-  let node=category; const visited=new Set<string>();
-  while(node.parentId) {
-    if(visited.has(node.id)) return false; visited.add(node.id);
-    const parent=s.educationCategories.find(c=>c.id===node.parentId && c.scope===scope);
-    if(!parent || !parent.enabled) return false;
-    node=parent;
-  }
-  return true;
+  const resources=s.educationResources.filter(r=>r.id===id),resource=resources[0];
+  if(resources.length!==1||!resource||resource.scope!==scope||resource.status!=='PUBLISHED')return false;
+  const categories=s.educationCategories.filter(c=>c.id===resource.categoryId),category=categories[0];
+  return categories.length===1&&Boolean(category&&category.scope===scope&&visibleEducationCategory(s,category));
 }
 const scopeActive=(s:BotState, policy:Policy, scope:string):boolean=>scope==='private'||policy.canUseChat(s,scope,'navigation');
 const mayUpload=(s:BotState, policy:Policy, by:string, scope:string, now:number):boolean=>scopeActive(s,policy,scope) && (scope==='private'

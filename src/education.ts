@@ -5,7 +5,7 @@ import { Policy } from './policy.js';
 import { parseDocument, type ImportFormat } from './ingestion.js';
 import { planPublicationPreview } from './publication-preview-plan.js';
 import {resourceArchiveFingerprint} from './education-archive.js';
-import {categoryVisibilityFingerprint,categoryOrderFingerprint,categoryOrderPeers} from './education-category-policy.js';
+import {categoryVisibilityFingerprint,categoryOrderFingerprint,categoryOrderPeers,visibleEducationCategory} from './education-category-policy.js';
 
 type Origin = 'TELEGRAM_ADMIN' | 'ADMIN_WEB';
 /** Public resource projections must not reveal internal audit identities or import job IDs. */
@@ -37,10 +37,7 @@ export class EducationService {
   }
   private assertOwner(actor: string): void { if (!this.policy.isOwner(actor)) throw new Error('OWNER_ONLY'); }
   private visibleCategory(s: BotState, cat: EducationCategory): boolean {
-    if (!cat.enabled) return false;
-    if (!cat.parentId) return true;
-    const parent=s.educationCategories.find(x=>x.id===cat.parentId && x.scope===cat.scope);
-    return Boolean(parent && this.visibleCategory(s,parent));
+    return visibleEducationCategory(s,cat);
   }
   async createCategory(actor: string, input: {id: string; scope: string; title: string; order: number; parentId?: string}): Promise<EducationCategory> {
     this.assertOwner(actor);
