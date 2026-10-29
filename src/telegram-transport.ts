@@ -294,8 +294,8 @@ export class TelegramUpdateApplication {
      // Reauthorize the real sender at every tap. Never dispatch a privileged
      // command from untrusted callback_data or from a group context.
      if(kind!=='private'||actorId!==chatId)return {status:'DENIED',reason:'PRIVATE_CALLBACK_ONLY'};
-     if(event.callbackData.startsWith('pr:1:')||/^mi:1:i:02:0[567]$/u.test(event.callbackData)){
-      if(/^mi:1:i:02:0[567]$/u.test(event.callbackData)&&!this.opts.policy.isOwner(actorId))return {status:'DENIED',reason:'OWNER_ONLY'};
+     if(event.callbackData.startsWith('pr:1:')||/^mi:1:i:02:(?:0[567]|12)$/u.test(event.callbackData)){
+      if(/^mi:1:i:02:(?:0[567]|12)$/u.test(event.callbackData)&&!this.opts.policy.isOwner(actorId))return {status:'DENIED',reason:'OWNER_ONLY'};
       const view=await new TelegramProtectionEditor(this.opts.store,this.opts.policy,this.clock).handle(event.callbackData,actorId);
       if(!view)return {status:'DENIED',reason:'PROTECTION_EDITOR_NOT_ACCESSIBLE'};
       return {status:'APPLIED',reason:'RESPONSE_PLANNED_ONLY',plan:this.plan(chatId,view.text,undefined,view.keyboard,event.callbackMessageId)};
@@ -1025,7 +1025,7 @@ export class TelegramUpdateApplication {
     let handled:ProcessedReply;
     try{handled=await this.process(event);}catch(err){handled={status:'DENIED',reason:safeError(err)};}
     if(event.kind==='private'&&event.callbackData&&!event.callbackData.startsWith('pr:1:')&&
-     !/^mi:1:i:02:0[567]$/u.test(event.callbackData)&&handled.plan){
+     !/^mi:1:i:02:(?:0[567]|12)$/u.test(event.callbackData)&&handled.plan){
      await new TelegramProtectionEditor(this.opts.store,this.opts.policy,this.clock).cancelNavigation(event.actorId);
     }
     if(handled.plan&&!handled.plan.chatId.startsWith('-')&&handled.plan.inlineMarkup?.inline_keyboard.flat().some(b=>b.callback_data.startsWith('pr:1:'))){

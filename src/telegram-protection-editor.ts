@@ -9,13 +9,16 @@ import type {OwnerInlineScreen} from './telegram-inline-owner.js';
 type Button={text:string;callback_data:string};
 type Frame={chat:Chat;config:ProtectionPolicy;epoch:number;page:number;slot:number;digest:string;stale:boolean};
 type Outcome={status:'APPLIED'|'DENIED';reason:string;screen:OwnerInlineScreen};
+type InputKind='WORD'|'PHRASE'|'LINK'|'TEST'|'DOMAIN'|'ALLOWPHRASE';
 const TTL=300000,PREFIX='protection-ui:';
-const flow=/^protection-ui:(WORD|PHRASE|TEST|LINK):(-[1-9][0-9]{0,15}):([1-9][0-9]{0,15}):(0|[1-9][0-9]{0,15}):(0|[1-9][0-9]{0,15}):([A-Za-z0-9_-]{16})(?::([A-Za-z0-9][A-Za-z0-9_-]{0,47}))?$/u;
+const flow=/^protection-ui:(WORD|PHRASE|TEST|LINK|DOMAIN|ALLOWPHRASE):(-[1-9][0-9]{0,15}):([1-9][0-9]{0,15}):(0|[1-9][0-9]{0,15}):(0|[1-9][0-9]{0,15}):([A-Za-z0-9_-]{16})(?::([A-Za-z0-9][A-Za-z0-9_-]{0,47}))?$/u;
 const escape=(v:string)=>v.replace(/\p{Cf}/gu,'').replace(/&/gu,'&amp;').replace(/</gu,'&lt;').replace(/>/gu,'&gt;').replace(/"/gu,'&quot;');
 const btn=(text:string,callback_data:string):Button=>({text,callback_data});
 const screen=(text:string,rows:Button[][]):OwnerInlineScreen=>({text,keyboard:{inline_keyboard:rows}});
 const types:Record<ProtectionMessageType,string>={TEXT:'نصوص',PHOTO:'صور',VIDEO:'فيديو',ANIMATION:'GIF',STICKER:'ملصقات',DOCUMENT:'مستندات',AUDIO:'صوتيات',VOICE:'رسائل صوتية',VIDEO_NOTE:'دوائر مرئية',CONTACT:'جهات اتصال',LOCATION:'مواقع',POLL:'استطلاعات'};
-const ruleName=(r:ProtectionRule)=>r.kind==='WORD'||r.kind==='PHRASE'?r.value:r.kind==='TYPE'?types[r.type]:r.kind==='LINK'?(r.hosts==='*'?'جميع الروابط':r.hosts.join('، ')):r.value;
+function ruleName(r:ProtectionRule):string{
+ switch(r.kind){case 'WORD':case 'PHRASE':return r.value;case 'TYPE':return types[r.type];case 'LINK':return r.hosts==='*'?'جميع الروابط':r.hosts.slice(0,3).join('، ')+(r.hosts.length>3?' …':'');}
+}
 const newRuleId=(config:ProtectionPolicy)=>{let id:string;do{id='r_'+randomBytes(8).toString('hex');}while(config.rules.some(r=>r.id===id));return id;};
 const actions={REVIEW:'مراجعة',WARN:'تحذير',DELETE:'حذف',MUTE:'كتم'} as const;
 const key=(kind:string,f:Frame,suffix='')=>'pr:1:'+kind+':'+f.page+':'+f.slot+':'+f.digest+suffix;
@@ -25,6 +28,15 @@ function rulesWithInput(config:ProtectionPolicy,kind:'WORD'|'PHRASE'|'LINK',valu
  if(editing&&(!old||old.kind!==kind))return null;
  const rule:ProtectionRule=kind==='LINK'?{id,kind,hosts:[value],enabled:old?.enabled??false,action:old?.action??'REVIEW'}:{id,kind,value,enabled:old?.enabled??false,action:old?.action??'REVIEW'};
  return editing?config.rules.map(r=>r.id===id?rule:r):[...config.rules,rule];
+}
+function inputPolicy(config:ProtectionPolicy,kind:Exclude<InputKind,'TEST'>,text:string,id:string,editing:boolean):ProtectionPolicy|null{
+ if(kind==='DOMAIN'||kind==='ALLOWPHRASE'){
+  const field=kind==='DOMAIN'?'allowedDomains':'allowedPhrases';
+  if(config[field].includes(text))return null;
+  return {...config,revision:config.revision+1,[field]:[...config[field],text]};
+ }
+ const rules=rulesWithInput(config,kind,text,id,editing);
+ return rules?{...config,revision:config.revision+1,rules}:null;
 }
 /** Shared owner/delegated private editor. Text samples are evaluated in memory;
  * only policy rules explicitly entered by an operator are persisted. */
@@ -49,6 +61,8 @@ export class TelegramProtectionEditor{
   if(!f.stale){
    rows.push([btn('➕ إضافة كلمة',key('w',f)),btn('➕ إضافة عبارة',key('f',f))]);
    rows.push([btn('🔗 جميع الروابط',key('b',f)),btn('🌐 نطاق محدد',key('j',f))]);
+   rows.push([btn('✅ سماح نطاق',key('c',f)),btn('📚 سماح عبارة',key('u',f))]);
+   rows.push([btn('📋 النطاقات المسموحة',key('s',f,':0:1')),btn('📋 العبارات المسموحة',key('s',f,':0:2'))]);
    rows.push([btn('🔒 أنواع الرسائل',key('y',f,':0'))]);
    rows.push([btn('📋 القواعد',key('l',f,':0')),btn('🧪 اختبار القواعد',key('t',f))]);
    rows.push([btn('👁️ تشغيل المراقبة',key('m',f)),btn('⏹ إيقاف الفحص',key('o',f))]);
@@ -67,7 +81,7 @@ export class TelegramProtectionEditor{
  private failure(actor:string,text='تغيرت الصلاحية أو السياسة؛ افتح القسم من جديد.'):OwnerInlineScreen{return screen(text,[this.back(actor)]);}
  async handle(data:string,actor:string):Promise<OwnerInlineScreen|null>{
   if(!validTime(this.clock()))return null;
-  const route=protectionInlineRoute(/^mi:1:i:02:0[567]$/u.test(data)?'pr:1:h':data);if(!route)return null;
+  const route=protectionInlineRoute(/^mi:1:i:02:(?:0[567]|12)$/u.test(data)?'pr:1:h':data);if(!route)return null;
   if(route.kind==='cancel')return this.cancel(actor,route.nonce);
   await this.cancel(actor);
   const state=await this.store.snapshot();
@@ -87,6 +101,24 @@ export class TelegramProtectionEditor{
   const f=this.frame(state,actor,route.page,route.slot);if(!f||f.digest!==route.digest)return null;
   if(route.kind==='g')return this.groupScreen(actor,f);
   if(f.stale)return null;
+  if(route.kind==='c'||route.kind==='u')return this.begin(actor,f,route.kind==='c'?'DOMAIN':'ALLOWPHRASE');
+  if(route.kind==='s'||route.kind==='q'||route.kind==='k'){
+   const listKind=route.kind==='s'?(route.ruleSlot===1?'d':route.ruleSlot===2?'p':null):route.listKind;
+   if(!listKind)return null;
+   const field=listKind==='d'?'allowedDomains':'allowedPhrases',values=f.config[field],page=route.rulePage??0;
+   if(page>=Math.max(1,Math.ceil(values.length/8)))return null;
+   if(route.kind==='s'){
+    const rows=values.slice(page*8,page*8+8).map((value,i)=>[btn('🗑 '+Array.from(value).slice(0,40).join(''),key('q',f,':'+page+':'+(i+1)+':'+listKind))]);
+    const nav:Button[]=[];if(page>0)nav.push(btn('⬅️ السابق',key('s',f,':'+(page-1)+':'+(listKind==='d'?1:2))));
+    if((page+1)*8<values.length)nav.push(btn('➡️ التالي',key('s',f,':'+(page+1)+':'+(listKind==='d'?1:2))));
+    if(nav.length)rows.push(nav);rows.push([btn('↩️ إعدادات المجموعة',key('g',f))]);
+    return screen((listKind==='d'?'النطاقات المسموحة: تطابق المضيف بالضبط.':'العبارات المسموحة: تعفى في موضعها فقط.')+'\n'+values.slice(page*8,page*8+8).map(v=>'• '+escape(listKind==='p'?Array.from(v).slice(0,60).join('')+(Array.from(v).length>60?'…':''):v)).join('\n'),rows);
+   }
+   const index=page*8+(route.ruleSlot??1)-1,value=values[index];if(value===undefined)return null;
+   if(route.kind==='q')return screen('إزالة عنصر السماح التالي؟\n'+escape(value),[[btn('✅ تأكيد الإزالة',key('k',f,':'+page+':'+(route.ruleSlot??1)+':'+listKind)),btn('↩️ إلغاء',key('s',f,':'+page+':'+(listKind==='d'?1:2)))]]);
+   const saved=await this.service.save(actor,{...f.config,revision:f.config.revision+1,[field]:values.filter((_,i)=>i!==index)},f.epoch,f.config.revision);
+   return saved.status==='SAVED'?this.fresh(actor,f.chat.id,'أُزيل عنصر السماح.'):null;
+  }
   if(route.kind==='j')return this.begin(actor,f,'LINK');
   if(route.kind==='b')return this.addRule(actor,f,{id:newRuleId(f.config),kind:'LINK',hosts:'*',enabled:false,action:'REVIEW'});
   if(route.kind==='y'||route.kind==='n'){
@@ -149,7 +181,7 @@ export class TelegramProtectionEditor{
    !Number.isSafeInteger(w.expiresAt)||!validTime(Number(m[5]))||w.expiresAt!==Number(m[5])+TTL||w.policyVersion!==Number(m[3])||![Number(m[3]),Number(m[4])].every(Number.isSafeInteger))return null;
   return m;
  }
- private async begin(actor:string,f:Frame,kind:'WORD'|'PHRASE'|'TEST'|'LINK',editRuleId?:string):Promise<OwnerInlineScreen|null>{
+ private async begin(actor:string,f:Frame,kind:InputKind,editRuleId?:string):Promise<OwnerInlineScreen|null>{
   if(kind==='TEST'&&!f.config.rules.length)return this.groupScreen(actor,f,'أضف قاعدة أولًا.');
   const nonce=randomBytes(12).toString('base64url');
   const created=await this.store.transaction(state=>{
@@ -163,6 +195,8 @@ export class TelegramProtectionEditor{
    return true;
   });
   return created?screen(kind==='TEST'?'أرسل عينة نصية لاختبار جميع القواعد، بما فيها المعطلة، دون تشغيلها أو حفظ العينة.':
+   kind==='DOMAIN'?'أرسل اسم نطاق مسموح واحدًا بحروف صغيرة دون رابط أو مسار، مثل school.edu. السماح للمضيف نفسه فقط ولا يعفي أنواع الرسائل.':
+   kind==='ALLOWPHRASE'?'أرسل عبارة تعليمية مسموحة حتى 120 حرفًا. تعفى في موضعها فقط ولا تعفي بقية الرسالة أو نوعها.':
    kind==='LINK'?'أرسل اسم نطاق واحدًا بحروف صغيرة، مثل example.org، دون رابط أو مسار أو بيانات دخول. ستُضاف قاعدة معطلة تشمل النطاق ونطاقاته الفرعية.':
    editRuleId?'أرسل النص البديل حتى 120 حرفًا. تبقى حالة القاعدة وإجراؤها المقترح كما هما. الأوامر أو الرجوع يلغيان الخطوة.':
    'أرسل '+(kind==='WORD'?'كلمة واحدة':'عبارة')+' حتى 120 حرفًا. ستُضاف القاعدة معطلة وبإجراء مراجعة.\nالأوامر أو الرجوع يلغيان هذه الخطوة.',[[btn('↩️ إلغاء','pr:1:z:'+nonce)]]):null;
@@ -212,15 +246,13 @@ export class TelegramProtectionEditor{
    if(!validTime(now)||now>=w.expiresAt||now<w.expiresAt-TTL||!f||f.stale||f.epoch!==epoch||f.config.revision!==revision){w.status='CANCELLED';w.version++;return {kind:'DENIED' as const};}
    let ruleId=m[7]??'';
    if(m[1]!=='TEST'){
-    if(!m[7]&&f.config.rules.length>=100)return {kind:'RETRY' as const,notice:'بلغت السياسة الحد الحالي للقواعد. ألغ الخطوة واحذف قاعدة قبل إضافة أخرى.'};
+    if(!m[7]&&!['DOMAIN','ALLOWPHRASE'].includes(m[1]!)&&f.config.rules.length>=100)return {kind:'RETRY' as const,notice:'بلغت السياسة الحد الحالي للقواعد. ألغ الخطوة واحذف قاعدة قبل إضافة أخرى.'};
     if(!m[7])ruleId=newRuleId(f.config);
-    const rules=rulesWithInput(f.config,m[1] as 'WORD'|'PHRASE'|'LINK',text,ruleId,Boolean(m[7]));
-    if(!rules)return {kind:'DENIED' as const};
-    const candidate={...f.config,revision:revision+1,rules};
-    if(!isValidProtectionPolicy(candidate))return {kind:'RETRY' as const,notice:m[1]==='LINK'?'اسم النطاق غير صالح. أرسل اسم نطاق واحدًا بحروف صغيرة دون مسار أو بيانات دخول، أو /cancel.':'المدخل غير صالح. أرسل كلمة واحدة أو عبارة بحسب الخطوة، حتى 120 حرفًا، أو /cancel.'};
+    const candidate=inputPolicy(f.config,m[1] as Exclude<InputKind,'TEST'>,text,ruleId,Boolean(m[7]));
+    if(!candidate||!isValidProtectionPolicy(candidate))return {kind:'RETRY' as const,notice:'المدخل غير صالح أو مكرر أو يتجاوز الحد. راجع صيغة الخطوة أو أرسل /cancel.'};
    }
    w.status='CANCELLED';w.version++;
-   return {kind:m[1] as 'WORD'|'PHRASE'|'LINK'|'TEST',frame:f,ruleId,editing:Boolean(m[7])};
+   return {kind:m[1] as InputKind,frame:f,ruleId,editing:Boolean(m[7])};
   });
   if(!claim)return null;
   if(claim.kind==='DENIED')return {status:'DENIED',reason:'PROTECTION_EDITOR_STALE',screen:this.failure(actor)};
@@ -237,10 +269,10 @@ export class TelegramProtectionEditor{
    }).join('\n');
    return {status:'APPLIED',reason:'PROTECTION_DRY_RUN_ONLY',screen:screen('نتيجة الاختبار المحلي: '+(result.status==='MATCH'?'مطابقة':'لا مطابقة')+'\nنسخة الاختبار: '+f.config.revision+'\nالقواعد المطابقة: '+result.matchedRuleIds.length+'\nالإجراء المقترح: '+(result.proposedAction?actions[result.proposedAction]:'لا شيء')+'\n'+explanations+(matched.length>6?'\nتوجد مطابقات إضافية؛ راجع قائمة القواعد.':'')+'\nلم تُحفظ العينة أو تُفعّل عقوبة.',[[btn('↩️ إعدادات المجموعة',key('g',f))]])};
   }
-  const rules=rulesWithInput(f.config,claim.kind,text,claim.ruleId,claim.editing);
-  if(!rules)return {status:'DENIED',reason:'PROTECTION_EDITOR_STALE',screen:this.failure(actor)};
-  const saved=await this.service.save(actor,{...f.config,revision:f.config.revision+1,rules},f.epoch,f.config.revision);
-  const view=saved.status==='SAVED'?await this.fresh(actor,f.chat.id,claim.editing?'حُفظ النص البديل مع إبقاء إعدادات القاعدة.':'أُضيفت القاعدة معطلة؛ راجعها واختبرها قبل أي تفعيل.'):null;
+  const candidate=inputPolicy(f.config,claim.kind,text,claim.ruleId,claim.editing);
+  if(!candidate)return {status:'DENIED',reason:'PROTECTION_EDITOR_STALE',screen:this.failure(actor)};
+  const saved=await this.service.save(actor,candidate,f.epoch,f.config.revision);
+  const view=saved.status==='SAVED'?await this.fresh(actor,f.chat.id,claim.kind==='DOMAIN'||claim.kind==='ALLOWPHRASE'?'حُفظ عنصر السماح المحلي.':claim.editing?'حُفظ النص البديل مع إبقاء إعدادات القاعدة.':'أُضيفت القاعدة معطلة؛ راجعها واختبرها قبل أي تفعيل.'):null;
   return view?{status:'APPLIED',reason:'PROTECTION_RULE_SAVED',screen:view}:{status:'DENIED',reason:'PROTECTION_EDITOR_STALE',screen:this.failure(actor)};
  }
 }

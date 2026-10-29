@@ -40,8 +40,8 @@ const partial={
  'TYPELOCK-004':['src/telegram-protection-editor.ts','tests/telegram-protection-editor.test.ts','اختيار 12 نوع رسالة بواجهة مقسمة وقواعد معطلة؛ الاستقبال الحي للوسائط والرسائل الطويلة والتنفيذ غير مكتمل.'],
  'LEX-002':['src/protection-rules.ts','tests/protection-rules.test.ts','كلمة كاملة وعبارة متجاورة فقط؛ لا اشتقاق أو تحليل لغوي شامل.'],
  'LEX-003':['src/protection-rules.ts','tests/protection-rules.test.ts','تطبيع Unicode والعربية مع حدود؛ لا ادعاء كشف كل التحايل.'],
- 'LEX-006':['src/protection-rules.ts','tests/protection-rules.test.ts','استثناء العبارة في موضعها واسم المضيف الدقيق؛ الواجهة والحوكمة الكاملة ناقصتان.'],
- 'LEX-007':['src/telegram-protection-editor.ts','tests/telegram-protection-editor.test.ts','واجهة تعديل واختبار قواعد المجموعة دون تخزين العينة؛ السماح المركزي والاستثناءات بالواجهة غير مكتملة.'],
+ 'LEX-006':['src/telegram-protection-editor.ts','tests/telegram-protection-editor.test.ts','إضافة السماح بالنطاق الدقيق والعبارة في موضعها وحذف مؤكد عبر الواجهة؛ الحوكمة المركزية والاستثناءات المؤقتة ناقصة.'],
+ 'LEX-007':['src/telegram-protection-editor.ts','tests/telegram-protection-editor.test.ts','واجهة تعديل واختبار قواعد المجموعة دون تخزين العينة؛ السماح المركزي والاستثناءات الشخصية المؤقتة غير مكتملة.'],
  'TYPELOCK-009':['src/protection-rules.ts','tests/protection-rules.test.ts','قرار مقترح واحد للنوع والروابط والكلمات؛ الاستقبال والمنشن والتنفيذ بحاجة للربط.'],
  'OPS-003':['src/store.ts','tests/telegram-moderation-commands.test.ts','سجل تحديث ومحاولة ونتيجة ومنع تكرار؛ الوظائف القادمة تحتاج الربط به.']
 };

@@ -99,6 +99,70 @@ for(const engine of ['json','sqlite'] as const){
    assert.match(detail.plan!.text,/اتصال/);assert.equal(detail.plan!.inlineMarkup!.inline_keyboard.flat().some(b=>b.callback_data.startsWith('pr:1:v:')),false);
   }finally{await f.close();}
  });
+ test('allow-list controls validate domain and phrase inputs without persisting invalid values ('+engine+')',async()=>{
+  const f=await fixture();try{
+   const root=await f.app().handle(cb(1,'mi:1:i:02:12'));
+   const group=await f.app().handle(cb(2,route(root,'pr:1:g:')));
+   await f.app().handle(cb(3,route(group,'pr:1:c:')));
+   assert.equal((await f.app().handle(msg(4,'school.edu@evil.test'))).reason,'PROTECTION_EDITOR_INPUT_REJECTED');
+   const saved=await f.app().handle(msg(5,'school.edu'));
+   let cfg=(await f.store.snapshot()).protectionPolicies![0]!.policy;
+   assert.deepEqual(cfg.allowedDomains,['school.edu']);assert.equal(cfg.mode,'OFF');
+   await f.app().handle(cb(6,route(saved,'pr:1:u:')));
+   assert.equal((await f.app().handle(msg(7,'درس طبي حساس'))).status,'APPLIED');
+   cfg=(await f.store.snapshot()).protectionPolicies![0]!.policy;
+   assert.deepEqual(cfg.allowedPhrases,['درس طبي حساس']);
+   assert.equal(JSON.stringify(await f.store.snapshot()).includes('school.edu@evil.test'),false);
+  }finally{await f.close();}
+ });
+ test('allow-list removal needs confirmation and rejects a reused stale confirmation ('+engine+')',async()=>{
+  const f=await fixture();try{
+   const root=await f.app().handle(cb(1,'pr:1:h'));
+   const group=await f.app().handle(cb(2,route(root,'pr:1:g:')));
+   await f.app().handle(cb(3,route(group,'pr:1:c:')));
+   const saved=await f.app().handle(msg(4,'school.edu'));
+   const list=await f.app().handle(cb(5,route(saved,'pr:1:s:')));
+   assert.match(list.plan!.text,/school.edu/);
+   const preview=await f.app().handle(cb(6,route(list,'pr:1:q:')));
+   assert.deepEqual((await f.store.snapshot()).protectionPolicies![0]!.policy.allowedDomains,['school.edu']);
+   const confirm=route(preview,'pr:1:k:');
+   assert.equal((await f.app().handle(cb(7,confirm))).status,'APPLIED');
+   assert.deepEqual((await f.store.snapshot()).protectionPolicies![0]!.policy.allowedDomains,[]);
+   assert.equal((await f.app().handle(cb(8,confirm))).status,'DENIED');
+  }finally{await f.close();}
+ });
+ test('allow-list pending edits cannot survive permission revocation or duplicate a saved entry ('+engine+')',async()=>{
+  const f=await fixture();try{
+   await f.policy.grant('100','200','chat.manage',CHAT,NOW+600000);
+   let home=await f.app().handle(cb(1,'pr:1:h',200));
+   let group=await f.app().handle(cb(2,route(home,'pr:1:g:'),200));
+   await f.app().handle(cb(3,route(group,'pr:1:c:'),200));
+   const saved=await f.app().handle(msg(4,'school.edu',200));
+   await f.app().handle(cb(5,route(saved,'pr:1:c:'),200));
+   assert.equal((await f.app().handle(msg(6,'school.edu',200))).reason,'PROTECTION_EDITOR_INPUT_REJECTED');
+   assert.equal((await f.store.snapshot()).protectionPolicies![0]!.policy.revision,1);
+   await f.policy.revokeGrant('100','200','chat.manage',CHAT);
+   assert.equal((await f.app().handle(msg(7,'secret.edu',200))).status,'DENIED');
+   assert.equal(JSON.stringify(await f.store.snapshot()).includes('secret.edu'),false);
+  }finally{await f.close();}
+ });
+ test('escaped long allow-list entries remain readable and paginated within Telegram limits ('+engine+')',async()=>{
+  const f=await fixture();try{
+   const values=Array.from({length:9},(_,i)=>'"'.repeat(119)+i);
+   const service=new GroupProtectionPolicyService(f.store,f.policy,()=>NOW);
+   await service.save('100',{chatId:CHAT,revision:1,mode:'OFF',rules:[],allowedDomains:[],allowedPhrases:values,exemptMemberIds:[]},f.policy.chatRevision(await f.store.snapshot(),CHAT),0);
+   const root=await f.app().handle(cb(1,'pr:1:h'));
+   const group=await f.app().handle(cb(2,route(root,'pr:1:g:')));
+   const open=group.plan!.inlineMarkup!.inline_keyboard.flat().find(b=>b.callback_data.startsWith('pr:1:s:')&&b.callback_data.endsWith(':2'))!;
+   const first=await f.app().handle(cb(3,open.callback_data));
+   assert.equal(first.status,'APPLIED');assert.ok(Buffer.byteLength(first.plan!.text)<=4096);
+   assert.equal(first.plan!.inlineMarkup!.inline_keyboard.flat().filter(b=>b.callback_data.startsWith('pr:1:q:')).length,8);
+   const next=first.plan!.inlineMarkup!.inline_keyboard.flat().find(b=>b.text.includes('التالي'))!;
+   const second=await f.app().handle(cb(4,next.callback_data));
+   assert.equal(second.plan!.inlineMarkup!.inline_keyboard.flat().filter(b=>b.callback_data.startsWith('pr:1:q:')).length,1);
+   assert.ok(isValidTelegramInlineKeyboard(second.plan!.inlineMarkup));
+  }finally{await f.close();}
+ });
  test('approved keyword button opens groups and persists a disabled reviewed word ('+engine+')',async()=>{
   const f=await fixture();try{
    const home=await f.app().handle(cb(1,'mi:1:i:02:07'));

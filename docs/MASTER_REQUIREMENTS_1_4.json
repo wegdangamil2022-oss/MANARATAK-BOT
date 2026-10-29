@@ -5849,9 +5849,9 @@
       ],
       "implementation": "PARTIAL_LOCAL",
       "evidence": {
-        "code": "src/protection-rules.ts",
-        "tests": "tests/protection-rules.test.ts",
-        "limit": "استثناء العبارة في موضعها واسم المضيف الدقيق؛ الواجهة والحوكمة الكاملة ناقصتان."
+        "code": "src/telegram-protection-editor.ts",
+        "tests": "tests/telegram-protection-editor.test.ts",
+        "limit": "إضافة السماح بالنطاق الدقيق والعبارة في موضعها وحذف مؤكد عبر الواجهة؛ الحوكمة المركزية والاستثناءات المؤقتة ناقصة."
       }
     },
     {
@@ -5877,7 +5877,7 @@
       "evidence": {
         "code": "src/telegram-protection-editor.ts",
         "tests": "tests/telegram-protection-editor.test.ts",
-        "limit": "واجهة تعديل واختبار قواعد المجموعة دون تخزين العينة؛ السماح المركزي والاستثناءات بالواجهة غير مكتملة."
+        "limit": "واجهة تعديل واختبار قواعد المجموعة دون تخزين العينة؛ السماح المركزي والاستثناءات الشخصية المؤقتة غير مكتملة."
       }
     },
     {
