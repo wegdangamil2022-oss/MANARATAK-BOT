@@ -35,7 +35,7 @@ const partial={
  'SPAM-001':['src/telegram-protection-editor.ts','tests/telegram-protection-editor.test.ts','قواعد روابط عامة ونطاق محدد بواجهة خاصة ومراقبة النص دون شبكة؛ لا حل اختصارات أو جلب أو تنفيذ عقوبات.'],
  'SPAM-006':['src/telegram-protection-media.ts','tests/telegram-protection-editor.test.ts','مراقبة 11 نوع وسيط وشرح وروابط كيانات دون تنزيل؛ التوجيه والرسائل الطويلة والإعلانات والتنفيذ غير مكتملة.'],
  'LEX-001':['src/telegram-protection-editor.ts','tests/telegram-protection-editor.test.ts','تخزين مرقم وواجهة كلمات وعبارات لكل مجموعة؛ القوالب المركزية وحوكمة الشبكات غير مكتملة.'],
- 'SPAM-011':['src/group-protection-policy.ts','tests/telegram-protection-editor.test.ts','مراقبة النص والوسائط المدعومة وتدقيق بلا محتوى أو عقوبة؛ التعديلات والقياس الشامل غير مكتملين.'],
+ 'SPAM-011':['src/group-protection-policy.ts','tests/telegram-protection-editor.test.ts','مراقبة النص والوسائط وتعديلاتها وتدقيق بلا محتوى أو عقوبة؛ القياس الشامل غير مكتمل.'],
  'TYPELOCK-001':['src/protection-rules.ts','tests/protection-rules.test.ts','تقييم أنواع رسائل محددة محليًا؛ السياسات المنفصلة لإشارات الأشخاص والقنوات غير مكتملة.'],
  'TYPELOCK-004':['src/telegram-protection-editor.ts','tests/telegram-protection-editor.test.ts','اختيار 12 نوع رسالة بواجهة مقسمة ومراقبة الوسائط الواردة؛ الرسائل الطويلة والتنفيذ غير مكتملين.'],
  'LEX-002':['src/protection-rules.ts','tests/protection-rules.test.ts','كلمة كاملة وعبارة متجاورة فقط؛ لا اشتقاق أو تحليل لغوي شامل.'],

@@ -101,7 +101,7 @@
   - المصدر: docs/MANARATAK_BOT_MASTER_v1.2.1_AR.md:607؛ الأقسام: 2؛ النطاق: 3؛ الحالة: NOT_ASSESSED.
 - [ ] **SPAM-011** — نظام Safe Mode لتجربة قاعدة جديدة دون فرض العقوبة حتى نعرف عدد الإنذارات الكاذبة.
   - المصدر: docs/MANARATAK_BOT_MASTER_v1.2.1_AR.md:608؛ الأقسام: 2؛ النطاق: 3؛ الحالة: PARTIAL_LOCAL.
-  - دليل جزئي: src/group-protection-policy.ts؛ tests/telegram-protection-editor.test.ts؛ مراقبة النص والوسائط المدعومة وتدقيق بلا محتوى أو عقوبة؛ التعديلات والقياس الشامل غير مكتملين.
+  - دليل جزئي: src/group-protection-policy.ts؛ tests/telegram-protection-editor.test.ts؛ مراقبة النص والوسائط وتعديلاتها وتدقيق بلا محتوى أو عقوبة؛ القياس الشامل غير مكتمل.
 - [ ] **SPAM-012** — كشف المحتوى الخطر بالصورة/OCR أو AI اختياري لاحقًا، مع موافقة وخصوصية وتكلفة وحساسية الأخطاء.
   - المصدر: docs/MANARATAK_BOT_MASTER_v1.2.1_AR.md:609؛ الأقسام: 2؛ النطاق: 3؛ الحالة: NOT_ASSESSED.
 

@@ -490,6 +490,41 @@ for(const engine of ['json','sqlite'] as const){
    assert.equal((await f.store.snapshot()).audit.filter(a=>a.reason.startsWith('PROTECTION_MONITOR_MATCH')).length,1);
   }finally{await f.close();}
  });
+ test('edited group text is monitored without executing its command or replying ('+engine+')',async()=>{
+  const f=await fixture();try{
+   await new GroupProtectionPolicyService(f.store,f.policy,()=>NOW).save('100',{
+    chatId:CHAT,revision:1,mode:'MONITOR',rules:[{id:'word',kind:'WORD',value:'spam',enabled:true,action:'DELETE'}],allowedDomains:[],allowedPhrases:[],exemptMemberIds:[]
+   },f.policy.chatRevision(await f.store.snapshot(),CHAT),0);
+   const incoming={update_id:1000,edited_message:{message_id:10,edit_date:Math.floor(NOW/1000),chat:{id:Number(CHAT),type:'supergroup'},from:{id:300,is_bot:false},text:'/warn spam PRIVATE_EDIT_TEXT',reply_to_message:{message_id:9,from:{id:400,is_bot:false}}}};
+   const result=await f.app().handle(incoming);assert.equal(result.status,'IGNORED');assert.equal(result.plan,undefined);
+   assert.equal((await f.app().handle(incoming)).status,'DUPLICATE');
+   const state=await f.store.snapshot();assert.equal(state.audit.filter(a=>a.reason.startsWith('PROTECTION_MONITOR_MATCH')).length,1);
+   assert.equal(state.moderationOperations.length,0);assert.equal(JSON.stringify(state).includes('PRIVATE_EDIT_TEXT'),false);
+  }finally{await f.close();}
+ });
+ test('edited media captions use the same monitor and never enter admin upload ('+engine+')',async()=>{
+  const f=await fixture();try{
+   await new GroupProtectionPolicyService(f.store,f.policy,()=>NOW).save('100',{
+    chatId:CHAT,revision:1,mode:'MONITOR',rules:[{id:'word',kind:'WORD',value:'spam',enabled:true,action:'DELETE'}],allowedDomains:[],allowedPhrases:[],exemptMemberIds:[]
+   },f.policy.chatRevision(await f.store.snapshot(),CHAT),0);
+   const result=await f.app().handle({update_id:1001,edited_message:{message_id:10,edit_date:Math.floor(NOW/1000),chat:{id:Number(CHAT),type:'supergroup'},from:{id:300,is_bot:false},
+    document:{file_id:'PRIVATE_EDIT_FILE_ID',file_name:'config.json'},caption:'/upload private spam PRIVATE_EDIT_CAPTION'}});
+   assert.equal(result.plan,undefined);const state=await f.store.snapshot();
+   assert.equal(state.audit.filter(a=>a.reason.startsWith('PROTECTION_MONITOR_MATCH')).length,1);
+   assert.equal(state.importRuns.length,0);assert.equal(JSON.stringify(state).includes('PRIVATE_EDIT_CAPTION'),false);
+   assert.equal(JSON.stringify(state).includes('PRIVATE_EDIT_FILE_ID'),false);
+  }finally{await f.close();}
+ });
+ test('private, malformed or ambiguous edit envelopes cannot enter monitoring ('+engine+')',async()=>{
+  const f=await fixture();try{
+   const base={message_id:10,edit_date:Math.floor(NOW/1000),chat:{id:Number(CHAT),type:'supergroup'},from:{id:300,is_bot:false},text:'spam'};
+   const bodies=[{edited_message:{...base,chat:{id:300,type:'private'}}},{edited_message:{...base,edit_date:0}},
+    {edited_message:{...base,message_id:-1}},{edited_message:{...base,edit_date:'now'}},{edited_message:{...base,forward_origin:{type:'user'}}},
+    {edited_message:base,message:{...base,text:'/start'}},{edited_message:base,callback_query:{id:'fake'}}];
+   for(const [i,body] of bodies.entries())assert.equal((await f.app().handle({update_id:1010+i,...body})).status,'DENIED');
+   assert.equal((await f.store.snapshot()).audit.filter(a=>a.reason.startsWith('PROTECTION_MONITOR_')).length,0);
+  }finally{await f.close();}
+ });
  test('home cancels a pending editor before further private text ('+engine+')',async()=>{
   const f=await fixture();try{
    const home=await f.app().handle(cb(1,'pr:1:h'));

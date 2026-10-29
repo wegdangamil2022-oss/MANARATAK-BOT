@@ -98,7 +98,7 @@ export interface TelegramApplicationOptions {
   purge?:ModerationPurgeService;
 }
 
-type Event = {updateId: number; actorId: string; chatId: string; kind: 'private' | 'group'; text: string; entities?:unknown; messageId?:number; replyTo?:unknown; document?: IncomingDocument; protectionMedia?:ProtectionMedia; callbackData?:string; callbackQueryId?:string; callbackMessageId?:number};
+type Event = {updateId: number; actorId: string; chatId: string; kind: 'private' | 'group'; text: string; entities?:unknown; messageId?:number; replyTo?:unknown; document?: IncomingDocument; protectionMedia?:ProtectionMedia; edited?:true; callbackData?:string; callbackQueryId?:string; callbackMessageId?:number};
 const isObject=(x:unknown):x is Record<string,unknown>=>Boolean(x)&&typeof x==='object'&&!Array.isArray(x);
 const positiveId=(x:unknown): x is number=>typeof x==='number'&&Number.isSafeInteger(x)&&x>0;
 const chatId=(x:unknown): x is number=>typeof x==='number'&&Number.isSafeInteger(x)&&x!==0;
@@ -107,6 +107,14 @@ export function escapeTelegramHtml(text:string):string {
 }
 function eventFrom(value:unknown):{event?:Event;reason:string} {
   if(!isObject(value)||!Number.isSafeInteger(value.update_id)||typeof value.update_id!=='number'||value.update_id<0)return {reason:'INVALID_UPDATE_ID'};
+  if(value.edited_message!==undefined){
+   const edited=value.edited_message;
+   if(value.message!==undefined||value.callback_query!==undefined||!isObject(edited)||!isObject(edited.chat)||
+    typeof edited.chat.type!=='string'||!['group','supergroup'].includes(edited.chat.type)||!positiveId(edited.message_id)||
+    typeof edited.edit_date!=='number'||!Number.isSafeInteger(edited.edit_date)||edited.edit_date<=0)return {reason:'INVALID_GROUP_EDIT'};
+   const parsed=eventFrom({update_id:value.update_id,message:edited});
+   return parsed.event?{event:{...parsed.event,edited:true},reason:'VALID'}:parsed;
+  }
   // Only a callback from an actual bot-sent message may navigate this
   // read-only owner UI. A Telegram callback ID is ephemeral, not a grant.
   if(value.callback_query!==undefined){
@@ -299,6 +307,11 @@ export class TelegramUpdateApplication {
      await new GroupProtectionPolicyService(this.opts.store,this.opts.policy,this.clock).observeIncomingMessage(
       {chatId:event.chatId,memberId:event.actorId,type:media.type,caption:media.caption},media.entities,'b3-webhook:'+this.opts.botId+':'+event.updateId);
      return media.type==='DOCUMENT'?{status:'DENIED',reason:'PRIVATE_ADMIN_UPLOAD_ONLY'}:{status:'IGNORED',reason:'PROTECTION_MEDIA_MONITOR_ONLY'};
+    }
+    if(event.edited){
+     await new GroupProtectionPolicyService(this.opts.store,this.opts.policy,this.clock).observeIncomingText(
+      event.actorId,event.chatId,event.text,event.entities,'b3-webhook:'+this.opts.botId+':'+event.updateId);
+     return {status:'IGNORED',reason:'PROTECTION_EDIT_MONITOR_ONLY'};
     }
     if(event.document)return this.handleDocument(event);
     const {actorId,chatId,kind,text}=event;
