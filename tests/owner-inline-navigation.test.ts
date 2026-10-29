@@ -64,6 +64,16 @@ test('owner inline home and section pagination are strict bounded Telegram marku
    'mi:1:h\n','mi:1:s:01:-1','mi:2:h'])assert.equal(ownerInlineRender(bad),null,bad);
 });
 for(const engine of ['json','sqlite'] as const){
+ test('start explains how to open transparent menus without exposing owner entry to students ('+engine+')',async()=>{
+  const f=await fixture(engine);try{
+   const owner=await f.app.handle(message(100,100,'/start'));
+   assert.match(owner.plan?.text??'',/\/ownerinline/);
+   assert.match(owner.plan?.text??'',/\/studentinline/);
+   const student=await f.app.handle(message(101,300,'/start'));
+   assert.match(student.plan?.text??'',/\/studentinline/);
+   assert.doesNotMatch(student.plan?.text??'',/\/ownerinline/);
+  }finally{await f.close();}
+ });
  test('inline callback re-authorizes owner every time and does not execute admin action ('+engine+')',async()=>{
   const f=await fixture(engine);try{
    const opened=await f.app.handle(message(1,100,'/ownerinline'));

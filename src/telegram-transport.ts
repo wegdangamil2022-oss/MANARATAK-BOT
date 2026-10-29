@@ -472,6 +472,8 @@ export class TelegramUpdateApplication {
       const owner=this.opts.policy.isOwner(actorId);
       const main=()=>result('<b>أهلًا بك في بوت منارتك 🎓</b>\n'
         +'اختر أحد الأقسام من الأزرار أسفل المحادثة. تظهر الموارد المعتمدة فقط.\n'
+        +'لتصفح المكتبة بالأزرار الشفافة استخدم /studentinline.\n'
+        +(owner?'لفتح لوحة المالك الشفافة استخدم /ownerinline.\n':'')
         +'يمكنك أيضًا استخدام /categories private و /help.\n'
         +'المساعد الذكي وبعض الخدمات ما زالت قيد التطوير.',
         mainMenuKeyboard(owner));
