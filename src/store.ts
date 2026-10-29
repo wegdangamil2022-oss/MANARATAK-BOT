@@ -3,6 +3,7 @@ import { dirname } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { DatabaseSync, backup } from 'node:sqlite';
 import { resolve, isAbsolute } from 'node:path';
+import {isValidGroupProtectionRecord,type GroupProtectionRecord} from './protection-rules.js';
 
 export type Capability = 'ai.ask' | 'ai.settings.manage' | 'content.publish' | 'content.upload' | 'chat.manage' | 'education.navigate' | 'owner.dashboard' | 'subscription.verify' | 'support.use';
 export type GroupAIMode = 'OFF' | 'OWNER_MENTION' | 'STAFF_MENTION' | 'ALL_MENTION';
@@ -142,6 +143,8 @@ export interface B6BudgetAttempt {
 }
 export interface BotState {
   schemaVersion: 8;
+  /** Optional additive per-group monitor policy, validated on every read/write. */
+  protectionPolicies?:GroupProtectionRecord[];
   chats: Chat[];
   grants: Grant[];
   privateAI: PrivateAIMode;
@@ -220,6 +223,9 @@ export class BotStore {
       previous.purgeJobs = [];
     }
     if (previous.schemaVersion !== 8 ||
+      (previous.protectionPolicies!==undefined&&(!Array.isArray(previous.protectionPolicies)||
+       previous.protectionPolicies.length>500||previous.protectionPolicies.some(row=>!isValidGroupProtectionRecord(row))||
+       new Set(previous.protectionPolicies.map((row:GroupProtectionRecord)=>row.policy.chatId)).size!==previous.protectionPolicies.length))||
       (previous.b6TelegramKeyBinding!==undefined&&
        (typeof previous.b6TelegramKeyBinding!=='string'||
         !/^[a-f0-9]{64}$/u.test(previous.b6TelegramKeyBinding)||
