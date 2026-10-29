@@ -3,6 +3,7 @@ import type {Policy} from './policy.js';
 import type {OwnerInlineScreen,TelegramInlineKeyboard} from './telegram-inline-owner.js';
 import {reversalInventoryDigest,renderReversalInventory} from './moderation-reversal-inventory.js';
 import {ambiguousModerationChatIds} from './moderation-review-integrity.js';
+import {delegationGroupEntry} from './telegram-inline-delegation-edit.js';
 
 /** Read-only owner group browser. The selector is NEVER a permission token.
  * All screens are rebuilt from current durable state after checking the owner.
@@ -109,6 +110,8 @@ export async function renderOwnerInlineGroups(store:BotStore,policy:Policy,actor
    +'إصدار سياسة المجموعة: '+chat.version+'\n'
    +'لا يوجد تحقق حي من Telegram. لا توجد أوامر حظر أو نشر في هذه الشاشة.';
   const actionRows:Button[][]=[];
+  const delegation=delegationGroupEntry(state,chat.id,chat.version);
+  if(delegation)actionRows.push([button('➕ تفويض في هذه المجموعة',delegation)]);
   if(chat.scopes.includes('moderation')&&Number.isSafeInteger(Number(chat.id))&&chat.id.length<=17)
    actionRows.push([button('🛡️ إدارة حماية هذه المجموعة','gp:1:p:'+chat.id+':'+chat.version)]);
   if(chat.scopes.includes('moderation')&&Number.isSafeInteger(Number(chat.id))&&chat.id.length<=17&&!state.protectionPolicies?.some(r=>r.policy.chatId===chat.id))

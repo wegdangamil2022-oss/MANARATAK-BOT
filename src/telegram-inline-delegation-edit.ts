@@ -15,6 +15,13 @@ const button=(text:string,callback_data:string)=>({text,callback_data});
 const ui=(text:string,rows:{text:string;callback_data:string}[][]):OwnerInlineScreen=>({text,keyboard:{inline_keyboard:rows}});
 const escape=(v:string)=>v.replace(/&/gu,'&amp;').replace(/</gu,'&lt;').replace(/>/gu,'&gt;').replace(/"/gu,'&quot;');
 const allGroups=(s:BotState):Chat[]=>s.chats.filter(c=>c.approved&&/^-[1-9][0-9]{0,18}$/u.test(c.id)&&Number.isSafeInteger(Number(c.id))&&Number.isSafeInteger(c.version)&&c.version>=1&&c.version<=9999999999&&s.chats.filter(x=>x.id===c.id).length===1).sort((a,b)=>a.id.localeCompare(b.id));
+/** Resolve the selected group against the exact same ordered scope set used
+ * by the delegation editor. The returned locator is not authorization. */
+export function delegationGroupEntry(s:BotState,id:string,version:number):string|null{
+ const groups=allGroups(s),index=groups.findIndex(c=>c.id===id&&c.version===version);
+ if(index<0||Math.floor(index/8)>999||!groups[index]!.scopes.some(scope=>['assistant','publishing','navigation','moderation'].includes(scope)))return null;
+ return 'od:1:b:'+id+':'+version+':'+Math.floor(index/8);
+}
 const INPUT='delegation.input:',CONFIRM='delegation.confirm:';
 export class OwnerDelegationEditor{
  constructor(private store:BotStore,private policy:Policy,private clock:()=>number=Date.now){}

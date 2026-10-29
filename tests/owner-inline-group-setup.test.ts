@@ -38,6 +38,16 @@ for(const engine of ['json','sqlite'] as const){
   await f.policy.revokeChat('100',CHAT);
   assert.equal((await f.app().handle(cb(5,selector))).status,'DENIED');
  }finally{await f.close();}});
+ test(engine+' group card opens scoped delegation for the selected group',async()=>{const f=await fixture();try{
+  await f.policy.approveChat('100','-100456',['moderation']);
+  const home=await f.app().handle(cb(1,'mi:1:i:01:01'));
+  const detail=await f.app().handle(cb(2,button(home,CHAT))),selector=button(detail,'تفويض في هذه المجموعة');
+  const options=await f.app().handle(cb(3,selector));assert.equal(options.status,'APPLIED');
+  assert.match(options.plan!.text,new RegExp(CHAT));assert.doesNotMatch(options.plan!.text,/-100456/);
+  assert.ok(button(options,'إدارة المجموعة'));
+  await f.policy.revokeChat('100',CHAT);
+  assert.equal((await f.app().handle(cb(4,selector))).status,'DENIED');
+ }finally{await f.close();}});
  test(engine+' setup resumes, tests and commits local monitoring once',async()=>{const f=await fixture();try{
   const first=await begin(f);assert.match(first.plan!.text,/لم تُفحص حيًا/);
   assert.equal((await f.store.snapshot()).protectionPolicies,undefined);
