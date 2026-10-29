@@ -130,6 +130,7 @@ export class OwnerTelegramCategoryMenu{
    ];
    return screen('<b>تفاصيل القسم التعليمي 🗂️</b>\n'
     +'القسم: '+safe(cat.title)+'\n'
+    +'اللغة: '+safe(cat.language??'ar',35)+'\n'
     +'المعرّف: '+safe(cat.id,64)+'\n'
     +'النطاق: '+safe(cat.scope,32)+'\n'
     +'الحالة المحلية: '+currentStatus+'\n'

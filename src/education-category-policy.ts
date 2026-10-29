@@ -1,6 +1,9 @@
 import {createHash} from 'node:crypto';
 import type {BotState,EducationCategory} from './store.js';
 const idPattern=/^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/u;
+export function validCategoryLanguage(value:unknown):value is string{
+ try{return typeof value==='string'&&/^[a-z]{2,3}(?:-[A-Za-z0-9]{2,8}){0,3}$/u.test(value)&&Intl.getCanonicalLocales(value).length===1;}catch{return false;}
+}
 /** Compact text label token, uniquely resolved against current authorized
  * categories on each tap. Not an authentication credential.
  */
@@ -14,7 +17,7 @@ export function ownerCategoryChoiceToken(id:string):string{
  */
 export function categoryVisibilityFingerprint(cat:EducationCategory):string{
  return '~'+createHash('sha256').update(JSON.stringify([
-  cat.id,cat.scope,cat.parentId,cat.title,cat.order,cat.enabled,cat.revision??0
+  cat.id,cat.scope,cat.parentId,cat.title,cat.order,cat.enabled,cat.revision??0,...(cat.language===undefined?[]:[cat.language])
  ]),'utf8').digest('hex').slice(0,16);
 }
 

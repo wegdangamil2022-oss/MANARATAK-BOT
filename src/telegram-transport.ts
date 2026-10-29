@@ -25,6 +25,8 @@ import {renderOwnerInlineFAQ} from './telegram-inline-faq.js';
 import {renderOwnerInlineLibrary} from './telegram-inline-library.js';
 import {renderOwnerInlineStudio,studioOwnerEntry,studioDraftScreen} from './telegram-inline-studio.js';
 import {ButtonStudioService} from './button-studio.js';
+import {renderOwnerInlineCategories} from './telegram-inline-categories.js';
+import {EducationCategoryEditor} from './education-category-editor.js';
 import {renderOwnerInlineGroups} from './telegram-inline-groups.js';
 import {OwnerInlineGroupControls} from './telegram-inline-group-controls.js';
 import {renderOwnerInlineDelegations} from './telegram-inline-delegations.js';
@@ -336,6 +338,7 @@ export class TelegramUpdateApplication {
      // Reauthorize the real sender at every tap. Never dispatch a privileged
      // command from untrusted callback_data or from a group context.
      if(kind!=='private'||actorId!==chatId)return {status:'DENIED',reason:'PRIVATE_CALLBACK_ONLY'};
+     if(this.opts.policy.isOwner(actorId)&&!event.callbackData.startsWith('ec:1:')&&event.callbackData!=='mi:1:i:10:16')await new EducationCategoryEditor(this.opts.store,this.opts.policy,this.clock).cancel(actorId);
      if(event.callbackData.startsWith('pr:1:')||/^mi:1:i:02:(?:0[5678]|12)$/u.test(event.callbackData)){
       if(/^mi:1:i:02:(?:0[5678]|12)$/u.test(event.callbackData)&&!this.opts.policy.isOwner(actorId))return {status:'DENIED',reason:'OWNER_ONLY'};
       const view=await new TelegramProtectionEditor(this.opts.store,this.opts.policy,this.clock).handle(event.callbackData,actorId);
@@ -363,6 +366,10 @@ export class TelegramUpdateApplication {
        plan:this.plan(chatId,screen.text,undefined,screen.keyboard,event.callbackMessageId)};
      }
      if(!this.opts.policy.isOwner(actorId))return {status:'DENIED',reason:'OWNER_ONLY'};
+     if(event.callbackData==='mi:1:i:10:16'||event.callbackData.startsWith('ec:1:')){
+      const screen=await renderOwnerInlineCategories(this.opts.store,this.opts.policy,this.opts.education,actorId,event.callbackData,this.clock);
+      return screen?{status:'APPLIED',reason:'RESPONSE_PLANNED_ONLY',plan:this.plan(chatId,screen.text,undefined,screen.keyboard,event.callbackMessageId)}:{status:'DENIED',reason:'CATEGORY_UI_STALE_OR_UNAUTHORIZED'};
+     }
      if(studioOwnerEntry(event.callbackData)||event.callbackData.startsWith('st:1:')){
       const screen=await renderOwnerInlineStudio(this.opts.store,this.opts.policy,actorId,event.callbackData,this.clock);
       if(!screen)return {status:'DENIED',reason:'STUDIO_STALE_OR_UNAUTHORIZED'};
@@ -579,6 +586,12 @@ export class TelegramUpdateApplication {
       const m=menuLabels;
       const owner=this.opts.policy.isOwner(actorId);
       if(owner){
+       const categories=new EducationCategoryEditor(this.opts.store,this.opts.policy,this.clock);
+       if(text.startsWith('/')||Object.values(m).some(label=>label===text)||isOwnerMenuText(text))await categories.cancel(actorId);
+       else try{
+        const preview=await categories.preview(actorId,text);
+        if(preview)return {status:'APPLIED',reason:'CATEGORY_TEXT_PREVIEW',plan:this.plan(chatId,'<b>معاينة '+(preview.kind==='PARENT'?'تغيير القسم الأب':preview.kind==='RENAME'?'تغيير الاسم':preview.kind==='LANG'?'تغيير اللغة':'إنشاء قسم')+'</b>\nالقيمة: '+escapeTelegramHtml(preview.name)+'\nلم يُحفظ التغيير بعد. ينتهي التأكيد بعد دقيقتين.',undefined,{inline_keyboard:[[{text:'✅ تأكيد الحفظ',callback_data:'ec:1:a:'+preview.ref.slice(2)}],[{text:'إلغاء','callback_data':'ec:1:h'}]]})};
+       }catch{return {status:'DENIED',reason:'CATEGORY_TEXT_INVALID_OR_STALE',plan:this.plan(chatId,'تعذّر قبول الاسم أو انتهت خطوة الإدخال. افتح التصنيف الحالي وأعد المحاولة.')};}
        const studio=new ButtonStudioService(this.opts.store,this.opts.policy,this.clock);
        const pending=(await this.opts.store.snapshot()).buttonStudio?.inputs.some(i=>i.actor===actorId);
        if(pending){

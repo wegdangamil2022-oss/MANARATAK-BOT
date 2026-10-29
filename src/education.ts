@@ -75,7 +75,7 @@ export class EducationService {
       throw Error('CATEGORY_VISIBILITY_STALE');
     await this.store.transaction(s=>{
       const cat=s.educationCategories.find(x=>x.id===id);
-      if(!cat||!this.scopeReady(s,cat.scope))throw Error('CATEGORY_VISIBILITY_STALE');
+      if(!this.policy.privateFeature(s,'owner.dashboard',actor)||!cat||!this.scopeReady(s,cat.scope))throw Error('CATEGORY_VISIBILITY_STALE');
       const currentEpoch=cat.scope==='private'?0:this.policy.chatRevision(s,cat.scope);
       if(currentEpoch!==scopeRevision||(cat.revision??0)!==categoryRevision||
          categoryVisibilityFingerprint(cat)!==proof||cat.enabled===enabled)
@@ -107,7 +107,7 @@ export class EducationService {
       throw Error('CATEGORY_ORDER_STALE');
     await this.store.transaction(s=>{
       const cat=s.educationCategories.find(c=>c.id===id);
-      if(!cat||!this.scopeReady(s,cat.scope))throw Error('CATEGORY_ORDER_STALE');
+      if(!this.policy.privateFeature(s,'owner.dashboard',actor)||!cat||!this.scopeReady(s,cat.scope))throw Error('CATEGORY_ORDER_STALE');
       const epoch=cat.scope==='private'?0:this.policy.chatRevision(s,cat.scope);
       if(epoch!==scopeRevision||(cat.revision??0)!==categoryRevision||
         categoryOrderFingerprint(s,cat)!==proof)throw Error('CATEGORY_ORDER_STALE');
