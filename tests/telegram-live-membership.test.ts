@@ -200,3 +200,42 @@ test('live membership preflight honors group approval revoked during asynchronou
  assert.equal(x.status,'DENIED');assert.equal(x.deliveryKey,undefined);
  await rm(directory,{recursive:true,force:true});
 });
+
+test('live server owner entry uses approved inline dashboard with legacy tools still reachable (offline HTTP)',async()=>{
+ const directory=await mkdtemp(join(tmpdir(),'manaratak-inline-entry-'));
+ const path=join(directory,'state.sqlite'),safetyFile=join(directory,'safety.flag');
+ let server:Awaited<ReturnType<typeof createLiveTelegramServer>>|undefined;
+ try{
+  await writeFile(safetyFile,'RUN\n',{mode:0o600});
+  await new BotStore(path,{engine:'sqlite'}).transaction(()=>{});
+  await chmod(path,0o600);
+  const env={BOT_ENV:'production',TELEGRAM_ENABLED:'true',TELEGRAM_REPLY_DELIVERY_ENABLED:'true',
+   BOT_OWNER_ID:OWNER,BOT_ID:'inline-test-bot',BOT_USERNAME:'ManaratakBot',BOT_STATE_FILE:path,
+   TELEGRAM_BOT_TOKEN:TOKEN,TELEGRAM_WEBHOOK_SECRET:SECRET,TELEGRAM_LISTEN_PORT:'8787',
+   TELEGRAM_WEBHOOK_PUBLIC_URL:'https://webhook.manaratak-ops.net/telegram/webhook',TELEGRAM_SAFETY_FILE:safetyFile};
+  const {request,calls}=fakeRequester(url=>{
+   assert.ok(url.endsWith('/sendMessage'),'unexpected external method');
+   return new Response(JSON.stringify({ok:true,result:{message_id:91,chat:{id:100}}}),{status:200});
+  });
+  server=await createLiveTelegramServer(loadLiveTelegramConfig(env),request);
+  server.listen(0,'127.0.0.1');await once(server,'listening');
+  const addr=server.address();assert.ok(addr&&typeof addr!=='string');
+  const endpoint='http://127.0.0.1:'+addr.port+'/telegram/webhook';
+  let update=500;
+  for(const text of ['🔐 لوحة المالك','/ownerlegacy']){
+   const response=await fetch(endpoint,{method:'POST',headers:{'content-type':'application/json',
+    'x-telegram-bot-api-secret-token':SECRET},body:JSON.stringify({update_id:update++,message:{
+     message_id:500,from:{id:100,is_bot:false},chat:{id:100,type:'private'},text}})});
+   assert.equal(response.status,200);
+   assert.deepEqual(await response.json(),{ok:true,status:'APPLIED'});
+  }
+  assert.equal(calls.length,2);
+  const inline=calls[0]!.body.reply_markup as {inline_keyboard?:unknown;keyboard?:unknown};
+  assert.ok(Array.isArray(inline.inline_keyboard));assert.equal(inline.keyboard,undefined);
+  const legacy=calls[1]!.body.reply_markup as {keyboard?:unknown};
+  assert.ok(Array.isArray(legacy.keyboard));
+ }finally{
+  if(server?.listening){server.close();await once(server,'close');}
+  await rm(directory,{recursive:true,force:true});
+ }
+});

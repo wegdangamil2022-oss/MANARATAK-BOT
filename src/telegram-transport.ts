@@ -79,6 +79,8 @@ export interface TelegramApplicationOptions {
   answerPreflight?:B6AnswerPreflight;
   /** Optional trusted operator STOP/RUN file for owner-private emergency view. */
   moderationSafetyFile?:string;
+  /** Inline is enabled by the live server; legacy remains the default for existing integrations. */
+  ownerMenuMode?:'inline'|'legacy';
 }
 
 type Event = {updateId: number; actorId: string; chatId: string; kind: 'private' | 'group'; text: string; entities?:unknown; messageId?:number; replyTo?:unknown; document?: IncomingDocument; callbackData?:string; callbackQueryId?:string; callbackMessageId?:number};
@@ -473,14 +475,14 @@ export class TelegramUpdateApplication {
       const main=()=>result('<b>أهلًا بك في بوت منارتك 🎓</b>\n'
         +'اختر أحد الأقسام من الأزرار أسفل المحادثة. تظهر الموارد المعتمدة فقط.\n'
         +'لتصفح المكتبة بالأزرار الشفافة استخدم /studentinline.\n'
-        +(owner?'لفتح لوحة المالك الشفافة استخدم /ownerinline.\n':'')
+        +(owner?'لفتح لوحة المالك الشفافة استخدم /ownerinline، ولأدوات الإدارة القديمة /ownerlegacy.\n':'')
         +'يمكنك أيضًا استخدام /categories private و /help.\n'
         +'المساعد الذكي وبعض الخدمات ما زالت قيد التطوير.',
         mainMenuKeyboard(owner));
       if(cmd==='/start'||cmd==='/help'||text===m.home||text===m.back)return main();
-      // Opt-in migration path; existing authorized owner commands and legacy
-      // reply keyboards are left functional until their workflows are ported.
-      if(text==='/ownerinline'){
+      // The runtime selects the inline owner entry; direct integrations can
+      // retain legacy mode. Existing authorized tools remain reachable.
+      if(text==='/ownerinline'||text===m.owner&&this.opts.ownerMenuMode==='inline'){
        if(!owner)return {status:'DENIED',reason:'OWNER_ONLY'};
        const view=ownerInlineHome();
        return {status:'APPLIED',reason:'RESPONSE_PLANNED_ONLY',
@@ -500,12 +502,12 @@ export class TelegramUpdateApplication {
        return {status:'APPLIED',reason:'RESPONSE_PLANNED_ONLY',
         plan:this.plan(chatId,screen.text,undefined,screen.keyboard)};
       }
-      if(isOwnerMenuText(text)){
+      if(text==='/ownerlegacy'||isOwnerMenuText(text)){
         if(!owner)return {status:'DENIED',reason:'OWNER_ONLY'};
         const screen=await new OwnerTelegramMenu(
           this.opts.store,this.opts.policy,this.opts.education,this.opts.admin,
           this.opts.platformCatalog,this.clock
-        ).handle(text,adminCtx);
+        ).handle(text==='/ownerlegacy'?m.owner:text,adminCtx);
         if(!screen)return {status:'DENIED',reason:'OWNER_MENU_UNAVAILABLE'};
         return result(screen.text,screen.keyboard);
       }

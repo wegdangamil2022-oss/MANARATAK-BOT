@@ -1,5 +1,7 @@
 # مصفوفة التتبع / القبول
 
+تحديث الجرد المحلي: [المرحلة الأولى](PHASE1_REALITY_AUDIT_AR.md) و[253 زرًا](PHASE1_BUTTON_INVENTORY_AR.md). بداية المرحلة الثانية: [مدخل المالك الشفاف](PHASE2_INLINE_ENTRY_AR.md). نتائج الجرد لا تعني تنفيذ الأزرار المصنفة DESIGN_ONLY.
+
 مرجع: MANARATAK_BOT_MASTER_v1.2.1_AR.md و START_HERE_MANARATAK_BOT_v1.2.1_AR.md على `docs/bot-specs-v1.2.1`.
 
 | المتطلب أو الاختبار | التطبيق | الحالة | الإثبات |

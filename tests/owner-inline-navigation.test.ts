@@ -25,13 +25,14 @@ const callback=(updateId:number,actor:number,data:string,group=false)=>({
 });
 const buttons=(screen:{keyboard:{inline_keyboard:readonly (readonly {text:string;callback_data:string}[])[]}})=>
  screen.keyboard.inline_keyboard.flat();
-async function fixture(engine:'json'|'sqlite'='json'){
+async function fixture(engine:'json'|'sqlite'='json',inlineDefault=false){
  const dir=await mkdtemp(join(tmpdir(),'manaratak-owner-inline-'));
  const store=new BotStore(join(dir,engine==='sqlite'?'state.sqlite':'state.json'),{engine});
  const policy=new Policy(store,'100'),education=new EducationService(store,policy);
  const admin=new EducationAdminFacade(store,policy,education);
  const faq=new ApprovedAnswerService(store,policy),links=new ResourceLinkService(store,policy);
- const app=new TelegramUpdateApplication({store,policy,education,admin,faq,links,
+ const migrationOptions=inlineDefault?{ownerMenuMode:'inline' as const}:{};
+ const app=new TelegramUpdateApplication({store,policy,education,admin,faq,links,...migrationOptions,
   botId:'bot-main',botUsername:'ManaratakBot',membership:async()=> 'UNKNOWN'});
  return {store,app,close:()=>rm(dir,{recursive:true,force:true})};
 }
@@ -64,6 +65,20 @@ test('owner inline home and section pagination are strict bounded Telegram marku
    'mi:1:h\n','mi:1:s:01:-1','mi:2:h'])assert.equal(ownerInlineRender(bad),null,bad);
 });
 for(const engine of ['json','sqlite'] as const){
+ test('inline mode opens approved owner dashboard from existing button and preserves legacy tools ('+engine+')',async()=>{
+  const f=await fixture(engine,true);try{
+   const opened=await f.app.handle(message(200,100,'🔐 لوحة المالك'));
+   assert.equal(opened.status,'APPLIED');
+   assert.equal(isValidTelegramInlineKeyboard(opened.plan?.inlineMarkup),true);
+   assert.equal(opened.plan?.replyMarkup,undefined);
+   const legacy=await f.app.handle(message(201,100,'/ownerlegacy'));
+   assert.equal(legacy.status,'APPLIED');
+   assert.ok(legacy.plan?.replyMarkup);
+   let updateId=202;
+   for(const command of ['🔐 لوحة المالك','/ownerlegacy','/ownerinline'])
+    assert.equal((await f.app.handle(message(updateId++,300,command))).status,'DENIED');
+  }finally{await f.close();}
+ });
  test('start explains how to open transparent menus without exposing owner entry to students ('+engine+')',async()=>{
   const f=await fixture(engine);try{
    const owner=await f.app.handle(message(100,100,'/start'));
