@@ -29,7 +29,8 @@
     "demo:faq": "npm run build && node dist/src/faq-demo.js",
     "demo:publishing": "npm run build && node dist/src/publishing-demo.js",
     "demo:preview-migration": "npm run build && node dist/src/preview-migration-demo.js",
-    "audit:phase1": "npm run build && node scripts/audit-phase1.mjs"
+    "audit:phase1": "npm run build && node scripts/audit-phase1.mjs",
+    "demo:moderation": "npm run build && node dist/src/moderation-commands-demo.js"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",

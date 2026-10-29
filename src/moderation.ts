@@ -251,6 +251,10 @@ export class ModerationService {
   }
   async issueWarning(actorId: string, chatId: string, memberId: string, reference: string): Promise<{ status: 'ADDED' | 'NO_CHANGE'; count: number } | { status: 'DENIED'; count: null }> {
     if (!reference || reference.length > 80) throw new Error('Invalid warning reference');
+    // A local warning must not target a Telegram administrator or bypass
+    // missing bot authority. Recheck internal authorization in the transaction
+    // after these awaited external reads, just as sanction reason writes do.
+    if (!await this.check(actorId,chatId,memberId))return {status:'DENIED',count:null};
     return this.store.transaction(s => {
       const count = () => s.warnings.filter(w => byTarget(w, chatId, memberId) && w.active).length;
       if (!this.authorized(s, actorId, chatId, memberId)) return { status: 'DENIED' as const, count: null };

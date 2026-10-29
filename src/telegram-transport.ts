@@ -42,6 +42,8 @@ import {privateFAQSearchLabel,parsePrivateFAQSearchQuery,parsePrivateFAQSearchPa
  privateFAQSearchReturnLabel,parsePrivateFAQSearchReturn} from './telegram-private-faq-search.js';
 import {escapeTelegramListPreview} from './telegram-preview.js';
 import {parseB6ExplicitMention} from './b6-telegram-mention.js';
+import type {ModerationService} from './moderation.js';
+import {parseReplyModerationCommand,executeReplyModerationCommand} from './telegram-moderation-commands.js';
 import {parseB6OwnerReplyTarget} from './b6-telegram-owner-reply.js';
 
 /** Inbound-only boundary. A test double may supply bytes; there is intentionally no live HTTP implementation. */
@@ -83,6 +85,8 @@ export interface TelegramApplicationOptions {
   ownerMenuMode?:'inline'|'legacy';
   /** Existing student catalogue buttons open filtered inline menus in the live runtime. */
   studentMenuMode?:'inline'|'legacy';
+  /** Explicitly injected moderation adapter; absent means commands cannot execute. */
+  moderation?:ModerationService;
 }
 
 type Event = {updateId: number; actorId: string; chatId: string; kind: 'private' | 'group'; text: string; entities?:unknown; messageId?:number; replyTo?:unknown; document?: IncomingDocument; callbackData?:string; callbackQueryId?:string; callbackMessageId?:number};
@@ -383,6 +387,14 @@ export class TelegramUpdateApplication {
      }
      return {status:'APPLIED',reason:'RESPONSE_PLANNED_ONLY',
       plan:this.plan(chatId,view.text,undefined,view.keyboard,event.callbackMessageId)};
+    }
+    if(kind==='group'){
+     const command=parseReplyModerationCommand(text,this.opts.botUsername,chatId,event.messageId,event.replyTo);
+     if(command.status==='INVALID')return {status:'DENIED',reason:'INVALID_MODERATION_COMMAND'};
+     if(command.status==='COMMAND'){
+      if(!this.opts.moderation)return {status:'DENIED',reason:'MODERATION_NOT_CONFIGURED'};
+      return executeReplyModerationCommand(this.opts.moderation,actorId,chatId,command.command);
+     }
     }
     if(kind==='group'&&!this.opts.policy.canUseChat(await this.opts.store.snapshot(),chatId,'navigation'))return {status:'DENIED',reason:'CHAT_NOT_AUTHORIZED'};
     const adminCtx:VerifiedAdminContext={origin:'TELEGRAM_PRIVATE',actorId,chatId,verified:true};
@@ -956,7 +968,8 @@ export class TelegramUpdateApplication {
       if(fence)return {status:'DENIED',reason:fence};
       return result(`<b>إجابة من موارد منارتك المعتمدة</b>\n${escapeTelegramHtml(ans.answer)}`,undefined,groupAnswerAccess());
     }
-    // No admin command may be executed in groups; no AI or subscription bypass.
+    // Only the explicit injected reply-moderation handler above can execute
+    // group admin commands; all other group admin text remains unsupported.
     return {status:'IGNORED',reason:'UNSUPPORTED_COMMAND'};
   }
   async handle(payload:unknown):Promise<TelegramResult> {
