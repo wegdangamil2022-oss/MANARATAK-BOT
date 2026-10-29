@@ -10,6 +10,7 @@ import {EducationService} from '../dist/src/education.js';
 import {EducationAdminFacade} from '../dist/src/education-admin.js';
 import {ApprovedAnswerService,ResourceLinkService} from '../dist/src/education-interactions.js';
 import {TelegramUpdateApplication} from '../dist/src/telegram-transport.js';
+import {studioOwnerEntry} from '../dist/src/telegram-inline-studio.js';
 
 // Explicit offline audit. No deployment, credentials, real groups or network.
 const doc=(await readFile(new URL('../docs/أزرار_منارتك.md',import.meta.url),'utf8')).replace(/\r\n/g,'\n');
@@ -39,7 +40,7 @@ for(let s=0;s<ownerInlineSections.length;s++){
   assert.ok(screen.keyboard.inline_keyboard.flat().some(b=>b.callback_data==='mi:1:s:'+key+':'+(s===5?(i<9?0:1):Math.floor(i/8))),route+' back');
   const special=new Set(['mi:1:i:03:01','mi:1:i:02:01','mi:1:i:02:15','mi:1:i:02:16','mi:1:i:02:13','mi:1:i:02:05','mi:1:i:02:06','mi:1:i:02:07','mi:1:i:02:08','mi:1:i:02:12']);
   rows.push({section:key,sectionTitle:section.title,button:code(i+1),label:labels[i],callback:route,
-   status:ownerInlineLinkedReadOnly(route)!==null||special.has(route)?'LOCAL_VIEW':'DESIGN_ONLY'});
+   status:studioOwnerEntry(route)?'LOCAL_STUDIO_DRAFT':ownerInlineLinkedReadOnly(route)!==null||special.has(route)?'LOCAL_VIEW':'DESIGN_ONLY'});
  }
 }
 assert.equal(rows.length,253);
@@ -83,11 +84,12 @@ const report={schemaVersion:1,sourceCommit:execFileSync('git',['rev-parse','HEAD
  officialPlan:'docs/MANARATAK_BOT_MASTER_v1.2.1_AR.md',officialButtons:'docs/أزرار_منارتك.md',
  scope:'LOCAL_PHASE1_INVENTORY_ONLY',liveTelegram:'NOT_TESTED_DEFERRED_BY_OWNER',networkCalls,
  ownerSections:16,ownerButtons:253,localViews:rows.filter(r=>r.status==='LOCAL_VIEW').length,
+ localDraftEditors:rows.filter(r=>r.status==='LOCAL_STUDIO_DRAFT').length,
  designOnly:rows.filter(r=>r.status==='DESIGN_ONLY').length,engines,buttons:rows};
 if(process.argv.includes('--write')){
  await writeFile(new URL('../docs/PHASE1_BUTTON_INVENTORY.json',import.meta.url),JSON.stringify(report,null,2)+'\n');
  const lines=['# جرد أزرار المرحلة الأولى','',
-  'هذا جرد للنسخة المحلية: LOCAL_VIEW شاشة مرتبطة ببيانات محلية؛ DESIGN_ONLY مواصفة للعرض فقط. لا يثبت أي تصنيف تشغيل الوظيفة على Telegram.',
+  'هذا جرد للنسخة المحلية: LOCAL_VIEW شاشة مرتبطة ببيانات محلية؛ LOCAL_STUDIO_DRAFT مدخل لتحرير مسودات الاستوديو محليًا مع بقاء تفاصيل غير مكتملة؛ DESIGN_ONLY مواصفة للعرض فقط. لا يثبت أي تصنيف تشغيل الوظيفة على Telegram.',
   '', '| القسم | الزر | الحالة المحلية | callback |','|---|---|---|---|',
   ...rows.map(r=>'| '+r.section+' — '+r.sectionTitle+' | '+r.button+' — '+r.label+' | '+r.status+' | `'+r.callback+'` |')];
  await writeFile(new URL('../docs/PHASE1_BUTTON_INVENTORY_AR.md',import.meta.url),lines.join('\n')+'\n');

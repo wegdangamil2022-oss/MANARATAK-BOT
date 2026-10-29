@@ -23,6 +23,8 @@ import {OwnerTelegramMenu,isOwnerMenuText} from './telegram-owner-menu.js';
 import {ownerInlineHome,ownerInlineRender,ownerInlineLinkedReadOnly,type TelegramInlineKeyboard} from './telegram-inline-owner.js';
 import {renderOwnerInlineFAQ} from './telegram-inline-faq.js';
 import {renderOwnerInlineLibrary} from './telegram-inline-library.js';
+import {renderOwnerInlineStudio,studioOwnerEntry,studioDraftScreen} from './telegram-inline-studio.js';
+import {ButtonStudioService} from './button-studio.js';
 import {renderOwnerInlineGroups} from './telegram-inline-groups.js';
 import {OwnerInlineGroupControls} from './telegram-inline-group-controls.js';
 import {renderOwnerInlineDelegations} from './telegram-inline-delegations.js';
@@ -73,7 +75,7 @@ interface IncomingDocument {
 }
 /** Offline B3 application adapter: creates plans, NEVER sends a message or connects to Telegram. */
 export interface TelegramReplyPlan { chatId: string; parseMode: 'HTML'; text: string;
- replyMarkup?:TelegramReplyKeyboard; inlineMarkup?:TelegramInlineKeyboard; editMessageId?:number; }
+ replyMarkup?:TelegramReplyKeyboard; inlineMarkup?:TelegramInlineKeyboard; studioMarkup?:import('./telegram-studio-rich.js').StudioNativeKeyboard; editMessageId?:number; }
 export interface TelegramResult { status: 'APPLIED' | 'DUPLICATE' | 'DENIED' | 'IGNORED' | 'UNKNOWN'; reason: string; plan?: TelegramReplyPlan; deliveryKey?: string; callbackQueryId?:string; }
 type ProcessedReply={status:TelegramResult['status'];reason:string;plan?:TelegramReplyPlan;
  groupQuestionAccess?:TelegramReplyJob['groupQuestionAccess'];
@@ -361,6 +363,13 @@ export class TelegramUpdateApplication {
        plan:this.plan(chatId,screen.text,undefined,screen.keyboard,event.callbackMessageId)};
      }
      if(!this.opts.policy.isOwner(actorId))return {status:'DENIED',reason:'OWNER_ONLY'};
+     if(studioOwnerEntry(event.callbackData)||event.callbackData.startsWith('st:1:')){
+      const screen=await renderOwnerInlineStudio(this.opts.store,this.opts.policy,actorId,event.callbackData,this.clock);
+      if(!screen)return {status:'DENIED',reason:'STUDIO_STALE_OR_UNAUTHORIZED'};
+      const planned=this.plan(chatId,screen.text,undefined,screen.keyboard,event.callbackMessageId);
+      if(screen.nativeKeyboard){const {inlineMarkup:_,...base}=planned;return {status:'APPLIED',reason:'RESPONSE_PLANNED_ONLY',plan:{...base,studioMarkup:screen.nativeKeyboard}};}
+      return {status:'APPLIED',reason:'RESPONSE_PLANNED_ONLY',plan:planned};
+     }
      if(event.callbackData==='mi:1:i:10:09'||event.callbackData.startsWith('ol:1:')){
       const screen=await renderOwnerInlineLibrary(this.opts.store,this.opts.policy,actorId,event.callbackData,this.clock);
       if(!screen)return {status:'DENIED',reason:'LIBRARY_INLINE_STALE_OR_UNAUTHORIZED'};
@@ -569,6 +578,17 @@ export class TelegramUpdateApplication {
     if(kind==='private'){
       const m=menuLabels;
       const owner=this.opts.policy.isOwner(actorId);
+      if(owner){
+       const studio=new ButtonStudioService(this.opts.store,this.opts.policy,this.clock);
+       const pending=(await this.opts.store.snapshot()).buttonStudio?.inputs.some(i=>i.actor===actorId);
+       if(pending){
+        if(text.startsWith('/')||Object.values(m).some(label=>label===text)||isOwnerMenuText(text))await studio.cancelInput(actorId);
+        else try{
+         const draft=await studio.acceptInput(actorId,text);
+         if(draft){const screen=studioDraftScreen(draft);return {status:'APPLIED',reason:'STUDIO_DRAFT_SAVED',plan:this.plan(chatId,screen.text,undefined,screen.keyboard)};}
+        }catch{return {status:'DENIED',reason:'STUDIO_INPUT_INVALID_OR_STALE',plan:this.plan(chatId,'تعذّر حفظ الإدخال: تأكد من القيمة أو افتح المسودة الحالية وأعد المحاولة.')};}
+       }
+      }
       const main=()=>result('<b>أهلًا بك في بوت منارتك 🎓</b>\n'
         +'اختر أحد الأقسام من الأزرار أسفل المحادثة. تظهر الموارد المعتمدة فقط.\n'
         +'لتصفح المكتبة بالأزرار الشفافة استخدم /studentinline.\n'

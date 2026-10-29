@@ -5,6 +5,7 @@ import {Policy} from './policy.js';
 import type {TelegramReplyPlan} from './telegram-transport.js';
 import {isValidTelegramReplyKeyboard} from './telegram-menu.js';
 import {isValidTelegramInlineKeyboard} from './telegram-inline-owner.js';
+import {validStudioNativeKeyboard} from './telegram-studio-rich.js';
 import {groupQuestionEpochDigest,groupMenuEpochDigest,privateGroupEpochDigest} from './telegram-group-access.js';
 import {subscriptionRequirementMode,acceptsActiveSubscriptionEvidence} from './subscription-integrity.js';
 import type {SubscriptionGate} from './subscription.js';
@@ -20,13 +21,14 @@ const validChat=(chat:string)=>/^(?:[1-9]\d{0,15}|-[1-9]\d{0,15})$/.test(chat)&&
 const validPlan=(p:unknown):p is TelegramReplyPlan=>{
  if(!p||typeof p!=='object'||Array.isArray(p))return false;
  const v=p as Record<string,unknown>;
- return (Object.keys(v).length===(3+(v.replyMarkup===undefined?0:1)+(v.inlineMarkup===undefined?0:1)+(v.editMessageId===undefined?0:1)))&&
-  Object.keys(v).every(k=>['chatId','parseMode','text','replyMarkup','inlineMarkup','editMessageId'].includes(k))&&
-  !(v.replyMarkup!==undefined&&v.inlineMarkup!==undefined)&&
+ return (Object.keys(v).length===(3+(v.replyMarkup===undefined?0:1)+(v.inlineMarkup===undefined?0:1)+(v.studioMarkup===undefined?0:1)+(v.editMessageId===undefined?0:1)))&&
+  Object.keys(v).every(k=>['chatId','parseMode','text','replyMarkup','inlineMarkup','studioMarkup','editMessageId'].includes(k))&&
+  [v.replyMarkup,v.inlineMarkup,v.studioMarkup].filter(x=>x!==undefined).length<=1&&
   (v.replyMarkup===undefined||isValidTelegramReplyKeyboard(v.replyMarkup))&&
   (v.inlineMarkup===undefined||isValidTelegramInlineKeyboard(v.inlineMarkup))&&
+  (v.studioMarkup===undefined||typeof v.chatId==='string'&&!v.chatId.startsWith('-')&&validStudioNativeKeyboard(v.studioMarkup))&&
   (v.editMessageId===undefined||(typeof v.editMessageId==='number'&&
-    Number.isSafeInteger(v.editMessageId)&&v.editMessageId>0&&v.inlineMarkup!==undefined))&&
+    Number.isSafeInteger(v.editMessageId)&&v.editMessageId>0&&(v.inlineMarkup!==undefined||v.studioMarkup!==undefined)))&&
   v.parseMode==='HTML'&&typeof v.chatId==='string'&&
   validChat(v.chatId)&&typeof v.text==='string'&&v.text.length>0&&
   Buffer.byteLength(v.text,'utf8')<=4096&& !/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/u.test(v.text);
@@ -51,7 +53,7 @@ export class TelegramBotApiTextSender implements TelegramReplySender {
     body:JSON.stringify({chat_id:plan.chatId,text:plan.text,parse_mode:'HTML',
      link_preview_options:{is_disabled:true},
      ...(plan.editMessageId===undefined?{protect_content:true}:{message_id:plan.editMessageId}),
-     ...(plan.inlineMarkup?{reply_markup:plan.inlineMarkup}:plan.replyMarkup?{reply_markup:plan.replyMarkup}:{})}),
+     ...(plan.studioMarkup?{reply_markup:plan.studioMarkup}:plan.inlineMarkup?{reply_markup:plan.inlineMarkup}:plan.replyMarkup?{reply_markup:plan.replyMarkup}:{})}),
     redirect:'error',signal:AbortSignal.timeout(8000)
    });
   }catch{return {status:'UNKNOWN_OUTCOME'};}

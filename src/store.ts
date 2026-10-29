@@ -1,5 +1,6 @@
 import {isValidFloodWindow,type FloodWindow} from './protection-flood.js';
 import {validAdminUIAccess,type AdminUIAccess} from './protection-ui-access.js';
+import {validStudioState,type StudioState} from './button-studio-model.js';
 import { mkdir, open, readFile, rename, rm, stat, lstat, realpath, writeFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
 import { randomUUID } from 'node:crypto';
@@ -88,6 +89,7 @@ export interface TelegramReplyJob {
  updateKey:string;plan?:{chatId:string;parseMode:'HTML';text:string;
   replyMarkup?:import('./telegram-menu.js').TelegramReplyKeyboard;
   inlineMarkup?:import('./telegram-inline-owner.js').TelegramInlineKeyboard;
+  studioMarkup?:import('./telegram-studio-rich.js').StudioNativeKeyboard;
   editMessageId?:number};
  status:'QUEUED'|'SENDING'|'SENT'|'FAILED_CONFIRMED'|'UNKNOWN_OUTCOME';
  attemptId?:string;startedAt?:number;messageId?:number;
@@ -146,6 +148,7 @@ export interface B6BudgetAttempt {
   operatorReview?:{reviewedBy:string;reviewedAt:number};
 }
 export interface BotState {
+  buttonStudio?:StudioState;
   schemaVersion: 8;
   /** Optional additive per-group monitor policy, validated on every read/write. */
   protectionPolicies?:GroupProtectionRecord[];
@@ -228,6 +231,7 @@ export class BotStore {
       previous.purgeJobs = [];
     }
     if (previous.schemaVersion !== 8 ||
+      (previous.buttonStudio!==undefined&&!validStudioState(previous.buttonStudio))||
       (previous.protectionFloodWindows!==undefined&&(!Array.isArray(previous.protectionFloodWindows)||
        previous.protectionFloodWindows.length>1000||previous.protectionFloodWindows.some(row=>!isValidFloodWindow(row))||
        new Set(previous.protectionFloodWindows.map((row:FloodWindow)=>JSON.stringify([row.chatId,row.memberId]))).size!==previous.protectionFloodWindows.length||
