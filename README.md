@@ -1,3 +1,5 @@
+> مرجع النطاق الحالي: [MASTER الكامل ومتطلباته](docs/MASTER_SCOPE_METHOD_AR.md) و[توزيعه على الأقسام](docs/MASTER_SECTIONS_1_4_AR.md). جرد الأزرار المختصر يثبت التصفح فقط، وليس اكتمال وظائف المراحل الأربع.
+
 > تحديث جرد 29 أكتوبر 2026: راجع [تقرير المرحلة الأولى](docs/PHASE1_REALITY_AUDIT_AR.md) و[جرد الأزرار الكامل](docs/PHASE1_BUTTON_INVENTORY_AR.md). الأوصاف المؤرخة في الإصدارات السابقة تحفظ حالتها التاريخية؛ لا تثبت تشغيل النسخة الحالية.
 
 ## v0.7.106 — Phase 3 owner group restore quarantine and late reversal integrity

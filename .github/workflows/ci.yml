@@ -20,9 +20,11 @@ jobs:
       - run: npm install --no-audit --no-fund
       - run: npm run check
       - run: node scripts/audit-phase1.mjs
+      - run: node scripts/audit-master-scope.mjs
       - run: npm run demo
       - run: npm run demo:education
       - run: npm run demo:faq
       - run: npm run demo:publishing
       - run: npm run demo:preview-migration
       - run: npm run demo:moderation
+      - run: npm run demo:protection
