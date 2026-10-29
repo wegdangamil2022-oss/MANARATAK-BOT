@@ -1,4 +1,5 @@
 import {randomBytes} from 'node:crypto';
+import {studioPresetContent} from './button-studio-presets.js';
 import type {BotStore,BotState} from './store.js';
 import type {Policy} from './policy.js';
 import {validStudioContent,studioId,type StudioTemplate,type StudioContent,type StudioAction,type StudioButton} from './button-studio-model.js';
@@ -50,9 +51,9 @@ export class ButtonStudioService{
   t.draft=draft;t.revision++;t.updatedAt=this.clock();t.updatedBy=actor;
   s.audit.push({actorId:actor,updateKey:'studio:'+t.id+':'+t.revision,decision:'ALLOW',reason,policyVersion:0,at:this.clock()});
  }
- async create(actor:string,name:string):Promise<StudioTemplate>{return this.store.transaction(s=>{
+ async create(actor:string,name:string,preset?:string):Promise<StudioTemplate>{return this.store.transaction(s=>{
   const now=this.auth(s,actor),studio=s.buttonStudio??={templates:[],inputs:[]};if(studio.templates.length>=200)throw Error('STUDIO_LIMIT');
-  const draft:StudioContent={name,text:'رسالة جديدة',buttons:[],layout:[],timezone:'Asia/Aden',hour12:false,calendar:'gregory'};
+  const draft:StudioContent=preset===undefined?{name,text:'رسالة جديدة',buttons:[],layout:[],timezone:'Asia/Aden',hour12:false,calendar:'gregory'}:studioPresetContent(preset,id)!;
   if(!validStudioContent(draft))throw Error('STUDIO_INVALID_CONTENT');
   const t:StudioTemplate={id:id(),revision:1,createdBy:actor,createdAt:now,updatedBy:actor,updatedAt:now,draft,versions:[]};studio.templates.push(t);
   s.audit.push({actorId:actor,updateKey:'studio:'+t.id+':1',decision:'ALLOW',reason:'STUDIO_DRAFT_CREATED',policyVersion:0,at:now});return structuredClone(t);

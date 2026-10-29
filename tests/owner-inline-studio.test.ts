@@ -37,6 +37,16 @@ for(const engine of ['json','sqlite'] as const){
    assert.ok(isValidTelegramInlineKeyboard(created.plan?.inlineMarkup));assert.ok(isValidTelegramInlineKeyboard(saved.plan?.inlineMarkup));
   }finally{await f.close();}
  });
+ test('studio library imports versioned starter templates as independent editable drafts ('+engine+')',async()=>{
+  const f=await fixture();try{
+   const library=await f.app().handle(event(200,'mi:1:i:07:07'));const route=select(library,'st:1:g:education');
+   const first=await f.app().handle(event(201,route));assert.equal(first.status,'APPLIED');assert.equal((await f.app().handle(event(202,route,300))).status,'DENIED');
+   await f.app().handle(event(203,route));const templates=(await f.store.snapshot()).buttonStudio!.templates;
+   assert.equal(templates.length,2);assert.equal(templates[0]!.draft.buttons.length,5);assert.notEqual(templates[0]!.draft.buttons[0]!.id,templates[1]!.draft.buttons[0]!.id);assert.deepEqual(templates[0]!.versions,[]);
+   const preview=await f.app().handle(event(204,select(first,'st:1:v:')));const service=await f.app().handle(event(205,select(preview,'st:1:t:')));assert.equal(service.status,'APPLIED');assert.ok(service.plan?.text.includes('المنح'));
+   assert.equal((await f.store.snapshot()).deliveries.length,0);assert.equal((await f.app().handle(event(206,'st:1:g:arbitrary'))).status,'DENIED');
+  }finally{await f.close();}
+ });
  test('studio cancel button clears pending input and stale input cannot change another revision ('+engine+')',async()=>{
   const f=await fixture();try{
    const t=await f.svc.create('100','قالب');

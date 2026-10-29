@@ -5,9 +5,10 @@ import {ButtonStudioService,studioInputFields} from './button-studio.js';
 import {studioId,type StudioTemplate,type StudioButton,type StudioAction} from './button-studio-model.js';
 import type {StudioNativeKeyboard,StudioNativeButton} from './telegram-studio-rich.js';
 import {renderStudentInline} from './telegram-inline-student.js';
+import {studioPresets} from './button-studio-presets.js';
 export interface OwnerStudioScreen extends OwnerInlineScreen{nativeKeyboard?:StudioNativeKeyboard;}
 const n='(0|[1-9][0-9]{0,5})',rev='([1-9][0-9]{0,6})',id='([a-f0-9]{12})',mode='(0[1-9]|1[0-6])';
-const patterns=[new RegExp('^st:1:l:'+mode+':'+n+'$','u'),/^st:1:n$/u,/^st:1:c:[A-Za-z0-9_-]{24}$/u,
+const patterns=[new RegExp('^st:1:l:'+mode+':'+n+'$','u'),/^st:1:n$/u,/^st:1:g:(?:education|welcome)$/u,/^st:1:c:[A-Za-z0-9_-]{24}$/u,
  new RegExp('^st:1:[dsvhj]:'+id+':'+rev+'$','u'),new RegExp('^st:1:v:'+id+':'+rev+':'+n+'$','u'),new RegExp('^st:1:e:'+mode+':'+id+':'+rev+'$','u'),
  new RegExp('^st:1:i:'+id+':'+rev+':(?:NAME|TEXT|ADD_BUTTON|LAYOUT|TIMEZONE|(?:BUTTON_TITLE|TARGET|OPENS_AT|CLOSES_AT|SEATS):'+id+')$','u'),
  new RegExp('^st:1:[boxt]:'+id+':'+rev+':'+id+'$','u'),new RegExp('^st:1:k:'+id+':'+rev+':'+id+':(?:URL|COPY|INLINE|SERVICE|MINI_APP)$','u'),
@@ -49,12 +50,14 @@ export async function renderOwnerInlineStudio(store:BotStore,policy:Policy,actor
  if(main||parts[2]==='l'){
   await svc.cancelInput(actor);const m=main?parts[4]!:parts[3]!,page=main?0:Number(parts[4]),pages=Math.max(1,Math.ceil(all.length/8));if(page>=pages)return null;
   const rows=all.slice(page*8,page*8+8).map(t=>[b(t.draft.name,'st:1:e:'+m+':'+t.id+':'+t.revision)]);
+  if(m==='07'&&page===0)rows.unshift(...studioPresets.map(p=>[b('➕ '+p.name+' · نموذج '+p.version,'st:1:g:'+p.id)]));
   rows.push([b('➕ إنشاء قالب','st:1:n')]);const nav=[];if(page)nav.push(b('السابق','st:1:l:'+m+':'+(page-1)));if(page+1<pages)nav.push(b('التالي','st:1:l:'+m+':'+(page+1)));if(nav.length)rows.push(nav);rows.push(root);
   return ui('<b>استوديو الأزرار والقوالب</b>\nاختر قالبًا لتحريره أو أنشئ قالبًا جديدًا.\nالصفحة '+(page+1)+' من '+pages+'\nالحفظ ينشئ إصدارًا محليًا؛ النشر يحتاج مساره المخوّل.',rows);
  }
  try{
   await svc.cancelInput(actor);
   if(parts[2]==='n')return studioDraftScreen(await svc.create(actor,'قالب جديد'));
+  if(parts[2]==='g')return studioDraftScreen(await svc.create(actor,'نموذج',parts[3]!));
   if(parts[2]==='c'){const t=await svc.confirmDecision(actor,'c_'+parts[3]);return t?studioDraftScreen(t):null;}
   const mode=parts[2]==='e'?parts[3]:undefined,id=parts[mode?4:3]!,revision=Number(parts[mode?5:4]),t=all.find(t=>t.id===id&&t.revision===revision);if(!t||!studioId(id))return null;
   const action=parts[2],button=parts[5]?t.draft.buttons.find(b=>b.id===parts[5]):undefined;
