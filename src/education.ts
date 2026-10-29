@@ -1,5 +1,5 @@
 import {normalizeEducationDiscovery} from './education-search-normalization.js';
-import { randomUUID } from 'node:crypto';
+import { randomUUID,randomBytes } from 'node:crypto';
 import { BotStore, type BotState, type EducationCategory, type EducationResource, type ImportRun } from './store.js';
 import { Policy } from './policy.js';
 import { parseDocument, type ImportFormat } from './ingestion.js';
@@ -257,6 +257,34 @@ export class EducationService {
       resource.status='ARCHIVED';
       s.audit.push({updateKey:'b3:archive:'+id,decision:'ALLOW',
        reason:'RESOURCE_ARCHIVED',policyVersion:currentRevision,at:this.clock()});
+    });
+  }
+  async issueInlineArchive(actor:string,id:string,proof:string,scopeRevision:number,returnPage:number):Promise<string>{
+    return this.store.transaction(s=>{
+      const matches=s.educationResources.filter(r=>r.id===id),r=matches[0],now=this.clock();
+      if(!this.policy.isOwner(actor)||!this.policy.privateFeature(s,'owner.dashboard',actor)||matches.length!==1||!r||r.status!=='PUBLISHED'||
+        !this.canPublish(s,actor,r.scope)||resourceArchiveFingerprint(r)!==proof||
+        (r.scope==='private'?0:this.policy.chatRevision(s,r.scope))!==scopeRevision||
+        !Number.isSafeInteger(returnPage)||returnPage<0||returnPage>999||!Number.isSafeInteger(now)||now<0||now>8_640_000_000_000_000-120000)throw Error('RESOURCE_ARCHIVE_STALE');
+      const ref='c_'+randomBytes(18).toString('base64url');
+      s.callbacks.push({ref,action:'owner.library.archive:'+id+':'+proof+':'+returnPage,chatId:r.scope,actorId:actor,policyVersion:scopeRevision,expiresAt:now+120000,oneShot:true,used:false,revoked:false});
+      return ref;
+    });
+  }
+  async confirmInlineArchive(actor:string,ref:string):Promise<{returnPage:number}|null>{
+    if(!this.policy.isOwner(actor)||!/^c_[A-Za-z0-9_-]{24}$/u.test(ref))return null;
+    return this.store.transaction(s=>{
+      const rows=s.callbacks.filter(c=>c.ref===ref),c=rows[0],now=this.clock();
+      if(rows.length!==1||!c||c.actorId!==actor||c.used||c.revoked||!c.oneShot||!Number.isSafeInteger(now)||now<0||
+        c.expiresAt<=now||c.expiresAt>now+120000||!this.policy.privateFeature(s,'owner.dashboard',actor))return null;
+      const m=/^owner\.library\.archive:([a-f0-9]{8}-(?:[a-f0-9]{4}-){3}[a-f0-9]{12}):(~[a-f0-9]{16}):(0|[1-9][0-9]{0,2})$/u.exec(c.action);
+      if(!m||m[0]!==c.action)return null;
+      const resources=s.educationResources.filter(r=>r.id===m[1]),r=resources[0];
+      if(resources.length!==1||!r||r.status!=='PUBLISHED'||r.scope!==c.chatId||!this.canPublish(s,actor,r.scope)||
+        (r.scope==='private'?0:this.policy.chatRevision(s,r.scope))!==c.policyVersion||resourceArchiveFingerprint(r)!==m[2])return null;
+      c.used=true;r.status='ARCHIVED';
+      s.audit.push({actorId:actor,updateKey:'b3:archive:'+r.id,decision:'ALLOW',reason:'RESOURCE_ARCHIVED',policyVersion:c.policyVersion,at:now});
+      return {returnPage:Number(m[3])};
     });
   }
   async archiveResource(actor:string,id:string):Promise<void> {

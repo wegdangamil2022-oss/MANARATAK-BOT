@@ -22,6 +22,7 @@ import {menuLabels,mainMenuKeyboard,backMenuKeyboard,categoryButton,
 import {OwnerTelegramMenu,isOwnerMenuText} from './telegram-owner-menu.js';
 import {ownerInlineHome,ownerInlineRender,ownerInlineLinkedReadOnly,type TelegramInlineKeyboard} from './telegram-inline-owner.js';
 import {renderOwnerInlineFAQ} from './telegram-inline-faq.js';
+import {renderOwnerInlineLibrary} from './telegram-inline-library.js';
 import {renderOwnerInlineGroups} from './telegram-inline-groups.js';
 import {OwnerInlineGroupControls} from './telegram-inline-group-controls.js';
 import {renderOwnerInlineDelegations} from './telegram-inline-delegations.js';
@@ -360,6 +361,11 @@ export class TelegramUpdateApplication {
        plan:this.plan(chatId,screen.text,undefined,screen.keyboard,event.callbackMessageId)};
      }
      if(!this.opts.policy.isOwner(actorId))return {status:'DENIED',reason:'OWNER_ONLY'};
+     if(event.callbackData==='mi:1:i:10:09'||event.callbackData.startsWith('ol:1:')){
+      const screen=await renderOwnerInlineLibrary(this.opts.store,this.opts.policy,actorId,event.callbackData,this.clock);
+      if(!screen)return {status:'DENIED',reason:'LIBRARY_INLINE_STALE_OR_UNAUTHORIZED'};
+      return {status:'APPLIED',reason:'RESPONSE_PLANNED_ONLY',plan:this.plan(chatId,screen.text,undefined,screen.keyboard,event.callbackMessageId)};
+     }
      if(event.callbackData==='mi:1:i:10:08'||event.callbackData.startsWith('of:1:')){
       const screen=await renderOwnerInlineFAQ(this.opts.store,this.opts.policy,actorId,event.callbackData,this.clock);
       if(!screen)return {status:'DENIED',reason:'FAQ_INLINE_STALE_OR_UNAUTHORIZED'};
