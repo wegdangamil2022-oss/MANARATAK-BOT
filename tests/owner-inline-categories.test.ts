@@ -46,6 +46,51 @@ for(const engine of ['json','sqlite'] as const){
    assert.equal((await f.app().handle(event(244,select(review,'تأكيد الحفظ')))).status,'DENIED');assert.equal((await f.store.snapshot()).educationCategories[0]!.title,'قسم 0');
   }finally{await f.close();}
  });
+ test('owner parent picker pages valid choices and confirms the selected parent once ('+engine+')',async()=>{
+  const f=await fixture(12);try{
+   await f.store.transaction(s=>{s.educationCategories.find(c=>c.id==='cat-1')!.parentId='cat-0';});
+   let root=await f.app().handle(event(300,'ec:1:h')),detail=await f.app().handle(event(301,select(root,'قسم 0')));
+   let picker=await f.app().handle(event(302,select(detail,'تغيير القسم الأب')));assert.equal(picker.status,'APPLIED');assert.ok(isValidTelegramInlineKeyboard(picker.plan!.inlineMarkup));
+   assert.equal(picker.plan!.inlineMarkup!.inline_keyboard.flat().some(b=>b.text.startsWith('📁 قسم 1 ·')),false);
+   const stale=select(picker,'📁 قسم 2');await f.store.transaction(s=>{s.educationCategories.find(c=>c.id==='cat-2')!.title='تغير الهدف';});
+   assert.equal((await f.app().handle(event(303,stale))).status,'DENIED');assert.equal((await f.store.snapshot()).educationCategories.find(c=>c.id==='cat-0')!.parentId,null);
+   root=await f.app().handle(event(304,'ec:1:h'));detail=await f.app().handle(event(305,select(root,'قسم 0')));picker=await f.app().handle(event(306,select(detail,'تغيير القسم الأب')));
+   picker=await f.app().handle(event(307,select(picker,'التالي')));assert.equal(picker.status,'APPLIED');assert.ok(picker.plan!.text.includes('الصفحة 2 من 2'));
+   const target=picker.plan!.inlineMarkup!.inline_keyboard.flat().find(b=>b.text.startsWith('📁 قسم '))!;assert.ok(target);const targetId='cat-'+target.text.match(/\d+/u)![0];
+   const result=await Promise.all([f.app().handle(event(308,target.callback_data)),f.app().handle(event(309,target.callback_data))]);assert.equal(result.filter(x=>x.status==='APPLIED').length,1);
+   const review=result.find(x=>x.status==='APPLIED')!;assert.ok(review.plan!.text.includes(target.text.replace('📁 ','').split(' · ')[0]!));
+   assert.equal((await f.app().handle(event(310,select(review,'تأكيد الحفظ')))).status,'APPLIED');assert.equal((await f.store.snapshot()).educationCategories.find(c=>c.id==='cat-0')!.parentId,targetId);
+   assert.equal((await f.store.snapshot()).callbacks.some(c=>c.action.startsWith('category.input:')&&c.used===false&&c.revoked===false),false);
+  }finally{await f.close();}
+ });
+ test('owner parent picker invalidates a changed ancestor both before and after preview ('+engine+')',async()=>{
+  const f=await fixture(4);try{
+   await f.store.transaction(s=>{s.educationCategories.find(c=>c.id==='cat-2')!.parentId='cat-3';});
+   let root=await f.app().handle(event(360,'ec:1:h')),detail=await f.app().handle(event(361,select(root,'قسم 0'))),picker=await f.app().handle(event(362,select(detail,'تغيير القسم الأب')));
+   const choice=select(picker,'📁 قسم 2');await f.store.transaction(s=>{s.educationCategories.find(c=>c.id==='cat-3')!.title='تغيير الأب';});assert.equal((await f.app().handle(event(363,choice))).status,'DENIED');
+   root=await f.app().handle(event(364,'ec:1:h'));detail=await f.app().handle(event(365,select(root,'قسم 0')));picker=await f.app().handle(event(366,select(detail,'تغيير القسم الأب')));
+   const review=await f.app().handle(event(367,select(picker,'📁 قسم 2')));assert.equal(review.status,'APPLIED');await f.store.transaction(s=>{s.educationCategories.find(c=>c.id==='cat-3')!.enabled=false;});
+   assert.equal((await f.app().handle(event(368,select(review,'تأكيد الحفظ')))).status,'DENIED');assert.equal((await f.store.snapshot()).educationCategories.find(c=>c.id==='cat-0')!.parentId,null);
+  }finally{await f.close();}
+ });
+ test('owner parent picker distinguishes a category named zero from the root option ('+engine+')',async()=>{
+  const f=await fixture();try{
+   await f.education.createCategory('100',{id:'0',scope:'private',title:'تصنيف صفر',order:3});
+   let root=await f.app().handle(event(340,'ec:1:h')),detail=await f.app().handle(event(341,select(root,'قسم 0'))),picker=await f.app().handle(event(342,select(detail,'تغيير القسم الأب')));
+   let review=await f.app().handle(event(343,select(picker,'تصنيف صفر')));assert.equal((await f.app().handle(event(344,select(review,'تأكيد الحفظ')))).status,'APPLIED');assert.equal((await f.store.snapshot()).educationCategories.find(c=>c.id==='cat-0')!.parentId,'0');
+   root=await f.app().handle(event(345,'ec:1:h'));detail=await f.app().handle(event(346,select(root,'قسم 0')));picker=await f.app().handle(event(347,select(detail,'تغيير القسم الأب')));
+   review=await f.app().handle(event(348,select(picker,'قسم رئيسي بلا أب')));assert.equal((await f.app().handle(event(349,select(review,'تأكيد الحفظ')))).status,'APPLIED');assert.equal((await f.store.snapshot()).educationCategories.find(c=>c.id==='cat-0')!.parentId,null);
+  }finally{await f.close();}
+ });
+ test('owner parent picker rejects expired, stale and unauthorised selections ('+engine+')',async()=>{
+  const f=await fixture();try{
+   let root=await f.app().handle(event(320,'ec:1:h')),detail=await f.app().handle(event(321,select(root,'قسم 0'))),picker=await f.app().handle(event(322,select(detail,'تغيير القسم الأب')));
+   let route=select(picker,'قسم 1');assert.equal((await f.app().handle(event(323,route,300))).status,'DENIED');assert.equal((await f.app().handle(event(324,route,100,true))).status,'DENIED');
+   f.time(1700000120000);assert.equal((await f.app().handle(event(325,route))).status,'DENIED');
+   root=await f.app().handle(event(326,'ec:1:h'));detail=await f.app().handle(event(327,select(root,'قسم 0')));picker=await f.app().handle(event(328,select(detail,'تغيير القسم الأب')));route=select(picker,'قسم 1');
+   await f.store.transaction(s=>{s.educationCategories[0]!.title='تغير المصدر';});assert.equal((await f.app().handle(event(329,route))).status,'DENIED');assert.equal((await f.store.snapshot()).educationCategories[0]!.parentId,null);
+  }finally{await f.close();}
+ });
  test('owner category parent change fences both categories and prevents cycles or crossing scopes ('+engine+')',async()=>{
   const f=await fixture();try{
    let root=await f.app().handle(event(200,'ec:1:h')),detail=await f.app().handle(event(201,select(root,'قسم 1')));

@@ -13,11 +13,13 @@ export function validAdminUIAccess(v:unknown):v is AdminUIAccess{
  * recompute actual current policy rights. No raw group IDs are queued here. */
 export function protectionUIEpoch(state:BotState,policy:Policy,actor:string,now:number):string|null{
  if(!/^[1-9][0-9]{0,15}$/u.test(actor)||!Number.isSafeInteger(now)||now<0||now>8640000000000000)return null;
+ if(policy.isOwner(actor)&&!policy.privateFeature(state,'owner.dashboard',actor))return null;
  const chats=state.chats.filter(c=>policy.canUseChat(state,c.id,'moderation')&&policy.has(state,actor,'chat.manage',c.id,now)).sort((a,b)=>a.id.localeCompare(b.id));
  if(!chats.length&&!policy.isOwner(actor))return null;
  const sessions=state.wizards.filter(w=>w.userId===actor&&w.chatId===actor&&w.status==='ACTIVE'&&typeof w.flow==='string'&&w.flow.startsWith('protection-ui:'))
   .map(w=>[w.key,w.flow,w.version,w.expiresAt]);
  return createHash('sha256').update('MANARATAK:PROTECTION-UI:V1:').update(JSON.stringify([
-  actor,policy.ownerId,chats.map(c=>[c,state.protectionPolicies?.find(r=>r.policy.chatId===c.id)??null]),sessions
+  actor,policy.ownerId,chats.map(c=>[c,state.protectionPolicies?.find(r=>r.policy.chatId===c.id)??null]),sessions,
+  ...(policy.isOwner(actor)&&state.privateSettingsRevision!==undefined?[state.privateSettingsRevision]:[])
  ])).digest('hex');
 }

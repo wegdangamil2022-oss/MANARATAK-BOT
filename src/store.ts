@@ -158,6 +158,7 @@ export interface BotState {
   grants: Grant[];
   privateAI: PrivateAIMode;
   privateFeatures: Record<string, boolean>;
+  privateSettingsRevision?: number;
   updates: ProcessedUpdate[];
   operations: Operation[];
   callbacks: CallbackRecord[];
@@ -232,6 +233,7 @@ export class BotStore {
       previous.purgeJobs = [];
     }
     if (previous.schemaVersion !== 8 ||
+      (previous.privateSettingsRevision!==undefined&&(typeof previous.privateSettingsRevision!=='number'||!Number.isSafeInteger(previous.privateSettingsRevision)||previous.privateSettingsRevision<0||previous.privateSettingsRevision>=Number.MAX_SAFE_INTEGER))||
       (previous.buttonStudio!==undefined&&!validStudioState(previous.buttonStudio))||
       (previous.protectionFloodWindows!==undefined&&(!Array.isArray(previous.protectionFloodWindows)||
        previous.protectionFloodWindows.length>1000||previous.protectionFloodWindows.some(row=>!isValidFloodWindow(row))||

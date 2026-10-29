@@ -8,11 +8,13 @@ import {ownerCategoryChoiceToken} from './education-category-policy.js';
 import {menuLabels} from './telegram-menu.js';
 import {EducationCategoryEditor} from './education-category-editor.js';
 export function validOwnerCategoryInlineRoute(data:string):boolean{
- return typeof data==='string'&&Buffer.byteLength(data)<=64&&/^(?:ec:1:[hn]|ec:1:[ra]:[A-Za-z0-9_-]{24})$/u.test(data)&&!data.endsWith('\n');
+ if(typeof data!=='string'||Buffer.byteLength(data)>64)return false;
+ const m=/^(?:ec:1:[hn]|ec:1:[rap]:[A-Za-z0-9_-]{24})$/u.exec(data);return m?.[0]===data;
 }
 const custom=(label:string)=>/^edit:(RENAME|CHILD|LANG|PARENT):([A-Za-z0-9_-]{1,24}|~[a-f0-9]{16})$/u.exec(label);
 const prefix='category.ui:';
 const button=(text:string,callback_data:string)=>({text,callback_data});
+const escape=(s:string)=>s.replace(/&/gu,'&amp;').replace(/</gu,'&lt;').replace(/>/gu,'&gt;').replace(/"/gu,'&quot;').replace(/'/gu,'&#39;');
 /** Reuses the existing category menu and service checks. Callback text is
  * stored server-side, owner-bound, short-lived and consumed before dispatch.
  * The service's metadata/sibling fingerprints still fence the actual write. */
@@ -20,7 +22,13 @@ export async function renderOwnerInlineCategories(store:BotStore,policy:Policy,e
  if(!policy.isOwner(actor)||data!=='mi:1:i:10:16'&&!validOwnerCategoryInlineRoute(data))return null;
  try{
   const now=clock(),state=await store.snapshot();if(!Number.isSafeInteger(now)||now<0||now>8640000000000000-120000||!policy.privateFeature(state,'owner.dashboard',actor))return null;
-  const editor=new EducationCategoryEditor(store,policy,clock);await editor.cancel(actor);
+  const editor=new EducationCategoryEditor(store,policy,clock);if(!data.startsWith('ec:1:p:'))await editor.cancel(actor);
+  const pickerScreen=(view:{text:string;buttons:{text:string;callback_data:string}[]}):OwnerInlineScreen=>({text:view.text,keyboard:{inline_keyboard:[...view.buttons.map(b=>[b]),[button('إلغاء','ec:1:h')]]}});
+  if(data.startsWith('ec:1:p:')){
+   const choice=await editor.chooseParent(actor,'c_'+data.slice(7));if(!choice)return null;
+   if(choice.kind==='PAGE')return pickerScreen(await editor.parentPicker(actor,choice.id,choice.returnPage,choice.page,choice.proof,choice.epoch));
+   return {text:'<b>معاينة تغيير القسم الأب</b>\nالقسم الأب: '+escape(choice.name)+'\nلم يُحفظ التغيير بعد. ينتهي التأكيد بعد دقيقتين.',keyboard:{inline_keyboard:[[button('✅ تأكيد الحفظ','ec:1:a:'+choice.ref.slice(2))],[button('إلغاء','ec:1:h')]]}};
+  }
   let label=ownerCategoryMenuLabel,returnPage=0;
   if(data==='ec:1:n')label='edit:ROOT';
   if(data.startsWith('ec:1:a:')){const changed=await editor.confirm(actor,'c_'+data.slice(7));if(!changed)return null;returnPage=changed.page;}
@@ -37,6 +45,9 @@ export async function renderOwnerInlineCategories(store:BotStore,policy:Policy,e
    const m=custom(label),matches=m?state.educationCategories.filter(c=>ownerCategoryChoiceToken(c.id)===m[2]&&(c.scope==='private'||policy.canUseChat(state,c.scope,'navigation'))):[];
    if(m&&matches.length!==1)return null;
    await editor.begin(actor,m?m[1] as 'RENAME'|'CHILD'|'LANG'|'PARENT':'ROOT',matches[0]?.id??'',returnPage);
+   if(m?.[1]==='PARENT'){
+    try{return pickerScreen(await editor.parentPicker(actor,matches[0]!.id,returnPage));}catch{await editor.cancel(actor);return null;}
+   }
    return {text:(m?.[1]==='PARENT'?'اكتب معرّف القسم الأب من بطاقة تفاصيله، أو 0 لجعل هذا القسم رئيسيًا. لا يُسمح بتغيير النطاق أو إنشاء دورة في الشجرة.':m?.[1]==='LANG'?'اكتب رمز اللغة مثل ar أو en أو fr.':'اكتب '+(m?.[1]==='RENAME'?'الاسم الجديد':'اسم القسم الجديد')+' في رسالة واحدة (100 حرف كحد أقصى).')+'\nستظهر معاينة قبل التأكيد، وتنتهي خطوة الإدخال بعد عشر دقائق.\nالقسم الرئيسي الجديد يُنشأ في مكتبة الخاص.',keyboard:{inline_keyboard:[[button('إلغاء الإدخال','ec:1:h')]]}};
   }
   const page=parseOwnerCategoryPage(label);if(page)returnPage=page.page;

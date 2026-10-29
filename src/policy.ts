@@ -299,7 +299,8 @@ export class Policy {
   }
   async configurePrivateAI(actor: string, mode: PrivateAIMode): Promise<void> {
     this.requireOwner(actor);
-    await this.store.transaction(s => { s.privateAI = mode; });
+    if(!['OFF','STAFF_ONLY','ALL_OPT_IN'].includes(mode))throw new Error('Invalid private AI mode');
+    await this.store.transaction(s => { if((s.privateSettingsRevision??0)>=Number.MAX_SAFE_INTEGER-1)throw new Error('PRIVATE_SETTINGS_REVISION_EXHAUSTED');s.privateAI = mode;s.privateSettingsRevision=(s.privateSettingsRevision??0)+1; });
   }
   mayAskPrivate(s: BotState, actor: string | undefined, optedIn: boolean): boolean {
     if (!actor || s.privateAI === 'OFF') return false;

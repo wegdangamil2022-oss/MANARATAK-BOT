@@ -27,6 +27,8 @@ import {renderOwnerInlineStudio,studioOwnerEntry,studioDraftScreen} from './tele
 import {ButtonStudioService} from './button-studio.js';
 import {renderOwnerInlineCategories} from './telegram-inline-categories.js';
 import {EducationCategoryEditor} from './education-category-editor.js';
+import {renderPrivateSettings} from './telegram-inline-private-settings.js';
+import {protectionUIEpoch,ADMIN_UI_TTL_MS} from './protection-ui-access.js';
 import {renderOwnerInlineGroups} from './telegram-inline-groups.js';
 import {OwnerInlineGroupControls} from './telegram-inline-group-controls.js';
 import {renderOwnerInlineDelegations} from './telegram-inline-delegations.js';
@@ -339,6 +341,11 @@ export class TelegramUpdateApplication {
      // command from untrusted callback_data or from a group context.
      if(kind!=='private'||actorId!==chatId)return {status:'DENIED',reason:'PRIVATE_CALLBACK_ONLY'};
      if(this.opts.policy.isOwner(actorId)&&!event.callbackData.startsWith('ec:1:')&&event.callbackData!=='mi:1:i:10:16')await new EducationCategoryEditor(this.opts.store,this.opts.policy,this.clock).cancel(actorId);
+     if(this.opts.policy.isOwner(actorId)&&!event.callbackData.startsWith('ps:1:')&&event.callbackData!=='mi:1:i:11:03'&&!event.callbackData.startsWith('si:1:')&&!event.callbackData.startsWith('si:2:')&&!event.callbackData.startsWith('ms:1:')&&!this.opts.policy.privateFeature(await this.opts.store.snapshot(),'owner.dashboard',actorId))return {status:'DENIED',reason:'OWNER_DASHBOARD_DISABLED'};
+     if(event.callbackData==='mi:1:i:11:03'||event.callbackData.startsWith('ps:1:')){
+      const view=await renderPrivateSettings(this.opts.store,this.opts.policy,actorId,event.callbackData,this.clock);
+      return view?{status:'APPLIED',reason:'RESPONSE_PLANNED_ONLY',plan:this.plan(chatId,view.text,undefined,view.keyboard,event.callbackMessageId)}:{status:'DENIED',reason:'PRIVATE_SETTINGS_STALE_OR_UNAUTHORIZED'};
+     }
      if(event.callbackData.startsWith('pr:1:')||/^mi:1:i:02:(?:0[5678]|12)$/u.test(event.callbackData)){
       if(/^mi:1:i:02:(?:0[5678]|12)$/u.test(event.callbackData)&&!this.opts.policy.isOwner(actorId))return {status:'DENIED',reason:'OWNER_ONLY'};
       const view=await new TelegramProtectionEditor(this.opts.store,this.opts.policy,this.clock).handle(event.callbackData,actorId);
@@ -602,18 +609,25 @@ export class TelegramUpdateApplication {
         }catch{return {status:'DENIED',reason:'STUDIO_INPUT_INVALID_OR_STALE',plan:this.plan(chatId,'تعذّر حفظ الإدخال: تأكد من القيمة أو افتح المسودة الحالية وأعد المحاولة.')};}
        }
       }
+      const dashboardEnabled=owner&&this.opts.policy.privateFeature(await this.opts.store.snapshot(),'owner.dashboard',actorId);
       const main=()=>result('<b>أهلًا بك في بوت منارتك 🎓</b>\n'
         +'اختر أحد الأقسام من الأزرار أسفل المحادثة. تظهر الموارد المعتمدة فقط.\n'
         +'لتصفح المكتبة بالأزرار الشفافة استخدم /studentinline.\n'
-        +(owner?'لفتح لوحة المالك الشفافة استخدم /ownerinline، ولأدوات الإدارة القديمة /ownerlegacy.\n':'')
+        +(dashboardEnabled?'لفتح لوحة المالك الشفافة استخدم /ownerinline، ولأدوات الإدارة القديمة /ownerlegacy.\n':owner?'لوحة المالك معطلة؛ لاستعادتها استخدم /ownerrecover.\n':'')
         +'يمكنك أيضًا استخدام /categories private و /help.\n'
         +'المساعد الذكي وبعض الخدمات ما زالت قيد التطوير.',
-        mainMenuKeyboard(owner));
+        mainMenuKeyboard(dashboardEnabled));
       const editorResult=await new TelegramProtectionEditor(this.opts.store,this.opts.policy,this.clock).handleText(
        actorId,text,Object.values(m).some(label=>label===text)||isOwnerMenuText(text));
       if(editorResult)return {status:editorResult.status,reason:editorResult.reason,
        plan:this.plan(chatId,editorResult.screen.text,undefined,editorResult.screen.keyboard)};
       if(cmd==='/start'||cmd==='/help'||text===m.home||text===m.back)return main();
+      if(text==='/ownerrecover'){
+       if(!owner)return {status:'DENIED',reason:'OWNER_ONLY'};
+       const view=await renderPrivateSettings(this.opts.store,this.opts.policy,actorId,'ps:1:h',this.clock);
+       return view?{status:'APPLIED',reason:'RESPONSE_PLANNED_ONLY',plan:this.plan(chatId,view.text,undefined,view.keyboard)}:{status:'DENIED',reason:'PRIVATE_SETTINGS_UNAVAILABLE'};
+      }
+      if(owner&&(text==='/ownerinline'||text==='/ownerlegacy'||text===m.owner||isOwnerMenuText(text))&&!this.opts.policy.privateFeature(await this.opts.store.snapshot(),'owner.dashboard',actorId))return {status:'DENIED',reason:'OWNER_DASHBOARD_DISABLED'};
       // The runtime selects the inline owner entry; direct integrations can
       // retain legacy mode. Existing authorized tools remain reachable.
       if(text==='/ownerinline'||text===m.owner&&this.opts.ownerMenuMode==='inline'){
@@ -1115,6 +1129,19 @@ export class TelegramUpdateApplication {
      const proof=await new TelegramProtectionEditor(this.opts.store,this.opts.policy,this.clock).witness(event.actorId,handled.plan.inlineMarkup);
      if(proof)handled={...handled,adminUIAccess:proof};
      else{const {plan:_,...withoutPlan}=handled;handled={...withoutPlan,reason:'PROTECTION_RESPONSE_WITHHELD'};}
+    }
+    const callback=event.callbackData??'';
+    const ownerScreen=event.kind==='private'&&this.opts.policy.isOwner(event.actorId)&&(
+     /^(?:mi:1:|ec:1:|of:1:|ol:1:|st:1:|ps:1:|pr:1:|pd:1:|pq:1:|mr:1:|mp:1:|c_)/u.test(callback)||
+     event.text==='/ownerinline'||event.text==='/ownerlegacy'||event.text==='/ownerrecover'||isOwnerMenuText(event.text)||
+     handled.reason==='CATEGORY_TEXT_PREVIEW'||handled.reason==='STUDIO_DRAFT_SAVED');
+    if(ownerScreen&&handled.plan&&!handled.adminUIAccess){
+     const state=await this.opts.store.snapshot(),now=this.clock(),epoch=protectionUIEpoch(state,this.opts.policy,event.actorId,now);
+     const recovery=!this.opts.policy.privateFeature(state,'owner.dashboard',event.actorId)&&
+      (callback.startsWith('ps:1:')||event.text==='/ownerrecover')&&
+      (handled.plan.text.startsWith('<b>استعادة لوحة المالك</b>')||handled.plan.text.startsWith('<b>معاينة إعداد الخاص</b>'));
+     if(epoch&&Number.isSafeInteger(now)&&now>=0&&now<=8640000000000000-ADMIN_UI_TTL_MS)handled={...handled,adminUIAccess:{actorId:event.actorId,epoch,expiresAt:now+ADMIN_UI_TTL_MS}};
+     else if(!recovery){const {plan:_,...withoutPlan}=handled;handled={...withoutPlan,reason:'OWNER_RESPONSE_WITHHELD'};}
     }
     const audit:AuditRecord={updateKey:key,decision:handled.status==='APPLIED'?'ALLOW':handled.status==='DENIED'?'DENY':'NOOP',reason:handled.reason,policyVersion:0,at:this.clock()};
     // Commit the decision and outbound reply intent in one durable transaction.
