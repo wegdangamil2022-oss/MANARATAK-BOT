@@ -1,3 +1,4 @@
+import {protectionMediaFromMessage,type ProtectionMedia} from './telegram-protection-media.js';
 import { timingSafeEqual,createHash } from 'node:crypto';
 import type { IncomingMessage, RequestListener, ServerResponse } from 'node:http';
 import { BotStore, type AuditRecord, type BotState, type TelegramReplyJob } from './store.js';
@@ -97,7 +98,7 @@ export interface TelegramApplicationOptions {
   purge?:ModerationPurgeService;
 }
 
-type Event = {updateId: number; actorId: string; chatId: string; kind: 'private' | 'group'; text: string; entities?:unknown; messageId?:number; replyTo?:unknown; document?: IncomingDocument; callbackData?:string; callbackQueryId?:string; callbackMessageId?:number};
+type Event = {updateId: number; actorId: string; chatId: string; kind: 'private' | 'group'; text: string; entities?:unknown; messageId?:number; replyTo?:unknown; document?: IncomingDocument; protectionMedia?:ProtectionMedia; callbackData?:string; callbackQueryId?:string; callbackMessageId?:number};
 const isObject=(x:unknown):x is Record<string,unknown>=>Boolean(x)&&typeof x==='object'&&!Array.isArray(x);
 const positiveId=(x:unknown): x is number=>typeof x==='number'&&Number.isSafeInteger(x)&&x>0;
 const chatId=(x:unknown): x is number=>typeof x==='number'&&Number.isSafeInteger(x)&&x!==0;
@@ -133,6 +134,11 @@ function eventFrom(value:unknown):{event?:Event;reason:string} {
   if(msg.sender_chat!==undefined||msg.via_bot!==undefined||msg.forward_origin!==undefined||msg.forward_date!==undefined||msg.is_automatic_forward===true)return {reason:'UNTRUSTED_FORWARD'};
   const kind=msg.chat.type==='private'?'private':msg.chat.type==='group'||msg.chat.type==='supergroup'?'group':null;
   if(!kind || (kind==='private'&&(msg.chat.id!==msg.from.id))||(kind==='group'&&msg.chat.id>=0))return {reason:'INVALID_CHAT_CONTEXT'};
+  if(kind==='group'){
+   const decoded=protectionMediaFromMessage(msg);
+   if(decoded.status==='INVALID')return {reason:'INVALID_GROUP_MEDIA'};
+   if(decoded.status==='MEDIA')return {event:{updateId:value.update_id as number,actorId:String(msg.from.id),chatId:String(msg.chat.id),kind,text:'',protectionMedia:decoded.media},reason:'VALID'};
+  }
   if(msg.document!==undefined){
     // Telegram must not attach both an ordinary text command and a document.
     if (!isObject(msg.document) || msg.text!==undefined) return {reason:'INVALID_DOCUMENT'};
@@ -288,6 +294,12 @@ export class TelegramUpdateApplication {
       `<b>تقرير استيراد ملف Telegram تجريبي</b>\nالمعرف: <code>${escapeTelegramHtml(run.id)}</code>\nالأقسام: ${report.sections}\nالجامعات: ${report.universities}\nفرص مرشحة: ${report.opportunities}\nيتطلب المراجعة قبل الاعتماد والنشر المحلي.`)};
   }
   private async process(event:Event):Promise<ProcessedReply> {
+    if(event.protectionMedia){
+     const media=event.protectionMedia;
+     await new GroupProtectionPolicyService(this.opts.store,this.opts.policy,this.clock).observeIncomingMessage(
+      {chatId:event.chatId,memberId:event.actorId,type:media.type,caption:media.caption},media.entities,'b3-webhook:'+this.opts.botId+':'+event.updateId);
+     return media.type==='DOCUMENT'?{status:'DENIED',reason:'PRIVATE_ADMIN_UPLOAD_ONLY'}:{status:'IGNORED',reason:'PROTECTION_MEDIA_MONITOR_ONLY'};
+    }
     if(event.document)return this.handleDocument(event);
     const {actorId,chatId,kind,text}=event;
     if(event.callbackData!==undefined){

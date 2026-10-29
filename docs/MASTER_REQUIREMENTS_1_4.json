@@ -13,8 +13,8 @@
     "inStages1to4": 690,
     "deferred": 13,
     "fullyImplementedVerified": 0,
-    "inScopeNotAssessed": 670,
-    "localPartial": 20
+    "inScopeNotAssessed": 669,
+    "localPartial": 21
   },
   "modules": [
     {
@@ -1626,9 +1626,9 @@
       ],
       "implementation": "PARTIAL_LOCAL",
       "evidence": {
-        "code": "src/protection-rules.ts",
-        "tests": "tests/protection-rules.test.ts",
-        "limit": "مطابقة أنواع محددة والنص/الشرح في محرك محلي؛ استقبال الوسائط والتوجيه ما زال ناقصًا."
+        "code": "src/telegram-protection-media.ts",
+        "tests": "tests/telegram-protection-editor.test.ts",
+        "limit": "مراقبة 11 نوع وسيط وشرح وروابط كيانات دون تنزيل؛ التوجيه والرسائل الطويلة والإعلانات والتنفيذ غير مكتملة."
       }
     },
     {
@@ -1742,7 +1742,7 @@
       "evidence": {
         "code": "src/group-protection-policy.ts",
         "tests": "tests/telegram-protection-editor.test.ts",
-        "limit": "مراقبة النص الوارد وتدقيق بلا محتوى أو عقوبة؛ الوسائط والتعديلات والقياس الشامل غير مكتملة."
+        "limit": "مراقبة النص والوسائط المدعومة وتدقيق بلا محتوى أو عقوبة؛ التعديلات والقياس الشامل غير مكتملين."
       }
     },
     {
@@ -5921,8 +5921,12 @@
           "title": "🛡️ الحماية والعقوبات"
         }
       ],
-      "implementation": "NOT_ASSESSED",
-      "evidence": null
+      "implementation": "PARTIAL_LOCAL",
+      "evidence": {
+        "code": "src/telegram-protection-media.ts",
+        "tests": "tests/telegram-protection-editor.test.ts",
+        "limit": "فحص الشرح وروابط كيانات الوسائط دون حفظ أو تنزيل؛ ملصقات النص وOCR غير موصولين."
+      }
     },
     {
       "id": "LEX-010",
@@ -14561,7 +14565,7 @@
       "evidence": {
         "code": "src/telegram-protection-editor.ts",
         "tests": "tests/telegram-protection-editor.test.ts",
-        "limit": "اختيار 12 نوع رسالة بواجهة مقسمة وقواعد معطلة؛ الاستقبال الحي للوسائط والرسائل الطويلة والتنفيذ غير مكتمل."
+        "limit": "اختيار 12 نوع رسالة بواجهة مقسمة ومراقبة الوسائط الواردة؛ الرسائل الطويلة والتنفيذ غير مكتملين."
       }
     },
     {
@@ -14673,9 +14677,9 @@
       ],
       "implementation": "PARTIAL_LOCAL",
       "evidence": {
-        "code": "src/protection-rules.ts",
-        "tests": "tests/protection-rules.test.ts",
-        "limit": "قرار مقترح واحد للنوع والروابط والكلمات؛ الاستقبال والمنشن والتنفيذ بحاجة للربط."
+        "code": "src/group-protection-policy.ts",
+        "tests": "tests/telegram-protection-editor.test.ts",
+        "limit": "مراقبة النوع والروابط والكلمات بقرار مقترح واحد؛ المنشن والتنفيذ غير مكتملين."
       }
     },
     {

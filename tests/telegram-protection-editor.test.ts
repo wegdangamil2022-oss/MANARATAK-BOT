@@ -11,6 +11,7 @@ import {EducationAdminFacade} from '../src/education-admin.js';
 import {ApprovedAnswerService,ResourceLinkService} from '../src/education-interactions.js';
 import {TelegramUpdateApplication} from '../src/telegram-transport.js';
 import {TelegramReplyDispatcher} from '../src/telegram-replies.js';
+import type {ProtectionMessageType} from '../src/protection-rules.js';
 import {protectionInlineRoute} from '../src/protection-inline-route.js';
 import {isValidTelegramInlineKeyboard} from '../src/telegram-inline-owner.js';
 const NOW=1700000000000,CHAT='-100123';
@@ -408,6 +409,85 @@ for(const engine of ['json','sqlite'] as const){
    const incoming=(id:number,actor:number)=>({update_id:id,message:{message_id:id,chat:{id:Number(CHAT),type:'supergroup'},from:{id:actor,is_bot:false},text:'spam'}});
    await f.app().handle(incoming(700,100));await f.policy.revokeChat('100',CHAT);await f.app().handle(incoming(701,300));
    assert.equal((await f.store.snapshot()).audit.filter(a=>a.reason.startsWith('PROTECTION_MONITOR_')).length,0);
+  }finally{await f.close();}
+ });
+ test('incoming supported media are monitored once without downloading or storing payloads ('+engine+')',async()=>{
+  const f=await fixture();try{
+   const variants:[string,ProtectionMessageType,unknown][]=[
+    ['photo','PHOTO',[{file_id:'PRIVATE_MEDIA_FILE_ID'}]],['video','VIDEO',{file_id:'PRIVATE_MEDIA_FILE_ID'}],
+    ['animation','ANIMATION',{file_id:'PRIVATE_MEDIA_FILE_ID'}],['sticker','STICKER',{file_id:'PRIVATE_MEDIA_FILE_ID'}],
+    ['document','DOCUMENT',{file_id:'PRIVATE_MEDIA_FILE_ID',file_name:'secret.bin'}],['audio','AUDIO',{file_id:'PRIVATE_MEDIA_FILE_ID'}],
+    ['voice','VOICE',{file_id:'PRIVATE_MEDIA_FILE_ID'}],['video_note','VIDEO_NOTE',{file_id:'PRIVATE_MEDIA_FILE_ID'}],
+    ['contact','CONTACT',{phone_number:'+967_PRIVATE_PHONE',first_name:'PRIVATE_CONTACT'}],
+    ['location','LOCATION',{latitude:15.1,longitude:44.2}],['poll','POLL',{id:'PRIVATE_POLL_ID',question:'PRIVATE_POLL_QUESTION',options:[{text:'yes'},{text:'no'}]}]
+   ];
+   await new GroupProtectionPolicyService(f.store,f.policy,()=>NOW).save('100',{
+    chatId:CHAT,revision:1,mode:'MONITOR',rules:variants.map(([_,type])=>({id:type,kind:'TYPE' as const,type,enabled:true,action:'DELETE' as const})),allowedDomains:[],allowedPhrases:[],exemptMemberIds:[]
+   },f.policy.chatRevision(await f.store.snapshot(),CHAT),0);
+   for(const [i,[field,_,value]] of variants.entries()){
+    const incoming={update_id:800+i,message:{message_id:800+i,chat:{id:Number(CHAT),type:'supergroup'},from:{id:300,is_bot:false},[field]:value}};
+    const result=await f.app().handle(incoming);assert.equal(result.plan,undefined);
+    assert.equal((await f.app().handle(incoming)).status,'DUPLICATE');
+   }
+   const state=await f.store.snapshot();
+   assert.equal(state.audit.filter(a=>a.reason.startsWith('PROTECTION_MONITOR_MATCH')).length,11);
+   for(const secret of ['PRIVATE_MEDIA_FILE_ID','+967_PRIVATE_PHONE','PRIVATE_CONTACT','PRIVATE_POLL_ID','PRIVATE_POLL_QUESTION'])assert.equal(JSON.stringify(state).includes(secret),false,secret);
+   assert.equal(state.moderationOperations.length,0);
+  }finally{await f.close();}
+ });
+ test('caption, hidden link and media-type matches combine into one strongest observation ('+engine+')',async()=>{
+  const f=await fixture();try{
+   await new GroupProtectionPolicyService(f.store,f.policy,()=>NOW).save('100',{
+    chatId:CHAT,revision:1,mode:'MONITOR',rules:[{id:'photo',kind:'TYPE',type:'PHOTO',enabled:true,action:'DELETE'},
+     {id:'word',kind:'WORD',value:'spam',enabled:true,action:'WARN'},{id:'link',kind:'LINK',hosts:'*',enabled:true,action:'MUTE'}],allowedDomains:[],allowedPhrases:[],exemptMemberIds:[]
+   },f.policy.chatRevision(await f.store.snapshot(),CHAT),0);
+   const incoming={update_id:850,message:{message_id:850,chat:{id:Number(CHAT),type:'supergroup'},from:{id:300,is_bot:false},
+    photo:[{file_id:'PRIVATE_PHOTO_ID'}],caption:'spam PRIVATE_CAPTION',caption_entities:[{type:'text_link',offset:5,length:15,url:'https://private.test/'}]}};
+   await f.app().handle(incoming);
+   const audit=(await f.store.snapshot()).audit.filter(a=>a.reason.startsWith('PROTECTION_MONITOR_MATCH'));
+   assert.equal(audit.length,1);assert.match(audit[0]!.reason,/action=MUTE;rules=3/);
+   assert.equal(JSON.stringify(await f.store.snapshot()).includes('PRIVATE_'),false);
+  }finally{await f.close();}
+ });
+ test('ambiguous media and private media cannot invoke group monitoring ('+engine+')',async()=>{
+  const f=await fixture();try{
+   await new GroupProtectionPolicyService(f.store,f.policy,()=>NOW).save('100',{
+    chatId:CHAT,revision:1,mode:'MONITOR',rules:[{id:'photo',kind:'TYPE',type:'PHOTO',enabled:true,action:'DELETE'}],allowedDomains:[],allowedPhrases:[],exemptMemberIds:[]
+   },f.policy.chatRevision(await f.store.snapshot(),CHAT),0);
+   const base={message_id:870,chat:{id:Number(CHAT),type:'supergroup'},from:{id:300,is_bot:false},photo:[{file_id:'PRIVATE_ID'}]};
+   for(const [i,extra] of [{text:'/ban x'},{video:{file_id:'OTHER'}},{photo:[]},{photo:[null]},{caption:42},{caption:'x'.repeat(4097)},{caption:'x\u0000y'},{sender_chat:{id:Number(CHAT)}}].entries()){
+    assert.equal((await f.app().handle({update_id:870+i,message:{...base,...extra}})).status,'DENIED');
+   }
+   await f.app().handle({update_id:880,message:{...base,chat:{id:300,type:'private'}}});
+   assert.equal((await f.store.snapshot()).audit.filter(a=>a.reason.startsWith('PROTECTION_MONITOR_MATCH')).length,0);
+  }finally{await f.close();}
+ });
+ test('media monitoring respects allow-list boundaries and invalid caption entities ('+engine+')',async()=>{
+  const f=await fixture();try{
+   await new GroupProtectionPolicyService(f.store,f.policy,()=>NOW).save('100',{
+    chatId:CHAT,revision:1,mode:'MONITOR',rules:[{id:'photo',kind:'TYPE',type:'PHOTO',enabled:true,action:'DELETE'},
+     {id:'word',kind:'WORD',value:'حساس',enabled:true,action:'WARN'},{id:'link',kind:'LINK',hosts:'*',enabled:true,action:'MUTE'}],
+     allowedDomains:['school.edu'],allowedPhrases:['درس طبي حساس'],exemptMemberIds:[]
+   },f.policy.chatRevision(await f.store.snapshot(),CHAT),0);
+   const base={message_id:900,chat:{id:Number(CHAT),type:'supergroup'},from:{id:300,is_bot:false},photo:[{file_id:'HIDDEN_FILE_ID'}]};
+   await f.app().handle({update_id:900,message:{...base,caption:'درس طبي حساس https://school.edu/lesson'}});
+   await f.app().handle({update_id:901,message:{...base,caption:'😀',caption_entities:[{type:'url',offset:1,length:1}]}});
+   const audit=(await f.store.snapshot()).audit;
+   assert.equal(audit.filter(a=>a.reason.startsWith('PROTECTION_MONITOR_MATCH')).length,1);
+   assert.ok(audit.some(a=>a.reason.endsWith('action=DELETE;rules=1')));
+   assert.equal(audit.filter(a=>a.reason==='PROTECTION_MONITOR_INPUT_UNAVAILABLE').length,1);
+   await f.policy.revokeChat('100',CHAT);
+   await f.app().handle({update_id:902,message:{...base,caption:'حساس'}});
+   assert.equal((await f.store.snapshot()).audit.filter(a=>a.reason.startsWith('PROTECTION_MONITOR_MATCH')).length,1);
+  }finally{await f.close();}
+ });
+ test('Telegram animation with its compatibility document is classified once as animation ('+engine+')',async()=>{
+  const f=await fixture();try{
+   await new GroupProtectionPolicyService(f.store,f.policy,()=>NOW).save('100',{
+    chatId:CHAT,revision:1,mode:'MONITOR',rules:[{id:'animation',kind:'TYPE',type:'ANIMATION',enabled:true,action:'REVIEW'}],allowedDomains:[],allowedPhrases:[],exemptMemberIds:[]
+   },f.policy.chatRevision(await f.store.snapshot(),CHAT),0);
+   await f.app().handle({update_id:950,message:{message_id:950,chat:{id:Number(CHAT),type:'supergroup'},from:{id:300,is_bot:false},animation:{file_id:'ANIMATION_ID'},document:{file_id:'ANIMATION_ID'}}});
+   assert.equal((await f.store.snapshot()).audit.filter(a=>a.reason.startsWith('PROTECTION_MONITOR_MATCH')).length,1);
   }finally{await f.close();}
  });
  test('home cancels a pending editor before further private text ('+engine+')',async()=>{

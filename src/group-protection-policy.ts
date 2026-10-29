@@ -1,7 +1,7 @@
 import {protectionEntityLinks} from './protection-message-entities.js';
 import {BotStore,type BotState} from './store.js';
 import type {Policy} from './policy.js';
-import {isValidProtectionPolicy,evaluateProtectionRules,type GroupProtectionRecord,type ProtectionEvaluation} from './protection-rules.js';
+import {isValidProtectionPolicy,evaluateProtectionRules,type GroupProtectionRecord,type ProtectionEvaluation,type ProtectionMessage} from './protection-rules.js';
 type Inspection={status:'DENIED'|'UNCONFIGURED'|'STALE'}|{status:'CONFIGURED';record:GroupProtectionRecord;enforcementConnected:false};
 const clockValid=(n:number)=>Number.isSafeInteger(n)&&n>=0&&n<=8640000000000000;
 /** Owner/delegated operator control of one group's local rules. Saving a
@@ -44,6 +44,10 @@ export class GroupProtectionPolicyService{
  /** Record-only incoming TEXT monitor. Authorization precedes body/entity
   * evaluation; observations retain no sender identity or message contents. */
  async observeIncomingText(member:string,chat:string,text:string,entities:unknown,updateKey:string):Promise<string>{
+  return this.observeIncomingMessage({chatId:chat,memberId:member,type:'TEXT',text},entities,updateKey);
+ }
+ async observeIncomingMessage(message:ProtectionMessage,entities:unknown,updateKey:string):Promise<string>{
+  const {chatId:chat,memberId:member}=message;
   if(!/^b3-webhook:[A-Za-z0-9_-]{1,80}:[0-9]+$/u.test(updateKey))return 'DENIED';
   return this.store.transaction(state=>{
    const now=this.clock();
@@ -54,8 +58,9 @@ export class GroupProtectionPolicyService{
    if(this.policy.isOwner(member)||this.policy.has(state,member,'chat.manage',chat,now)||record.policy.exemptMemberIds.includes(member))return 'EXEMPT';
    const key=updateKey+':protection:'+chat;
    if(state.audit.some(a=>a.updateKey===key))return 'DUPLICATE';
-   const links=typeof text==='string'&&text.length<=4096?protectionEntityLinks(text,entities):null;
-   const result=links===null?null:evaluateProtectionRules(record.policy,{chatId:chat,memberId:member,type:'TEXT',text,links});
+   const body=message.text??message.caption??'';
+   const links=typeof body==='string'&&body.length<=4096?protectionEntityLinks(body,entities):null;
+   const result=links===null?null:evaluateProtectionRules(record.policy,{...message,links});
    if(!result||result.status==='INVALID_MESSAGE'||result.status==='INVALID_POLICY'){
     state.audit.push({updateKey:key,decision:'NOOP',reason:'PROTECTION_MONITOR_INPUT_UNAVAILABLE',policyVersion:record.chatPolicyVersion,at:now});
     return 'UNAVAILABLE';
