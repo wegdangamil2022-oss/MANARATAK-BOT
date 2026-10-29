@@ -53,7 +53,7 @@ for(const engine of ['json','sqlite'] as const){
  test('queued owner screens are withheld after dashboard revocation while student and recovery screens remain usable ('+engine+')',async()=>{
   const f=await fixture();try{
    const category=await f.app().handle(event(60,'mi:1:i:10:16')),student=await f.app().handle(message(61,'/studentinline'));assert.equal(category.status,'APPLIED');assert.equal(student.status,'APPLIED');
-   const before=await f.store.snapshot();assert.equal(before.telegramReplyJobs!.find(j=>j.updateKey===category.deliveryKey)!.privateReplyKind,'ADMIN_SCOPED');assert.equal(before.telegramReplyJobs!.find(j=>j.updateKey===student.deliveryKey)!.privateReplyKind,'LOCAL');
+   const before=await f.store.snapshot();assert.equal(before.telegramReplyJobs!.find(j=>j.updateKey===category.deliveryKey)!.privateReplyKind,'ADMIN_SCOPED');assert.equal(before.telegramReplyJobs!.find(j=>j.updateKey===student.deliveryKey)!.privateReplyKind,'LIBRARY_SCOPED');
    await f.store.transaction(s=>{s.privateFeatures['owner.dashboard']=false;});let sends=0;
    const dispatcher=new TelegramReplyDispatcher(f.store,f.policy,{send:async()=>{sends++;return {status:'CONFIRMED',messageId:99};}},()=>1700000000000);
    assert.equal((await dispatcher.dispatch(category.deliveryKey!)).status,'FAILED_CONFIRMED');assert.equal(sends,0);
