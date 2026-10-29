@@ -37,6 +37,24 @@ for(const engine of ['json','sqlite'] as const){
    assert.ok(isValidTelegramInlineKeyboard(created.plan?.inlineMarkup));assert.ok(isValidTelegramInlineKeyboard(saved.plan?.inlineMarkup));
   }finally{await f.close();}
  });
+ test('studio links menus through paginated targets and returns without bypassing conditions ('+engine+')',async()=>{
+  const f=await fixture();try{
+   let source=await f.svc.create('100','قائمة رئيسية');source=await f.svc.edit('100',source.id,1,{kind:'ADD_BUTTON',value:'قائمة فرعية'});const button=source.draft.buttons[0]!;
+   for(let i=0;i<8;i++)await f.svc.create('100','قائمة '+i);
+   let target=await f.svc.create('100','القائمة المطلوبة');target=await f.svc.edit('100',target.id,1,{kind:'TEXT',value:'محتوى الهدف <كامل>'});
+   let picker=await f.app().handle(event(300,'st:1:u:'+source.id+':'+source.revision+':'+button.id));assert.equal(picker.status,'APPLIED');
+   picker=await f.app().handle(event(301,buttons(picker).find(b=>b.text==='التالي')!.callback_data));
+   const link=select(picker,'st:1:L:');assert.equal((await f.app().handle(event(302,link))).status,'APPLIED');
+   source=(await f.svc.list('100')).find(t=>t.id===source.id)!;
+   const preview=await f.app().handle(event(303,'st:1:v:'+source.id+':'+source.revision));const press=select(preview,'st:1:t:');
+   const opened=await f.app().handle(event(304,press));assert.equal(opened.status,'APPLIED');assert.ok(opened.plan!.text.includes('محتوى الهدف &lt;كامل&gt;'));
+   const back=buttons(opened).find(b=>b.text==='↩️ القائمة السابقة')!;assert.equal((await f.app().handle(event(305,back.callback_data))).status,'APPLIED');
+   assert.equal((await f.app().handle(event(306,press,300))).status,'DENIED');
+   await assert.rejects(f.svc.edit('100',source.id,source.revision,{kind:'ACTION',buttonId:button.id,action:{kind:'MENU',target:source.id}}));
+   source=await f.svc.edit('100',source.id,source.revision,{kind:'CONDITION',buttonId:button.id,condition:{...button.condition,opensAt:1700000000001}});
+   assert.equal((await f.app().handle(event(307,'st:1:t:'+source.id+':'+source.revision+':'+button.id))).status,'DENIED');
+  }finally{await f.close();}
+ });
  test('studio library imports versioned starter templates as independent editable drafts ('+engine+')',async()=>{
   const f=await fixture();try{
    const library=await f.app().handle(event(200,'mi:1:i:07:07'));const route=select(library,'st:1:g:education');

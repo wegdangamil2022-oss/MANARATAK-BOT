@@ -12,12 +12,13 @@ const patterns=[new RegExp('^st:1:l:'+mode+':'+n+'$','u'),/^st:1:n$/u,/^st:1:g:(
  new RegExp('^st:1:[dsvhj]:'+id+':'+rev+'$','u'),new RegExp('^st:1:v:'+id+':'+rev+':'+n+'$','u'),new RegExp('^st:1:e:'+mode+':'+id+':'+rev+'$','u'),
  new RegExp('^st:1:i:'+id+':'+rev+':(?:NAME|TEXT|ADD_BUTTON|LAYOUT|TIMEZONE|(?:BUTTON_TITLE|TARGET|OPENS_AT|CLOSES_AT|SEATS):'+id+')$','u'),
  new RegExp('^st:1:[boxt]:'+id+':'+rev+':'+id+'$','u'),new RegExp('^st:1:k:'+id+':'+rev+':'+id+':(?:URL|COPY|INLINE|SERVICE|MINI_APP)$','u'),
+ new RegExp('^st:1:u:'+id+':'+rev+':'+id+'$','u'),new RegExp('^st:1:w:'+id+':'+rev+':'+id+':'+n+'$','u'),new RegExp('^st:1:L:'+id+':'+rev+':'+id+':'+id+'$','u'),
  new RegExp('^st:1:y:'+id+':'+rev+':'+id+':(?:default|primary|success|danger)$','u'),new RegExp('^st:1:r:'+id+':'+rev+':'+rev+'$','u'),
  new RegExp('^st:1:f:'+id+':'+rev+':(?:12|24|gregory|islamic)$','u'),new RegExp('^st:1:a:'+id+':'+rev+':'+id+':(?:ANY|OWNER)$','u'),
  new RegExp('^st:1:m:'+id+':'+rev+':'+n+':'+n+'$','u'),new RegExp('^st:1:q:'+id+':'+rev+':'+n+'$','u'),
  new RegExp('^st:1:h:'+id+':'+rev+':'+n+'$','u'),new RegExp('^st:1:z:'+id+':'+rev+':'+rev+':'+n+'$','u')];
 export function validStudioInlineRoute(data:string):boolean{return typeof data==='string'&&Buffer.byteLength(data)<=64&&patterns.some(re=>{const m=re.exec(data);return m?.[0]===data;});}
-export const studioOwnerEntry=(data:string)=>/^mi:1:i:07:(?:0[1-489]|0[67]|1[125])$/u.test(data);
+export const studioOwnerEntry=(data:string)=>/^mi:1:i:07:(?:0[1-9]|1[125])$/u.test(data);
 const b=(text:string,callback_data:string)=>({text,callback_data});
 const ui=(text:string,rows:{text:string;callback_data:string}[][]):OwnerInlineScreen=>({text,keyboard:{inline_keyboard:rows}});
 export const studioEscape=(v:string)=>v.replace(/&/gu,'&amp;').replace(/</gu,'&lt;').replace(/>/gu,'&gt;').replace(/"/gu,'&quot;').replace(/'/gu,'&#39;');
@@ -36,6 +37,7 @@ function buttonScreen(t:StudioTemplate,button:StudioButton):OwnerInlineScreen{
  return ui('<b>تحرير الزر</b>\nالاسم: '+studioEscape(button.title)+'\nالنوع: '+button.action.kind+'\nالهدف: '+studioEscape(Array.from(button.action.target).slice(0,200).join(''))+'\nالنمط: '+button.style+'\nالجمهور: '+button.condition.role+'\nالفتح: '+(button.condition.opensAt?new Date(button.condition.opensAt).toISOString():'دون حد')+'\nالإغلاق: '+(button.condition.closesAt?new Date(button.condition.closesAt).toISOString():'دون حد')+'\nالمقاعد: '+(button.condition.seats||'دون حد'),
  [[b('✏️ عنوان الزر',edit(t,'BUTTON_TITLE:'+suffix)),b('🎯 الهدف',edit(t,'TARGET:'+suffix))],
  ...(['URL','COPY','INLINE','SERVICE','MINI_APP'] as const).map(k=>[b('النوع: '+k,key('k',t,suffix+':'+k))]),
+ [b('🧭 فتح قائمة أخرى',key('u',t,suffix))],
  [b('افتراضي',key('y',t,suffix+':default')),b('🔵',key('y',t,suffix+':primary')),b('🟢',key('y',t,suffix+':success')),b('🔴',key('y',t,suffix+':danger'))],
  [b('للجميع',key('a',t,suffix+':ANY')),b('للمالك',key('a',t,suffix+':OWNER'))],
  [b('موعد الفتح',edit(t,'OPENS_AT:'+suffix)),b('موعد الإغلاق',edit(t,'CLOSES_AT:'+suffix)),b('المقاعد',edit(t,'SEATS:'+suffix))],
@@ -89,8 +91,22 @@ export async function renderOwnerInlineStudio(store:BotStore,policy:Policy,actor
    return ui(action==='r'?'<b>معاينة الاستعادة</b>\nالقالب الحالي: '+studioEscape(t.draft.name)+'\nاسم النسخة المختارة: '+studioEscape(v!.content.name)+'\nعدد الأزرار: '+v!.content.buttons.length+'\nسيُحفظ إصدار جديد ولن تُمسح الإصدارات القديمة.':'<b>معاينة حذف الزر</b>\nسيُحذف من المسودة: '+studioEscape(button!.title),[[b('✅ تأكيد','st:1:c:'+ref.slice(2))],[b('إلغاء',key('d',t))],root]);
   }
   if(action==='b')return button?buttonScreen(t,button):null;
+  if((action==='u'||action==='w')&&button){
+   const targets=all.filter(x=>x.id!==t.id),page=action==='w'?Number(parts[6]):0,pages=Math.max(1,Math.ceil(targets.length/8));if(page>=pages)return null;
+   const rows=targets.slice(page*8,page*8+8).map(x=>[b(x.draft.name,key('L',t,button.id+':'+x.id))]);
+   const nav=[];if(page)nav.push(b('السابق',key('w',t,button.id+':'+(page-1))));if(page+1<pages)nav.push(b('التالي',key('w',t,button.id+':'+(page+1))));if(nav.length)rows.push(nav);
+   rows.push([b('↩️ الزر',key('b',t,button.id))],root);
+   return ui('<b>ربط الزر بقائمة</b>\nاختر قالبًا آخر؛ يُفتح بإصداره الحالي وقت الضغط.\nالصفحة '+(page+1)+' من '+pages+(targets.length?'':'\nأنشئ قالبًا ثانيًا أولًا.'),rows);
+  }
+  if(action==='L'&&button){const next=await svc.edit(actor,id,revision,{kind:'ACTION',buttonId:button.id,action:{kind:'MENU',target:parts[6]!}});return buttonScreen(next,next.draft.buttons.find(b=>b.id===button.id)!);}
   if(action==='t'&&button){
    await svc.pressPreview(actor,id,revision,button.id);
+   if(button.action.kind==='MENU'){
+    const target=(await svc.list(actor)).find(x=>x.id===button.action.target);if(!target)return null;
+    const screen=await renderOwnerInlineStudio(store,policy,actor,key('v',target),clock);if(!screen)return null;
+    const back=[b('↩️ القائمة السابقة',key('v',t))];
+    return {...screen,keyboard:{inline_keyboard:[...screen.keyboard.inline_keyboard,back]},...(screen.nativeKeyboard?{nativeKeyboard:{inline_keyboard:[...screen.nativeKeyboard.inline_keyboard,back]}}:{})};
+   }
    if(button.action.kind==='SERVICE')return renderStudentInline(store,policy,actor,button.action.target);
    const text=button.action.kind==='URL'?'<a href="'+studioEscape(button.action.target)+'">'+studioEscape(button.title)+'</a>':button.action.kind==='MINI_APP'?'وجهة Mini App تحتاج اعتمادًا في مرحلة ربطها قبل فتحها.':studioEscape(button.action.target);
    return ui(text,[[b('↩️ المعاينة',key('v',t))],root]);
@@ -104,7 +120,7 @@ export async function renderOwnerInlineStudio(store:BotStore,policy:Policy,actor
   if(action==='f'){const v=parts[5]!;return studioDraftScreen(await svc.edit(actor,id,revision,{kind:'FORMAT',hour12:v==='12'?true:v==='24'?false:t.draft.hour12,calendar:v==='gregory'||v==='islamic'?v:t.draft.calendar}));}
   if(mode==='12')return ui('<b>التاريخ والوقت</b>\nالمنطقة: '+studioEscape(t.draft.timezone)+'\nالتوقيت: '+(t.draft.hour12?'12':'24')+'\nالتقويم: '+t.draft.calendar,[[b('12 ساعة',key('f',t,'12')),b('24 ساعة',key('f',t,'24'))],[b('ميلادي',key('f',t,'gregory')),b('هجري',key('f',t,'islamic'))],[b('المنطقة الزمنية',edit(t,'TIMEZONE'))],[b('↩️ المسودة',key('d',t))],root]);
   if(mode==='03')return ui('<b>ترتيب الصفوف</b>\nالتوزيع الحالي: '+(t.draft.layout.join('-')||'فارغ'),[[b('كتابة توزيع الصفوف',edit(t,'LAYOUT'))],...t.draft.layout.map((_,i)=>[b('نسخ الصف '+(i+1),key('q',t,String(i)))]),[b('↩️ المسودة',key('d',t))],root]);
-  if(action==='e'&&['01','02','04','06'].includes(mode!))return ui('<b>أزرار القالب</b>\nاختر زرًا لتحرير عنوانه ووظيفته ونمطه وشرطه.',[...t.draft.buttons.map(bt=>[b(bt.title,key('b',t,bt.id))]),[b('إضافة زر',edit(t,'ADD_BUTTON'))],[b('↩️ المسودة',key('d',t))],root]);
+  if(action==='e'&&['01','02','04','05','06'].includes(mode!))return ui('<b>أزرار القالب</b>\nاختر زرًا لتحرير عنوانه ووظيفته ونمطه وشرطه.',[...t.draft.buttons.map(bt=>[b(bt.title,key('b',t,bt.id))]),[b('إضافة زر',edit(t,'ADD_BUTTON'))],[b('↩️ المسودة',key('d',t))],root]);
   if(mode==='11')return ui('<b>المتغيرات المسموحة</b>\n{العضو}\n{اسم_المجموعة}\n{التاريخ}\n{الوقت}\n{رابط_القوانين}\nتُستبدل وفق النطاق أثناء العرض؛ لا تُنفذ تعبيرات برمجية.',[[b('تحرير نص القالب',edit(t,'TEXT'))],[b('↩️ المسودة',key('d',t))],root]);
   if(action==='v'||mode==='08'){
    const d=t.draft,fmt=(options:Intl.DateTimeFormatOptions)=>new Intl.DateTimeFormat('ar',{timeZone:d.timezone,calendar:d.calendar,...options}).format(clock());

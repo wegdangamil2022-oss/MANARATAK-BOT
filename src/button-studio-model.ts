@@ -1,4 +1,4 @@
-export type StudioAction={kind:'URL'|'COPY'|'INLINE'|'SERVICE'|'MINI_APP';target:string};
+export type StudioAction={kind:'URL'|'COPY'|'INLINE'|'SERVICE'|'MINI_APP'|'MENU';target:string};
 export interface StudioCondition{role:'ANY'|'OWNER';opensAt:number;closesAt:number;seats:number;}
 export interface StudioButton{id:string;title:string;action:StudioAction;style:'default'|'primary'|'success'|'danger';condition:StudioCondition;}
 export interface StudioContent{name:string;text:string;buttons:StudioButton[];layout:number[];timezone:string;hour12:boolean;calendar:'gregory'|'islamic';}
@@ -24,6 +24,7 @@ export function validStudioAction(v:unknown):v is StudioAction{
  if(v.kind==='URL'||v.kind==='MINI_APP')return studioURL(v.target)!==null;
  if(v.kind==='COPY')return text(v.target,256);
  if(v.kind==='INLINE')return text(v.target,128)&&!/[\r\n\t]/u.test(v.target);
+ if(v.kind==='MENU')return studioId(v.target);
  return v.kind==='SERVICE'&&studioServices.includes(v.target as typeof studioServices[number]);
 }
 export function validStudioContent(v:unknown):v is StudioContent{

@@ -45,7 +45,7 @@ export class ButtonStudioService{
    case 'FORMAT':d.hour12=edit.hour12;d.calendar=edit.calendar;break;
    default:throw Error('STUDIO_UNKNOWN_EDIT');
   }
-  if(!validStudioContent(d))throw Error('STUDIO_INVALID_CONTENT');this.record(s,actor,t,d,'STUDIO_DRAFT_CHANGED');
+  if(!validStudioContent(d)||d.buttons.some(b=>b.action.kind==='MENU'&&(b.action.target===t.id||!s.buttonStudio?.templates.some(target=>target.id===b.action.target))))throw Error('STUDIO_INVALID_CONTENT');this.record(s,actor,t,d,'STUDIO_DRAFT_CHANGED');
  }
  private record(s:BotState,actor:string,t:StudioTemplate,draft:StudioContent,reason:string):void{
   t.draft=draft;t.revision++;t.updatedAt=this.clock();t.updatedBy=actor;
