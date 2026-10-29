@@ -57,12 +57,22 @@ test('owner inline home and section pagination are strict bounded Telegram marku
   assert.ok(section);
   assert.equal(isValidTelegramInlineKeyboard(section.keyboard),true);
   const items=buttons(section).filter(b=>/^mi:1:i:/.test(b.callback_data));
-  assert.equal(items.length,8);
+  assert.equal(items.length,n===6?9:8);
   assert.ok(ownerInlineRender('mi:1:i:'+key+':01'));
  }
  for(const bad of ['mi:1:p:2','mi:1:p:01','mi:1:s:00:0','mi:1:s:01:3',
    'mi:1:i:01:13','mi:1:i:01:00','mi:1:p:0:extra','mi:1:i:99:01',
    'mi:1:h\n','mi:1:s:01:-1','mi:2:h'])assert.equal(ownerInlineRender(bad),null,bad);
+});
+test('broadcast section uses the approved nine and eight buttons with correct return pages',()=>{
+ const first=ownerInlineRender('mi:1:s:06:0')!,second=ownerInlineRender('mi:1:s:06:1')!;
+ assert.deepEqual(buttons(first).filter(b=>b.callback_data.startsWith('mi:1:i:')).map(b=>b.callback_data),Array.from({length:9},(_,i)=>'mi:1:i:06:'+String(i+1).padStart(2,'0')));
+ assert.deepEqual(buttons(second).filter(b=>b.callback_data.startsWith('mi:1:i:')).map(b=>b.callback_data),Array.from({length:8},(_,i)=>'mi:1:i:06:'+String(i+10).padStart(2,'0')));
+ assert.equal(ownerInlineRender('mi:1:s:06:2'),null);
+ for(let i=1;i<=17;i++){
+  const item=ownerInlineRender('mi:1:i:06:'+String(i).padStart(2,'0'))!;
+  assert.ok(buttons(item).some(b=>b.callback_data==='mi:1:s:06:'+(i<=9?0:1)));
+ }
 });
 for(const engine of ['json','sqlite'] as const){
  test('inline mode opens approved owner dashboard from existing button and preserves legacy tools ('+engine+')',async()=>{

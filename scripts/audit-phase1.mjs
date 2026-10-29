@@ -26,16 +26,17 @@ for(let s=0;s<ownerInlineSections.length;s++){
  const labels=[...official.matchAll(/^\| \d\d \| (.*?) \|/gm)].map(m=>m[1]);
  assert.deepEqual(section.items,labels,'official button names/order '+key);
  assert.equal(section.descriptions.length,labels.length);
- for(let p=0;p<Math.ceil(labels.length/8);p++){
+ const pageSizes=s===5?[9,8]:Array.from({length:Math.ceil(labels.length/8)},(_,p)=>Math.min(8,labels.length-p*8));
+ for(let p=0;p<pageSizes.length;p++){
   const page=ownerInlineRender('mi:1:s:'+key+':'+p);
   assert.ok(page&&isValidTelegramInlineKeyboard(page.keyboard));
-  assert.equal(page.keyboard.inline_keyboard.flat().filter(b=>b.callback_data.startsWith('mi:1:i:')).length,labels.slice(p*8,p*8+8).length);
+  assert.equal(page.keyboard.inline_keyboard.flat().filter(b=>b.callback_data.startsWith('mi:1:i:')).length,pageSizes[p]);
  }
  for(let i=0;i<labels.length;i++){
   const route='mi:1:i:'+key+':'+code(i+1);
   const screen=ownerInlineRender(route);
   assert.ok(screen&&isValidTelegramInlineKeyboard(screen.keyboard),route);
-  assert.ok(screen.keyboard.inline_keyboard.flat().some(b=>b.callback_data==='mi:1:s:'+key+':'+Math.floor(i/8)),route+' back');
+  assert.ok(screen.keyboard.inline_keyboard.flat().some(b=>b.callback_data==='mi:1:s:'+key+':'+(s===5?(i<9?0:1):Math.floor(i/8))),route+' back');
   const special=new Set(['mi:1:i:03:01','mi:1:i:02:01','mi:1:i:02:15','mi:1:i:02:16','mi:1:i:02:13','mi:1:i:02:05','mi:1:i:02:06','mi:1:i:02:07','mi:1:i:02:08','mi:1:i:02:12']);
   rows.push({section:key,sectionTitle:section.title,button:code(i+1),label:labels[i],callback:route,
    status:ownerInlineLinkedReadOnly(route)!==null||special.has(route)?'LOCAL_VIEW':'DESIGN_ONLY'});

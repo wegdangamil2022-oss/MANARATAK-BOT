@@ -711,10 +711,11 @@ function home(page:0|1):OwnerInlineScreen{
 export function ownerInlineHome():OwnerInlineScreen{return home(0);}
 function sectionScreen(sectionIndex:number,page:number):OwnerInlineScreen|null{
  const section=ownerInlineSections[sectionIndex]!;
- const pages=Math.ceil(section.items.length/8);
+ const pages=sectionIndex===5?2:Math.ceil(section.items.length/8);
  if(page<0||page>=pages)return null;
  const rows=[] as {text:string;callback_data:string}[][];
- const start=page*8,end=Math.min(start+8,section.items.length);
+ const start=sectionIndex===5?(page===0?0:9):page*8;
+ const end=Math.min(sectionIndex===5?(page===0?9:17):start+8,section.items.length);
  for(let i=start;i<end;i+=2){
   rows.push(Array.from({length:Math.min(2,end-i)},(_,j)=>{
    const itemIndex=i+j;
@@ -742,7 +743,7 @@ function itemScreen(sectionIndex:number,itemIndex:number):OwnerInlineScreen{
  return {text:'<b>'+esc(label)+'</b>\n'+esc(detail)+'\n\n'
   +'⌛ غير مفعّلة بعد في لوحة الأزرار الشفافة. هذا عرض للمواصفة المعتمدة، '
   +'ولا ينفذ أي إجراء في Telegram أو قاعدة البيانات.',
-  keyboard:keyboard([navigation('mi:1:s:'+number(sectionIndex+1)+':'+Math.floor(itemIndex/8))])};
+  keyboard:keyboard([navigation('mi:1:s:'+number(sectionIndex+1)+':'+(sectionIndex===5?(itemIndex<9?0:1):Math.floor(itemIndex/8)))])};
 }
 /** Strict stateless route decoder. Unknown, stale-version, malformed or
  * out-of-range selectors fail closed. The caller MUST authorize the actor.
