@@ -72,7 +72,7 @@ function normalizedOutcome(value:unknown):PurgeOutcome|'RATE_LIMITED' {
 
 export interface PurgeGateway {
  canDelete(chatId:string):Promise<boolean>;
- deleteMessage(chatId:string,messageId:number,attemptId:string):Promise<PurgeGatewayResult>;
+ deleteMessage(chatId:string,messageId:number,attemptId:string,verifyCurrentAuthority?:()=>Promise<boolean>):Promise<PurgeGatewayResult>;
  /** Must independently verify issuer, scope, attempt and statement of provider result. */
  verifyEvidence(evidence:PurgeEvidence):Promise<boolean>;
 }
@@ -99,6 +99,18 @@ const hash=(m:RollingMessageMeta)=>createHash('sha256').update(JSON.stringify([
  m.chatId,m.messageId,m.senderKind,m.senderId??null,m.sentAt,m.contentType,m.hasLinks,
  m.pinned,m.linkedChannel,m.adminLog,m.approvedAnnouncement
 ])).digest('hex');
+/** Immutable review/attempt projection; a restored or concurrent writer must
+ * not replace the approved target/filter while external rights checks wait. */
+const attemptBinding=(job:PurgeJob,item:PurgeItem):string=>JSON.stringify([
+ job.id,job.chatId,job.actorId,job.createdAt,job.expiresAt,job.scopeVersion,job.filter,
+ job.confirmedAt,job.confirmedBy,item.messageId,item.metaDigest,item.attemptId,item.startedAt,item.leaseUntil
+]);
+/** Local comparison digest of exactly what a human previewed. This is not
+ * authentication against replacement of both database and original button. */
+export const purgeReviewDigest=(job:PurgeJob):string=>createHash('sha256').update(JSON.stringify([
+ job.id,job.chatId,job.actorId,job.createdAt,job.expiresAt,job.scopeVersion,job.filter,
+ job.items.map(i=>[i.messageId,i.metaDigest])
+])).digest('hex').slice(0,16);
 const terminalItem=(s:PurgeItem['status'])=>s==='ACKNOWLEDGED'||s==='CANCELLED'||s==='SKIPPED_UNVERIFIED';
 const protectedMessage=(m:RollingMessageMeta)=>m.pinned||m.linkedChannel||m.adminLog||m.approvedAnnouncement;
 const validId=(v:unknown)=>typeof v==='number'&&Number.isSafeInteger(v)&&v>0;
@@ -205,7 +217,7 @@ export class ModerationPurgeService {
    return structuredClone(job);
   });
  }
- async confirm(actor:string,jobId:string):Promise<PurgeJob>{
+ async confirm(actor:string,jobId:string,expectedReviewDigest?:string):Promise<PurgeJob>{
   return this.store.transaction(s=>{
    const job=s.purgeJobs.find(x=>x.id===jobId);
    if(!job)throw new Error('PURGE_NOT_FOUND');
@@ -214,6 +226,7 @@ export class ModerationPurgeService {
    if(actor!==job.actorId&&!this.policy.isOwner(actor))throw new Error('PREVIEW_ACTOR_MISMATCH');
    if(job.items.length>10&&!this.policy.isOwner(actor))throw new Error('OWNER_APPROVAL_REQUIRED');
    if(job.status!=='PREVIEW')throw new Error('ALREADY_CONFIRMED');
+   if(expectedReviewDigest!==undefined&&expectedReviewDigest!==purgeReviewDigest(job))throw new Error('PURGE_REVIEW_CHANGED');
    if(now>job.expiresAt||this.policy.chatRevision(s,job.chatId)!==job.scopeVersion)
      throw new Error('PREVIEW_STALE');
    prune(s,now);
@@ -259,9 +272,24 @@ export class ModerationPurgeService {
       actorId:job.actorId,decision:'ALLOW',reason:'PURGE_ATTEMPT_DURABLY_RECORDED',
       policyVersion:job.scopeVersion,at:now});
    return {kind:'SEND' as const,chatId:job.chatId,messageId:current.messageId,
-     attemptId:current.attemptId,actor:job.actorId,version:job.scopeVersion};
+     attemptId:current.attemptId,actor:job.actorId,version:job.scopeVersion,binding:attemptBinding(job,current)};
   });
   if(claimed.kind!=='SEND')return {status:claimed.kind};
+  const stillAuthorized=(s:BotState):boolean=>{
+   const jobs=s.purgeJobs.filter(j=>j.id===jobId);
+   if(jobs.length!==1)return false;
+   const job=jobs[0]!;
+   const items=job.items.filter(i=>i.messageId===claimed.messageId);
+   if(items.length!==1)return false;
+   const item=items[0]!;
+   return job.status==='READY'&&item.status==='SENDING'&&item.attemptId===claimed.attemptId&&
+    attemptBinding(job,item)===claimed.binding&&!leaseExpired(item.leaseUntil,this.clock())&&
+    allowed(s,this.policy,claimed.actor,claimed.chatId,this.clock())&&
+    this.policy.chatRevision(s,claimed.chatId)===claimed.version&&available(s,{...job,items:[item]},this.clock());
+  };
+  const verifyCurrentAuthority=async():Promise<boolean>=>{
+   try{return stillAuthorized(await this.store.snapshot());}catch{return false;}
+  };
   let rights=false;
   try{rights=(await this.gateway.canDelete(claimed.chatId))===true;}catch{/* fail closed */}
   const permit=await this.store.transaction(s=>{
@@ -269,6 +297,7 @@ export class ModerationPurgeService {
    const item=job?.items.find(x=>x.messageId===claimed.messageId);
    if(!job||!item||item.status!=='SENDING'||item.attemptId!==claimed.attemptId)return false;
    if(leaseExpired(item.leaseUntil,this.clock())){item.status='UNKNOWN_OUTCOME';return false;}
+   if(attemptBinding(job,item)!==claimed.binding){item.status='UNKNOWN_OUTCOME';return false;}
    prune(s,this.clock());
    if(job.status==='READY'&&rights&&allowed(s,this.policy,claimed.actor,claimed.chatId,this.clock())&&
      this.policy.chatRevision(s,claimed.chatId)===claimed.version&&available(s,{...job,items:[item]},this.clock()))return true;
@@ -279,7 +308,8 @@ export class ModerationPurgeService {
   });
   if(!permit)return {status:'BLOCKED'};
   let response:unknown;
-  try{response=await this.gateway.deleteMessage(claimed.chatId,claimed.messageId,claimed.attemptId);}
+  try{response=await verifyCurrentAuthority()?
+   await this.gateway.deleteMessage(claimed.chatId,claimed.messageId,claimed.attemptId,verifyCurrentAuthority):'FAILED_CONFIRMED';}
   catch{response='UNKNOWN_OUTCOME';}
   const outcome=normalizedOutcome(response);
   return this.store.transaction(s=>{
@@ -288,7 +318,10 @@ export class ModerationPurgeService {
    if(!job||!item||item.status!=='SENDING'||item.attemptId!==claimed.attemptId)
      return {status:'BLOCKED' as const};
    const recordedAttempt=item.attemptId;
-   if(outcome==='RATE_LIMITED'&&confirmedRateLimit(response)){
+   // A late API acknowledgement does not certify continued authority or an
+   // unchanged reviewed target. Preserve uncertainty rather than green status.
+   if(outcome==='ACKNOWLEDGED'&&!stillAuthorized(s))item.status='UNKNOWN_OUTCOME';
+   else if(outcome==='RATE_LIMITED'&&confirmedRateLimit(response)){
      // Explicit 429 is a confirmed rejection, not an ambiguous network outcome.
      // Never auto-loop; only a future explicit dispatch can retry after cooldown.
      const next=this.clock()+response.retryAfterMs;
