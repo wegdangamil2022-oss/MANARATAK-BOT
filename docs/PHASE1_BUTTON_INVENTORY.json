@@ -1,6 +1,7 @@
 {
   "schemaVersion": 1,
-  "sourceCommit": "c0e46fde86e514646af5c1f3b694fe3c4e34b19e",
+  "sourceCommit": "584673934f9221c93fdcaf85bc3555a2ff234f4a",
+  "sourceDirty": false,
   "officialPlan": "docs/MANARATAK_BOT_MASTER_v1.2.1_AR.md",
   "officialButtons": "docs/أزرار_منارتك.md",
   "scope": "LOCAL_PHASE1_INVENTORY_ONLY",
@@ -8,8 +9,8 @@
   "networkCalls": 0,
   "ownerSections": 16,
   "ownerButtons": 253,
-  "localViews": 10,
-  "designOnly": 243,
+  "localViews": 16,
+  "designOnly": 237,
   "engines": [
     {
       "engine": "json",
@@ -163,7 +164,7 @@
       "button": "05",
       "label": "🔒 أقفال أنواع الرسائل",
       "callback": "mi:1:i:02:05",
-      "status": "DESIGN_ONLY"
+      "status": "LOCAL_VIEW"
     },
     {
       "section": "02",
@@ -171,7 +172,7 @@
       "button": "06",
       "label": "🔗 الروابط والتوجيه",
       "callback": "mi:1:i:02:06",
-      "status": "DESIGN_ONLY"
+      "status": "LOCAL_VIEW"
     },
     {
       "section": "02",
@@ -179,7 +180,7 @@
       "button": "07",
       "label": "🚫 الكلمات والعبارات",
       "callback": "mi:1:i:02:07",
-      "status": "DESIGN_ONLY"
+      "status": "LOCAL_VIEW"
     },
     {
       "section": "02",
@@ -187,7 +188,7 @@
       "button": "08",
       "label": "🤖 مكافحة السبام والفلود",
       "callback": "mi:1:i:02:08",
-      "status": "DESIGN_ONLY"
+      "status": "LOCAL_VIEW"
     },
     {
       "section": "02",
@@ -219,7 +220,7 @@
       "button": "12",
       "label": "✅ الاستثناءات والسماح",
       "callback": "mi:1:i:02:12",
-      "status": "DESIGN_ONLY"
+      "status": "LOCAL_VIEW"
     },
     {
       "section": "02",
@@ -227,7 +228,7 @@
       "button": "13",
       "label": "🧹 تنظيف الرسائل",
       "callback": "mi:1:i:02:13",
-      "status": "DESIGN_ONLY"
+      "status": "LOCAL_VIEW"
     },
     {
       "section": "02",
