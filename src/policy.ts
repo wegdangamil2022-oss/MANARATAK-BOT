@@ -1,4 +1,5 @@
 import {randomUUID} from 'node:crypto';
+import {delegationFingerprint} from './delegation-fingerprint.js';
 import { BotStore, type BotState, type Chat, type Grant, type Capability, type GroupAIMode, type PrivateAIMode } from './store.js';
 
 export class Policy {
@@ -68,6 +69,11 @@ export class Policy {
     const active=relevant.filter(g=>!g.revoked&&g.expiresAt>now);
     if(active.length>1)return {safe:false,active:[]};
     return {safe:true,active};
+  }
+  /** Read-only preflight; the confirmation transaction checks again. */
+  canIssueGroupGrant(s:BotState,actor:string,capability:Capability,chatId:string,now:number):boolean{
+   const chat=this.uniqueChat(s,chatId);if(!chat?.approved||this.isOwner(actor))return false;
+   const ledger=this.groupGrantLedger(s,actor,capability,chatId,chat.version,now);return ledger.safe&&ledger.active.length===0;
   }
   /** Restore-safe unique group record lookup. Never select the first, last
    * or most permissive approval from multiple rows with the same ID.
@@ -370,5 +376,29 @@ export class Policy {
           g.revoked=true;
       }
     });
+  }
+  /** The reviewed grant and its one-shot confirmation commit atomically. */
+  async confirmOwnerDelegation(by:string,ref:string,now:number):Promise<{actor:string;capability:Capability;chatId:string;kind:'GRANT'|'REVOKE';page:number}|null>{
+   this.requireOwner(by);
+   if(!/^c_[A-Za-z0-9_-]{24}$/u.test(ref)||!Number.isSafeInteger(now)||now<0||now>8_640_000_000_000_000-120000)return null;
+   return this.store.transaction(s=>{
+    const rows=s.callbacks.filter(c=>c.ref===ref),c=rows[0];
+    if(rows.length!==1||!c||c.actorId!==by||c.chatId!=='private'||c.policyVersion!==0||c.used!==false||c.revoked!==false||c.oneShot!==true||!Number.isSafeInteger(c.expiresAt)||c.expiresAt<=now||c.expiresAt>now+120000||!c.action.startsWith('delegation.confirm:')||!this.privateFeature(s,'owner.dashboard',by))return null;
+    const v:unknown=JSON.parse(c.action.slice('delegation.confirm:'.length));
+    if(!Array.isArray(v)||v.length!==8||!['GRANT','REVOKE'].includes(v[0])||typeof v[1]!=='string'||!/^[1-9]\d{0,15}$/u.test(v[1])||!Number.isSafeInteger(Number(v[1]))||v[1]===by||typeof v[2]!=='string'||!['ai.ask','ai.settings.manage','content.publish','content.upload','chat.manage','education.navigate','subscription.verify','support.use'].includes(v[2])||typeof v[3]!=='string'||!/^-[1-9]\d{0,18}$/u.test(v[3])||!Number.isSafeInteger(v[4])||v[4]<1||!Number.isSafeInteger(v[5])||v[5]<0||!Number.isSafeInteger(v[6])||v[6]<0||v[6]>999||typeof v[7]!=='string'||!/^[a-f0-9]{64}$/u.test(v[7]))return null;
+    const kind=v[0] as 'GRANT'|'REVOKE',actor=v[1],capability=v[2] as Capability,chatId=v[3],epoch=v[4] as number,until=v[5] as number,page=v[6] as number;
+    const chat=this.assertUniqueChatRecord(s,chatId);if(!chat?.approved||chat.version!==epoch||delegationFingerprint(s,actor,capability,chatId)!==v[7])return null;
+    const ledger=this.groupGrantLedger(s,actor,capability,chatId,epoch,now);if(!ledger.safe)return null;
+    if(kind==='GRANT'){
+     const required:Partial<Record<Capability,string>>={'ai.ask':'assistant','content.publish':'publishing','content.upload':'navigation','chat.manage':'moderation'};
+     if(!required[capability]||!chat.scopes.includes(required[capability]!))return null;
+     if(until<=now||until>now+30*86400000||ledger.active.length!==0)return null;
+     const grantId=randomUUID();if(s.grants.some(g=>g.grantId===grantId))return null;
+     s.grants.push({actor,capability,chatId,expiresAt:until,grantedBy:by,revoked:false,chatPolicyVersion:epoch,grantId});
+    }else{
+     if(ledger.active.length!==1||ledger.active[0]!.expiresAt!==until)return null;ledger.active[0]!.revoked=true;
+    }
+    c.used=true;s.audit.push({actorId:by,updateKey:'delegation:'+ref,decision:'ALLOW',reason:kind==='GRANT'?'OWNER_DELEGATION_GRANTED':'OWNER_DELEGATION_REVOKED',policyVersion:epoch,at:now});return {actor,capability,chatId,kind,page};
+   });
   }
 }

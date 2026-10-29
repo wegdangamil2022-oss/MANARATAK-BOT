@@ -29,6 +29,7 @@ import {renderOwnerInlineCategories} from './telegram-inline-categories.js';
 import {EducationCategoryEditor} from './education-category-editor.js';
 import {renderPrivateSettings} from './telegram-inline-private-settings.js';
 import {protectionUIEpoch,ADMIN_UI_TTL_MS} from './protection-ui-access.js';
+import {OwnerDelegationEditor} from './telegram-inline-delegation-edit.js';
 import {renderOwnerInlineGroups} from './telegram-inline-groups.js';
 import {OwnerInlineGroupControls} from './telegram-inline-group-controls.js';
 import {renderOwnerInlineDelegations} from './telegram-inline-delegations.js';
@@ -341,6 +342,8 @@ export class TelegramUpdateApplication {
      // command from untrusted callback_data or from a group context.
      if(kind!=='private'||actorId!==chatId)return {status:'DENIED',reason:'PRIVATE_CALLBACK_ONLY'};
      if(this.opts.policy.isOwner(actorId)&&!event.callbackData.startsWith('ec:1:')&&event.callbackData!=='mi:1:i:10:16')await new EducationCategoryEditor(this.opts.store,this.opts.policy,this.clock).cancel(actorId);
+     if(this.opts.policy.isOwner(actorId)&&!event.callbackData.startsWith('od:1:'))await new OwnerDelegationEditor(this.opts.store,this.opts.policy,this.clock).cancel(actorId);
+     if(this.opts.policy.isOwner(actorId)&&!event.callbackData.startsWith('st:1:')&&!studioOwnerEntry(event.callbackData))await new ButtonStudioService(this.opts.store,this.opts.policy,this.clock).cancelInput(actorId);
      if(this.opts.policy.isOwner(actorId)&&!event.callbackData.startsWith('ps:1:')&&event.callbackData!=='mi:1:i:11:03'&&!event.callbackData.startsWith('si:1:')&&!event.callbackData.startsWith('si:2:')&&!event.callbackData.startsWith('ms:1:')&&!this.opts.policy.privateFeature(await this.opts.store.snapshot(),'owner.dashboard',actorId))return {status:'DENIED',reason:'OWNER_DASHBOARD_DISABLED'};
      if(event.callbackData==='mi:1:i:11:03'||event.callbackData.startsWith('ps:1:')){
       const view=await renderPrivateSettings(this.opts.store,this.opts.policy,actorId,event.callbackData,this.clock);
@@ -373,6 +376,10 @@ export class TelegramUpdateApplication {
        plan:this.plan(chatId,screen.text,undefined,screen.keyboard,event.callbackMessageId)};
      }
      if(!this.opts.policy.isOwner(actorId))return {status:'DENIED',reason:'OWNER_ONLY'};
+     if(event.callbackData.startsWith('od:1:')){
+      const view=await new OwnerDelegationEditor(this.opts.store,this.opts.policy,this.clock).handle(actorId,event.callbackData);
+      return view?{status:'APPLIED',reason:'RESPONSE_PLANNED_ONLY',plan:this.plan(chatId,view.text,undefined,view.keyboard,event.callbackMessageId)}:{status:'DENIED',reason:'DELEGATION_STALE_OR_UNAUTHORIZED'};
+     }
      if(event.callbackData==='mi:1:i:10:16'||event.callbackData.startsWith('ec:1:')){
       const screen=await renderOwnerInlineCategories(this.opts.store,this.opts.policy,this.opts.education,actorId,event.callbackData,this.clock);
       return screen?{status:'APPLIED',reason:'RESPONSE_PLANNED_ONLY',plan:this.plan(chatId,screen.text,undefined,screen.keyboard,event.callbackMessageId)}:{status:'DENIED',reason:'CATEGORY_UI_STALE_OR_UNAUTHORIZED'};
@@ -593,6 +600,12 @@ export class TelegramUpdateApplication {
       const m=menuLabels;
       const owner=this.opts.policy.isOwner(actorId);
       if(owner){
+       const delegation=new OwnerDelegationEditor(this.opts.store,this.opts.policy,this.clock);
+       if(text.startsWith('/')||Object.values(m).some(label=>label===text)||isOwnerMenuText(text))await delegation.cancel(actorId);
+       else try{
+        const review=await delegation.previewInput(actorId,text);
+        if(review)return {status:'APPLIED',reason:'DELEGATION_TEXT_PREVIEW',plan:this.plan(chatId,review.text,undefined,review.keyboard)};
+       }catch{return {status:'DENIED',reason:'DELEGATION_INPUT_INVALID_OR_STALE',plan:this.plan(chatId,'تعذّر قبول المعرّف أو انتهت خطوة الإدخال. افتح التفويض وأعد المحاولة.')};}
        const categories=new EducationCategoryEditor(this.opts.store,this.opts.policy,this.clock);
        if(text.startsWith('/')||Object.values(m).some(label=>label===text)||isOwnerMenuText(text))await categories.cancel(actorId);
        else try{
@@ -1132,9 +1145,9 @@ export class TelegramUpdateApplication {
     }
     const callback=event.callbackData??'';
     const ownerScreen=event.kind==='private'&&this.opts.policy.isOwner(event.actorId)&&(
-     /^(?:mi:1:|ec:1:|of:1:|ol:1:|st:1:|ps:1:|pr:1:|pd:1:|pq:1:|mr:1:|mp:1:|c_)/u.test(callback)||
+     /^(?:mi:1:|ec:1:|od:1:|of:1:|ol:1:|st:1:|ps:1:|pr:1:|pd:1:|pq:1:|mr:1:|mp:1:|c_)/u.test(callback)||
      event.text==='/ownerinline'||event.text==='/ownerlegacy'||event.text==='/ownerrecover'||isOwnerMenuText(event.text)||
-     handled.reason==='CATEGORY_TEXT_PREVIEW'||handled.reason==='STUDIO_DRAFT_SAVED');
+     handled.reason==='CATEGORY_TEXT_PREVIEW'||handled.reason==='DELEGATION_TEXT_PREVIEW'||handled.reason==='STUDIO_DRAFT_SAVED');
     if(ownerScreen&&handled.plan&&!handled.adminUIAccess){
      const state=await this.opts.store.snapshot(),now=this.clock(),epoch=protectionUIEpoch(state,this.opts.policy,event.actorId,now);
      const recovery=!this.opts.policy.privateFeature(state,'owner.dashboard',event.actorId)&&

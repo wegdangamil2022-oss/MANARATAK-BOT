@@ -96,7 +96,7 @@ export class ButtonStudioService{
   const studio=s.buttonStudio!;studio.inputs=studio.inputs.filter(i=>i.actor!==actor&&i.expiresAt>this.clock());
   studio.inputs.push({actor,templateId:key,revision,field,buttonId,expiresAt:this.clock()+(studio.settings?.inputSeconds??600)*1000});
  });}
- async cancelInput(actor:string):Promise<void>{await this.store.transaction(s=>{this.auth(s,actor);if(s.buttonStudio)s.buttonStudio.inputs=s.buttonStudio.inputs.filter(i=>i.actor!==actor);});}
+ async cancelInput(actor:string):Promise<void>{await this.store.transaction(s=>{if(!this.policy.isOwner(actor))throw Error('STUDIO_NOT_AUTHORIZED');if(s.buttonStudio)s.buttonStudio.inputs=s.buttonStudio.inputs.filter(i=>i.actor!==actor);});}
  async pressPreview(actor:string,key:string,revision:number,buttonId:string):Promise<StudioButton>{return this.store.transaction(s=>{
   const t=this.current(s,actor,key,revision),b=t.draft.buttons.find(b=>b.id===buttonId),now=this.clock();if(!b||now<b.condition.opensAt||b.condition.closesAt!==0&&now>=b.condition.closesAt||b.condition.role==='OWNER'&&!this.policy.isOwner(actor))throw Error('STUDIO_BUTTON_CONDITION_DENIED');
   if(b.condition.seats){
