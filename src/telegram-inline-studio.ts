@@ -19,6 +19,7 @@ const patterns=[new RegExp('^st:1:l:'+mode+':'+n+'$','u'),/^st:1:n$/u,/^st:1:g:(
  new RegExp('^st:1:h:'+id+':'+rev+':'+n+'$','u'),new RegExp('^st:1:z:'+id+':'+rev+':'+rev+':'+n+'$','u'),
  new RegExp('^st:1:P:'+id+':'+rev+':[1-8]$','u'),new RegExp('^st:1:v:'+id+':'+rev+':'+n+':'+n+'$','u'),/^st:1:C$/u,
  new RegExp('^st:1:t:'+id+':'+rev+':'+id+':'+n+':'+n+'$','u'),
+ new RegExp('^st:1:T:'+id+':'+rev+':'+id+':'+n+'$','u'),
  new RegExp('^st:1:D:'+rev+':'+n+'$','u'),new RegExp('^st:1:S:'+rev+':(?:defaultTemplateId:(?:none|'+id+')|(?:buttonLimit|rowsPerPage|inputSeconds|confirmationSeconds):'+n+'|colorsByFunction:[01])$','u')];
 export function validStudioInlineRoute(data:string):boolean{return typeof data==='string'&&Buffer.byteLength(data)<=64&&patterns.some(re=>{const m=re.exec(data);return m?.[0]===data;});}
 export const studioOwnerEntry=(data:string)=>/^mi:1:i:07:(?:0[1-9]|1[1256])$/u.test(data);
@@ -37,8 +38,9 @@ export function studioDraftScreen(t:StudioTemplate):OwnerInlineScreen{
 function buttonScreen(t:StudioTemplate,button:StudioButton):OwnerInlineScreen{
  const suffix=button.id,index=t.draft.buttons.findIndex(b=>b.id===button.id);
  const moves=[];if(index>0)moves.push(b('⬆️ تقديم الزر',key('m',t,(index)+':'+(index-1))));if(index+1<t.draft.buttons.length)moves.push(b('⬇️ تأخير الزر',key('m',t,index+':'+(index+1))));
- return ui('<b>تحرير الزر</b>\nالاسم: '+studioEscape(button.title)+'\nالنوع: '+button.action.kind+'\nالهدف: '+studioEscape(Array.from(button.action.target).slice(0,200).join(''))+'\nالنمط: '+button.style+'\nالجمهور: '+button.condition.role+'\nالفتح: '+(button.condition.opensAt?new Date(button.condition.opensAt).toISOString():'دون حد')+'\nالإغلاق: '+(button.condition.closesAt?new Date(button.condition.closesAt).toISOString():'دون حد')+'\nالمقاعد: '+(button.condition.seats||'دون حد'),
- [[b('✏️ عنوان الزر',edit(t,'BUTTON_TITLE:'+suffix)),b('🎯 الهدف',edit(t,'TARGET:'+suffix))],
+ const target=Array.from(button.action.target),domain=button.action.kind==='URL'||button.action.kind==='MINI_APP'?new URL(button.action.target).hostname:'';
+ return ui('<b>تحرير الزر</b>\nالاسم: '+studioEscape(button.title)+'\nالنوع: '+button.action.kind+(domain?'\nالنطاق: <code>'+studioEscape(domain)+'</code>':'')+'\nالهدف: '+studioEscape(target.slice(0,160).join(''))+(target.length>160?'…':'')+'\nالنمط: '+button.style+'\nالجمهور: '+button.condition.role+'\nالفتح: '+(button.condition.opensAt?new Date(button.condition.opensAt).toISOString():'دون حد')+'\nالإغلاق: '+(button.condition.closesAt?new Date(button.condition.closesAt).toISOString():'دون حد')+'\nالمقاعد: '+(button.condition.seats||'دون حد'),
+ [[b('✏️ عنوان الزر',edit(t,'BUTTON_TITLE:'+suffix)),b('🎯 تعديل الهدف',edit(t,'TARGET:'+suffix))],[b('🔎 عرض الهدف كاملًا',key('T',t,suffix+':0'))],
  ...(['URL','COPY','INLINE','SERVICE','MINI_APP'] as const).map(k=>[b('النوع: '+k,key('k',t,suffix+':'+k))]),
  [b('🧭 فتح قائمة أخرى',key('u',t,suffix))],
  [b('افتراضي',key('y',t,suffix+':default')),b('🔵',key('y',t,suffix+':primary')),b('🟢',key('y',t,suffix+':success')),b('🔴',key('y',t,suffix+':danger'))],
@@ -115,6 +117,12 @@ export async function renderOwnerInlineStudio(store:BotStore,policy:Policy,actor
    return ui(action==='r'?'<b>معاينة الاستعادة</b>\nالقالب الحالي: '+studioEscape(t.draft.name)+'\nاسم النسخة المختارة: '+studioEscape(v!.content.name)+'\nعدد الأزرار: '+v!.content.buttons.length+'\nسيُحفظ إصدار جديد ولن تُمسح الإصدارات القديمة.':'<b>معاينة حذف الزر</b>\nسيُحذف من المسودة: '+studioEscape(button!.title),[[b('✅ تأكيد','st:1:c:'+ref.slice(2))],[b('إلغاء',key('d',t))],root]);
   }
   if(action==='b')return button?buttonScreen(t,button):null;
+  if(action==='T'&&button){
+   const chars=Array.from(button.action.target),page=Number(parts[6]),pages=Math.max(1,Math.ceil(chars.length/160));if(page>=pages)return null;
+   const nav=[];if(page)nav.push(b('السابق',key('T',t,button.id+':'+(page-1))));if(page+1<pages)nav.push(b('التالي',key('T',t,button.id+':'+(page+1))));
+   const url=button.action.kind==='URL'||button.action.kind==='MINI_APP',domain=url?new URL(button.action.target).hostname:'';
+   return ui('<b>مراجعة هدف الزر</b>\n'+(domain?'النطاق: <code>'+studioEscape(domain)+'</code>\n':'')+'الصفحة '+(page+1)+' من '+pages+'\n<pre>'+studioEscape(chars.slice(page*160,page*160+160).join(''))+'</pre>'+(url?'\nفحص إعادة التوجيه واعتماد الرابط مطلوبان قبل النشر.':''),[...(nav.length?[nav]:[]),[b('↩️ تحرير الزر',key('b',t,button.id))],root]);
+  }
   if((action==='u'||action==='w')&&button){
    const targets=all.filter(x=>x.id!==t.id),page=action==='w'?Number(parts[6]):0,pages=Math.max(1,Math.ceil(targets.length/8));if(page>=pages)return null;
    const rows=targets.slice(page*8,page*8+8).map(x=>[b(x.draft.name,key('L',t,button.id+':'+x.id))]);

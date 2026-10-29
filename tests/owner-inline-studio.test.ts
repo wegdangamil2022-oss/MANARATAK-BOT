@@ -18,6 +18,19 @@ const buttons=(r:Result)=>r.plan?.inlineMarkup?.inline_keyboard.flat()??r.plan?.
 const select=(r:Result,prefix:string)=>{const b=buttons(r).find(b=>b.callback_data.startsWith(prefix));assert.ok(b,'missing '+prefix);return b.callback_data;};
 for(const engine of ['json','sqlite'] as const){
  async function fixture(){const dir=await mkdtemp(join(tmpdir(),'studio-ui-')),store=new BotStore(join(dir,'state.'+engine),{engine}),policy=new Policy(store,'100'),education=new EducationService(store,policy);const app=()=>new TelegramUpdateApplication({store,policy,education,admin:new EducationAdminFacade(store,policy,education),faq:new ApprovedAnswerService(store,policy),links:new ResourceLinkService(store,policy),clock:()=>1700000000000,botId:'studio-local',botUsername:'ManaratakBot',membership:async()=>{throw Error('NETWORK_FORBIDDEN');}});return {store,policy,app,svc:new ButtonStudioService(store,policy,()=>1700000000000),close:()=>rm(dir,{recursive:true,force:true})};}
+ test('studio target review shows the actual domain and complete escaped URL in bounded pages ('+engine+')',async()=>{
+  const f=await fixture();try{
+   let t=await f.svc.create('100','قالب');t=await f.svc.edit('100',t.id,t.revision,{kind:'ADD_BUTTON',value:'رابط'});const id=t.draft.buttons[0]!.id;
+   const target='https://example.org/path?value='+('a'.repeat(700))+'&tail=final';t=await f.svc.edit('100',t.id,t.revision,{kind:'ACTION',buttonId:id,action:{kind:'URL',target}});
+   const detail=await f.app().handle(event(600,'st:1:b:'+t.id+':'+t.revision+':'+id));assert.equal(detail.status,'APPLIED');assert.ok(detail.plan!.text.includes('<code>example.org</code>'));assert.ok(detail.plan!.text.includes('…'));
+   let page=await f.app().handle(event(601,select(detail,'st:1:T:'))),whole='',i=602,route='';
+   for(;;){assert.equal(page.status,'APPLIED');assert.ok(Buffer.byteLength(page.plan!.text)<=4096);assert.ok(page.plan!.text.includes('فحص إعادة التوجيه'));whole+=page.plan!.text.match(/<pre>([\s\S]*?)<\/pre>/u)![1];
+    const next=buttons(page).find(b=>b.text==='التالي');if(!next)break;route=next.callback_data;assert.ok(Buffer.byteLength(route)<=64);page=await f.app().handle(event(i++,route));assert.ok(i<615);
+   }
+   assert.equal(whole.replace(/&amp;/gu,'&'),target);assert.equal((await f.app().handle(event(i++,route,300))).status,'DENIED');
+   t=await f.svc.edit('100',t.id,t.revision,{kind:'NAME',value:'تحديث'});assert.equal((await f.app().handle(event(i++,route))).status,'DENIED');
+  }finally{await f.close();}
+ });
  test('studio owner creates, edits, saves and restores through approved inline entry ('+engine+')',async()=>{
   const f=await fixture();try{
    const list=await f.app().handle(event(1,'mi:1:i:07:01'));assert.equal(list.status,'APPLIED');assert.equal(list.plan?.editMessageId,55);
