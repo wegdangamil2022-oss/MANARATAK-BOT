@@ -21,6 +21,7 @@ import {menuLabels,mainMenuKeyboard,backMenuKeyboard,categoryButton,
  type TelegramReplyKeyboard} from './telegram-menu.js';
 import {OwnerTelegramMenu,isOwnerMenuText} from './telegram-owner-menu.js';
 import {ownerInlineHome,ownerInlineRender,ownerInlineLinkedReadOnly,type TelegramInlineKeyboard} from './telegram-inline-owner.js';
+import {renderOwnerInlineFAQ} from './telegram-inline-faq.js';
 import {renderOwnerInlineGroups} from './telegram-inline-groups.js';
 import {OwnerInlineGroupControls} from './telegram-inline-group-controls.js';
 import {renderOwnerInlineDelegations} from './telegram-inline-delegations.js';
@@ -359,6 +360,11 @@ export class TelegramUpdateApplication {
        plan:this.plan(chatId,screen.text,undefined,screen.keyboard,event.callbackMessageId)};
      }
      if(!this.opts.policy.isOwner(actorId))return {status:'DENIED',reason:'OWNER_ONLY'};
+     if(event.callbackData==='mi:1:i:10:08'||event.callbackData.startsWith('of:1:')){
+      const screen=await renderOwnerInlineFAQ(this.opts.store,this.opts.policy,actorId,event.callbackData,this.clock);
+      if(!screen)return {status:'DENIED',reason:'FAQ_INLINE_STALE_OR_UNAUTHORIZED'};
+      return {status:'APPLIED',reason:'RESPONSE_PLANNED_ONLY',plan:this.plan(chatId,screen.text,undefined,screen.keyboard,event.callbackMessageId)};
+     }
      if(event.callbackData==='mi:1:i:02:13'||event.callbackData.startsWith('pq:1:')){
       const view=await renderOwnerPurgeQueue(this.opts.store,this.opts.policy,actorId,event.callbackData,this.clock(),Boolean(this.opts.purge));
       if(!view)return {status:'DENIED',reason:'PURGE_QUEUE_UNAVAILABLE'};
