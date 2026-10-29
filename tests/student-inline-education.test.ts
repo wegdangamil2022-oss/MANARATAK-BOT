@@ -22,13 +22,14 @@ const cb=(i:number,actor:number,data:string,group=false)=>({update_id:i,callback
 }});
 const buttons=(r:Awaited<ReturnType<TelegramUpdateApplication['handle']>>)=>
  r.plan?.inlineMarkup?.inline_keyboard.flat()??[];
-async function fixture(engine:'json'|'sqlite'){
+async function fixture(engine:'json'|'sqlite',inlineDefault=false){
  const dir=await mkdtemp(join(tmpdir(),'manaratak-student-inline-'));
  const store=new BotStore(join(dir,engine==='sqlite'?'state.sqlite':'state.json'),{engine});
  const policy=new Policy(store,OWNER),education=new EducationService(store,policy);
  const admin=new EducationAdminFacade(store,policy,education);
  const faq=new ApprovedAnswerService(store,policy),links=new ResourceLinkService(store,policy);
- const app=()=>new TelegramUpdateApplication({store,policy,education,admin,faq,links,
+ const migrationOptions=inlineDefault?{studentMenuMode:'inline' as const}:{};
+ const app=()=>new TelegramUpdateApplication({store,policy,education,admin,faq,links,...migrationOptions,
   botId:'bot-main',botUsername:'ManaratakBot',membership:async()=> 'UNKNOWN'});
  const close=()=>rm(dir,{force:true,recursive:true});
  await education.createCategory(OWNER,{id:'scholarships',scope:'private',title:'منح <آمنة> & فرص',order:1});
@@ -66,6 +67,72 @@ test('student inline router rejects malformed, noncanonical and owner callback s
   assert.equal(studentInlineRoute(bad),null,bad);
 });
 for(const engine of ['json','sqlite'] as const){
+ test('main student section buttons use filtered inline menus and keep their section on back ('+engine+')',async()=>{
+  const f=await fixture(engine,true);try{
+   const home=await f.app().handle(msg(500,300,'🎓 المنح الدراسية'));
+   assert.equal(home.status,'APPLIED');
+   assert.equal(isValidTelegramInlineKeyboard(home.plan?.inlineMarkup),true);
+   const cats=buttons(home).filter(b=>b.callback_data.includes(':c:'));
+   assert.equal(cats.length,1);
+   assert.match(cats[0]!.callback_data,/^si:2:s:c:/);
+   const list=await f.app().handle(cb(501,300,cats[0]!.callback_data));
+   assert.equal(list.status,'APPLIED');
+   const item=buttons(list).find(b=>b.callback_data.includes(':r:'))!;
+   const detail=await f.app().handle(cb(502,300,item.callback_data));
+   assert.equal(detail.status,'APPLIED');
+   const back=buttons(detail).find(b=>b.callback_data.includes(':l:'))!;
+   assert.match(back.callback_data,/^si:2:s:l:/);
+   const returned=await f.app().handle(cb(503,300,back.callback_data));
+   assert.equal(returned.status,'APPLIED');
+   const categoriesBack=buttons(returned).find(b=>b.callback_data==='si:2:s:p:0')!;
+   assert.ok(categoriesBack);
+   const categories=await f.app().handle(cb(504,300,categoriesBack.callback_data));
+   assert.equal(buttons(categories).filter(b=>b.callback_data.includes(':c:')).length,1);
+   const libraryHome=buttons(categories).find(b=>b.text==='🏠 المكتبة')!;
+   assert.equal(libraryHome.callback_data,'si:2:a:h');
+   const all=await f.app().handle(cb(505,300,libraryHome.callback_data));
+   assert.equal(buttons(all).filter(b=>b.callback_data.includes(':c:')).length,2);
+   assert.equal((await f.app().handle(cb(506,300,cats[0]!.callback_data,true))).status,'DENIED');
+   await f.store.transaction(s=>{s.privateFeatures['education.navigate']=false;});
+   assert.equal((await f.app().handle(cb(507,300,cats[0]!.callback_data))).status,'DENIED');
+  }finally{await f.close();}
+ });
+ test('all six existing section buttons have inline empty states and reject forged section routes ('+engine+')',async()=>{
+  const f=await fixture(engine,true);try{
+   let id=600;
+   for(const [label,token] of [['🎓 المنح الدراسية','s'],['📚 الدورات التعليمية','c'],['🏛 الجامعات والتخصصات','u'],['📝 الاختبارات','e'],['📄 الملفات والنماذج','f'],['📂 التعليم والموارد','a']]){
+    const result=await f.app().handle(msg(id++,300,label!));
+    assert.equal(result.status,'APPLIED');
+    assert.equal(isValidTelegramInlineKeyboard(result.plan?.inlineMarkup),true);
+    assert.ok(buttons(result).every(b=>b.callback_data==='si:2:a:h'||b.callback_data.startsWith('si:2:'+token+':')));
+   }
+   for(const bad of ['si:2:x:h','si:2:s:p:00','si:2:ss:h','si:2:s:h\n','si:2:s:r:0:1:abcdef012345:0:1:123456abcdef:publish'])
+    assert.equal((await f.app().handle(cb(id++,300,bad))).status,'DENIED');
+  }finally{await f.close();}
+ });
+ test('filtered inline resource pages return to the same page and reject stale or cross-section selections ('+engine+')',async()=>{
+  const f=await fixture(engine,true);try{
+   await f.store.transaction(s=>{
+    const template=s.educationResources.find(r=>r.id==='public1')!;
+    for(let i=1;i<=9;i++)s.educationResources.push({...template,id:'extra'+i,title:'مورد '+i});
+   });
+   const home=await f.app().handle(msg(700,300,'🎓 المنح الدراسية'));
+   const category=buttons(home).find(b=>b.callback_data.includes(':c:'))!.callback_data;
+   const list=await f.app().handle(cb(701,300,category));
+   const next=buttons(list).find(b=>b.text==='➡️ التالي')!;
+   assert.match(next.callback_data,/^si:2:s:l:/);
+   const second=await f.app().handle(cb(702,300,next.callback_data));
+   assert.match(second.plan?.text??'',/صفحة 2 من 2/);
+   const resource=buttons(second).find(b=>b.callback_data.includes(':r:'))!;
+   const detail=await f.app().handle(cb(703,300,resource.callback_data));
+   const back=buttons(detail).find(b=>b.text==='↩️ موارد القسم')!;
+   const restored=await f.app().handle(cb(704,300,back.callback_data));
+   assert.match(restored.plan?.text??'',/صفحة 2 من 2/);
+   assert.equal((await f.app().handle(cb(705,300,category.replace('si:2:s:','si:2:c:')))).status,'DENIED');
+   await f.store.transaction(s=>{s.educationCategories.find(c=>c.id==='scholarships')!.enabled=false;});
+   assert.equal((await f.app().handle(cb(706,300,back.callback_data))).status,'DENIED');
+  }finally{await f.close();}
+ });
  test('student navigates live published private catalogue with actual inline back/home ('+engine+')',async()=>{
   const f=await fixture(engine);try{
    const home=await f.app().handle(msg(1,300,'/studentinline'));

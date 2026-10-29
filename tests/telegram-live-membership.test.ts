@@ -201,7 +201,7 @@ test('live membership preflight honors group approval revoked during asynchronou
  await rm(directory,{recursive:true,force:true});
 });
 
-test('live server owner entry uses approved inline dashboard with legacy tools still reachable (offline HTTP)',async()=>{
+test('live server uses inline owner and student entries while preserving legacy owner tools (offline HTTP)',async()=>{
  const directory=await mkdtemp(join(tmpdir(),'manaratak-inline-entry-'));
  const path=join(directory,'state.sqlite'),safetyFile=join(directory,'safety.flag');
  let server:Awaited<ReturnType<typeof createLiveTelegramServer>>|undefined;
@@ -213,27 +213,30 @@ test('live server owner entry uses approved inline dashboard with legacy tools s
    BOT_OWNER_ID:OWNER,BOT_ID:'inline-test-bot',BOT_USERNAME:'ManaratakBot',BOT_STATE_FILE:path,
    TELEGRAM_BOT_TOKEN:TOKEN,TELEGRAM_WEBHOOK_SECRET:SECRET,TELEGRAM_LISTEN_PORT:'8787',
    TELEGRAM_WEBHOOK_PUBLIC_URL:'https://webhook.manaratak-ops.net/telegram/webhook',TELEGRAM_SAFETY_FILE:safetyFile};
-  const {request,calls}=fakeRequester(url=>{
+  const {request,calls}=fakeRequester((url,body)=>{
    assert.ok(url.endsWith('/sendMessage'),'unexpected external method');
-   return new Response(JSON.stringify({ok:true,result:{message_id:91,chat:{id:100}}}),{status:200});
+   return new Response(JSON.stringify({ok:true,result:{message_id:91,chat:{id:Number(body.chat_id)}}}),{status:200});
   });
   server=await createLiveTelegramServer(loadLiveTelegramConfig(env),request);
   server.listen(0,'127.0.0.1');await once(server,'listening');
   const addr=server.address();assert.ok(addr&&typeof addr!=='string');
   const endpoint='http://127.0.0.1:'+addr.port+'/telegram/webhook';
   let update=500;
-  for(const text of ['🔐 لوحة المالك','/ownerlegacy']){
+  for(const [actor,text] of [[100,'🔐 لوحة المالك'],[100,'/ownerlegacy'],[300,'📂 التعليم والموارد']] as const){
    const response=await fetch(endpoint,{method:'POST',headers:{'content-type':'application/json',
     'x-telegram-bot-api-secret-token':SECRET},body:JSON.stringify({update_id:update++,message:{
-     message_id:500,from:{id:100,is_bot:false},chat:{id:100,type:'private'},text}})});
+     message_id:500,from:{id:actor,is_bot:false},chat:{id:actor,type:'private'},text}})});
    assert.equal(response.status,200);
    assert.deepEqual(await response.json(),{ok:true,status:'APPLIED'});
   }
-  assert.equal(calls.length,2);
+  assert.equal(calls.length,3);
   const inline=calls[0]!.body.reply_markup as {inline_keyboard?:unknown;keyboard?:unknown};
   assert.ok(Array.isArray(inline.inline_keyboard));assert.equal(inline.keyboard,undefined);
   const legacy=calls[1]!.body.reply_markup as {keyboard?:unknown};
   assert.ok(Array.isArray(legacy.keyboard));
+  const student=calls[2]!.body.reply_markup as {inline_keyboard:{callback_data:string}[][]};
+  assert.ok(student.inline_keyboard.flat().some(b=>b.callback_data==='si:2:a:h'));
+  assert.equal(calls[2]!.body.chat_id,'300');
  }finally{
   if(server?.listening){server.close();await once(server,'close');}
   await rm(directory,{recursive:true,force:true});

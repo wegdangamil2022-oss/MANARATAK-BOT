@@ -172,7 +172,7 @@ export async function createLiveTelegramServer(config:LiveTelegramConfig,
  const app=new TelegramUpdateApplication({store,policy,education,admin,faq,links,
   botId:check.botId,botUsername:check.botUsername,
   membership:(chatId,actorId)=>membership.verifyMembership(chatId,actorId),subscription,
-  moderationSafetyFile:check.safetySwitchFile,ownerMenuMode:'inline'});
+  moderationSafetyFile:check.safetySwitchFile,ownerMenuMode:'inline',studentMenuMode:'inline'});
  const dispatcher=new TelegramReplyDispatcher(store,policy,
   new TelegramBotApiTextSender(check.token,request),Date.now,safetyGate,subscription,
   (chatId,actorId)=>membership.verifyMembership(chatId,actorId));

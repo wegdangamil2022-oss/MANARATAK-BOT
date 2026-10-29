@@ -28,7 +28,7 @@ import {ModerationUnknownOwnerReview} from './moderation-unknown-review.js';
 import {ModerationPendingOwnerView} from './moderation-pending-owner-view.js';
 import {renderOwnerModerationRateStatus} from './telegram-inline-moderation-rate-status.js';
 import {renderOwnerModerationEmergencyStatus} from './telegram-inline-moderation-emergency.js';
-import {renderStudentInline} from './telegram-inline-student.js';
+import {renderStudentInline,studentSectionInlineData} from './telegram-inline-student.js';
 import {parseSearchQuery,parseSearchPageCommand,searchPageButton,
  searchResourceButton,parseSearchResourceSelection,searchResultsBreadcrumb,
  parseSearchResultsBreadcrumb} from './telegram-search.js';
@@ -81,6 +81,8 @@ export interface TelegramApplicationOptions {
   moderationSafetyFile?:string;
   /** Inline is enabled by the live server; legacy remains the default for existing integrations. */
   ownerMenuMode?:'inline'|'legacy';
+  /** Existing student catalogue buttons open filtered inline menus in the live runtime. */
+  studentMenuMode?:'inline'|'legacy';
 }
 
 type Event = {updateId: number; actorId: string; chatId: string; kind: 'private' | 'group'; text: string; entities?:unknown; messageId?:number; replyTo?:unknown; document?: IncomingDocument; callbackData?:string; callbackQueryId?:string; callbackMessageId?:number};
@@ -280,7 +282,7 @@ export class TelegramUpdateApplication {
      // Reauthorize the real sender at every tap. Never dispatch a privileged
      // command from untrusted callback_data or from a group context.
      if(kind!=='private'||actorId!==chatId)return {status:'DENIED',reason:'PRIVATE_CALLBACK_ONLY'};
-     if(event.callbackData.startsWith('si:1:')){
+     if(event.callbackData.startsWith('si:1:')||event.callbackData.startsWith('si:2:')){
       const screen=await renderStudentInline(this.opts.store,this.opts.policy,
        actorId,event.callbackData);
       if(!screen)return {status:'DENIED',reason:'STUDENT_CALLBACK_NOT_ACCESSIBLE'};
@@ -671,6 +673,12 @@ export class TelegramUpdateApplication {
         [m.files]:{section:'files',title:'ملفات ونماذج'},
         [m.library]:{section:'all',title:'التعليم والموارد'}
       };
+      if(this.opts.studentMenuMode==='inline'&&sections[text]){
+       const selector=studentSectionInlineData(sections[text]!.section);
+       const screen=selector?await renderStudentInline(this.opts.store,this.opts.policy,actorId,selector):null;
+       if(!screen)return {status:'DENIED',reason:'STUDENT_CATALOGUE_NOT_ACCESSIBLE'};
+       return {status:'APPLIED',reason:'RESPONSE_PLANNED_ONLY',plan:this.plan(chatId,screen.text,undefined,screen.keyboard)};
+      }
       const denyPage=():TelegramResult=>({status:'DENIED',reason:'INVALID_MENU_PAGE'});
       const sectionPage=async(section:string,title:string,page:number,
         direction?:MenuPageCommand['direction']):Promise<TelegramResult>=>{
