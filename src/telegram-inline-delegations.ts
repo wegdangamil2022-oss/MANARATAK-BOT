@@ -32,6 +32,7 @@ const capabilities=new Set<Capability>([
  'education.navigate','owner.dashboard','subscription.verify','support.use'
 ]);
 const PAGE_SIZE=8;
+export const delegationOwnerEntry=(data:string)=>/^mi:1:i:03:(?:01|02|04|05|07)$/u.test(data);
 const sortGrants=(a:Grant,b:Grant)=>a.actor.localeCompare(b.actor)||
  a.chatId.localeCompare(b.chatId)||a.capability.localeCompare(b.capability)||
  a.expiresAt-b.expiresAt;
@@ -110,7 +111,7 @@ function detailScreen(s:BotState,now:number,route:Extract<OwnerInlineDelegationR
 export async function renderOwnerInlineDelegations(store:BotStore,policy:Policy,
  actorId:string,data:string,now:number):Promise<OwnerInlineScreen|null>{
  if(!policy.isOwner(actorId)||!Number.isSafeInteger(now)||now<0)return null;
- const route=data==='mi:1:i:03:01'?{kind:'list' as const,page:0}:
+ const route=delegationOwnerEntry(data)?{kind:'list' as const,page:0}:
   parseOwnerInlineDelegationRoute(data);
  if(!route)return null;
  const state=await store.snapshot();

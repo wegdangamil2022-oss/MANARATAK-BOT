@@ -25,6 +25,18 @@ for(const engine of ['json','sqlite'] as const){
    const caps=await app().handle(event(start+2,select(groups,CHAT)));const duration=await app().handle(event(start+3,select(caps,'نشر المحتوى')));return app().handle(event(start+4,select(duration,'7 يوم')));}
   return {store,policy,app,begin,time:(n:number)=>{now=n;},clock:()=>now,close:()=>rm(dir,{recursive:true,force:true})};
  }
+ test('official assignment, capability, scope and temporary delegation entries open the shared local controls ('+engine+')',async()=>{
+  const f=await fixture();try{
+   for(const [index,entry] of ['02','04','05','07'].entries()){
+    const route='mi:1:i:03:'+entry,view=await f.app().handle(event(500+index*3,route));
+    assert.equal(view.status,'APPLIED');assert.match(view.plan!.text,/لا تثبت صلاحيات Telegram/);
+    const groups=await f.app().handle(event(501+index*3,select(view,'إنشاء تفويض')));
+    assert.ok(select(groups,CHAT));
+    assert.equal((await f.app().handle(event(502+index*3,route,200))).status,'DENIED');
+   }
+   assert.equal((await f.store.snapshot()).grants.length,0);
+  }finally{await f.close();}
+ });
  test('owner grants and revokes one capability in one group with explicit single-use review ('+engine+')',async()=>{
   const f=await fixture();try{
    const prompt=await f.begin(1);assert.equal(prompt.status,'APPLIED');assert.ok(isValidTelegramInlineKeyboard(prompt.plan!.inlineMarkup));

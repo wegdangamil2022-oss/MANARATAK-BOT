@@ -5,6 +5,7 @@ import {validStudioInlineRoute,studioOwnerEntry} from './telegram-inline-studio.
 import {validOwnerCategoryInlineRoute} from './telegram-inline-categories.js';
 import {validPrivateSettingsRoute} from './telegram-inline-private-settings.js';
 import {validDelegationEditRoute} from './telegram-inline-delegation-edit.js';
+import {delegationOwnerEntry} from './telegram-inline-delegations.js';
 import {validGroupSetupRoute} from './telegram-inline-group-setup.js';
 /** The approved 2026-10-23 owner catalogue from docs/أزرار_منارتك.md.
  * READ-ONLY navigation: do NOT treat a visible catalogue item as a permission
@@ -729,7 +730,7 @@ function sectionScreen(sectionIndex:number,page:number):OwnerInlineScreen|null{
    const selector='mi:1:i:'+number(sectionIndex+1)+':'+number(itemIndex+1);
    const browsable=ownerInlineLinkedReadOnly(selector)!==null||selector==='mi:1:i:03:01'||selector==='mi:1:i:02:01'||selector==='mi:1:i:02:15'||selector==='mi:1:i:02:16'||selector==='mi:1:i:02:13'||/^mi:1:i:02:(?:0[5678]|12)$/u.test(selector);
    // Read-only connected views are different from design-only placeholders.
-   const editing=selector==='mi:1:i:03:01'||selector==='mi:1:i:10:16'||selector==='mi:1:i:11:03'||studioOwnerEntry(selector);
+   const editing=delegationOwnerEntry(selector)||selector==='mi:1:i:10:16'||selector==='mi:1:i:11:03'||studioOwnerEntry(selector);
    return callback((editing?'🛠️ ':browsable?'👁️ ':'⌛ ')+section.items[itemIndex],selector);
   }));
  }

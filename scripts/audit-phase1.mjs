@@ -11,6 +11,7 @@ import {EducationAdminFacade} from '../dist/src/education-admin.js';
 import {ApprovedAnswerService,ResourceLinkService} from '../dist/src/education-interactions.js';
 import {TelegramUpdateApplication} from '../dist/src/telegram-transport.js';
 import {studioOwnerEntry} from '../dist/src/telegram-inline-studio.js';
+import {delegationOwnerEntry} from '../dist/src/telegram-inline-delegations.js';
 
 // Explicit offline audit. No deployment, credentials, real groups or network.
 const doc=(await readFile(new URL('../docs/أزرار_منارتك.md',import.meta.url),'utf8')).replace(/\r\n/g,'\n');
@@ -40,7 +41,7 @@ for(let s=0;s<ownerInlineSections.length;s++){
   assert.ok(screen.keyboard.inline_keyboard.flat().some(b=>b.callback_data==='mi:1:s:'+key+':'+(s===5?(i<9?0:1):Math.floor(i/8))),route+' back');
   const special=new Set(['mi:1:i:03:01','mi:1:i:02:01','mi:1:i:02:15','mi:1:i:02:16','mi:1:i:02:13','mi:1:i:02:05','mi:1:i:02:06','mi:1:i:02:07','mi:1:i:02:08','mi:1:i:02:12']);
   rows.push({section:key,sectionTitle:section.title,button:code(i+1),label:labels[i],callback:route,
-   status:route==='mi:1:i:03:01'?'LOCAL_DELEGATION_EDITOR':route==='mi:1:i:10:16'?'LOCAL_CATEGORY_EDITOR':route==='mi:1:i:11:03'?'LOCAL_PRIVATE_SETTINGS':studioOwnerEntry(route)?'LOCAL_STUDIO_DRAFT':ownerInlineLinkedReadOnly(route)!==null||special.has(route)?'LOCAL_VIEW':'DESIGN_ONLY'});
+   status:delegationOwnerEntry(route)?'LOCAL_DELEGATION_EDITOR':route==='mi:1:i:10:16'?'LOCAL_CATEGORY_EDITOR':route==='mi:1:i:11:03'?'LOCAL_PRIVATE_SETTINGS':studioOwnerEntry(route)?'LOCAL_STUDIO_DRAFT':ownerInlineLinkedReadOnly(route)!==null||special.has(route)?'LOCAL_VIEW':'DESIGN_ONLY'});
  }
 }
 assert.equal(rows.length,253);

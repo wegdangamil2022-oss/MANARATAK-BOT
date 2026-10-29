@@ -33,7 +33,7 @@ import {OwnerDelegationEditor} from './telegram-inline-delegation-edit.js';
 import {renderOwnerInlineGroups} from './telegram-inline-groups.js';
 import {OwnerGroupSetup} from './telegram-inline-group-setup.js';
 import {OwnerInlineGroupControls} from './telegram-inline-group-controls.js';
-import {renderOwnerInlineDelegations} from './telegram-inline-delegations.js';
+import {renderOwnerInlineDelegations,delegationOwnerEntry} from './telegram-inline-delegations.js';
 import {renderStaffInline} from './telegram-inline-staff.js';
 import {ModerationUnknownOwnerReview} from './moderation-unknown-review.js';
 import {ModerationPendingOwnerView} from './moderation-pending-owner-view.js';
@@ -454,7 +454,7 @@ export class TelegramUpdateApplication {
      }
      // Delegation audit is read-only and owner-private. Paged details are
      // independently checked against the CURRENT stored grant and status.
-     if(event.callbackData==='mi:1:i:03:01'||event.callbackData.startsWith('mi:1:d:')){
+     if(delegationOwnerEntry(event.callbackData)||event.callbackData.startsWith('mi:1:d:')){
       const screen=await renderOwnerInlineDelegations(this.opts.store,this.opts.policy,
        actorId,event.callbackData,this.clock());
       if(!screen)return {status:'DENIED',reason:'INVALID_OR_STALE_DELEGATION_CALLBACK'};
