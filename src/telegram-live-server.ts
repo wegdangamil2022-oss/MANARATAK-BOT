@@ -1,3 +1,5 @@
+import {GroupProtectionPolicyService} from './group-protection-policy.js';
+import {startProtectionMaintenance} from './protection-maintenance.js';
 import {createServer,type Server} from 'node:http';
 import {lstat,realpath} from 'node:fs/promises';
 import {isAbsolute,resolve} from 'node:path';
@@ -107,6 +109,7 @@ export async function preflightLiveTelegram(
  * not authorization to abort a possibly committed Telegram send. A DRAINING
  * return means the server is still closing in the same process.
  */
+const protectionMaintenanceStops=new WeakMap<Server,()=>Promise<void>>();
 const drainPromises=new WeakMap<Server,Promise<void>>();
 export async function stopLiveTelegramServer(server:Server,graceMs=15_000):
  Promise<'STOPPED'|'DRAINING'>{
@@ -114,8 +117,8 @@ export async function stopLiveTelegramServer(server:Server,graceMs=15_000):
   throw Error('INVALID_DRAIN_TIMEOUT');
  let drained=drainPromises.get(server);
  if(!drained){
-  if(!server.listening)return 'STOPPED';
-  drained=new Promise<void>((resolve,reject)=>{
+  if(!server.listening&&!protectionMaintenanceStops.has(server))return 'STOPPED';
+  drained=!server.listening?protectionMaintenanceStops.get(server)!():new Promise<void>((resolve,reject)=>{
    // Closing idle connections once is insufficient when a pending request
    // completes later and its keep-alive socket becomes idle after that call.
    // Repeat idle-only closing during the drain, never close active requests.
@@ -124,7 +127,7 @@ export async function stopLiveTelegramServer(server:Server,graceMs=15_000):
    server.close(error=>{
     clearInterval(reapIdle);
     if(error)reject(Error('LIVE_TELEGRAM_DRAIN_FAILED'));
-    else resolve();
+    else void (protectionMaintenanceStops.get(server)?.()??Promise.resolve()).then(resolve,()=>reject(Error('LIVE_TELEGRAM_DRAIN_FAILED')));
    });
    server.closeIdleConnections();
   });
@@ -178,6 +181,15 @@ export async function createLiveTelegramServer(config:LiveTelegramConfig,
   (chatId,actorId)=>membership.verifyMembership(chatId,actorId));
  const server=createServer(telegramWebhookListener(app,check.webhookSecret,dispatcher,{},safetyGate,
   new TelegramBotApiCallbackAcker(check.token,request)));
+ server.once('listening',()=>{
+  const protection=new GroupProtectionPolicyService(store,policy);
+  const cleanup=startProtectionMaintenance(async()=>{
+   const result=await protection.cleanupFloodWindows();
+   if(result.status==='CLOCK_UNTRUSTED')throw Error('PROTECTION_CLOCK_UNTRUSTED');
+  },undefined,()=>process.stderr.write('PROTECTION_MAINTENANCE_FAILED\n'));
+  protectionMaintenanceStops.set(server,cleanup.stop);
+  server.once('close',()=>{void cleanup.stop();});
+ });
  // Local-only listener. These are resource budgets, not a substitute for the
  // trusted HTTPS proxy, ingress anti-abuse controls, TLS or real load testing.
  server.requestTimeout=15_000;

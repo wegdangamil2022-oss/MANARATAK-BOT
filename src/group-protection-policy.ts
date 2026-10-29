@@ -43,14 +43,31 @@ export class GroupProtectionPolicyService{
    return {status:'SAVED' as const,revision:candidate.revision};
   });
  }
+ private pruneFloodWindows(state:BotState,now:number):{removedWindows:number;removedEvents:number;clockUntrusted:boolean}{
+  const previous=state.protectionFloodWindows??[];let removedEvents=0,clockUntrusted=false;
+  const windows=previous.flatMap(w=>{
+   const record=state.protectionPolicies?.find(r=>r.policy.chatId===w.chatId),config=record?.policy.flood;
+   if(!record||record.policy.mode!=='MONITOR'||!config?.enabled||record.policy.revision!==w.policyRevision||
+    record.chatPolicyVersion!==w.chatPolicyVersion||record.chatPolicyVersion!==this.policy.chatRevision(state,w.chatId)||!this.policy.canUseChat(state,w.chatId,'moderation')){removedEvents+=w.events.length;return [];}
+   if(w.updatedAt>now||record.updatedAt>now){clockUntrusted=true;return [w];}
+   const events=w.events.filter(e=>e.at>now-config.windowMs);removedEvents+=w.events.length-events.length;
+   return events.length?[{...w,events}]:[];
+  });
+  if(state.protectionFloodWindows)state.protectionFloodWindows=windows;
+  return {removedWindows:previous.length-windows.length,removedEvents,clockUntrusted};
+ }
+ async cleanupFloodWindows():Promise<{status:'CLEANED'|'CLOCK_UNTRUSTED';removedWindows:number;removedEvents:number}>{
+  if(!(await this.store.snapshot()).protectionFloodWindows?.length)return {status:'CLEANED',removedWindows:0,removedEvents:0};
+  return this.store.transaction(state=>{
+   const now=this.clock();if(!clockValid(now))return {status:'CLOCK_UNTRUSTED' as const,removedWindows:0,removedEvents:0};
+   const result=this.pruneFloodWindows(state,now);
+   return {status:result.clockUntrusted?'CLOCK_UNTRUSTED' as const:'CLEANED' as const,removedWindows:result.removedWindows,removedEvents:result.removedEvents};
+  });
+ }
  private observeFlood(state:BotState,record:GroupProtectionRecord,member:string,key:string,now:number):'CLEAR'|'EXCEEDED'|'DUPLICATE'|'INVALID'{
   const config=record.policy.flood;if(!config?.enabled)return 'CLEAR';
   state.protectionFloodWindows??=[];
-  state.protectionFloodWindows=state.protectionFloodWindows.filter(w=>{
-   const policy=state.protectionPolicies?.find(r=>r.policy.chatId===w.chatId);
-   return policy?.policy.mode==='MONITOR'&&policy.policy.flood?.enabled&&policy.policy.revision===w.policyRevision&&
-    policy.chatPolicyVersion===w.chatPolicyVersion&&this.policy.canUseChat(state,w.chatId,'moderation')&&now-w.updatedAt<60000;
-  });
+  this.pruneFloodWindows(state,now);
   const windows=state.protectionFloodWindows,index=windows.findIndex(w=>w.chatId===record.policy.chatId&&w.memberId===member),old=windows[index];
   if(!old&&windows.length>=1000)return 'INVALID';
   const result=advanceFloodWindow(config,old?.events??[],key,now);

@@ -664,6 +664,33 @@ for(const engine of ['json','sqlite'] as const){
    await assert.rejects(f.store.transaction(s=>{s.protectionFloodWindows![1]!.events[0]!.key=s.protectionFloodWindows![0]!.events[0]!.key;}),/Unsupported state schema/);
   }finally{await f.close();}
  });
+ test('idle flood maintenance trims expired events and removes revoked-group windows ('+engine+')',async()=>{
+  const f=await fixture();try{
+   const service=new GroupProtectionPolicyService(f.store,f.policy,()=>NOW+3000);
+   await new GroupProtectionPolicyService(f.store,f.policy,()=>NOW).save('100',{
+    chatId:CHAT,revision:1,mode:'MONITOR',rules:[],allowedDomains:[],allowedPhrases:[],exemptMemberIds:[],flood:{enabled:true,limit:3,windowMs:3000,action:'REVIEW'}
+   },f.policy.chatRevision(await f.store.snapshot(),CHAT),0);
+   const incoming=(id:number)=>({update_id:id,message:{message_id:id,chat:{id:Number(CHAT),type:'supergroup'},from:{id:300,is_bot:false},text:'x'}});
+   await f.app().handle(incoming(1800));f.setTime(NOW+1000);await f.app().handle(incoming(1801));
+   const cleaned=await service.cleanupFloodWindows();assert.equal(cleaned.status,'CLEANED');assert.equal(cleaned.removedEvents,1);
+   assert.equal((await f.store.snapshot()).protectionFloodWindows![0]!.events.length,1);
+   await f.policy.revokeChat('100',CHAT);await f.policy.approveChat('100',CHAT,['moderation']);await service.cleanupFloodWindows();
+   assert.deepEqual((await f.store.snapshot()).protectionFloodWindows,[]);
+  }finally{await f.close();}
+ });
+ test('idle flood maintenance keeps future evidence and reports clock uncertainty ('+engine+')',async()=>{
+  const f=await fixture();try{
+   await new GroupProtectionPolicyService(f.store,f.policy,()=>NOW).save('100',{
+    chatId:CHAT,revision:1,mode:'MONITOR',rules:[],allowedDomains:[],allowedPhrases:[],exemptMemberIds:[],flood:{enabled:true,limit:1,windowMs:3000,action:'REVIEW'}
+   },f.policy.chatRevision(await f.store.snapshot(),CHAT),0);
+   await f.app().handle({update_id:1850,message:{message_id:1850,chat:{id:Number(CHAT),type:'supergroup'},from:{id:300,is_bot:false},text:'x'}});
+   const before=(await f.store.snapshot()).protectionFloodWindows;
+   const result=await new GroupProtectionPolicyService(f.store,f.policy,()=>NOW-1).cleanupFloodWindows();
+   assert.equal(result.status,'CLOCK_UNTRUSTED');assert.deepEqual((await f.store.snapshot()).protectionFloodWindows,before);
+   const expired=await new GroupProtectionPolicyService(f.store,f.policy,()=>NOW+3000).cleanupFloodWindows();
+   assert.equal(expired.removedWindows,1);assert.equal(expired.removedEvents,1);assert.deepEqual((await f.store.snapshot()).protectionFloodWindows,[]);
+  }finally{await f.close();}
+ });
  test('home cancels a pending editor before further private text ('+engine+')',async()=>{
   const f=await fixture();try{
    const home=await f.app().handle(cb(1,'pr:1:h'));
