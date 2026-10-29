@@ -26,6 +26,7 @@ import {renderOwnerInlineDelegations} from './telegram-inline-delegations.js';
 import {renderStaffInline} from './telegram-inline-staff.js';
 import {ModerationUnknownOwnerReview} from './moderation-unknown-review.js';
 import {ModerationPendingOwnerView} from './moderation-pending-owner-view.js';
+import {renderOwnerPurgeQueue} from './telegram-inline-purge.js';
 import {renderOwnerModerationRateStatus} from './telegram-inline-moderation-rate-status.js';
 import {renderOwnerModerationEmergencyStatus} from './telegram-inline-moderation-emergency.js';
 import {renderStudentInline,studentSectionInlineData} from './telegram-inline-student.js';
@@ -43,6 +44,8 @@ import {privateFAQSearchLabel,parsePrivateFAQSearchQuery,parsePrivateFAQSearchPa
 import {escapeTelegramListPreview} from './telegram-preview.js';
 import {parseB6ExplicitMention} from './b6-telegram-mention.js';
 import type {ModerationService} from './moderation.js';
+import type {ModerationPurgeService} from './moderation-purge.js';
+import {isReplyDeleteCommand,previewReplyDelete,handleReplyDeleteCallback} from './telegram-reply-delete.js';
 import {parseReplyModerationCommand,executeReplyModerationCommand} from './telegram-moderation-commands.js';
 import {parseB6OwnerReplyTarget} from './b6-telegram-owner-reply.js';
 
@@ -87,6 +90,8 @@ export interface TelegramApplicationOptions {
   studentMenuMode?:'inline'|'legacy';
   /** Explicitly injected moderation adapter; absent means commands cannot execute. */
   moderation?:ModerationService;
+  /** Explicit reviewed-deletion service; no automatic metadata collection. */
+  purge?:ModerationPurgeService;
 }
 
 type Event = {updateId: number; actorId: string; chatId: string; kind: 'private' | 'group'; text: string; entities?:unknown; messageId?:number; replyTo?:unknown; document?: IncomingDocument; callbackData?:string; callbackQueryId?:string; callbackMessageId?:number};
@@ -286,6 +291,12 @@ export class TelegramUpdateApplication {
      // Reauthorize the real sender at every tap. Never dispatch a privileged
      // command from untrusted callback_data or from a group context.
      if(kind!=='private'||actorId!==chatId)return {status:'DENIED',reason:'PRIVATE_CALLBACK_ONLY'};
+     if(event.callbackData.startsWith('pd:1:')){
+      if(!this.opts.purge)return {status:'DENIED',reason:'DELETE_NOT_CONFIGURED'};
+      const result=await handleReplyDeleteCallback(this.opts.store,this.opts.policy,this.opts.purge,actorId,event.callbackData,this.clock());
+      const {screen,...outcome}=result;
+      return {...outcome,...(screen?{plan:this.plan(chatId,screen.text,undefined,screen.keyboard,event.callbackMessageId)}:{})};
+     }
      if(event.callbackData.startsWith('si:1:')||event.callbackData.startsWith('si:2:')){
       const screen=await renderStudentInline(this.opts.store,this.opts.policy,
        actorId,event.callbackData);
@@ -301,6 +312,11 @@ export class TelegramUpdateApplication {
        plan:this.plan(chatId,screen.text,undefined,screen.keyboard,event.callbackMessageId)};
      }
      if(!this.opts.policy.isOwner(actorId))return {status:'DENIED',reason:'OWNER_ONLY'};
+     if(event.callbackData==='mi:1:i:02:13'||event.callbackData.startsWith('pq:1:')){
+      const view=await renderOwnerPurgeQueue(this.opts.store,this.opts.policy,actorId,event.callbackData,this.clock(),Boolean(this.opts.purge));
+      if(!view)return {status:'DENIED',reason:'PURGE_QUEUE_UNAVAILABLE'};
+      return {status:'APPLIED',reason:'RESPONSE_PLANNED_ONLY',plan:this.plan(chatId,view.text,undefined,view.keyboard,event.callbackMessageId)};
+     }
      // The owner-private emergency/status screen never permits mutation.
      if(event.callbackData==='mi:1:i:02:16'){
       const view=await renderOwnerModerationEmergencyStatus(
@@ -387,6 +403,12 @@ export class TelegramUpdateApplication {
      }
      return {status:'APPLIED',reason:'RESPONSE_PLANNED_ONLY',
       plan:this.plan(chatId,view.text,undefined,view.keyboard,event.callbackMessageId)};
+    }
+    if(kind==='group'&&isReplyDeleteCommand(text,this.opts.botUsername)){
+     if(!this.opts.purge)return {status:'DENIED',reason:'DELETE_NOT_CONFIGURED'};
+     const result=await previewReplyDelete(this.opts.store,this.opts.policy,this.opts.purge,actorId,chatId,event.messageId,text,event.replyTo,this.clock());
+     const {screen,...outcome}=result;
+     return {...outcome,...(screen?{plan:this.plan(actorId,screen.text,undefined,screen.keyboard)}:{})};
     }
     if(kind==='group'){
      const command=parseReplyModerationCommand(text,this.opts.botUsername,chatId,event.messageId,event.replyTo);

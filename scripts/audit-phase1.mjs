@@ -36,7 +36,7 @@ for(let s=0;s<ownerInlineSections.length;s++){
   const screen=ownerInlineRender(route);
   assert.ok(screen&&isValidTelegramInlineKeyboard(screen.keyboard),route);
   assert.ok(screen.keyboard.inline_keyboard.flat().some(b=>b.callback_data==='mi:1:s:'+key+':'+Math.floor(i/8)),route+' back');
-  const special=new Set(['mi:1:i:03:01','mi:1:i:02:01','mi:1:i:02:15','mi:1:i:02:16']);
+  const special=new Set(['mi:1:i:03:01','mi:1:i:02:01','mi:1:i:02:15','mi:1:i:02:16','mi:1:i:02:13']);
   rows.push({section:key,sectionTitle:section.title,button:code(i+1),label:labels[i],callback:route,
    status:ownerInlineLinkedReadOnly(route)!==null||special.has(route)?'LOCAL_VIEW':'DESIGN_ONLY'});
  }
@@ -78,6 +78,7 @@ try{
 }finally{globalThis.fetch=originalFetch;}
 assert.equal(networkCalls,0);
 const report={schemaVersion:1,sourceCommit:execFileSync('git',['rev-parse','HEAD'],{encoding:'utf8'}).trim(),
+ sourceDirty:execFileSync('git',['status','--porcelain'],{encoding:'utf8'}).trim().length>0,
  officialPlan:'docs/MANARATAK_BOT_MASTER_v1.2.1_AR.md',officialButtons:'docs/أزرار_منارتك.md',
  scope:'LOCAL_PHASE1_INVENTORY_ONLY',liveTelegram:'NOT_TESTED_DEFERRED_BY_OWNER',networkCalls,
  ownerSections:16,ownerButtons:253,localViews:rows.filter(r=>r.status==='LOCAL_VIEW').length,
