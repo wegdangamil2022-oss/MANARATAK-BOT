@@ -12,7 +12,7 @@ import {ApprovedAnswerService,ResourceLinkService} from '../dist/src/education-i
 import {TelegramUpdateApplication} from '../dist/src/telegram-transport.js';
 
 // Explicit offline audit. No deployment, credentials, real groups or network.
-const doc=await readFile(new URL('../docs/أزرار_منارتك.md',import.meta.url),'utf8');
+const doc=(await readFile(new URL('../docs/أزرار_منارتك.md',import.meta.url),'utf8')).replace(/\r\n/g,'\n');
 const code=(n)=>String(n).padStart(2,'0');
 const rows=[];
 for(let s=0;s<ownerInlineSections.length;s++){
