@@ -9,6 +9,23 @@ import {ButtonStudioService} from '../src/button-studio.js';
 import {validStudioState,studioURL,defaultStudioSettings} from '../src/button-studio-model.js';
 for(const engine of ['json','sqlite'] as const){
  async function fixture(){const dir=await mkdtemp(join(tmpdir(),'studio-')),store=new BotStore(join(dir,'state.'+engine),{engine});let now=1700000000000;const policy=new Policy(store,'100',()=>now),svc=()=>new ButtonStudioService(store,policy,()=>now);return {store,svc,setTime:(n:number)=>{now=n;},close:()=>rm(dir,{recursive:true,force:true})};}
+ test('adding, copying and deleting buttons preserve unaffected row layouts ('+engine+')',async()=>{
+  const f=await fixture();try{
+   let t=await f.svc().create('100','قالب');
+   for(let i=0;i<5;i++)t=await f.svc().edit('100',t.id,t.revision,{kind:'ADD_BUTTON',value:'زر '+i});
+   t=await f.svc().edit('100',t.id,t.revision,{kind:'LAYOUT',value:'2-3'});
+   t=await f.svc().edit('100',t.id,t.revision,{kind:'ADD_BUTTON',value:'إضافي'});
+   assert.deepEqual(t.draft.layout,[2,3,1]);
+   t=await f.svc().edit('100',t.id,t.revision,{kind:'COPY_BUTTON',buttonId:t.draft.buttons[0]!.id});
+   assert.deepEqual(t.draft.layout,[2,3,1,1]);
+   const deleted=t.draft.buttons[2]!.id;
+   const ref=await f.svc().issueDecision('100',t.id,t.revision,'DELETE_BUTTON',deleted);
+   t=(await f.svc().confirmDecision('100',ref))!;
+   assert.deepEqual(t.draft.layout,[2,2,1,1]);assert.equal(t.draft.buttons.some(b=>b.id===deleted),false);
+   t=await f.svc().edit('100',t.id,t.revision,{kind:'DELETE_BUTTON',buttonId:t.draft.buttons[4]!.id});
+   assert.deepEqual(t.draft.layout,[2,2,1]);
+  }finally{await f.close();}
+ });
  test('studio settings enforce stale revision, density, defaults, color and configured expiry ('+engine+')',async()=>{
   const f=await fixture();try{
    let config=await f.svc().settings('100');assert.equal(config.revision,1);

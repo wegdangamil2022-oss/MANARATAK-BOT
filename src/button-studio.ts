@@ -25,14 +25,20 @@ export class ButtonStudioService{
    case 'NAME':d.name=edit.value;break;
    case 'TEXT':d.text=edit.value;break;
    case 'TIMEZONE':d.timezone=edit.value;break;
-   case 'ADD_BUTTON':d.buttons.push({id:id(),title:edit.value,action:{kind:'COPY',target:edit.value},style:s.buttonStudio?.settings?.colorsByFunction?'success':'default',condition:{role:'ANY',opensAt:0,closesAt:0,seats:0}});d.layout=d.buttons.map(()=>1);break;
+   case 'ADD_BUTTON':d.buttons.push({id:id(),title:edit.value,action:{kind:'COPY',target:edit.value},style:s.buttonStudio?.settings?.colorsByFunction?'success':'default',condition:{role:'ANY',opensAt:0,closesAt:0,seats:0}});d.layout.push(1);break;
    case 'LAYOUT':if(!/^[1-3](?:-[1-3]){0,23}$/u.test(edit.value))throw Error('STUDIO_INVALID_LAYOUT');d.layout=edit.value.split('-').map(Number);break;
    case 'BUTTON_TITLE':button!.title=edit.value;break;
    case 'ACTION':button!.action=structuredClone(edit.action);if(s.buttonStudio?.settings?.colorsByFunction)button!.style=edit.action.kind==='URL'?'primary':edit.action.kind==='COPY'?'success':'default';break;
    case 'STYLE':button!.style=edit.style;break;
    case 'CONDITION':button!.condition=structuredClone(edit.condition);break;
-   case 'DELETE_BUTTON':d.buttons=d.buttons.filter(b=>b.id!==edit.buttonId);d.layout=d.buttons.map(()=>1);break;
-   case 'COPY_BUTTON':d.buttons.push({...structuredClone(button!),id:id()});d.layout=d.buttons.map(()=>1);break;
+   case 'DELETE_BUTTON':{
+    const index=d.buttons.findIndex(b=>b.id===edit.buttonId);let end=0;
+    const row=d.layout.findIndex(size=>{end+=size;return index<end;});
+    if(index<0||row<0)throw Error('STUDIO_BUTTON_MISSING');
+    d.buttons.splice(index,1);if(d.layout[row]===1)d.layout.splice(row,1);else d.layout[row]!--;
+    break;
+   }
+   case 'COPY_BUTTON':d.buttons.push({...structuredClone(button!),id:id()});d.layout.push(1);break;
    case 'MOVE_BUTTON':{
     if(!Number.isSafeInteger(edit.from)||!Number.isSafeInteger(edit.to)||edit.from<0||edit.to<0||edit.from>=d.buttons.length||edit.to>=d.buttons.length||edit.from===edit.to)throw Error('STUDIO_INVALID_MOVE');
     const [b]=d.buttons.splice(edit.from,1);d.buttons.splice(edit.to,0,b!);break;
