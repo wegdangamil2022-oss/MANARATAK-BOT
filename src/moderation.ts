@@ -249,21 +249,21 @@ export class ModerationService {
       ?this.reconcile(this.policy.ownerId,chatId,memberId,stillCurrent)
       :{status:'NO_CHANGE',reason:'REASON_UNCHANGED'};
   }
-  async issueWarning(actorId: string, chatId: string, memberId: string, reference: string): Promise<{ status: 'ADDED' | 'NO_CHANGE' | 'DENIED'; count: number }> {
+  async issueWarning(actorId: string, chatId: string, memberId: string, reference: string): Promise<{ status: 'ADDED' | 'NO_CHANGE'; count: number } | { status: 'DENIED'; count: null }> {
     if (!reference || reference.length > 80) throw new Error('Invalid warning reference');
     return this.store.transaction(s => {
       const count = () => s.warnings.filter(w => byTarget(w, chatId, memberId) && w.active).length;
-      if (!this.authorized(s, actorId, chatId, memberId)) return { status: 'DENIED' as const, count: count() };
+      if (!this.authorized(s, actorId, chatId, memberId)) return { status: 'DENIED' as const, count: null };
       const existing = s.warnings.find(w => byTarget(w, chatId, memberId) && w.reference === reference);
       if (existing) return { status: 'NO_CHANGE' as const, count: count() }; // immutable reference; cannot replay revoked warning
       s.warnings.push({ actorId, chatId, memberId, reference, at: this.clock(), active: true });
       return { status: 'ADDED' as const, count: count() };
     });
   }
-  async removeWarning(actorId: string, chatId: string, memberId: string, reference: string): Promise<{ status: 'REVOKED' | 'NO_CHANGE' | 'DENIED'; count: number }> {
+  async removeWarning(actorId: string, chatId: string, memberId: string, reference: string): Promise<{ status: 'REVOKED' | 'NO_CHANGE'; count: number } | { status: 'DENIED'; count: null }> {
     return this.store.transaction(s => {
       const count = () => s.warnings.filter(w => byTarget(w, chatId, memberId) && w.active).length;
-      if (!this.authorized(s, actorId, chatId, memberId)) return { status: 'DENIED' as const, count: count() };
+      if (!this.authorized(s, actorId, chatId, memberId)) return { status: 'DENIED' as const, count: null };
       const existing = s.warnings.find(w => byTarget(w, chatId, memberId) && w.reference === reference && w.active);
       if (!existing) return { status: 'NO_CHANGE' as const, count: count() };
       existing.active = false;
