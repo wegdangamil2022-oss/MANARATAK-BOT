@@ -83,6 +83,43 @@ for(const engine of ['json','sqlite'] as const){
    assert.equal(total,300);
   }finally{await f.close();}
  });
+ test('studio approved settings entry applies bounded controls and rejects stale or unauthorized selection ('+engine+')',async()=>{
+  const f=await fixture();try{
+   const t=await f.svc.create('100','افتراضي');const config=await f.app().handle(event(500,'mi:1:i:07:16'));assert.equal(config.status,'APPLIED');
+   const color=select(config,'st:1:S:1:colorsByFunction:');assert.equal((await f.app().handle(event(501,color))).status,'APPLIED');assert.equal((await f.app().handle(event(502,color))).status,'DENIED');
+   assert.equal((await f.app().handle(event(503,'mi:1:i:07:16',300))).status,'DENIED');
+   const current=await f.app().handle(event(504,'st:1:C'));const pick=await f.app().handle(event(505,select(current,'st:1:D:')));
+   const chosen=await f.app().handle(event(506,select(pick,'st:1:S:2:defaultTemplateId:'+t.id)));assert.equal(chosen.status,'APPLIED');assert.equal((await f.svc.settings('100')).defaultTemplateId,t.id);
+   assert.equal((await f.app().handle(event(507,'st:1:S:3:inputSeconds:1'))).status,'DENIED');
+   assert.equal((await f.app().handle(event(508,'st:1:S:3:buttonLimit:25'))).status,'DENIED');
+  }finally{await f.close();}
+ });
+ test('studio authored button pages preserve rows, text position, history and reject invalid or stale pages ('+engine+')',async()=>{
+  const f=await fixture();try{
+   let t=await f.svc.create('100','صفحات');
+   for(let i=0;i<7;i++)t=await f.svc.edit('100',t.id,t.revision,{kind:'ADD_BUTTON',value:'زر '+i});
+   t=await f.svc.edit('100',t.id,t.revision,{kind:'LAYOUT',value:'2-1-3-1'});
+   t=await f.svc.edit('100',t.id,t.revision,{kind:'TEXT',value:'أ'.repeat(450)});
+   const config=await f.app().handle(event(400,'st:1:e:05:'+t.id+':'+t.revision));assert.equal(config.status,'APPLIED');
+   await f.app().handle(event(401,select(config,'st:1:P:').replace(/:1$/u,':2')));t=(await f.svc.list('100'))[0]!;assert.equal(t.draft.rowsPerPage,2);
+   const route='st:1:v:'+t.id+':'+t.revision+':1:0';let shown=await f.app().handle(event(402,route));
+   assert.deepEqual(shown.plan!.studioMarkup!.inline_keyboard.slice(0,2).map(r=>r.length),[2,1]);
+   const next=buttons(shown).find(b=>b.text==='▶️ الأزرار التالية')!;shown=await f.app().handle(event(403,next.callback_data));
+   assert.ok(shown.plan!.text.includes('النص (2 من 3)'));assert.deepEqual(shown.plan!.studioMarkup!.inline_keyboard.slice(0,2).map(r=>r.length),[3,1]);
+   assert.equal(buttons(shown).some(b=>b.text==='▶️ الأزرار التالية'),false);
+   assert.equal((await f.app().handle(event(404,'st:1:v:'+t.id+':'+t.revision+':1:2'))).status,'DENIED');
+   await assert.rejects(f.svc.edit('100',t.id,t.revision,{kind:'PAGE_SIZE',rows:0}));await assert.rejects(f.svc.edit('100',t.id,t.revision,{kind:'PAGE_SIZE',rows:9}));
+   t=await f.svc.save('100',t.id,t.revision);assert.equal(t.versions.at(-1)!.content.rowsPerPage,2);
+   assert.equal((await f.app().handle(event(405,route))).status,'DENIED');
+   const bt=t.draft.buttons[4]!;t=await f.svc.edit('100',t.id,t.revision,{kind:'CONDITION',buttonId:bt.id,condition:{...bt.condition,role:'OWNER',seats:1}});
+   shown=await f.app().handle(event(406,'st:1:v:'+t.id+':'+t.revision+':1:1'));
+   const press=buttons(shown).find(b=>b.text===bt.title)!.callback_data;
+   assert.equal((await f.app().handle(event(407,press.replace(/:1:1$/u,':1:99')))).status,'DENIED');
+   assert.equal((await f.store.snapshot()).callbacks.some(c=>c.action.startsWith('studio.seat:')),false);
+   const opened=await f.app().handle(event(408,press));const returned=await f.app().handle(event(409,buttons(opened).find(b=>b.text==='↩️ المعاينة')!.callback_data));
+   assert.ok(returned.plan!.text.includes('النص (2 من 3)'));assert.ok(returned.plan!.text.includes('صفحة الأزرار 2 من 2'));
+  }finally{await f.close();}
+ });
  test('studio history exposes all versions and comparison content without accepting stale revisions ('+engine+')',async()=>{
   const f=await fixture();try{
    let t=await f.svc.create('100','أقدم قالب');

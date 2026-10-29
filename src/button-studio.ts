@@ -2,11 +2,11 @@ import {randomBytes} from 'node:crypto';
 import {studioPresetContent} from './button-studio-presets.js';
 import type {BotStore,BotState} from './store.js';
 import type {Policy} from './policy.js';
-import {validStudioContent,studioId,type StudioTemplate,type StudioContent,type StudioAction,type StudioButton} from './button-studio-model.js';
+import {validStudioContent,studioId,defaultStudioSettings,validStudioSettings,type StudioSettings,type StudioTemplate,type StudioContent,type StudioAction,type StudioButton} from './button-studio-model.js';
 export type StudioEdit={kind:'NAME'|'TEXT'|'ADD_BUTTON'|'LAYOUT'|'TIMEZONE';value:string}|{kind:'BUTTON_TITLE';buttonId:string;value:string}|
  {kind:'ACTION';buttonId:string;action:StudioAction}|{kind:'STYLE';buttonId:string;style:StudioButton['style']}|
  {kind:'CONDITION';buttonId:string;condition:StudioButton['condition']}|{kind:'DELETE_BUTTON'|'COPY_BUTTON';buttonId:string}|
- {kind:'MOVE_BUTTON';from:number;to:number}|{kind:'COPY_ROW';row:number}|{kind:'FORMAT';hour12:boolean;calendar:StudioContent['calendar']};
+ {kind:'MOVE_BUTTON';from:number;to:number}|{kind:'COPY_ROW';row:number}|{kind:'PAGE_SIZE';rows:number}|{kind:'FORMAT';hour12:boolean;calendar:StudioContent['calendar']};
 export const studioInputFields=['NAME','TEXT','ADD_BUTTON','LAYOUT','BUTTON_TITLE','TARGET','TIMEZONE','OPENS_AT','CLOSES_AT','SEATS'] as const;
 const id=()=>randomBytes(6).toString('hex');
 export class ButtonStudioService{
@@ -25,10 +25,10 @@ export class ButtonStudioService{
    case 'NAME':d.name=edit.value;break;
    case 'TEXT':d.text=edit.value;break;
    case 'TIMEZONE':d.timezone=edit.value;break;
-   case 'ADD_BUTTON':d.buttons.push({id:id(),title:edit.value,action:{kind:'COPY',target:edit.value},style:'default',condition:{role:'ANY',opensAt:0,closesAt:0,seats:0}});d.layout=d.buttons.map(()=>1);break;
+   case 'ADD_BUTTON':d.buttons.push({id:id(),title:edit.value,action:{kind:'COPY',target:edit.value},style:s.buttonStudio?.settings?.colorsByFunction?'success':'default',condition:{role:'ANY',opensAt:0,closesAt:0,seats:0}});d.layout=d.buttons.map(()=>1);break;
    case 'LAYOUT':if(!/^[1-3](?:-[1-3]){0,23}$/u.test(edit.value))throw Error('STUDIO_INVALID_LAYOUT');d.layout=edit.value.split('-').map(Number);break;
    case 'BUTTON_TITLE':button!.title=edit.value;break;
-   case 'ACTION':button!.action=structuredClone(edit.action);break;
+   case 'ACTION':button!.action=structuredClone(edit.action);if(s.buttonStudio?.settings?.colorsByFunction)button!.style=edit.action.kind==='URL'?'primary':edit.action.kind==='COPY'?'success':'default';break;
    case 'STYLE':button!.style=edit.style;break;
    case 'CONDITION':button!.condition=structuredClone(edit.condition);break;
    case 'DELETE_BUTTON':d.buttons=d.buttons.filter(b=>b.id!==edit.buttonId);d.layout=d.buttons.map(()=>1);break;
@@ -43,9 +43,10 @@ export class ButtonStudioService{
     const row=d.buttons.slice(start,start+size).map(b=>({...structuredClone(b),id:id()}));d.buttons.splice(start+size,0,...row);d.layout.splice(edit.row+1,0,size);break;
    }
    case 'FORMAT':d.hour12=edit.hour12;d.calendar=edit.calendar;break;
+   case 'PAGE_SIZE':d.rowsPerPage=edit.rows;break;
    default:throw Error('STUDIO_UNKNOWN_EDIT');
   }
-  if(!validStudioContent(d)||d.buttons.some(b=>b.action.kind==='MENU'&&(b.action.target===t.id||!s.buttonStudio?.templates.some(target=>target.id===b.action.target))))throw Error('STUDIO_INVALID_CONTENT');this.record(s,actor,t,d,'STUDIO_DRAFT_CHANGED');
+  if(!validStudioContent(d)||d.buttons.length>(s.buttonStudio?.settings?.buttonLimit??24)||d.buttons.some(b=>b.action.kind==='MENU'&&(b.action.target===t.id||!s.buttonStudio?.templates.some(target=>target.id===b.action.target))))throw Error('STUDIO_INVALID_CONTENT');this.record(s,actor,t,d,'STUDIO_DRAFT_CHANGED');
  }
  private record(s:BotState,actor:string,t:StudioTemplate,draft:StudioContent,reason:string):void{
   t.draft=draft;t.revision++;t.updatedAt=this.clock();t.updatedBy=actor;
@@ -53,8 +54,9 @@ export class ButtonStudioService{
  }
  async create(actor:string,name:string,preset?:string):Promise<StudioTemplate>{return this.store.transaction(s=>{
   const now=this.auth(s,actor),studio=s.buttonStudio??={templates:[],inputs:[]};if(studio.templates.length>=200)throw Error('STUDIO_LIMIT');
-  const draft:StudioContent=preset===undefined?{name,text:'رسالة جديدة',buttons:[],layout:[],timezone:'Asia/Aden',hour12:false,calendar:'gregory'}:studioPresetContent(preset,id)!;
-  if(!validStudioContent(draft))throw Error('STUDIO_INVALID_CONTENT');
+  const settings=studio.settings??defaultStudioSettings(),base=preset===undefined?studio.templates.find(t=>t.id===settings.defaultTemplateId):undefined;
+  const draft:StudioContent=preset===undefined?(base?{...structuredClone(base.draft),name,buttons:base.draft.buttons.map(b=>({...structuredClone(b),id:id()}))}:{name,text:'رسالة جديدة',buttons:[],layout:[],timezone:'Asia/Aden',hour12:false,calendar:'gregory',rowsPerPage:settings.rowsPerPage}):studioPresetContent(preset,id)!;
+  if(!validStudioContent(draft)||draft.buttons.length>settings.buttonLimit)throw Error('STUDIO_INVALID_CONTENT');
   const t:StudioTemplate={id:id(),revision:1,createdBy:actor,createdAt:now,updatedBy:actor,updatedAt:now,draft,versions:[]};studio.templates.push(t);
   s.audit.push({actorId:actor,updateKey:'studio:'+t.id+':1',decision:'ALLOW',reason:'STUDIO_DRAFT_CREATED',policyVersion:0,at:now});return structuredClone(t);
  });}
@@ -71,7 +73,7 @@ export class ButtonStudioService{
   this.record(s,actor,t,structuredClone(t.draft),'STUDIO_VERSION_SAVED');t.versions.push({revision:t.revision,by:actor,at:this.clock(),content:structuredClone(t.draft)});return structuredClone(t);
  });}
  private restoreInState(s:BotState,actor:string,key:string,revision:number,savedRevision:number):StudioTemplate{
-  const t=this.current(s,actor,key,revision),v=t.versions.find(v=>v.revision===savedRevision);if(!v||t.versions.length>=50)throw Error('STUDIO_VERSION_MISSING');
+  const t=this.current(s,actor,key,revision),v=t.versions.find(v=>v.revision===savedRevision);if(!v||t.versions.length>=50||v.content.buttons.length>(s.buttonStudio?.settings?.buttonLimit??24))throw Error('STUDIO_VERSION_MISSING');
   this.record(s,actor,t,structuredClone(v.content),'STUDIO_VERSION_RESTORED');t.versions.push({revision:t.revision,by:actor,at:this.clock(),content:structuredClone(t.draft)});return structuredClone(t);
  }
  async restore(actor:string,key:string,revision:number,savedRevision:number):Promise<StudioTemplate>{return this.store.transaction(s=>this.restoreInState(s,actor,key,revision,savedRevision));}
@@ -79,7 +81,7 @@ export class ButtonStudioService{
   const t=this.current(s,actor,key,revision);
   if(kind==='RESTORE'?!/^[1-9][0-9]{0,6}$/u.test(target)||!t.versions.some(v=>v.revision===Number(target)):!t.draft.buttons.some(b=>b.id===target))throw Error('STUDIO_DECISION_INVALID');
   const ref='c_'+randomBytes(18).toString('base64url');
-  s.callbacks.push({ref,action:'studio.'+kind+':'+key+':'+revision+':'+target,chatId:'private',actorId:actor,policyVersion:0,expiresAt:this.clock()+120000,oneShot:true,used:false,revoked:false});return ref;
+  s.callbacks.push({ref,action:'studio.'+kind+':'+key+':'+revision+':'+target,chatId:'private',actorId:actor,policyVersion:0,expiresAt:this.clock()+(s.buttonStudio?.settings?.confirmationSeconds??120)*1000,oneShot:true,used:false,revoked:false});return ref;
  });}
  async confirmDecision(actor:string,ref:string):Promise<StudioTemplate|null>{return this.store.transaction(s=>{
   const now=this.auth(s,actor),rows=s.callbacks.filter(c=>c.ref===ref),c=rows[0];
@@ -92,7 +94,7 @@ export class ButtonStudioService{
  async beginInput(actor:string,key:string,revision:number,field:typeof studioInputFields[number],buttonId=''):Promise<void>{await this.store.transaction(s=>{
   const t=this.current(s,actor,key,revision);if(!studioInputFields.includes(field)||buttonId&&!t.draft.buttons.some(b=>b.id===buttonId))throw Error('STUDIO_INVALID_INPUT');
   const studio=s.buttonStudio!;studio.inputs=studio.inputs.filter(i=>i.actor!==actor&&i.expiresAt>this.clock());
-  studio.inputs.push({actor,templateId:key,revision,field,buttonId,expiresAt:this.clock()+600000});
+  studio.inputs.push({actor,templateId:key,revision,field,buttonId,expiresAt:this.clock()+(studio.settings?.inputSeconds??600)*1000});
  });}
  async cancelInput(actor:string):Promise<void>{await this.store.transaction(s=>{this.auth(s,actor);if(s.buttonStudio)s.buttonStudio.inputs=s.buttonStudio.inputs.filter(i=>i.actor!==actor);});}
  async pressPreview(actor:string,key:string,revision:number,buttonId:string):Promise<StudioButton>{return this.store.transaction(s=>{
@@ -133,4 +135,11 @@ export class ButtonStudioService{
   this.change(s,actor,t,edit);s.buttonStudio!.inputs=s.buttonStudio!.inputs.filter(i=>i!==input);return structuredClone(t);
  });}
  async list(actor:string):Promise<StudioTemplate[]>{const s=await this.store.snapshot();this.auth(s,actor);return structuredClone(s.buttonStudio?.templates??[]);}
+ async settings(actor:string):Promise<StudioSettings>{const s=await this.store.snapshot();this.auth(s,actor);return structuredClone(s.buttonStudio?.settings??defaultStudioSettings());}
+ async configure(actor:string,revision:number,field:Exclude<keyof StudioSettings,'revision'>,value:string|number|boolean):Promise<StudioSettings>{return this.store.transaction(s=>{
+  const now=this.auth(s,actor),studio=s.buttonStudio??={templates:[],inputs:[]},current=studio.settings??defaultStudioSettings();
+  if(current.revision!==revision||current.revision>=999999||!['defaultTemplateId','buttonLimit','rowsPerPage','colorsByFunction','inputSeconds','confirmationSeconds'].includes(field))throw Error('STUDIO_STALE_SETTINGS');
+  const next={...current,[field]:value,revision:revision+1};if(!validStudioSettings(next)||next.defaultTemplateId&&!studio.templates.some(t=>t.id===next.defaultTemplateId)||studio.templates.some(t=>t.draft.buttons.length>next.buttonLimit))throw Error('STUDIO_INVALID_SETTINGS');
+  studio.settings=next;s.audit.push({actorId:actor,updateKey:'studio-settings:'+next.revision,decision:'ALLOW',reason:'STUDIO_SETTINGS_CHANGED',policyVersion:0,at:now});return structuredClone(next);
+ });}
 }

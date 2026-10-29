@@ -6,9 +6,30 @@ import {join} from 'node:path';
 import {BotStore} from '../src/store.js';
 import {Policy} from '../src/policy.js';
 import {ButtonStudioService} from '../src/button-studio.js';
-import {validStudioState,studioURL} from '../src/button-studio-model.js';
+import {validStudioState,studioURL,defaultStudioSettings} from '../src/button-studio-model.js';
 for(const engine of ['json','sqlite'] as const){
  async function fixture(){const dir=await mkdtemp(join(tmpdir(),'studio-')),store=new BotStore(join(dir,'state.'+engine),{engine});let now=1700000000000;const policy=new Policy(store,'100',()=>now),svc=()=>new ButtonStudioService(store,policy,()=>now);return {store,svc,setTime:(n:number)=>{now=n;},close:()=>rm(dir,{recursive:true,force:true})};}
+ test('studio settings enforce stale revision, density, defaults, color and configured expiry ('+engine+')',async()=>{
+  const f=await fixture();try{
+   let config=await f.svc().settings('100');assert.equal(config.revision,1);
+   await assert.rejects(f.svc().configure('300',1,'buttonLimit',8));
+   config=await f.svc().configure('100',1,'colorsByFunction',true);
+   await assert.rejects(f.svc().configure('100',1,'buttonLimit',8));
+   config=await f.svc().configure('100',config.revision,'buttonLimit',1);
+   config=await f.svc().configure('100',config.revision,'rowsPerPage',2);
+   config=await f.svc().configure('100',config.revision,'inputSeconds',60);
+   config=await f.svc().configure('100',config.revision,'confirmationSeconds',30);
+   let t=await f.svc().create('100','أصل');assert.equal(t.draft.rowsPerPage,2);
+   t=await f.svc().edit('100',t.id,t.revision,{kind:'ADD_BUTTON',value:'زر'});assert.equal(t.draft.buttons[0]!.style,'success');
+   await assert.rejects(f.svc().edit('100',t.id,t.revision,{kind:'COPY_BUTTON',buttonId:t.draft.buttons[0]!.id}));
+   config=await f.svc().configure('100',config.revision,'defaultTemplateId',t.id);
+   const copy=await f.svc().create('100','قالب جديد');assert.equal(copy.draft.buttons.length,1);assert.notEqual(copy.draft.buttons[0]!.id,t.draft.buttons[0]!.id);assert.deepEqual(copy.versions,[]);
+   await f.svc().beginInput('100',t.id,t.revision,'TEXT');f.setTime(1700000060000);await assert.rejects(f.svc().acceptInput('100','منتهي'));
+   f.setTime(1700000000000);const ref=await f.svc().issueDecision('100',t.id,t.revision,'DELETE_BUTTON',t.draft.buttons[0]!.id);f.setTime(1700000030000);assert.equal(await f.svc().confirmDecision('100',ref),null);
+   assert.ok(validStudioState((await f.store.snapshot()).buttonStudio));
+   await assert.rejects(f.svc().configure('100',config.revision,'inputSeconds',1));
+  }finally{await f.close();}
+ });
  test('studio persists drafts and rejects stale or unauthorized edits ('+engine+')',async()=>{
   const f=await fixture();try{
    const t=await f.svc().create('100','قالب المنح');assert.equal(t.revision,1);
@@ -85,6 +106,8 @@ for(const engine of ['json','sqlite'] as const){
 test('studio refuses unsafe public URLs and malformed restored optional state',async()=>{
  for(const url of ['javascript:alert(1)','https://127.0.0.1/','https://[::1]/','https://user:pass@t.me/','https://bit.ly/x','https://localhost/','https://abc.local/'])assert.equal(studioURL(url),null,url);
  assert.equal(validStudioState({templates:[],inputs:[],extra:true}),false);
+ assert.equal(validStudioState({templates:[],inputs:[],settings:defaultStudioSettings()}),true);
+ for(const settings of [undefined,null,{...defaultStudioSettings(),colorsByFunction:1},{...defaultStudioSettings(),inputSeconds:'60'},{...defaultStudioSettings(),defaultTemplateId:'abcdef123456'},{...defaultStudioSettings(),confirmationSeconds:121},{...defaultStudioSettings(),extra:true}])assert.equal(validStudioState({templates:[],inputs:[],settings}),false);
  const dir=await mkdtemp(join(tmpdir(),'studio-schema-'));try{
   const file=join(dir,'state.json'),s=new BotStore(file);await s.transaction(()=>{});
   const value=JSON.parse(await readFile(file,'utf8'));value.buttonStudio={templates:'bad',inputs:[]};await writeFile(file,JSON.stringify(value));await assert.rejects(s.snapshot());

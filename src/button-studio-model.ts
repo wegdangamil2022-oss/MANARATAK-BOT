@@ -1,11 +1,13 @@
 export type StudioAction={kind:'URL'|'COPY'|'INLINE'|'SERVICE'|'MINI_APP'|'MENU';target:string};
 export interface StudioCondition{role:'ANY'|'OWNER';opensAt:number;closesAt:number;seats:number;}
 export interface StudioButton{id:string;title:string;action:StudioAction;style:'default'|'primary'|'success'|'danger';condition:StudioCondition;}
-export interface StudioContent{name:string;text:string;buttons:StudioButton[];layout:number[];timezone:string;hour12:boolean;calendar:'gregory'|'islamic';}
+export interface StudioContent{name:string;text:string;buttons:StudioButton[];layout:number[];timezone:string;hour12:boolean;calendar:'gregory'|'islamic';rowsPerPage?:number;}
 export interface StudioVersion{revision:number;by:string;at:number;content:StudioContent;}
 export interface StudioTemplate{id:string;revision:number;createdBy:string;createdAt:number;updatedBy:string;updatedAt:number;draft:StudioContent;versions:StudioVersion[];}
 export interface StudioInput{actor:string;templateId:string;revision:number;field:string;buttonId:string;expiresAt:number;}
-export interface StudioState{templates:StudioTemplate[];inputs:StudioInput[];}
+export interface StudioSettings{revision:number;defaultTemplateId:string;buttonLimit:number;rowsPerPage:number;colorsByFunction:boolean;inputSeconds:number;confirmationSeconds:number;}
+export const defaultStudioSettings=():StudioSettings=>({revision:1,defaultTemplateId:'',buttonLimit:24,rowsPerPage:8,colorsByFunction:false,inputSeconds:600,confirmationSeconds:120});
+export interface StudioState{templates:StudioTemplate[];inputs:StudioInput[];settings?:StudioSettings;}
 const object=(v:unknown):v is Record<string,unknown>=>!!v&&typeof v==='object'&&!Array.isArray(v);
 const exact=(v:Record<string,unknown>,keys:string[])=>Object.keys(v).length===keys.length&&keys.every(k=>Object.hasOwn(v,k));
 const text=(v:unknown,max:number)=>typeof v==='string'&&v.length>0&&Array.from(v).length<=max&&!/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f\u202a-\u202e\u2066-\u2069]/u.test(v);
@@ -28,7 +30,8 @@ export function validStudioAction(v:unknown):v is StudioAction{
  return v.kind==='SERVICE'&&studioServices.includes(v.target as typeof studioServices[number]);
 }
 export function validStudioContent(v:unknown):v is StudioContent{
- if(!object(v)||!exact(v,['name','text','buttons','layout','timezone','hour12','calendar'])||!text(v.name,80)||/[\r\n\t]/u.test(String(v.name))||!text(v.text,1200)||
+ if(!object(v)||!exact(v,['name','text','buttons','layout','timezone','hour12','calendar',...(Object.hasOwn(v,'rowsPerPage')?['rowsPerPage']:[])])||
+  Object.hasOwn(v,'rowsPerPage')&&(!Number.isSafeInteger(v.rowsPerPage)||Number(v.rowsPerPage)<1||Number(v.rowsPerPage)>8)||!text(v.name,80)||/[\r\n\t]/u.test(String(v.name))||!text(v.text,1200)||
   !Array.isArray(v.buttons)||v.buttons.length>24||!Array.isArray(v.layout)||v.layout.length>24||
   !v.layout.every(n=>Number.isSafeInteger(n)&&n>=1&&n<=3)||v.layout.reduce((a,b)=>a+b,0)!==v.buttons.length||
   typeof v.timezone!=='string'||v.timezone.length>80||typeof v.hour12!=='boolean'||!['gregory','islamic'].includes(String(v.calendar)))return false;
@@ -46,7 +49,7 @@ export function validStudioContent(v:unknown):v is StudioContent{
  return variables.every(s=>['{العضو}','{اسم_المجموعة}','{التاريخ}','{الوقت}','{رابط_القوانين}'].includes(s));
 }
 export function validStudioState(v:unknown):v is StudioState{
- if(!object(v)||!exact(v,['templates','inputs'])||!Array.isArray(v.templates)||v.templates.length>200||!Array.isArray(v.inputs)||v.inputs.length>20)return false;
+ if(!object(v)||!exact(v,['templates','inputs',...(Object.hasOwn(v,'settings')?['settings']:[])])||Object.hasOwn(v,'settings')&&!validStudioSettings(v.settings)||!Array.isArray(v.templates)||v.templates.length>200||!Array.isArray(v.inputs)||v.inputs.length>20)return false;
  const ids=new Set();
  for(const t of v.templates){
   if(!object(t)||!exact(t,['id','revision','createdBy','createdAt','updatedBy','updatedAt','draft','versions'])||!studioId(t.id)||ids.has(t.id)||
@@ -55,7 +58,13 @@ export function validStudioState(v:unknown):v is StudioState{
   ids.add(t.id);const revs=new Set();
   for(const h of t.versions){if(!object(h)||!exact(h,['revision','by','at','content'])||!Number.isSafeInteger(h.revision)||Number(h.revision)<1||Number(h.revision)>Number(t.revision)||revs.has(h.revision)||!text(h.by,20)||!time(h.at)||!validStudioContent(h.content))return false;revs.add(h.revision);}
  }
+ if(v.settings&&((v.settings as StudioSettings).defaultTemplateId!==''&&!ids.has((v.settings as StudioSettings).defaultTemplateId)))return false;
  const actors=new Set();
  for(const i of v.inputs){if(!object(i)||!exact(i,['actor','templateId','revision','field','buttonId','expiresAt'])||!text(i.actor,20)||actors.has(i.actor)||!studioId(i.templateId)||!ids.has(i.templateId)||!Number.isSafeInteger(i.revision)||Number(i.revision)<1||!text(i.field,24)||typeof i.buttonId!=='string'||i.buttonId!==''&&!studioId(i.buttonId)||!time(i.expiresAt))return false;actors.add(i.actor);}
  return true;
+}
+export function validStudioSettings(v:unknown):v is StudioSettings{
+ if(!object(v)||!exact(v,['revision','defaultTemplateId','buttonLimit','rowsPerPage','colorsByFunction','inputSeconds','confirmationSeconds']))return false;
+ const int=(key:string,min:number,max:number)=>Number.isSafeInteger(v[key])&&Number(v[key])>=min&&Number(v[key])<=max;
+ return int('revision',1,999999)&&typeof v.defaultTemplateId==='string'&&(v.defaultTemplateId===''||studioId(v.defaultTemplateId))&&int('buttonLimit',1,24)&&int('rowsPerPage',1,8)&&typeof v.colorsByFunction==='boolean'&&int('inputSeconds',60,600)&&int('confirmationSeconds',30,120);
 }
