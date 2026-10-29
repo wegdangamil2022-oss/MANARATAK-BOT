@@ -2,7 +2,7 @@
 
 المصدر هو MASTER الكامل، وليس ملف الأزرار المختصر. توزيع الأقسام والمراحل أدناه قرار تنفيذ هندسي وفق المقدمة الحالية؛ لا يغير نص المصدر ولا يعد إثبات تنفيذ. تبقى المتطلبات المؤجلة مسجلة دون حذف. NOT_ASSESSED تعني لم تُقيّم تغطيته بعد، وPARTIAL_LOCAL تعني جزءًا محليًا موثقًا. لا يوجد متطلب موسوم مكتملًا بهذا الجرد.
 
-{"requirements":703,"referenceRequirements":691,"extensions":12,"modules":73,"details":50,"acceptanceCases":48,"inStages1to4":690,"deferred":13,"fullyImplementedVerified":0,"inScopeNotAssessed":669,"localPartial":21}
+{"requirements":703,"referenceRequirements":691,"extensions":12,"modules":73,"details":50,"acceptanceCases":48,"inStages1to4":690,"deferred":13,"fullyImplementedVerified":0,"inScopeNotAssessed":668,"localPartial":22}
 
 ## MOD-01 — التأسيس والهوية والربط [مقترح أساسي]
 
@@ -83,7 +83,8 @@
 - [ ] **SPAM-002** — مكافحة الردود الاقتباسية المزعجة، والإشارة الجماعية، والإحالات المكررة، والوسوم الزائدة.
   - المصدر: docs/MANARATAK_BOT_MASTER_v1.2.1_AR.md:599؛ الأقسام: 2؛ النطاق: 3؛ الحالة: NOT_ASSESSED.
 - [ ] **SPAM-003** — AntiFlood: حد رسائل قابل للضبط (مثل 5 في 3 ثوانٍ **كمثال فقط**)، ثم إجراء متدرج.
-  - المصدر: docs/MANARATAK_BOT_MASTER_v1.2.1_AR.md:600؛ الأقسام: 2؛ النطاق: 3؛ الحالة: NOT_ASSESSED.
+  - المصدر: docs/MANARATAK_BOT_MASTER_v1.2.1_AR.md:600؛ الأقسام: 2؛ النطاق: 3؛ الحالة: PARTIAL_LOCAL.
+  - دليل جزئي: src/group-protection-policy.ts؛ tests/telegram-protection-editor.test.ts؛ نافذة فلود مرقمة لكل عضو ومجموعة وإعداد inline ومراقبة فقط؛ التدرج والعقوبات والصيانة الدورية غير مكتملة.
 - [ ] **SPAM-004** — كشف تكرار النصوص المتشابهة داخل المجموعة أو عبر شبكة المجموعات المملوكة.
   - المصدر: docs/MANARATAK_BOT_MASTER_v1.2.1_AR.md:601؛ الأقسام: 2؛ النطاق: 3؛ الحالة: NOT_ASSESSED.
 - [ ] **SPAM-005** — كلمات وعبارات محظورة: مطابقة دقيقة/جزئية وقواعد لغات متعددة، مع استثناءات وصيغ عربية بديلة.

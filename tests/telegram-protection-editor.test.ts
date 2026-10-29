@@ -570,6 +570,100 @@ for(const engine of ['json','sqlite'] as const){
    assert.match(detail.plan!.text,/معاد توجيهها/);
   }finally{await f.close();}
  });
+ test('configured flood monitoring survives app restart and deduplicates incoming updates ('+engine+')',async()=>{
+  const f=await fixture();try{
+   const saved=await new GroupProtectionPolicyService(f.store,f.policy,()=>NOW).save('100',{
+    chatId:CHAT,revision:1,mode:'MONITOR',rules:[],allowedDomains:[],allowedPhrases:[],exemptMemberIds:[],flood:{enabled:true,limit:3,windowMs:3000,action:'REVIEW'}
+   },f.policy.chatRevision(await f.store.snapshot(),CHAT),0);assert.equal(saved.status,'SAVED');
+   for(let i=0;i<4;i++){
+    const incoming={update_id:1300+i,message:{message_id:1300+i,chat:{id:Number(CHAT),type:'supergroup'},from:{id:300,is_bot:false},text:'PRIVATE_FLOOD_TEXT'}};
+    await f.app().handle(incoming);assert.equal((await f.app().handle(incoming)).status,'DUPLICATE');
+   }
+   const state=await f.store.snapshot();assert.equal(state.audit.filter(a=>a.reason.startsWith('PROTECTION_MONITOR_MATCH')).length,1);
+   assert.equal(state.protectionFloodWindows?.[0]?.events.length,4);assert.equal(JSON.stringify(state).includes('PRIVATE_FLOOD_TEXT'),false);
+   assert.equal(state.moderationOperations.length,0);
+  }finally{await f.close();}
+ });
+ test('flood windows are per member, exclude edits and reset on policy updates ('+engine+')',async()=>{
+  const f=await fixture();try{
+   const service=new GroupProtectionPolicyService(f.store,f.policy,()=>NOW);
+   const config={chatId:CHAT,revision:1,mode:'MONITOR',rules:[],allowedDomains:[],allowedPhrases:[],exemptMemberIds:[],flood:{enabled:true,limit:2,windowMs:3000,action:'REVIEW'}};
+   assert.equal((await service.save('100',config,f.policy.chatRevision(await f.store.snapshot(),CHAT),0)).status,'SAVED');
+   const base={message_id:1400,chat:{id:Number(CHAT),type:'supergroup'},from:{id:300,is_bot:false},text:'x'};
+   await f.app().handle({update_id:1400,message:base});await f.app().handle({update_id:1401,message:{...base,from:{id:301,is_bot:false}}});
+   await f.app().handle({update_id:1402,edited_message:{...base,edit_date:Math.floor(NOW/1000)}});
+   assert.deepEqual((await f.store.snapshot()).protectionFloodWindows?.map(w=>w.events.length),[1,1]);
+   f.setTime(NOW+3000);await f.app().handle({update_id:1403,message:base});
+   assert.equal((await f.store.snapshot()).protectionFloodWindows?.find(w=>w.memberId==='300')?.events.length,1);
+   assert.equal((await f.store.snapshot()).audit.filter(a=>a.reason.startsWith('PROTECTION_MONITOR_MATCH')).length,0);
+   f.setTime(NOW);
+   assert.equal((await service.save('100',{...config,revision:2,mode:'OFF'},f.policy.chatRevision(await f.store.snapshot(),CHAT),1)).status,'SAVED');
+   assert.deepEqual((await f.store.snapshot()).protectionFloodWindows,[]);
+  }finally{await f.close();}
+ });
+ test('flood and content violations still yield one strongest proposed observation ('+engine+')',async()=>{
+  const f=await fixture();try{
+   await new GroupProtectionPolicyService(f.store,f.policy,()=>NOW).save('100',{
+    chatId:CHAT,revision:1,mode:'MONITOR',rules:[{id:'photo',kind:'TYPE',type:'PHOTO',enabled:true,action:'MUTE'},{id:'word',kind:'WORD',value:'spam',enabled:true,action:'DELETE'}],
+    allowedDomains:[],allowedPhrases:[],exemptMemberIds:[],flood:{enabled:true,limit:1,windowMs:3000,action:'WARN'}
+   },f.policy.chatRevision(await f.store.snapshot(),CHAT),0);
+   const base={message_id:1500,chat:{id:Number(CHAT),type:'supergroup'},from:{id:300,is_bot:false}};
+   await f.app().handle({update_id:1500,message:{...base,text:'first'}});
+   await f.app().handle({update_id:1501,message:{...base,photo:[{file_id:'FLOOD_PHOTO'}],caption:'spam'}});
+   const matches=(await f.store.snapshot()).audit.filter(a=>a.reason.startsWith('PROTECTION_MONITOR_MATCH'));
+   assert.equal(matches.length,1);assert.ok(matches[0]!.reason.endsWith('action=MUTE;rules=3'));
+  }finally{await f.close();}
+ });
+ test('flood configuration, proposed action and toggle are scoped inline settings ('+engine+')',async()=>{
+  const f=await fixture();try{
+   const root=await f.app().handle(cb(1,'mi:1:i:02:08'));
+   const group=await f.app().handle(cb(2,route(root,'pr:1:g:')));
+   const settings=await f.app().handle(cb(3,route(group,'pr:1:S:')));
+   await f.app().handle(cb(4,route(settings,'pr:1:F:')));
+   for(const [i,bad] of ['101 3','5 0','5 61','5 3 extra','5 0.1'].entries())assert.equal((await f.app().handle(msg(5+i,bad))).reason,'PROTECTION_EDITOR_INPUT_REJECTED');
+   const saved=await f.app().handle(msg(10,'5 3'));
+   assert.deepEqual((await f.store.snapshot()).protectionPolicies![0]!.policy.flood,{enabled:false,limit:5,windowMs:3000,action:'REVIEW'});
+   const panel=await f.app().handle(cb(11,route(saved,'pr:1:S:')));
+   const proposed=panel.plan!.inlineMarkup!.inline_keyboard.flat().find(b=>b.callback_data.startsWith('pr:1:A:')&&b.callback_data.endsWith(':m'))!;
+   const changed=await f.app().handle(cb(12,proposed.callback_data));
+   const toggled=await f.app().handle(cb(13,route(changed,'pr:1:T:')));
+   assert.equal(toggled.status,'APPLIED');
+   const cfg=(await f.store.snapshot()).protectionPolicies![0]!.policy;
+   assert.equal(cfg.mode,'OFF');assert.deepEqual(cfg.flood,{enabled:true,limit:5,windowMs:3000,action:'MUTE'});
+   assert.equal((await f.app().handle(cb(14,proposed.callback_data))).status,'DENIED');
+   assert.equal((await f.store.snapshot()).moderationOperations.length,0);
+  }finally{await f.close();}
+ });
+ test('flood restore rejects duplicated windows and future observations do not advance ('+engine+')',async()=>{
+  const f=await fixture();try{
+   await new GroupProtectionPolicyService(f.store,f.policy,()=>NOW).save('100',{
+    chatId:CHAT,revision:1,mode:'MONITOR',rules:[],allowedDomains:[],allowedPhrases:[],exemptMemberIds:[],flood:{enabled:true,limit:1,windowMs:3000,action:'REVIEW'}
+   },f.policy.chatRevision(await f.store.snapshot(),CHAT),0);
+   const incoming=(id:number)=>({update_id:id,message:{message_id:id,chat:{id:Number(CHAT),type:'supergroup'},from:{id:300,is_bot:false},text:'x'}});
+   await f.app().handle(incoming(1600));const before=await f.store.snapshot();
+   await assert.rejects(f.store.transaction(s=>{s.protectionFloodWindows!.push(structuredClone(s.protectionFloodWindows![0]!));}),/Unsupported state schema/);
+   assert.deepEqual(await f.store.snapshot(),before);
+   await f.store.transaction(s=>{const w=s.protectionFloodWindows![0]!;w.updatedAt++;w.events[0]!.at++;});
+   await f.app().handle(incoming(1601));
+   const state=await f.store.snapshot();assert.equal(state.protectionFloodWindows![0]!.events.length,1);
+   assert.equal(state.audit.filter(a=>a.reason==='PROTECTION_MONITOR_INPUT_UNAVAILABLE').length,1);
+   assert.equal(state.audit.filter(a=>a.reason.startsWith('PROTECTION_MONITOR_MATCH')).length,0);
+  }finally{await f.close();}
+ });
+ test('flood capacity is bounded and cannot discard active windows to admit more members ('+engine+')',async()=>{
+  const f=await fixture();try{
+   await new GroupProtectionPolicyService(f.store,f.policy,()=>NOW).save('100',{
+    chatId:CHAT,revision:1,mode:'MONITOR',rules:[],allowedDomains:[],allowedPhrases:[],exemptMemberIds:[],flood:{enabled:true,limit:1,windowMs:3000,action:'REVIEW'}
+   },f.policy.chatRevision(await f.store.snapshot(),CHAT),0);
+   await f.store.transaction(s=>{s.protectionFloodWindows=Array.from({length:1000},(_,i)=>({chatId:CHAT,memberId:String(10000+i),chatPolicyVersion:s.chats[0]!.version,policyRevision:1,updatedAt:NOW,events:[{key:'b3-webhook:capacity:'+i,at:NOW}]}));});
+   const before=(await f.store.snapshot()).protectionFloodWindows;
+   await assert.rejects(f.store.transaction(s=>{const extra=structuredClone(s.protectionFloodWindows![0]!);extra.memberId='99999';extra.events[0]!.key='b3-webhook:capacity:1001';s.protectionFloodWindows!.push(extra);}),/Unsupported state schema/);
+   await f.app().handle({update_id:1700,message:{message_id:1700,chat:{id:Number(CHAT),type:'supergroup'},from:{id:300,is_bot:false},text:'x'}});
+   const state=await f.store.snapshot();assert.deepEqual(state.protectionFloodWindows,before);
+   assert.equal(state.audit.filter(a=>a.reason==='PROTECTION_MONITOR_INPUT_UNAVAILABLE').length,1);
+   await assert.rejects(f.store.transaction(s=>{s.protectionFloodWindows![1]!.events[0]!.key=s.protectionFloodWindows![0]!.events[0]!.key;}),/Unsupported state schema/);
+  }finally{await f.close();}
+ });
  test('home cancels a pending editor before further private text ('+engine+')',async()=>{
   const f=await fixture();try{
    const home=await f.app().handle(cb(1,'pr:1:h'));

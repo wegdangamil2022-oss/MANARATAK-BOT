@@ -1,3 +1,4 @@
+import {isValidFloodWindow,type FloodWindow} from './protection-flood.js';
 import {validAdminUIAccess,type AdminUIAccess} from './protection-ui-access.js';
 import { mkdir, open, readFile, rename, rm, stat, lstat, realpath, writeFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
@@ -148,6 +149,7 @@ export interface BotState {
   schemaVersion: 8;
   /** Optional additive per-group monitor policy, validated on every read/write. */
   protectionPolicies?:GroupProtectionRecord[];
+  protectionFloodWindows?:FloodWindow[];
   chats: Chat[];
   grants: Grant[];
   privateAI: PrivateAIMode;
@@ -226,6 +228,10 @@ export class BotStore {
       previous.purgeJobs = [];
     }
     if (previous.schemaVersion !== 8 ||
+      (previous.protectionFloodWindows!==undefined&&(!Array.isArray(previous.protectionFloodWindows)||
+       previous.protectionFloodWindows.length>1000||previous.protectionFloodWindows.some(row=>!isValidFloodWindow(row))||
+       new Set(previous.protectionFloodWindows.map((row:FloodWindow)=>JSON.stringify([row.chatId,row.memberId]))).size!==previous.protectionFloodWindows.length||
+       new Set(previous.protectionFloodWindows.flatMap((row:FloodWindow)=>row.events.map(e=>e.key))).size!==previous.protectionFloodWindows.reduce((sum:number,row:FloodWindow)=>sum+row.events.length,0)))||
       (previous.protectionPolicies!==undefined&&(!Array.isArray(previous.protectionPolicies)||
        previous.protectionPolicies.length>500||previous.protectionPolicies.some(row=>!isValidGroupProtectionRecord(row))||
        new Set(previous.protectionPolicies.map((row:GroupProtectionRecord)=>row.policy.chatId)).size!==previous.protectionPolicies.length))||

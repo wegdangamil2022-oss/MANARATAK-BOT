@@ -13,8 +13,8 @@
     "inStages1to4": 690,
     "deferred": 13,
     "fullyImplementedVerified": 0,
-    "inScopeNotAssessed": 669,
-    "localPartial": 21
+    "inScopeNotAssessed": 668,
+    "localPartial": 22
   },
   "modules": [
     {
@@ -1558,8 +1558,12 @@
           "title": "🛡️ الحماية والعقوبات"
         }
       ],
-      "implementation": "NOT_ASSESSED",
-      "evidence": null
+      "implementation": "PARTIAL_LOCAL",
+      "evidence": {
+        "code": "src/group-protection-policy.ts",
+        "tests": "tests/telegram-protection-editor.test.ts",
+        "limit": "نافذة فلود مرقمة لكل عضو ومجموعة وإعداد inline ومراقبة فقط؛ التدرج والعقوبات والصيانة الدورية غير مكتملة."
+      }
     },
     {
       "id": "SPAM-004",

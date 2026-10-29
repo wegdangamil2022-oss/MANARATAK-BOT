@@ -1,3 +1,4 @@
+import {advanceFloodWindow} from './protection-flood.js';
 import {protectionEntityLinks} from './protection-message-entities.js';
 import {BotStore,type BotState} from './store.js';
 import type {Policy} from './policy.js';
@@ -36,17 +37,35 @@ export class GroupProtectionPolicyService{
    state.protectionPolicies??=[];
    if(old)state.protectionPolicies[state.protectionPolicies.indexOf(old)]=record;
    else state.protectionPolicies.push(record);
+   if(state.protectionFloodWindows)state.protectionFloodWindows=state.protectionFloodWindows.filter(w=>w.chatId!==candidate.chatId);
    state.audit.push({actorId:actor,updateKey:'protection:policy:'+candidate.chatId+':'+candidate.revision,
     decision:'ALLOW',reason:'PROTECTION_POLICY_SAVED_'+candidate.mode,policyVersion:expectedChatRevision,at:now});
    return {status:'SAVED' as const,revision:candidate.revision};
   });
  }
+ private observeFlood(state:BotState,record:GroupProtectionRecord,member:string,key:string,now:number):'CLEAR'|'EXCEEDED'|'DUPLICATE'|'INVALID'{
+  const config=record.policy.flood;if(!config?.enabled)return 'CLEAR';
+  state.protectionFloodWindows??=[];
+  state.protectionFloodWindows=state.protectionFloodWindows.filter(w=>{
+   const policy=state.protectionPolicies?.find(r=>r.policy.chatId===w.chatId);
+   return policy?.policy.mode==='MONITOR'&&policy.policy.flood?.enabled&&policy.policy.revision===w.policyRevision&&
+    policy.chatPolicyVersion===w.chatPolicyVersion&&this.policy.canUseChat(state,w.chatId,'moderation')&&now-w.updatedAt<60000;
+  });
+  const windows=state.protectionFloodWindows,index=windows.findIndex(w=>w.chatId===record.policy.chatId&&w.memberId===member),old=windows[index];
+  if(!old&&windows.length>=1000)return 'INVALID';
+  const result=advanceFloodWindow(config,old?.events??[],key,now);
+  if(result.status==='INVALID'||result.status==='DUPLICATE')return result.status;
+  if(result.status==='DISABLED')return 'CLEAR';
+  const value={chatId:record.policy.chatId,memberId:member,chatPolicyVersion:record.chatPolicyVersion,policyRevision:record.policy.revision,events:result.events,updatedAt:now};
+  if(index<0)windows.push(value);else windows[index]=value;
+  return result.status;
+ }
  /** Record-only incoming TEXT monitor. Authorization precedes body/entity
   * evaluation; observations retain no sender identity or message contents. */
- async observeIncomingText(member:string,chat:string,text:string,entities:unknown,updateKey:string):Promise<string>{
-  return this.observeIncomingMessage({chatId:chat,memberId:member,type:'TEXT',text},entities,updateKey);
+ async observeIncomingText(member:string,chat:string,text:string,entities:unknown,updateKey:string,countTraffic=true):Promise<string>{
+  return this.observeIncomingMessage({chatId:chat,memberId:member,type:'TEXT',text},entities,updateKey,countTraffic);
  }
- async observeIncomingMessage(message:ProtectionMessage,entities:unknown,updateKey:string):Promise<string>{
+ async observeIncomingMessage(message:ProtectionMessage,entities:unknown,updateKey:string,countTraffic=true):Promise<string>{
   const {chatId:chat,memberId:member}=message;
   if(!/^b3-webhook:[A-Za-z0-9_-]{1,80}:[0-9]+$/u.test(updateKey))return 'DENIED';
   return this.store.transaction(state=>{
@@ -58,15 +77,21 @@ export class GroupProtectionPolicyService{
    if(this.policy.isOwner(member)||this.policy.has(state,member,'chat.manage',chat,now)||record.policy.exemptMemberIds.includes(member))return 'EXEMPT';
    const key=updateKey+':protection:'+chat;
    if(state.audit.some(a=>a.updateKey===key))return 'DUPLICATE';
+   const flood=countTraffic?this.observeFlood(state,record,member,updateKey,now):'CLEAR';
+   if(flood==='DUPLICATE')return 'DUPLICATE';
    const body=message.text??message.caption??'';
    const links=typeof body==='string'&&body.length<=4096?protectionEntityLinks(body,entities):null;
    const result=links===null?null:evaluateProtectionRules(record.policy,{...message,links});
-   if(!result||result.status==='INVALID_MESSAGE'||result.status==='INVALID_POLICY'){
+   if(flood==='INVALID'||!result||result.status==='INVALID_MESSAGE'||result.status==='INVALID_POLICY'){
     state.audit.push({updateKey:key,decision:'NOOP',reason:'PROTECTION_MONITOR_INPUT_UNAVAILABLE',policyVersion:record.chatPolicyVersion,at:now});
     return 'UNAVAILABLE';
    }
-   if(result.status==='MATCH')state.audit.push({updateKey:key,decision:'NOOP',
-    reason:'PROTECTION_MONITOR_MATCH:revision='+record.policy.revision+';action='+result.proposedAction+';rules='+result.matchedRuleIds.length,
+   const matches=result.matchedRuleIds.length+(flood==='EXCEEDED'?1:0);
+   const choices=['REVIEW','WARN','DELETE','MUTE'];
+   const floodAction=flood==='EXCEEDED'?record.policy.flood!.action:null;
+   const action=floodAction&&choices.indexOf(floodAction)>choices.indexOf(result.proposedAction??'')?floodAction:result.proposedAction;
+   if(matches)state.audit.push({updateKey:key,decision:'NOOP',
+    reason:'PROTECTION_MONITOR_MATCH:revision='+record.policy.revision+';action='+action+';rules='+matches,
     policyVersion:record.chatPolicyVersion,at:now});
    return 'OBSERVED';
   });

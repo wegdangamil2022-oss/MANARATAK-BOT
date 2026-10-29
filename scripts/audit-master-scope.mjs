@@ -33,6 +33,7 @@ const partial={
  'UX-004':['src/telegram-inline-student.ts','tests/student-inline-education.test.ts','صفحات ورجوع ومعاينات لشرائح منفذة؛ ليست كل المسارات الرسمية مكتملة.'],
  'SEC-004':['src/policy.ts','tests/owner-inline-navigation.test.ts','تتحقق الشرائح الحالية خادميًا؛ الخدمات غير المبرمجة لا تكتسب تغطية تلقائيًا.'],
  'SPAM-001':['src/telegram-protection-editor.ts','tests/telegram-protection-editor.test.ts','قواعد روابط عامة ونطاق محدد بواجهة خاصة ومراقبة النص دون شبكة؛ لا حل اختصارات أو جلب أو تنفيذ عقوبات.'],
+ 'SPAM-003':['src/group-protection-policy.ts','tests/telegram-protection-editor.test.ts','نافذة فلود مرقمة لكل عضو ومجموعة وإعداد inline ومراقبة فقط؛ التدرج والعقوبات والصيانة الدورية غير مكتملة.'],
  'SPAM-006':['src/telegram-protection-media.ts','tests/telegram-protection-editor.test.ts','مراقبة 11 نوع وسيط وشرح وروابط كيانات وقاعدة للتوجيه البشري دون تنزيل؛ منشورات القنوات والرسائل الطويلة والإعلانات والتنفيذ غير مكتملة.'],
  'LEX-001':['src/telegram-protection-editor.ts','tests/telegram-protection-editor.test.ts','تخزين مرقم وواجهة كلمات وعبارات لكل مجموعة؛ القوالب المركزية وحوكمة الشبكات غير مكتملة.'],
  'SPAM-011':['src/group-protection-policy.ts','tests/telegram-protection-editor.test.ts','مراقبة النص والوسائط وتعديلاتها وتدقيق بلا محتوى أو عقوبة؛ القياس الشامل غير مكتمل.'],

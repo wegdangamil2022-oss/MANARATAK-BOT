@@ -9,9 +9,9 @@ import type {OwnerInlineScreen} from './telegram-inline-owner.js';
 type Button={text:string;callback_data:string};
 type Frame={chat:Chat;config:ProtectionPolicy;epoch:number;page:number;slot:number;digest:string;stale:boolean};
 type Outcome={status:'APPLIED'|'DENIED';reason:string;screen:OwnerInlineScreen};
-type InputKind='WORD'|'PHRASE'|'LINK'|'TEST'|'DOMAIN'|'ALLOWPHRASE';
+type InputKind='WORD'|'PHRASE'|'LINK'|'TEST'|'DOMAIN'|'ALLOWPHRASE'|'FLOOD';
 const TTL=300000,PREFIX='protection-ui:';
-const flow=/^protection-ui:(WORD|PHRASE|TEST|LINK|DOMAIN|ALLOWPHRASE):(-[1-9][0-9]{0,15}):([1-9][0-9]{0,15}):(0|[1-9][0-9]{0,15}):(0|[1-9][0-9]{0,15}):([A-Za-z0-9_-]{16})(?::([A-Za-z0-9][A-Za-z0-9_-]{0,47}))?$/u;
+const flow=/^protection-ui:(WORD|PHRASE|TEST|LINK|DOMAIN|ALLOWPHRASE|FLOOD):(-[1-9][0-9]{0,15}):([1-9][0-9]{0,15}):(0|[1-9][0-9]{0,15}):(0|[1-9][0-9]{0,15}):([A-Za-z0-9_-]{16})(?::([A-Za-z0-9][A-Za-z0-9_-]{0,47}))?$/u;
 const escape=(v:string)=>v.replace(/\p{Cf}/gu,'').replace(/&/gu,'&amp;').replace(/</gu,'&lt;').replace(/>/gu,'&gt;').replace(/"/gu,'&quot;');
 const btn=(text:string,callback_data:string):Button=>({text,callback_data});
 const screen=(text:string,rows:Button[][]):OwnerInlineScreen=>({text,keyboard:{inline_keyboard:rows}});
@@ -30,6 +30,10 @@ function rulesWithInput(config:ProtectionPolicy,kind:'WORD'|'PHRASE'|'LINK',valu
  return editing?config.rules.map(r=>r.id===id?rule:r):[...config.rules,rule];
 }
 function inputPolicy(config:ProtectionPolicy,kind:Exclude<InputKind,'TEST'>,text:string,id:string,editing:boolean):ProtectionPolicy|null{
+ if(kind==='FLOOD'){
+  const m=/^([1-9][0-9]{0,2}) ([1-9][0-9]?)$/u.exec(text);if(!m||m[0]!==text)return null;
+  return {...config,revision:config.revision+1,flood:{enabled:config.flood?.enabled??false,limit:Number(m[1]),windowMs:Number(m[2])*1000,action:config.flood?.action??'REVIEW'}};
+ }
  if(kind==='DOMAIN'||kind==='ALLOWPHRASE'){
   const field=kind==='DOMAIN'?'allowedDomains':'allowedPhrases';
   if(config[field].includes(text))return null;
@@ -63,6 +67,7 @@ export class TelegramProtectionEditor{
    rows.push([btn('🔗 جميع الروابط',key('b',f)),btn('🌐 نطاق محدد',key('j',f))]);
    rows.push([btn('✅ سماح نطاق',key('c',f)),btn('📚 سماح عبارة',key('u',f))]);
    rows.push([btn('📋 النطاقات المسموحة',key('s',f,':0:1')),btn('📋 العبارات المسموحة',key('s',f,':0:2'))]);
+   rows.push([btn('🌊 مكافحة الفلود',key('S',f))]);
    rows.push([btn('🔒 أنواع الرسائل',key('y',f,':0'))]);
    rows.push([btn('📋 القواعد',key('l',f,':0')),btn('🧪 اختبار القواعد',key('t',f))]);
    rows.push([btn('👁️ تشغيل المراقبة',key('m',f)),btn('⏹ إيقاف الفحص',key('o',f))]);
@@ -81,7 +86,7 @@ export class TelegramProtectionEditor{
  private failure(actor:string,text='تغيرت الصلاحية أو السياسة؛ افتح القسم من جديد.'):OwnerInlineScreen{return screen(text,[this.back(actor)]);}
  async handle(data:string,actor:string):Promise<OwnerInlineScreen|null>{
   if(!validTime(this.clock()))return null;
-  const route=protectionInlineRoute(/^mi:1:i:02:(?:0[567]|12)$/u.test(data)?'pr:1:h':data);if(!route)return null;
+  const route=protectionInlineRoute(/^mi:1:i:02:(?:0[5678]|12)$/u.test(data)?'pr:1:h':data);if(!route)return null;
   if(route.kind==='cancel')return this.cancel(actor,route.nonce);
   await this.cancel(actor);
   const state=await this.store.snapshot();
@@ -101,6 +106,16 @@ export class TelegramProtectionEditor{
   const f=this.frame(state,actor,route.page,route.slot);if(!f||f.digest!==route.digest)return null;
   if(route.kind==='g')return this.groupScreen(actor,f);
   if(f.stale)return null;
+  if(route.kind==='F')return this.begin(actor,f,'FLOOD');
+  if(route.kind==='S')return this.floodScreen(f);
+  if(route.kind==='T'||route.kind==='A'){
+   if(!f.config.flood||route.kind==='A'&&!route.action)return null;
+   const flood={...f.config.flood,...(route.kind==='T'?{enabled:!f.config.flood.enabled}:{action:route.action!})};
+   const saved=await this.service.save(actor,{...f.config,revision:f.config.revision+1,flood},f.epoch,f.config.revision);
+   if(saved.status!=='SAVED')return null;
+   const state=await this.store.snapshot(),index=this.groups(state,actor).findIndex(c=>c.id===f.chat.id);
+   const current=index<0?null:this.frame(state,actor,Math.floor(index/8),index%8+1);return current&&!current.stale?this.floodScreen(current):null;
+  }
   if(route.kind==='c'||route.kind==='u')return this.begin(actor,f,route.kind==='c'?'DOMAIN':'ALLOWPHRASE');
   if(route.kind==='s'||route.kind==='q'||route.kind==='k'){
    const listKind=route.kind==='s'?(route.ruleSlot===1?'d':route.ruleSlot===2?'p':null):route.listKind;
@@ -167,6 +182,16 @@ export class TelegramProtectionEditor{
   const saved=await this.service.save(actor,next,f.epoch,f.config.revision);
   return saved.status==='SAVED'?this.fresh(actor,f.chat.id,'حُفظ تعديل القاعدة.'):null;
  }
+ private floodScreen(f:Frame):OwnerInlineScreen{
+  const config=f.config.flood,rows:Button[][]=[[btn('⚙️ ضبط العدد والمدة',key('F',f))]];
+  if(config){
+   rows.push([btn(config.enabled?'⏹ تعطيل الفلود':'👁️ تفعيل مراقبة الفلود',key('T',f))]);
+   rows.push([btn('مراجعة',key('A',f,':r')),btn('تحذير مقترح',key('A',f,':w'))]);
+   rows.push([btn('حذف مقترح',key('A',f,':d')),btn('كتم مقترح',key('A',f,':m'))]);
+  }
+  rows.push([btn('↩️ إعدادات المجموعة',key('g',f))]);
+  return screen('مكافحة الفلود — مراقبة فقط\nالمجموعة: <code>'+escape(f.chat.id)+'</code>\n'+(config?'الحالة: '+(config.enabled?'مفعلة':'متوقفة')+'\nالحد: '+config.limit+' رسالة خلال '+config.windowMs/1000+' ثانية\nالإجراء المقترح: '+actions[config.action]:'لم تضبط سياسة فلود لهذه المجموعة.')+'\nيجب أن يكون وضع المجموعة MONITOR لاحتساب الرسائل. لا تنفذ عقوبات. تعديل الرسالة لا يحتسب رسالة جديدة.',rows);
+ }
  private async addRule(actor:string,f:Frame,rule:ProtectionRule):Promise<OwnerInlineScreen|null>{
   const duplicate=f.config.rules.some(r=>r.kind===rule.kind&&(r.kind==='TYPE'&&rule.kind==='TYPE'?r.type===rule.type:r.kind==='LINK'&&rule.kind==='LINK'?JSON.stringify(r.hosts)===JSON.stringify(rule.hosts):r.kind==='FORWARD'&&rule.kind==='FORWARD'));
   if(duplicate)return this.groupScreen(actor,f,'توجد قاعدة لهذا الهدف؛ عدّلها من قائمة القواعد.');
@@ -177,7 +202,7 @@ export class TelegramProtectionEditor{
  private active(state:BotState,actor:string):Wizard[]{return state.wizards.filter(w=>w.userId===actor&&w.chatId===actor&&w.status==='ACTIVE'&&typeof w.flow==='string'&&w.flow.startsWith(PREFIX));}
  private decode(w:Wizard):RegExpExecArray|null{
   const m=flow.exec(w.flow);
-  if(!m||m[0]!==w.flow||m[1]==='TEST'&&m[7]!==undefined||w.key!==JSON.stringify([w.userId,w.chatId,'',w.flow])||w.topicId!==''||w.step!==0||w.version!==1||
+  if(!m||m[0]!==w.flow||!['WORD','PHRASE','LINK'].includes(m[1]!)&&m[7]!==undefined||w.key!==JSON.stringify([w.userId,w.chatId,'',w.flow])||w.topicId!==''||w.step!==0||w.version!==1||
    !Number.isSafeInteger(w.expiresAt)||!validTime(Number(m[5]))||w.expiresAt!==Number(m[5])+TTL||w.policyVersion!==Number(m[3])||![Number(m[3]),Number(m[4])].every(Number.isSafeInteger))return null;
   return m;
  }
@@ -194,7 +219,8 @@ export class TelegramProtectionEditor{
    state.wizards.push({key:JSON.stringify([actor,actor,'',value]),userId:actor,chatId:actor,topicId:'',flow:value,step:0,version:1,expiresAt:now+TTL,policyVersion:f.epoch,status:'ACTIVE'});
    return true;
   });
-  return created?screen(kind==='TEST'?'أرسل عينة نصية لاختبار جميع القواعد، بما فيها المعطلة، دون تشغيلها أو حفظ العينة.':
+  return created?screen(kind==='TEST'?'أرسل عينة نصية لاختبار قواعد المحتوى، بما فيها المعطلة، دون تشغيلها أو حفظ العينة. لا يختبر هذا المسار وتيرة الفلود.':
+   kind==='FLOOD'?'أرسل عدد الرسائل ثم المدة بالثواني، مفصولين بمسافة. العدد من 1 إلى 100 والمدة من 1 إلى 60. مثال إدخال فقط: 5 3. تبدأ السياسة الجديدة معطلة بإجراء مراجعة.':
    kind==='DOMAIN'?'أرسل اسم نطاق مسموح واحدًا بحروف صغيرة دون رابط أو مسار، مثل school.edu. السماح للمضيف نفسه فقط ولا يعفي أنواع الرسائل.':
    kind==='ALLOWPHRASE'?'أرسل عبارة تعليمية مسموحة حتى 120 حرفًا. تعفى في موضعها فقط ولا تعفي بقية الرسالة أو نوعها.':
    kind==='LINK'?'أرسل اسم نطاق واحدًا بحروف صغيرة، مثل example.org، دون رابط أو مسار أو بيانات دخول. ستُضاف قاعدة معطلة تشمل النطاق ونطاقاته الفرعية.':
@@ -246,7 +272,7 @@ export class TelegramProtectionEditor{
    if(!validTime(now)||now>=w.expiresAt||now<w.expiresAt-TTL||!f||f.stale||f.epoch!==epoch||f.config.revision!==revision){w.status='CANCELLED';w.version++;return {kind:'DENIED' as const};}
    let ruleId=m[7]??'';
    if(m[1]!=='TEST'){
-    if(!m[7]&&!['DOMAIN','ALLOWPHRASE'].includes(m[1]!)&&f.config.rules.length>=100)return {kind:'RETRY' as const,notice:'بلغت السياسة الحد الحالي للقواعد. ألغ الخطوة واحذف قاعدة قبل إضافة أخرى.'};
+    if(!m[7]&&!['DOMAIN','ALLOWPHRASE','FLOOD'].includes(m[1]!)&&f.config.rules.length>=100)return {kind:'RETRY' as const,notice:'بلغت السياسة الحد الحالي للقواعد. ألغ الخطوة واحذف قاعدة قبل إضافة أخرى.'};
     if(!m[7])ruleId=newRuleId(f.config);
     const candidate=inputPolicy(f.config,m[1] as Exclude<InputKind,'TEST'>,text,ruleId,Boolean(m[7]));
     if(!candidate||!isValidProtectionPolicy(candidate))return {kind:'RETRY' as const,notice:'المدخل غير صالح أو مكرر أو يتجاوز الحد. راجع صيغة الخطوة أو أرسل /cancel.'};
@@ -272,7 +298,7 @@ export class TelegramProtectionEditor{
   const candidate=inputPolicy(f.config,claim.kind,text,claim.ruleId,claim.editing);
   if(!candidate)return {status:'DENIED',reason:'PROTECTION_EDITOR_STALE',screen:this.failure(actor)};
   const saved=await this.service.save(actor,candidate,f.epoch,f.config.revision);
-  const view=saved.status==='SAVED'?await this.fresh(actor,f.chat.id,claim.kind==='DOMAIN'||claim.kind==='ALLOWPHRASE'?'حُفظ عنصر السماح المحلي.':claim.editing?'حُفظ النص البديل مع إبقاء إعدادات القاعدة.':'أُضيفت القاعدة معطلة؛ راجعها واختبرها قبل أي تفعيل.'):null;
+  const view=saved.status==='SAVED'?await this.fresh(actor,f.chat.id,claim.kind==='FLOOD'?'حُفظت حدود الفلود المحلية.':claim.kind==='DOMAIN'||claim.kind==='ALLOWPHRASE'?'حُفظ عنصر السماح المحلي.':claim.editing?'حُفظ النص البديل مع إبقاء إعدادات القاعدة.':'أُضيفت القاعدة معطلة؛ راجعها واختبرها قبل أي تفعيل.'):null;
   return view?{status:'APPLIED',reason:'PROTECTION_RULE_SAVED',screen:view}:{status:'DENIED',reason:'PROTECTION_EDITOR_STALE',screen:this.failure(actor)};
  }
 }

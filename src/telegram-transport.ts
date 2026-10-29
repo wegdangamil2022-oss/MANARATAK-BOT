@@ -313,17 +313,17 @@ export class TelegramUpdateApplication {
     if(event.protectionMedia){
      const media=event.protectionMedia;
      await new GroupProtectionPolicyService(this.opts.store,this.opts.policy,this.clock).observeIncomingMessage(
-      {chatId:event.chatId,memberId:event.actorId,type:media.type,caption:media.caption,...(event.forwarded?{forwarded:true}:{})},media.entities,'b3-webhook:'+this.opts.botId+':'+event.updateId);
+      {chatId:event.chatId,memberId:event.actorId,type:media.type,caption:media.caption,...(event.forwarded?{forwarded:true}:{})},media.entities,'b3-webhook:'+this.opts.botId+':'+event.updateId,!event.edited);
      return media.type==='DOCUMENT'?{status:'DENIED',reason:'PRIVATE_ADMIN_UPLOAD_ONLY'}:{status:'IGNORED',reason:'PROTECTION_MEDIA_MONITOR_ONLY'};
     }
     if(event.forwarded){
      await new GroupProtectionPolicyService(this.opts.store,this.opts.policy,this.clock).observeIncomingMessage(
-      {chatId:event.chatId,memberId:event.actorId,type:'TEXT',text:event.text,forwarded:true},event.entities,'b3-webhook:'+this.opts.botId+':'+event.updateId);
+      {chatId:event.chatId,memberId:event.actorId,type:'TEXT',text:event.text,forwarded:true},event.entities,'b3-webhook:'+this.opts.botId+':'+event.updateId,!event.edited);
      return {status:'DENIED',reason:'UNTRUSTED_FORWARD'};
     }
     if(event.edited){
      await new GroupProtectionPolicyService(this.opts.store,this.opts.policy,this.clock).observeIncomingText(
-      event.actorId,event.chatId,event.text,event.entities,'b3-webhook:'+this.opts.botId+':'+event.updateId);
+      event.actorId,event.chatId,event.text,event.entities,'b3-webhook:'+this.opts.botId+':'+event.updateId,false);
      return {status:'IGNORED',reason:'PROTECTION_EDIT_MONITOR_ONLY'};
     }
     if(event.document)return this.handleDocument(event);
@@ -332,8 +332,8 @@ export class TelegramUpdateApplication {
      // Reauthorize the real sender at every tap. Never dispatch a privileged
      // command from untrusted callback_data or from a group context.
      if(kind!=='private'||actorId!==chatId)return {status:'DENIED',reason:'PRIVATE_CALLBACK_ONLY'};
-     if(event.callbackData.startsWith('pr:1:')||/^mi:1:i:02:(?:0[567]|12)$/u.test(event.callbackData)){
-      if(/^mi:1:i:02:(?:0[567]|12)$/u.test(event.callbackData)&&!this.opts.policy.isOwner(actorId))return {status:'DENIED',reason:'OWNER_ONLY'};
+     if(event.callbackData.startsWith('pr:1:')||/^mi:1:i:02:(?:0[5678]|12)$/u.test(event.callbackData)){
+      if(/^mi:1:i:02:(?:0[5678]|12)$/u.test(event.callbackData)&&!this.opts.policy.isOwner(actorId))return {status:'DENIED',reason:'OWNER_ONLY'};
       const view=await new TelegramProtectionEditor(this.opts.store,this.opts.policy,this.clock).handle(event.callbackData,actorId);
       if(!view)return {status:'DENIED',reason:'PROTECTION_EDITOR_NOT_ACCESSIBLE'};
       return {status:'APPLIED',reason:'RESPONSE_PLANNED_ONLY',plan:this.plan(chatId,view.text,undefined,view.keyboard,event.callbackMessageId)};
@@ -1063,7 +1063,7 @@ export class TelegramUpdateApplication {
     let handled:ProcessedReply;
     try{handled=await this.process(event);}catch(err){handled={status:'DENIED',reason:safeError(err)};}
     if(event.kind==='private'&&event.callbackData&&!event.callbackData.startsWith('pr:1:')&&
-     !/^mi:1:i:02:(?:0[567]|12)$/u.test(event.callbackData)&&handled.plan){
+     !/^mi:1:i:02:(?:0[5678]|12)$/u.test(event.callbackData)&&handled.plan){
      await new TelegramProtectionEditor(this.opts.store,this.opts.policy,this.clock).cancelNavigation(event.actorId);
     }
     if(handled.plan&&!handled.plan.chatId.startsWith('-')&&handled.plan.inlineMarkup?.inline_keyboard.flat().some(b=>b.callback_data.startsWith('pr:1:'))){
