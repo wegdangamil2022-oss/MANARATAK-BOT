@@ -1,0 +1,2057 @@
+{
+  "schemaVersion": 1,
+  "sourceCommit": "c0e46fde86e514646af5c1f3b694fe3c4e34b19e",
+  "officialPlan": "docs/MANARATAK_BOT_MASTER_v1.2.1_AR.md",
+  "officialButtons": "docs/أزرار_منارتك.md",
+  "scope": "LOCAL_PHASE1_INVENTORY_ONLY",
+  "liveTelegram": "NOT_TESTED_DEFERRED_BY_OWNER",
+  "networkCalls": 0,
+  "ownerSections": 16,
+  "ownerButtons": 253,
+  "localViews": 10,
+  "designOnly": 243,
+  "engines": [
+    {
+      "engine": "json",
+      "buttonsPassed": 253,
+      "duplicateProtectionPassed": 253,
+      "unauthorizedDenied": 253,
+      "groupContextDenied": 253,
+      "businessStateUnchanged": true
+    },
+    {
+      "engine": "sqlite",
+      "buttonsPassed": 253,
+      "duplicateProtectionPassed": 253,
+      "unauthorizedDenied": 253,
+      "groupContextDenied": 253,
+      "businessStateUnchanged": true
+    }
+  ],
+  "buttons": [
+    {
+      "section": "01",
+      "sectionTitle": "👥 المجموعات والشبكات",
+      "button": "01",
+      "label": "📋 مجموعاتي",
+      "callback": "mi:1:i:01:01",
+      "status": "LOCAL_VIEW"
+    },
+    {
+      "section": "01",
+      "sectionTitle": "👥 المجموعات والشبكات",
+      "button": "02",
+      "label": "➕ ربط مجموعة",
+      "callback": "mi:1:i:01:02",
+      "status": "DESIGN_ONLY"
+    },
+    {
+      "section": "01",
+      "sectionTitle": "👥 المجموعات والشبكات",
+      "button": "03",
+      "label": "🌐 الشبكات والاتحادات",
+      "callback": "mi:1:i:01:03",
+      "status": "DESIGN_ONLY"
+    },
+    {
+      "section": "01",
+      "sectionTitle": "👥 المجموعات والشبكات",
+      "button": "04",
+      "label": "🏢 غرف الإدارة",
+      "callback": "mi:1:i:01:04",
+      "status": "DESIGN_ONLY"
+    },
+    {
+      "section": "01",
+      "sectionTitle": "👥 المجموعات والشبكات",
+      "button": "05",
+      "label": "🧩 مواضيع المجموعات",
+      "callback": "mi:1:i:01:05",
+      "status": "DESIGN_ONLY"
+    },
+    {
+      "section": "01",
+      "sectionTitle": "👥 المجموعات والشبكات",
+      "button": "06",
+      "label": "📑 قوالب الإعدادات",
+      "callback": "mi:1:i:01:06",
+      "status": "DESIGN_ONLY"
+    },
+    {
+      "section": "01",
+      "sectionTitle": "👥 المجموعات والشبكات",
+      "button": "07",
+      "label": "🔄 نسخ ومقارنة الإعدادات",
+      "callback": "mi:1:i:01:07",
+      "status": "DESIGN_ONLY"
+    },
+    {
+      "section": "01",
+      "sectionTitle": "👥 المجموعات والشبكات",
+      "button": "08",
+      "label": "👥 الإجراءات الجماعية",
+      "callback": "mi:1:i:01:08",
+      "status": "DESIGN_ONLY"
+    },
+    {
+      "section": "01",
+      "sectionTitle": "👥 المجموعات والشبكات",
+      "button": "09",
+      "label": "🔔 تنبيهات الشبكة",
+      "callback": "mi:1:i:01:09",
+      "status": "DESIGN_ONLY"
+    },
+    {
+      "section": "01",
+      "sectionTitle": "👥 المجموعات والشبكات",
+      "button": "10",
+      "label": "🔍 فحص الصلاحيات",
+      "callback": "mi:1:i:01:10",
+      "status": "DESIGN_ONLY"
+    },
+    {
+      "section": "01",
+      "sectionTitle": "👥 المجموعات والشبكات",
+      "button": "11",
+      "label": "🚦 أوضاع التشغيل",
+      "callback": "mi:1:i:01:11",
+      "status": "DESIGN_ONLY"
+    },
+    {
+      "section": "01",
+      "sectionTitle": "👥 المجموعات والشبكات",
+      "button": "12",
+      "label": "⚙️ إعدادات القسم",
+      "callback": "mi:1:i:01:12",
+      "status": "DESIGN_ONLY"
+    },
+    {
+      "section": "02",
+      "sectionTitle": "🛡️ الحماية والعقوبات",
+      "button": "01",
+      "label": "🛡️ حالة الحماية",
+      "callback": "mi:1:i:02:01",
+      "status": "LOCAL_VIEW"
+    },
+    {
+      "section": "02",
+      "sectionTitle": "🛡️ الحماية والعقوبات",
+      "button": "02",
+      "label": "⚖️ العقوبات والأعضاء",
+      "callback": "mi:1:i:02:02",
+      "status": "DESIGN_ONLY"
+    },
+    {
+      "section": "02",
+      "sectionTitle": "🛡️ الحماية والعقوبات",
+      "button": "03",
+      "label": "⚠️ التحذيرات والاعتراضات",
+      "callback": "mi:1:i:02:03",
+      "status": "DESIGN_ONLY"
+    },
+    {
+      "section": "02",
+      "sectionTitle": "🛡️ الحماية والعقوبات",
+      "button": "04",
+      "label": "🔐 قفل وفتح المجموعة",
+      "callback": "mi:1:i:02:04",
+      "status": "DESIGN_ONLY"
+    },
+    {
+      "section": "02",
+      "sectionTitle": "🛡️ الحماية والعقوبات",
+      "button": "05",
+      "label": "🔒 أقفال أنواع الرسائل",
+      "callback": "mi:1:i:02:05",
+      "status": "DESIGN_ONLY"
+    },
+    {
+      "section": "02",
+      "sectionTitle": "🛡️ الحماية والعقوبات",
+      "button": "06",
+      "label": "🔗 الروابط والتوجيه",
+      "callback": "mi:1:i:02:06",
+      "status": "DESIGN_ONLY"
+    },
+    {
+      "section": "02",
+      "sectionTitle": "🛡️ الحماية والعقوبات",
+      "button": "07",
+      "label": "🚫 الكلمات والعبارات",
+      "callback": "mi:1:i:02:07",
+      "status": "DESIGN_ONLY"
+    },
+    {
+      "section": "02",
+      "sectionTitle": "🛡️ الحماية والعقوبات",
+      "button": "08",
+      "label": "🤖 مكافحة السبام والفلود",
+      "callback": "mi:1:i:02:08",
+      "status": "DESIGN_ONLY"
+    },
+    {
+      "section": "02",
+      "sectionTitle": "🛡️ الحماية والعقوبات",
+      "button": "09",
+      "label": "🚨 الاحتيال والانتحال",
+      "callback": "mi:1:i:02:09",
+      "status": "DESIGN_ONLY"
+    },
+    {
+      "section": "02",
+      "sectionTitle": "🛡️ الحماية والعقوبات",
+      "button": "10",
+      "label": "🔞 حماية المحتوى الحساس",
+      "callback": "mi:1:i:02:10",
+      "status": "DESIGN_ONLY"
+    },
+    {
+      "section": "02",
+      "sectionTitle": "🛡️ الحماية والعقوبات",
+      "button": "11",
+      "label": "📜 قوانين المجموعة",
+      "callback": "mi:1:i:02:11",
+      "status": "DESIGN_ONLY"
+    },
+    {
+      "section": "02",
+      "sectionTitle": "🛡️ الحماية والعقوبات",
+      "button": "12",
+      "label": "✅ الاستثناءات والسماح",
+      "callback": "mi:1:i:02:12",
+      "status": "DESIGN_ONLY"
+    },
+    {
+      "section": "02",
+      "sectionTitle": "🛡️ الحماية والعقوبات",
+      "button": "13",
+      "label": "🧹 تنظيف الرسائل",
+      "callback": "mi:1:i:02:13",
+      "status": "DESIGN_ONLY"
+    },
+    {
+      "section": "02",
+      "sectionTitle": "🛡️ الحماية والعقوبات",
+      "button": "14",
+      "label": "📺 حماية القنوات المربوطة",
+      "callback": "mi:1:i:02:14",
+      "status": "DESIGN_ONLY"
+    },
+    {
+      "section": "02",
+      "sectionTitle": "🛡️ الحماية والعقوبات",
+      "button": "15",
+      "label": "⚙️ سياسات العقوبات والاختبار",
+      "callback": "mi:1:i:02:15",
+      "status": "LOCAL_VIEW"
+    },
+    {
+      "section": "02",
+      "sectionTitle": "🛡️ الحماية والعقوبات",
+      "button": "16",
+      "label": "📋 السجلات والطوارئ",
+      "callback": "mi:1:i:02:16",
+      "status": "LOCAL_VIEW"
+    },
+    {
+      "section": "03",
+      "sectionTitle": "👑 المشرفون والصلاحيات",
+      "button": "01",
+      "label": "📋 قائمة المشرفين",
+      "callback": "mi:1:i:03:01",
+      "status": "LOCAL_VIEW"
+    },
+    {
+      "section": "03",
+      "sectionTitle": "👑 المشرفون والصلاحيات",
+      "button": "02",
+      "label": "➕ تعيين أو إزالة مشرف",
+      "callback": "mi:1:i:03:02",
+      "status": "DESIGN_ONLY"
+    },
+    {
+      "section": "03",
+      "sectionTitle": "👑 المشرفون والصلاحيات",
+      "button": "03",
+      "label": "🏅 الرتب والمستويات",
+      "callback": "mi:1:i:03:03",
+      "status": "DESIGN_ONLY"
+    },
+    {
+      "section": "03",
+      "sectionTitle": "👑 المشرفون والصلاحيات",
+      "button": "04",
+      "label": "🔑 تخصيص الصلاحيات",
+      "callback": "mi:1:i:03:04",
+      "status": "DESIGN_ONLY"
+    },
+    {
+      "section": "03",
+      "sectionTitle": "👑 المشرفون والصلاحيات",
+      "button": "05",
+      "label": "🌐 نطاقات الإشراف",
+      "callback": "mi:1:i:03:05",
+      "status": "DESIGN_ONLY"
+    },
+    {
+      "section": "03",
+      "sectionTitle": "👑 المشرفون والصلاحيات",
+      "button": "06",
+      "label": "📲 صلاحيات Telegram",
+      "callback": "mi:1:i:03:06",
+      "status": "DESIGN_ONLY"
+    },
+    {
+      "section": "03",
+      "sectionTitle": "👑 المشرفون والصلاحيات",
+      "button": "07",
+      "label": "⏳ التفويض المؤقت",
+      "callback": "mi:1:i:03:07",
+      "status": "DESIGN_ONLY"
+    },
+    {
+      "section": "03",
+      "sectionTitle": "👑 المشرفون والصلاحيات",
+      "button": "08",
+      "label": "🛡️ الاستثناءات والحصانات",
+      "callback": "mi:1:i:03:08",
+      "status": "DESIGN_ONLY"
+    },
+    {
+      "section": "03",
+      "sectionTitle": "👑 المشرفون والصلاحيات",
+      "button": "09",
+      "label": "🗓️ جدول المناوبات",
+      "callback": "mi:1:i:03:09",
+      "status": "DESIGN_ONLY"
+    },
+    {
+      "section": "03",
+      "sectionTitle": "👑 المشرفون والصلاحيات",
+      "button": "10",
+      "label": "📥 المهام وتسليمها",
+      "callback": "mi:1:i:03:10",
+      "status": "DESIGN_ONLY"
+    },
+    {
+      "section": "03",
+      "sectionTitle": "👑 المشرفون والصلاحيات",
+      "button": "11",
+      "label": "✅ الموافقات الحساسة",
+      "callback": "mi:1:i:03:11",
+      "status": "DESIGN_ONLY"
+    },
+    {
+      "section": "03",
+      "sectionTitle": "👑 المشرفون والصلاحيات",
+      "button": "12",
+      "label": "⚖️ النزاعات والاعتراضات",
+      "callback": "mi:1:i:03:12",
+      "status": "DESIGN_ONLY"
+    },
+    {
+      "section": "03",
+      "sectionTitle": "👑 المشرفون والصلاحيات",
+      "button": "13",
+      "label": "🔍 مراجعة الصلاحيات",
+      "callback": "mi:1:i:03:13",
+      "status": "DESIGN_ONLY"
+    },
+    {
+      "section": "03",
+      "sectionTitle": "👑 المشرفون والصلاحيات",
+      "button": "14",
+      "label": "📜 سجل الإدارة والتقارير",
+      "callback": "mi:1:i:03:14",
+      "status": "DESIGN_ONLY"
+    },
+    {
+      "section": "03",
+      "sectionTitle": "👑 المشرفون والصلاحيات",
+      "button": "15",
+      "label": "🔄 انتقال المسؤولية",
+      "callback": "mi:1:i:03:15",
+      "status": "DESIGN_ONLY"
+    },
+    {
+      "section": "03",
+      "sectionTitle": "👑 المشرفون والصلاحيات",
+      "button": "16",
+      "label": "⚙️ إعدادات المشرفين",
+      "callback": "mi:1:i:03:16",
+      "status": "DESIGN_ONLY"
+    },
+    {
+      "section": "04",
+      "sectionTitle": "🔐 الانضمام والاشتراكات",
+      "button": "01",
+      "label": "📊 حالة الانضمام والإحصائيات",
+      "callback": "mi:1:i:04:01",
+      "status": "DESIGN_ONLY"
+    },
+    {
+      "section": "04",
+      "sectionTitle": "🔐 الانضمام والاشتراكات",
+      "button": "02",
+      "label": "📢 القنوات المطلوبة",
+      "callback": "mi:1:i:04:02",
+      "status": "DESIGN_ONLY"
+    },
+    {
+      "section": "04",
+      "sectionTitle": "🔐 الانضمام والاشتراكات",
+      "button": "03",
+      "label": "📁 مجلدات المجتمع",
+      "callback": "mi:1:i:04:03",
+      "status": "DESIGN_ONLY"
+    },
+    {
+      "section": "04",
+      "sectionTitle": "🔐 الانضمام والاشتراكات",
+      "button": "04",
+      "label": "🔐 الاشتراك الإجباري",
+      "callback": "mi:1:i:04:04",
+      "status": "DESIGN_ONLY"
+    },
+    {
+      "section": "04",
+      "sectionTitle": "🔐 الانضمام والاشتراكات",
+      "button": "05",
+      "label": "✅ فحص العضوية",
+      "callback": "mi:1:i:04:05",
+      "status": "LOCAL_VIEW"
+    },
+    {
+      "section": "04",
+      "sectionTitle": "🔐 الانضمام والاشتراكات",
+      "button": "06",
+      "label": "📥 طلبات الانضمام",
+      "callback": "mi:1:i:04:06",
+      "status": "DESIGN_ONLY"
+    },
+    {
+      "section": "04",
+      "sectionTitle": "🔐 الانضمام والاشتراكات",
+      "button": "07",
+      "label": "🤖 اختبار CAPTCHA",
+      "callback": "mi:1:i:04:07",
+      "status": "DESIGN_ONLY"
+    },
+    {
+      "section": "04",
+      "sectionTitle": "🔐 الانضمام والاشتراكات",
+      "button": "08",
+      "label": "👤 رحلة العضو الجديد",
+      "callback": "mi:1:i:04:08",
+      "status": "DESIGN_ONLY"
+    },
+    {
+      "section": "04",
+      "sectionTitle": "🔐 الانضمام والاشتراكات",
+      "button": "09",
+      "label": "🔒 قيود الأعضاء الجدد",
+      "callback": "mi:1:i:04:09",
+      "status": "DESIGN_ONLY"
+    },
+    {
+      "section": "04",
+      "sectionTitle": "🔐 الانضمام والاشتراكات",
+      "button": "10",
+      "label": "⏳ المهل والمحاولات",
+      "callback": "mi:1:i:04:10",
+      "status": "DESIGN_ONLY"
+    },
+    {
+      "section": "04",
+      "sectionTitle": "🔐 الانضمام والاشتراكات",
+      "button": "11",
+      "label": "🔄 إعادة التحقق",
+      "callback": "mi:1:i:04:11",
+      "status": "DESIGN_ONLY"
+    },
+    {
+      "section": "04",
+      "sectionTitle": "🔐 الانضمام والاشتراكات",
+      "button": "12",
+      "label": "🧑‍⚖️ المراجعة اليدوية",
+      "callback": "mi:1:i:04:12",
+      "status": "DESIGN_ONLY"
+    },
+    {
+      "section": "04",
+      "sectionTitle": "🔐 الانضمام والاشتراكات",
+      "button": "13",
+      "label": "🛡️ إعفاءات الاشتراك",
+      "callback": "mi:1:i:04:13",
+      "status": "DESIGN_ONLY"
+    },
+    {
+      "section": "04",
+      "sectionTitle": "🔐 الانضمام والاشتراكات",
+      "button": "14",
+      "label": "🔗 روابط الدعوة",
+      "callback": "mi:1:i:04:14",
+      "status": "DESIGN_ONLY"
+    },
+    {
+      "section": "04",
+      "sectionTitle": "🔐 الانضمام والاشتراكات",
+      "button": "15",
+      "label": "🎁 الإحالات والمكافآت",
+      "callback": "mi:1:i:04:15",
+      "status": "DESIGN_ONLY"
+    },
+    {
+      "section": "04",
+      "sectionTitle": "🔐 الانضمام والاشتراكات",
+      "button": "16",
+      "label": "⚙️ إعدادات الانضمام",
+      "callback": "mi:1:i:04:16",
+      "status": "DESIGN_ONLY"
+    },
+    {
+      "section": "05",
+      "sectionTitle": "📺 إدارة محتوى القنوات",
+      "button": "01",
+      "label": "📺 القنوات وربطها",
+      "callback": "mi:1:i:05:01",
+      "status": "DESIGN_ONLY"
+    },
+    {
+      "section": "05",
+      "sectionTitle": "📺 إدارة محتوى القنوات",
+      "button": "02",
+      "label": "📝 إنشاء محتوى",
+      "callback": "mi:1:i:05:02",
+      "status": "DESIGN_ONLY"
+    },
+    {
+      "section": "05",
+      "sectionTitle": "📺 إدارة محتوى القنوات",
+      "button": "03",
+      "label": "📂 الأقسام والسلاسل",
+      "callback": "mi:1:i:05:03",
+      "status": "DESIGN_ONLY"
+    },
+    {
+      "section": "05",
+      "sectionTitle": "📺 إدارة محتوى القنوات",
+      "button": "04",
+      "label": "📋 المسودات",
+      "callback": "mi:1:i:05:04",
+      "status": "DESIGN_ONLY"
+    },
+    {
+      "section": "05",
+      "sectionTitle": "📺 إدارة محتوى القنوات",
+      "button": "05",
+      "label": "🔎 تدقيق المصادر",
+      "callback": "mi:1:i:05:05",
+      "status": "DESIGN_ONLY"
+    },
+    {
+      "section": "05",
+      "sectionTitle": "📺 إدارة محتوى القنوات",
+      "button": "06",
+      "label": "👥 فريق التحرير",
+      "callback": "mi:1:i:05:06",
+      "status": "DESIGN_ONLY"
+    },
+    {
+      "section": "05",
+      "sectionTitle": "📺 إدارة محتوى القنوات",
+      "button": "07",
+      "label": "✅ المراجعة والاعتماد",
+      "callback": "mi:1:i:05:07",
+      "status": "DESIGN_ONLY"
+    },
+    {
+      "section": "05",
+      "sectionTitle": "📺 إدارة محتوى القنوات",
+      "button": "08",
+      "label": "👁️ معاينة المنشور",
+      "callback": "mi:1:i:05:08",
+      "status": "DESIGN_ONLY"
+    },
+    {
+      "section": "05",
+      "sectionTitle": "📺 إدارة محتوى القنوات",
+      "button": "09",
+      "label": "📅 تقويم المحتوى",
+      "callback": "mi:1:i:05:09",
+      "status": "DESIGN_ONLY"
+    },
+    {
+      "section": "05",
+      "sectionTitle": "📺 إدارة محتوى القنوات",
+      "button": "10",
+      "label": "📰 سجل المنشورات",
+      "callback": "mi:1:i:05:10",
+      "status": "DESIGN_ONLY"
+    },
+    {
+      "section": "05",
+      "sectionTitle": "📺 إدارة محتوى القنوات",
+      "button": "11",
+      "label": "✏️ التصحيحات والتحديثات",
+      "callback": "mi:1:i:05:11",
+      "status": "DESIGN_ONLY"
+    },
+    {
+      "section": "05",
+      "sectionTitle": "📺 إدارة محتوى القنوات",
+      "button": "12",
+      "label": "💬 التعليقات والمناقشات",
+      "callback": "mi:1:i:05:12",
+      "status": "DESIGN_ONLY"
+    },
+    {
+      "section": "05",
+      "sectionTitle": "📺 إدارة محتوى القنوات",
+      "button": "13",
+      "label": "📨 صندوق رسائل القنوات",
+      "callback": "mi:1:i:05:13",
+      "status": "DESIGN_ONLY"
+    },
+    {
+      "section": "05",
+      "sectionTitle": "📺 إدارة محتوى القنوات",
+      "button": "14",
+      "label": "📥 مقترحات المنشورات",
+      "callback": "mi:1:i:05:14",
+      "status": "DESIGN_ONLY"
+    },
+    {
+      "section": "05",
+      "sectionTitle": "📺 إدارة محتوى القنوات",
+      "button": "15",
+      "label": "🎨 الجودة والقوالب",
+      "callback": "mi:1:i:05:15",
+      "status": "DESIGN_ONLY"
+    },
+    {
+      "section": "05",
+      "sectionTitle": "📺 إدارة محتوى القنوات",
+      "button": "16",
+      "label": "⚙️ إعدادات القنوات",
+      "callback": "mi:1:i:05:16",
+      "status": "DESIGN_ONLY"
+    },
+    {
+      "section": "06",
+      "sectionTitle": "📢 النشر والإذاعة",
+      "button": "01",
+      "label": "📢 إنشاء إذاعة",
+      "callback": "mi:1:i:06:01",
+      "status": "DESIGN_ONLY"
+    },
+    {
+      "section": "06",
+      "sectionTitle": "📢 النشر والإذاعة",
+      "button": "02",
+      "label": "📎 استيراد ملف وجدولة النشر",
+      "callback": "mi:1:i:06:02",
+      "status": "DESIGN_ONLY"
+    },
+    {
+      "section": "06",
+      "sectionTitle": "📢 النشر والإذاعة",
+      "button": "03",
+      "label": "📺 النشر في القنوات",
+      "callback": "mi:1:i:06:03",
+      "status": "DESIGN_ONLY"
+    },
+    {
+      "section": "06",
+      "sectionTitle": "📢 النشر والإذاعة",
+      "button": "04",
+      "label": "👥 النشر في المجموعات",
+      "callback": "mi:1:i:06:04",
+      "status": "DESIGN_ONLY"
+    },
+    {
+      "section": "06",
+      "sectionTitle": "📢 النشر والإذاعة",
+      "button": "05",
+      "label": "🎯 اختيار الوجهات",
+      "callback": "mi:1:i:06:05",
+      "status": "DESIGN_ONLY"
+    },
+    {
+      "section": "06",
+      "sectionTitle": "📢 النشر والإذاعة",
+      "button": "06",
+      "label": "🗂️ الحملات والمسودات",
+      "callback": "mi:1:i:06:06",
+      "status": "DESIGN_ONLY"
+    },
+    {
+      "section": "06",
+      "sectionTitle": "📢 النشر والإذاعة",
+      "button": "07",
+      "label": "👁️ المعاينة والاعتماد",
+      "callback": "mi:1:i:06:07",
+      "status": "DESIGN_ONLY"
+    },
+    {
+      "section": "06",
+      "sectionTitle": "📢 النشر والإذاعة",
+      "button": "08",
+      "label": "📅 الجدولة والتكرار",
+      "callback": "mi:1:i:06:08",
+      "status": "DESIGN_ONLY"
+    },
+    {
+      "section": "06",
+      "sectionTitle": "📢 النشر والإذاعة",
+      "button": "09",
+      "label": "🎨 القوالب والوسائط",
+      "callback": "mi:1:i:06:09",
+      "status": "DESIGN_ONLY"
+    },
+    {
+      "section": "06",
+      "sectionTitle": "📢 النشر والإذاعة",
+      "button": "10",
+      "label": "📌 تثبيت الرسائل",
+      "callback": "mi:1:i:06:10",
+      "status": "DESIGN_ONLY"
+    },
+    {
+      "section": "06",
+      "sectionTitle": "📢 النشر والإذاعة",
+      "button": "11",
+      "label": "🎤 إعلانات الفعاليات",
+      "callback": "mi:1:i:06:11",
+      "status": "DESIGN_ONLY"
+    },
+    {
+      "section": "06",
+      "sectionTitle": "📢 النشر والإذاعة",
+      "button": "12",
+      "label": "🔔 التذكيرات والملخصات",
+      "callback": "mi:1:i:06:12",
+      "status": "DESIGN_ONLY"
+    },
+    {
+      "section": "06",
+      "sectionTitle": "📢 النشر والإذاعة",
+      "button": "13",
+      "label": "❤️ التفاعل والتصويت",
+      "callback": "mi:1:i:06:13",
+      "status": "DESIGN_ONLY"
+    },
+    {
+      "section": "06",
+      "sectionTitle": "📢 النشر والإذاعة",
+      "button": "14",
+      "label": "📤 طابور الإرسال",
+      "callback": "mi:1:i:06:14",
+      "status": "DESIGN_ONLY"
+    },
+    {
+      "section": "06",
+      "sectionTitle": "📢 النشر والإذاعة",
+      "button": "15",
+      "label": "⏸️ إيقاف وإلغاء الحملات",
+      "callback": "mi:1:i:06:15",
+      "status": "DESIGN_ONLY"
+    },
+    {
+      "section": "06",
+      "sectionTitle": "📢 النشر والإذاعة",
+      "button": "16",
+      "label": "📊 تقارير النشر",
+      "callback": "mi:1:i:06:16",
+      "status": "DESIGN_ONLY"
+    },
+    {
+      "section": "06",
+      "sectionTitle": "📢 النشر والإذاعة",
+      "button": "17",
+      "label": "⚙️ إعدادات وضوابط الإذاعة",
+      "callback": "mi:1:i:06:17",
+      "status": "DESIGN_ONLY"
+    },
+    {
+      "section": "07",
+      "sectionTitle": "🎨 الأزرار والقوالب",
+      "button": "01",
+      "label": "🔘 إنشاء الأزرار",
+      "callback": "mi:1:i:07:01",
+      "status": "DESIGN_ONLY"
+    },
+    {
+      "section": "07",
+      "sectionTitle": "🎨 الأزرار والقوالب",
+      "button": "02",
+      "label": "🎨 الألوان والمظهر",
+      "callback": "mi:1:i:07:02",
+      "status": "DESIGN_ONLY"
+    },
+    {
+      "section": "07",
+      "sectionTitle": "🎨 الأزرار والقوالب",
+      "button": "03",
+      "label": "📐 ترتيب الأزرار",
+      "callback": "mi:1:i:07:03",
+      "status": "DESIGN_ONLY"
+    },
+    {
+      "section": "07",
+      "sectionTitle": "🎨 الأزرار والقوالب",
+      "button": "04",
+      "label": "🔗 وظائف الأزرار",
+      "callback": "mi:1:i:07:04",
+      "status": "DESIGN_ONLY"
+    },
+    {
+      "section": "07",
+      "sectionTitle": "🎨 الأزرار والقوالب",
+      "button": "05",
+      "label": "🧭 القوائم والصفحات",
+      "callback": "mi:1:i:07:05",
+      "status": "DESIGN_ONLY"
+    },
+    {
+      "section": "07",
+      "sectionTitle": "🎨 الأزرار والقوالب",
+      "button": "06",
+      "label": "🔐 الأزرار المشروطة",
+      "callback": "mi:1:i:07:06",
+      "status": "DESIGN_ONLY"
+    },
+    {
+      "section": "07",
+      "sectionTitle": "🎨 الأزرار والقوالب",
+      "button": "07",
+      "label": "📚 مكتبة الأزرار",
+      "callback": "mi:1:i:07:07",
+      "status": "DESIGN_ONLY"
+    },
+    {
+      "section": "07",
+      "sectionTitle": "🎨 الأزرار والقوالب",
+      "button": "08",
+      "label": "👁️ المعاينة والاختبار",
+      "callback": "mi:1:i:07:08",
+      "status": "DESIGN_ONLY"
+    },
+    {
+      "section": "07",
+      "sectionTitle": "🎨 الأزرار والقوالب",
+      "button": "09",
+      "label": "📝 قوالب الرسائل",
+      "callback": "mi:1:i:07:09",
+      "status": "DESIGN_ONLY"
+    },
+    {
+      "section": "07",
+      "sectionTitle": "🎨 الأزرار والقوالب",
+      "button": "10",
+      "label": "🤖 الردود التلقائية",
+      "callback": "mi:1:i:07:10",
+      "status": "DESIGN_ONLY"
+    },
+    {
+      "section": "07",
+      "sectionTitle": "🎨 الأزرار والقوالب",
+      "button": "11",
+      "label": "🧩 المتغيرات الذكية",
+      "callback": "mi:1:i:07:11",
+      "status": "DESIGN_ONLY"
+    },
+    {
+      "section": "07",
+      "sectionTitle": "🎨 الأزرار والقوالب",
+      "button": "12",
+      "label": "📅 التاريخ والوقت",
+      "callback": "mi:1:i:07:12",
+      "status": "DESIGN_ONLY"
+    },
+    {
+      "section": "07",
+      "sectionTitle": "🎨 الأزرار والقوالب",
+      "button": "13",
+      "label": "🖼️ الصور والتنسيق",
+      "callback": "mi:1:i:07:13",
+      "status": "DESIGN_ONLY"
+    },
+    {
+      "section": "07",
+      "sectionTitle": "🎨 الأزرار والقوالب",
+      "button": "14",
+      "label": "🔗 ربط ونشر الأزرار",
+      "callback": "mi:1:i:07:14",
+      "status": "DESIGN_ONLY"
+    },
+    {
+      "section": "07",
+      "sectionTitle": "🎨 الأزرار والقوالب",
+      "button": "15",
+      "label": "📜 النسخ والاستعادة",
+      "callback": "mi:1:i:07:15",
+      "status": "DESIGN_ONLY"
+    },
+    {
+      "section": "07",
+      "sectionTitle": "🎨 الأزرار والقوالب",
+      "button": "16",
+      "label": "⚙️ إعدادات الاستوديو",
+      "callback": "mi:1:i:07:16",
+      "status": "DESIGN_ONLY"
+    },
+    {
+      "section": "08",
+      "sectionTitle": "🎮 الألعاب والمسابقات",
+      "button": "01",
+      "label": "🎮 مكتبة الألعاب",
+      "callback": "mi:1:i:08:01",
+      "status": "DESIGN_ONLY"
+    },
+    {
+      "section": "08",
+      "sectionTitle": "🎮 الألعاب والمسابقات",
+      "button": "02",
+      "label": "➕ إنشاء مسابقة",
+      "callback": "mi:1:i:08:02",
+      "status": "DESIGN_ONLY"
+    },
+    {
+      "section": "08",
+      "sectionTitle": "🎮 الألعاب والمسابقات",
+      "button": "03",
+      "label": "🧠 مسابقات الأسئلة",
+      "callback": "mi:1:i:08:03",
+      "status": "DESIGN_ONLY"
+    },
+    {
+      "section": "08",
+      "sectionTitle": "🎮 الألعاب والمسابقات",
+      "button": "04",
+      "label": "🧩 الألغاز والتحديات",
+      "callback": "mi:1:i:08:04",
+      "status": "DESIGN_ONLY"
+    },
+    {
+      "section": "08",
+      "sectionTitle": "🎮 الألعاب والمسابقات",
+      "button": "05",
+      "label": "⚡ المسابقات المباشرة",
+      "callback": "mi:1:i:08:05",
+      "status": "DESIGN_ONLY"
+    },
+    {
+      "section": "08",
+      "sectionTitle": "🎮 الألعاب والمسابقات",
+      "button": "06",
+      "label": "🌐 منافسات المجموعات",
+      "callback": "mi:1:i:08:06",
+      "status": "DESIGN_ONLY"
+    },
+    {
+      "section": "08",
+      "sectionTitle": "🎮 الألعاب والمسابقات",
+      "button": "07",
+      "label": "📅 تحديات اليوم والأسبوع",
+      "callback": "mi:1:i:08:07",
+      "status": "DESIGN_ONLY"
+    },
+    {
+      "section": "08",
+      "sectionTitle": "🎮 الألعاب والمسابقات",
+      "button": "08",
+      "label": "📚 بنك الأسئلة",
+      "callback": "mi:1:i:08:08",
+      "status": "DESIGN_ONLY"
+    },
+    {
+      "section": "08",
+      "sectionTitle": "🎮 الألعاب والمسابقات",
+      "button": "09",
+      "label": "🗳️ التصويت والإعجابات",
+      "callback": "mi:1:i:08:09",
+      "status": "DESIGN_ONLY"
+    },
+    {
+      "section": "08",
+      "sectionTitle": "🎮 الألعاب والمسابقات",
+      "button": "10",
+      "label": "🖼️ مشاركات المتسابقين",
+      "callback": "mi:1:i:08:10",
+      "status": "DESIGN_ONLY"
+    },
+    {
+      "section": "08",
+      "sectionTitle": "🎮 الألعاب والمسابقات",
+      "button": "11",
+      "label": "🎁 الجوائز والقرعة",
+      "callback": "mi:1:i:08:11",
+      "status": "DESIGN_ONLY"
+    },
+    {
+      "section": "08",
+      "sectionTitle": "🎮 الألعاب والمسابقات",
+      "button": "12",
+      "label": "🛡️ مكافحة الغش والرشق",
+      "callback": "mi:1:i:08:12",
+      "status": "DESIGN_ONLY"
+    },
+    {
+      "section": "08",
+      "sectionTitle": "🎮 الألعاب والمسابقات",
+      "button": "13",
+      "label": "🏆 النقاط والترتيب",
+      "callback": "mi:1:i:08:13",
+      "status": "DESIGN_ONLY"
+    },
+    {
+      "section": "08",
+      "sectionTitle": "🎮 الألعاب والمسابقات",
+      "button": "14",
+      "label": "⚖️ النتائج والاعتراضات",
+      "callback": "mi:1:i:08:14",
+      "status": "DESIGN_ONLY"
+    },
+    {
+      "section": "08",
+      "sectionTitle": "🎮 الألعاب والمسابقات",
+      "button": "15",
+      "label": "📋 مسابقاتي والجولات",
+      "callback": "mi:1:i:08:15",
+      "status": "DESIGN_ONLY"
+    },
+    {
+      "section": "08",
+      "sectionTitle": "🎮 الألعاب والمسابقات",
+      "button": "16",
+      "label": "⚙️ إعدادات المسابقات",
+      "callback": "mi:1:i:08:16",
+      "status": "DESIGN_ONLY"
+    },
+    {
+      "section": "09",
+      "sectionTitle": "👋 التفاعل والترحيب",
+      "button": "01",
+      "label": "👋 الترحيب والوداع",
+      "callback": "mi:1:i:09:01",
+      "status": "DESIGN_ONLY"
+    },
+    {
+      "section": "09",
+      "sectionTitle": "👋 التفاعل والترحيب",
+      "button": "02",
+      "label": "🧭 دليل العضو الجديد",
+      "callback": "mi:1:i:09:02",
+      "status": "DESIGN_ONLY"
+    },
+    {
+      "section": "09",
+      "sectionTitle": "👋 التفاعل والترحيب",
+      "button": "03",
+      "label": "📜 القوانين والرسائل الثابتة",
+      "callback": "mi:1:i:09:03",
+      "status": "DESIGN_ONLY"
+    },
+    {
+      "section": "09",
+      "sectionTitle": "👋 التفاعل والترحيب",
+      "button": "04",
+      "label": "🧹 الرسائل الخدمية",
+      "callback": "mi:1:i:09:04",
+      "status": "DESIGN_ONLY"
+    },
+    {
+      "section": "09",
+      "sectionTitle": "👋 التفاعل والترحيب",
+      "button": "05",
+      "label": "🤖 الردود التلقائية",
+      "callback": "mi:1:i:09:05",
+      "status": "DESIGN_ONLY"
+    },
+    {
+      "section": "09",
+      "sectionTitle": "👋 التفاعل والترحيب",
+      "button": "06",
+      "label": "💌 الهمسات الخاصة",
+      "callback": "mi:1:i:09:06",
+      "status": "DESIGN_ONLY"
+    },
+    {
+      "section": "09",
+      "sectionTitle": "👋 التفاعل والترحيب",
+      "button": "07",
+      "label": "💬 النقاشات والأسئلة",
+      "callback": "mi:1:i:09:07",
+      "status": "DESIGN_ONLY"
+    },
+    {
+      "section": "09",
+      "sectionTitle": "👋 التفاعل والترحيب",
+      "button": "08",
+      "label": "📊 استطلاعات الرأي",
+      "callback": "mi:1:i:09:08",
+      "status": "DESIGN_ONLY"
+    },
+    {
+      "section": "09",
+      "sectionTitle": "👋 التفاعل والترحيب",
+      "button": "09",
+      "label": "🗓️ اللقاءات والفعاليات",
+      "callback": "mi:1:i:09:09",
+      "status": "DESIGN_ONLY"
+    },
+    {
+      "section": "09",
+      "sectionTitle": "👋 التفاعل والترحيب",
+      "button": "10",
+      "label": "🎤 جلسات اسأل الخبير",
+      "callback": "mi:1:i:09:10",
+      "status": "DESIGN_ONLY"
+    },
+    {
+      "section": "09",
+      "sectionTitle": "👋 التفاعل والترحيب",
+      "button": "11",
+      "label": "👥 زملاء الدراسة",
+      "callback": "mi:1:i:09:11",
+      "status": "DESIGN_ONLY"
+    },
+    {
+      "section": "09",
+      "sectionTitle": "👋 التفاعل والترحيب",
+      "button": "12",
+      "label": "🏅 الشارات والتقدير",
+      "callback": "mi:1:i:09:12",
+      "status": "DESIGN_ONLY"
+    },
+    {
+      "section": "09",
+      "sectionTitle": "👋 التفاعل والترحيب",
+      "button": "13",
+      "label": "❤️ تفاعل المنشورات",
+      "callback": "mi:1:i:09:13",
+      "status": "DESIGN_ONLY"
+    },
+    {
+      "section": "09",
+      "sectionTitle": "👋 التفاعل والترحيب",
+      "button": "14",
+      "label": "🌙 وضع المحاضرة",
+      "callback": "mi:1:i:09:14",
+      "status": "DESIGN_ONLY"
+    },
+    {
+      "section": "09",
+      "sectionTitle": "👋 التفاعل والترحيب",
+      "button": "15",
+      "label": "📈 تقارير التفاعل",
+      "callback": "mi:1:i:09:15",
+      "status": "DESIGN_ONLY"
+    },
+    {
+      "section": "09",
+      "sectionTitle": "👋 التفاعل والترحيب",
+      "button": "16",
+      "label": "⚙️ إعدادات القسم",
+      "callback": "mi:1:i:09:16",
+      "status": "DESIGN_ONLY"
+    },
+    {
+      "section": "10",
+      "sectionTitle": "🎓 التعليم والمكتبة",
+      "button": "01",
+      "label": "🎓 المنح الدراسية",
+      "callback": "mi:1:i:10:01",
+      "status": "DESIGN_ONLY"
+    },
+    {
+      "section": "10",
+      "sectionTitle": "🎓 التعليم والمكتبة",
+      "button": "02",
+      "label": "🏛️ الجامعات",
+      "callback": "mi:1:i:10:02",
+      "status": "DESIGN_ONLY"
+    },
+    {
+      "section": "10",
+      "sectionTitle": "🎓 التعليم والمكتبة",
+      "button": "03",
+      "label": "🩺 التخصصات الدراسية",
+      "callback": "mi:1:i:10:03",
+      "status": "DESIGN_ONLY"
+    },
+    {
+      "section": "10",
+      "sectionTitle": "🎓 التعليم والمكتبة",
+      "button": "04",
+      "label": "📚 الدورات التعليمية",
+      "callback": "mi:1:i:10:04",
+      "status": "DESIGN_ONLY"
+    },
+    {
+      "section": "10",
+      "sectionTitle": "🎓 التعليم والمكتبة",
+      "button": "05",
+      "label": "📝 الاختبارات الدولية",
+      "callback": "mi:1:i:10:05",
+      "status": "DESIGN_ONLY"
+    },
+    {
+      "section": "10",
+      "sectionTitle": "🎓 التعليم والمكتبة",
+      "button": "06",
+      "label": "🌍 الدراسة حول العالم",
+      "callback": "mi:1:i:10:06",
+      "status": "DESIGN_ONLY"
+    },
+    {
+      "section": "10",
+      "sectionTitle": "🎓 التعليم والمكتبة",
+      "button": "07",
+      "label": "📋 أدلة التقديم والقبول",
+      "callback": "mi:1:i:10:07",
+      "status": "DESIGN_ONLY"
+    },
+    {
+      "section": "10",
+      "sectionTitle": "🎓 التعليم والمكتبة",
+      "button": "08",
+      "label": "❓ الأسئلة الشائعة",
+      "callback": "mi:1:i:10:08",
+      "status": "LOCAL_VIEW"
+    },
+    {
+      "section": "10",
+      "sectionTitle": "🎓 التعليم والمكتبة",
+      "button": "09",
+      "label": "📂 المكتبة والملفات",
+      "callback": "mi:1:i:10:09",
+      "status": "LOCAL_VIEW"
+    },
+    {
+      "section": "10",
+      "sectionTitle": "🎓 التعليم والمكتبة",
+      "button": "10",
+      "label": "📅 المواعيد والتنبيهات",
+      "callback": "mi:1:i:10:10",
+      "status": "DESIGN_ONLY"
+    },
+    {
+      "section": "10",
+      "sectionTitle": "🎓 التعليم والمكتبة",
+      "button": "11",
+      "label": "🧭 خطتي واستعدادي",
+      "callback": "mi:1:i:10:11",
+      "status": "DESIGN_ONLY"
+    },
+    {
+      "section": "10",
+      "sectionTitle": "🎓 التعليم والمكتبة",
+      "button": "12",
+      "label": "🧰 الأدوات والخدمات الطلابية",
+      "callback": "mi:1:i:10:12",
+      "status": "DESIGN_ONLY"
+    },
+    {
+      "section": "10",
+      "sectionTitle": "🎓 التعليم والمكتبة",
+      "button": "13",
+      "label": "🔍 البحث والفلاتر",
+      "callback": "mi:1:i:10:13",
+      "status": "DESIGN_ONLY"
+    },
+    {
+      "section": "10",
+      "sectionTitle": "🎓 التعليم والمكتبة",
+      "button": "14",
+      "label": "➕ إضافة واستيراد الموارد",
+      "callback": "mi:1:i:10:14",
+      "status": "DESIGN_ONLY"
+    },
+    {
+      "section": "10",
+      "sectionTitle": "🎓 التعليم والمكتبة",
+      "button": "15",
+      "label": "✅ مراجعة ونشر الموارد",
+      "callback": "mi:1:i:10:15",
+      "status": "DESIGN_ONLY"
+    },
+    {
+      "section": "10",
+      "sectionTitle": "🎓 التعليم والمكتبة",
+      "button": "16",
+      "label": "⚙️ إعدادات التعليم والمكتبة",
+      "callback": "mi:1:i:10:16",
+      "status": "DESIGN_ONLY"
+    },
+    {
+      "section": "11",
+      "sectionTitle": "🤖 المساعد الذكي",
+      "button": "01",
+      "label": "🤖 حالة المساعد",
+      "callback": "mi:1:i:11:01",
+      "status": "DESIGN_ONLY"
+    },
+    {
+      "section": "11",
+      "sectionTitle": "🤖 المساعد الذكي",
+      "button": "02",
+      "label": "👥 ذكاء المجموعات",
+      "callback": "mi:1:i:11:02",
+      "status": "DESIGN_ONLY"
+    },
+    {
+      "section": "11",
+      "sectionTitle": "🤖 المساعد الذكي",
+      "button": "03",
+      "label": "💬 ذكاء الخاص",
+      "callback": "mi:1:i:11:03",
+      "status": "DESIGN_ONLY"
+    },
+    {
+      "section": "11",
+      "sectionTitle": "🤖 المساعد الذكي",
+      "button": "04",
+      "label": "📚 مصادر المعرفة",
+      "callback": "mi:1:i:11:04",
+      "status": "DESIGN_ONLY"
+    },
+    {
+      "section": "11",
+      "sectionTitle": "🤖 المساعد الذكي",
+      "button": "05",
+      "label": "🌐 ربط منصة منارتك",
+      "callback": "mi:1:i:11:05",
+      "status": "DESIGN_ONLY"
+    },
+    {
+      "section": "11",
+      "sectionTitle": "🤖 المساعد الذكي",
+      "button": "06",
+      "label": "❓ الإجابات المعتمدة",
+      "callback": "mi:1:i:11:06",
+      "status": "DESIGN_ONLY"
+    },
+    {
+      "section": "11",
+      "sectionTitle": "🤖 المساعد الذكي",
+      "button": "07",
+      "label": "🔎 البحث الذكي",
+      "callback": "mi:1:i:11:07",
+      "status": "DESIGN_ONLY"
+    },
+    {
+      "section": "11",
+      "sectionTitle": "🤖 المساعد الذكي",
+      "button": "08",
+      "label": "👁️ تجربة المساعد",
+      "callback": "mi:1:i:11:08",
+      "status": "DESIGN_ONLY"
+    },
+    {
+      "section": "11",
+      "sectionTitle": "🤖 المساعد الذكي",
+      "button": "09",
+      "label": "🧠 شخصية المساعد",
+      "callback": "mi:1:i:11:09",
+      "status": "DESIGN_ONLY"
+    },
+    {
+      "section": "11",
+      "sectionTitle": "🤖 المساعد الذكي",
+      "button": "10",
+      "label": "🎓 الخدمات التعليمية",
+      "callback": "mi:1:i:11:10",
+      "status": "DESIGN_ONLY"
+    },
+    {
+      "section": "11",
+      "sectionTitle": "🤖 المساعد الذكي",
+      "button": "11",
+      "label": "📄 تحليل المحتوى",
+      "callback": "mi:1:i:11:11",
+      "status": "DESIGN_ONLY"
+    },
+    {
+      "section": "11",
+      "sectionTitle": "🤖 المساعد الذكي",
+      "button": "12",
+      "label": "✅ المراجعة البشرية",
+      "callback": "mi:1:i:11:12",
+      "status": "DESIGN_ONLY"
+    },
+    {
+      "section": "11",
+      "sectionTitle": "🤖 المساعد الذكي",
+      "button": "13",
+      "label": "🔌 النماذج والمزودون",
+      "callback": "mi:1:i:11:13",
+      "status": "DESIGN_ONLY"
+    },
+    {
+      "section": "11",
+      "sectionTitle": "🤖 المساعد الذكي",
+      "button": "14",
+      "label": "💰 الميزانية والحصص",
+      "callback": "mi:1:i:11:14",
+      "status": "DESIGN_ONLY"
+    },
+    {
+      "section": "11",
+      "sectionTitle": "🤖 المساعد الذكي",
+      "button": "15",
+      "label": "🔐 الخصوصية والأمان",
+      "callback": "mi:1:i:11:15",
+      "status": "DESIGN_ONLY"
+    },
+    {
+      "section": "11",
+      "sectionTitle": "🤖 المساعد الذكي",
+      "button": "16",
+      "label": "📊 السجلات والطوارئ",
+      "callback": "mi:1:i:11:16",
+      "status": "DESIGN_ONLY"
+    },
+    {
+      "section": "12",
+      "sectionTitle": "📨 الدعم والبلاغات",
+      "button": "01",
+      "label": "📨 صندوق التذاكر",
+      "callback": "mi:1:i:12:01",
+      "status": "DESIGN_ONLY"
+    },
+    {
+      "section": "12",
+      "sectionTitle": "📨 الدعم والبلاغات",
+      "button": "02",
+      "label": "➕ إنشاء تذكرة",
+      "callback": "mi:1:i:12:02",
+      "status": "DESIGN_ONLY"
+    },
+    {
+      "section": "12",
+      "sectionTitle": "📨 الدعم والبلاغات",
+      "button": "03",
+      "label": "🚨 بلاغات الإساءة والاحتيال",
+      "callback": "mi:1:i:12:03",
+      "status": "DESIGN_ONLY"
+    },
+    {
+      "section": "12",
+      "sectionTitle": "📨 الدعم والبلاغات",
+      "button": "04",
+      "label": "🎓 استفسارات الطلاب",
+      "callback": "mi:1:i:12:04",
+      "status": "DESIGN_ONLY"
+    },
+    {
+      "section": "12",
+      "sectionTitle": "📨 الدعم والبلاغات",
+      "button": "05",
+      "label": "📝 تصحيح المحتوى",
+      "callback": "mi:1:i:12:05",
+      "status": "DESIGN_ONLY"
+    },
+    {
+      "section": "12",
+      "sectionTitle": "📨 الدعم والبلاغات",
+      "button": "06",
+      "label": "🧭 تصنيف الطلبات",
+      "callback": "mi:1:i:12:06",
+      "status": "DESIGN_ONLY"
+    },
+    {
+      "section": "12",
+      "sectionTitle": "📨 الدعم والبلاغات",
+      "button": "07",
+      "label": "👥 التوزيع والتكليف",
+      "callback": "mi:1:i:12:07",
+      "status": "DESIGN_ONLY"
+    },
+    {
+      "section": "12",
+      "sectionTitle": "📨 الدعم والبلاغات",
+      "button": "08",
+      "label": "💬 الردود والمتابعة",
+      "callback": "mi:1:i:12:08",
+      "status": "DESIGN_ONLY"
+    },
+    {
+      "section": "12",
+      "sectionTitle": "📨 الدعم والبلاغات",
+      "button": "09",
+      "label": "📎 المرفقات والأدلة",
+      "callback": "mi:1:i:12:09",
+      "status": "DESIGN_ONLY"
+    },
+    {
+      "section": "12",
+      "sectionTitle": "📨 الدعم والبلاغات",
+      "button": "10",
+      "label": "🔐 البلاغات السرية",
+      "callback": "mi:1:i:12:10",
+      "status": "DESIGN_ONLY"
+    },
+    {
+      "section": "12",
+      "sectionTitle": "📨 الدعم والبلاغات",
+      "button": "11",
+      "label": "⏳ الأولويات والمهل",
+      "callback": "mi:1:i:12:11",
+      "status": "DESIGN_ONLY"
+    },
+    {
+      "section": "12",
+      "sectionTitle": "📨 الدعم والبلاغات",
+      "button": "12",
+      "label": "🔄 التصعيد والاعتراضات",
+      "callback": "mi:1:i:12:12",
+      "status": "DESIGN_ONLY"
+    },
+    {
+      "section": "12",
+      "sectionTitle": "📨 الدعم والبلاغات",
+      "button": "13",
+      "label": "📋 نماذج الدعم",
+      "callback": "mi:1:i:12:13",
+      "status": "DESIGN_ONLY"
+    },
+    {
+      "section": "12",
+      "sectionTitle": "📨 الدعم والبلاغات",
+      "button": "14",
+      "label": "💡 الاقتراحات والتطوير",
+      "callback": "mi:1:i:12:14",
+      "status": "DESIGN_ONLY"
+    },
+    {
+      "section": "12",
+      "sectionTitle": "📨 الدعم والبلاغات",
+      "button": "15",
+      "label": "📊 تقارير الدعم",
+      "callback": "mi:1:i:12:15",
+      "status": "DESIGN_ONLY"
+    },
+    {
+      "section": "12",
+      "sectionTitle": "📨 الدعم والبلاغات",
+      "button": "16",
+      "label": "⚙️ إعدادات الدعم",
+      "callback": "mi:1:i:12:16",
+      "status": "DESIGN_ONLY"
+    },
+    {
+      "section": "13",
+      "sectionTitle": "📊 الإحصائيات والتقارير",
+      "button": "01",
+      "label": "📊 لوحة المؤشرات",
+      "callback": "mi:1:i:13:01",
+      "status": "LOCAL_VIEW"
+    },
+    {
+      "section": "13",
+      "sectionTitle": "📊 الإحصائيات والتقارير",
+      "button": "02",
+      "label": "👥 نمو المجموعات",
+      "callback": "mi:1:i:13:02",
+      "status": "DESIGN_ONLY"
+    },
+    {
+      "section": "13",
+      "sectionTitle": "📊 الإحصائيات والتقارير",
+      "button": "03",
+      "label": "🔐 العضوية والاشتراكات",
+      "callback": "mi:1:i:13:03",
+      "status": "DESIGN_ONLY"
+    },
+    {
+      "section": "13",
+      "sectionTitle": "📊 الإحصائيات والتقارير",
+      "button": "04",
+      "label": "🛡️ الحماية والعقوبات",
+      "callback": "mi:1:i:13:04",
+      "status": "DESIGN_ONLY"
+    },
+    {
+      "section": "13",
+      "sectionTitle": "📊 الإحصائيات والتقارير",
+      "button": "05",
+      "label": "👑 نشاط المشرفين",
+      "callback": "mi:1:i:13:05",
+      "status": "DESIGN_ONLY"
+    },
+    {
+      "section": "13",
+      "sectionTitle": "📊 الإحصائيات والتقارير",
+      "button": "06",
+      "label": "📺 نشر القنوات",
+      "callback": "mi:1:i:13:06",
+      "status": "DESIGN_ONLY"
+    },
+    {
+      "section": "13",
+      "sectionTitle": "📊 الإحصائيات والتقارير",
+      "button": "07",
+      "label": "📢 الحملات والإذاعة",
+      "callback": "mi:1:i:13:07",
+      "status": "DESIGN_ONLY"
+    },
+    {
+      "section": "13",
+      "sectionTitle": "📊 الإحصائيات والتقارير",
+      "button": "08",
+      "label": "🎮 مسابقات وتصويت",
+      "callback": "mi:1:i:13:08",
+      "status": "DESIGN_ONLY"
+    },
+    {
+      "section": "13",
+      "sectionTitle": "📊 الإحصائيات والتقارير",
+      "button": "09",
+      "label": "👋 تفاعل الأعضاء",
+      "callback": "mi:1:i:13:09",
+      "status": "DESIGN_ONLY"
+    },
+    {
+      "section": "13",
+      "sectionTitle": "📊 الإحصائيات والتقارير",
+      "button": "10",
+      "label": "🎓 المحتوى التعليمي",
+      "callback": "mi:1:i:13:10",
+      "status": "DESIGN_ONLY"
+    },
+    {
+      "section": "13",
+      "sectionTitle": "📊 الإحصائيات والتقارير",
+      "button": "11",
+      "label": "🤖 المساعد والتكلفة",
+      "callback": "mi:1:i:13:11",
+      "status": "DESIGN_ONLY"
+    },
+    {
+      "section": "13",
+      "sectionTitle": "📊 الإحصائيات والتقارير",
+      "button": "12",
+      "label": "📨 الدعم والتذاكر",
+      "callback": "mi:1:i:13:12",
+      "status": "DESIGN_ONLY"
+    },
+    {
+      "section": "13",
+      "sectionTitle": "📊 الإحصائيات والتقارير",
+      "button": "13",
+      "label": "⏱️ الأداء والصحة",
+      "callback": "mi:1:i:13:13",
+      "status": "DESIGN_ONLY"
+    },
+    {
+      "section": "13",
+      "sectionTitle": "📊 الإحصائيات والتقارير",
+      "button": "14",
+      "label": "🎯 مقارنة الشبكات",
+      "callback": "mi:1:i:13:14",
+      "status": "DESIGN_ONLY"
+    },
+    {
+      "section": "13",
+      "sectionTitle": "📊 الإحصائيات والتقارير",
+      "button": "15",
+      "label": "📤 تقارير وتصدير",
+      "callback": "mi:1:i:13:15",
+      "status": "DESIGN_ONLY"
+    },
+    {
+      "section": "13",
+      "sectionTitle": "📊 الإحصائيات والتقارير",
+      "button": "16",
+      "label": "⚙️ قياس وخصوصية",
+      "callback": "mi:1:i:13:16",
+      "status": "DESIGN_ONLY"
+    },
+    {
+      "section": "14",
+      "sectionTitle": "🔗 التكاملات والبيانات",
+      "button": "01",
+      "label": "🔌 مركز التكاملات",
+      "callback": "mi:1:i:14:01",
+      "status": "DESIGN_ONLY"
+    },
+    {
+      "section": "14",
+      "sectionTitle": "🔗 التكاملات والبيانات",
+      "button": "02",
+      "label": "🌐 منصة منارتك API",
+      "callback": "mi:1:i:14:02",
+      "status": "DESIGN_ONLY"
+    },
+    {
+      "section": "14",
+      "sectionTitle": "🔗 التكاملات والبيانات",
+      "button": "03",
+      "label": "📚 مزامنة المحتوى",
+      "callback": "mi:1:i:14:03",
+      "status": "DESIGN_ONLY"
+    },
+    {
+      "section": "14",
+      "sectionTitle": "🔗 التكاملات والبيانات",
+      "button": "04",
+      "label": "📥 استيراد البيانات",
+      "callback": "mi:1:i:14:04",
+      "status": "DESIGN_ONLY"
+    },
+    {
+      "section": "14",
+      "sectionTitle": "🔗 التكاملات والبيانات",
+      "button": "05",
+      "label": "📤 تصدير البيانات",
+      "callback": "mi:1:i:14:05",
+      "status": "DESIGN_ONLY"
+    },
+    {
+      "section": "14",
+      "sectionTitle": "🔗 التكاملات والبيانات",
+      "button": "06",
+      "label": "📂 إدارة الملفات",
+      "callback": "mi:1:i:14:06",
+      "status": "DESIGN_ONLY"
+    },
+    {
+      "section": "14",
+      "sectionTitle": "🔗 التكاملات والبيانات",
+      "button": "07",
+      "label": "🧩 مصادر المعرفة",
+      "callback": "mi:1:i:14:07",
+      "status": "DESIGN_ONLY"
+    },
+    {
+      "section": "14",
+      "sectionTitle": "🔗 التكاملات والبيانات",
+      "button": "08",
+      "label": "🤖 مزودو AI",
+      "callback": "mi:1:i:14:08",
+      "status": "DESIGN_ONLY"
+    },
+    {
+      "section": "14",
+      "sectionTitle": "🔗 التكاملات والبيانات",
+      "button": "09",
+      "label": "📺 Telegram والحقوق",
+      "callback": "mi:1:i:14:09",
+      "status": "DESIGN_ONLY"
+    },
+    {
+      "section": "14",
+      "sectionTitle": "🔗 التكاملات والبيانات",
+      "button": "10",
+      "label": "🧵 هويات البوتات",
+      "callback": "mi:1:i:14:10",
+      "status": "DESIGN_ONLY"
+    },
+    {
+      "section": "14",
+      "sectionTitle": "🔗 التكاملات والبيانات",
+      "button": "11",
+      "label": "🔗 Webhooks وتدفق الأحداث",
+      "callback": "mi:1:i:14:11",
+      "status": "DESIGN_ONLY"
+    },
+    {
+      "section": "14",
+      "sectionTitle": "🔗 التكاملات والبيانات",
+      "button": "12",
+      "label": "🗂️ قاموس البيانات",
+      "callback": "mi:1:i:14:12",
+      "status": "DESIGN_ONLY"
+    },
+    {
+      "section": "14",
+      "sectionTitle": "🔗 التكاملات والبيانات",
+      "button": "13",
+      "label": "🔒 حدود الوصول",
+      "callback": "mi:1:i:14:13",
+      "status": "DESIGN_ONLY"
+    },
+    {
+      "section": "14",
+      "sectionTitle": "🔗 التكاملات والبيانات",
+      "button": "14",
+      "label": "🕓 المزامنة والأخطاء",
+      "callback": "mi:1:i:14:14",
+      "status": "DESIGN_ONLY"
+    },
+    {
+      "section": "14",
+      "sectionTitle": "🔗 التكاملات والبيانات",
+      "button": "15",
+      "label": "🧪 اختبار الاتصالات",
+      "callback": "mi:1:i:14:15",
+      "status": "DESIGN_ONLY"
+    },
+    {
+      "section": "14",
+      "sectionTitle": "🔗 التكاملات والبيانات",
+      "button": "16",
+      "label": "⚙️ إعدادات التكامل",
+      "callback": "mi:1:i:14:16",
+      "status": "DESIGN_ONLY"
+    },
+    {
+      "section": "15",
+      "sectionTitle": "⚙️ الإعدادات والأتمتة",
+      "button": "01",
+      "label": "⚙️ إعدادات عامة",
+      "callback": "mi:1:i:15:01",
+      "status": "LOCAL_VIEW"
+    },
+    {
+      "section": "15",
+      "sectionTitle": "⚙️ الإعدادات والأتمتة",
+      "button": "02",
+      "label": "👥 إعدادات المجموعات",
+      "callback": "mi:1:i:15:02",
+      "status": "DESIGN_ONLY"
+    },
+    {
+      "section": "15",
+      "sectionTitle": "⚙️ الإعدادات والأتمتة",
+      "button": "03",
+      "label": "🧩 ميزات النظام",
+      "callback": "mi:1:i:15:03",
+      "status": "DESIGN_ONLY"
+    },
+    {
+      "section": "15",
+      "sectionTitle": "⚙️ الإعدادات والأتمتة",
+      "button": "04",
+      "label": "📑 قوالب سياسات",
+      "callback": "mi:1:i:15:04",
+      "status": "DESIGN_ONLY"
+    },
+    {
+      "section": "15",
+      "sectionTitle": "⚙️ الإعدادات والأتمتة",
+      "button": "05",
+      "label": "⏰ المواعيد والأوقات",
+      "callback": "mi:1:i:15:05",
+      "status": "DESIGN_ONLY"
+    },
+    {
+      "section": "15",
+      "sectionTitle": "⚙️ الإعدادات والأتمتة",
+      "button": "06",
+      "label": "🔄 جدولة المهام",
+      "callback": "mi:1:i:15:06",
+      "status": "DESIGN_ONLY"
+    },
+    {
+      "section": "15",
+      "sectionTitle": "⚙️ الإعدادات والأتمتة",
+      "button": "07",
+      "label": "🧠 منشئ القواعد",
+      "callback": "mi:1:i:15:07",
+      "status": "DESIGN_ONLY"
+    },
+    {
+      "section": "15",
+      "sectionTitle": "⚙️ الإعدادات والأتمتة",
+      "button": "08",
+      "label": "🎯 الأحداث والشروط",
+      "callback": "mi:1:i:15:08",
+      "status": "DESIGN_ONLY"
+    },
+    {
+      "section": "15",
+      "sectionTitle": "⚙️ الإعدادات والأتمتة",
+      "button": "09",
+      "label": "⚡ الإجراءات الآلية",
+      "callback": "mi:1:i:15:09",
+      "status": "DESIGN_ONLY"
+    },
+    {
+      "section": "15",
+      "sectionTitle": "⚙️ الإعدادات والأتمتة",
+      "button": "10",
+      "label": "🧪 المحاكاة والمعاينة",
+      "callback": "mi:1:i:15:10",
+      "status": "DESIGN_ONLY"
+    },
+    {
+      "section": "15",
+      "sectionTitle": "⚙️ الإعدادات والأتمتة",
+      "button": "11",
+      "label": "🚥 الأولويات والتعارض",
+      "callback": "mi:1:i:15:11",
+      "status": "DESIGN_ONLY"
+    },
+    {
+      "section": "15",
+      "sectionTitle": "⚙️ الإعدادات والأتمتة",
+      "button": "12",
+      "label": "🧯 إيقاف القواعد",
+      "callback": "mi:1:i:15:12",
+      "status": "DESIGN_ONLY"
+    },
+    {
+      "section": "15",
+      "sectionTitle": "⚙️ الإعدادات والأتمتة",
+      "button": "13",
+      "label": "🔔 التنبيهات الآلية",
+      "callback": "mi:1:i:15:13",
+      "status": "DESIGN_ONLY"
+    },
+    {
+      "section": "15",
+      "sectionTitle": "⚙️ الإعدادات والأتمتة",
+      "button": "14",
+      "label": "📦 نسخ ونقل الإعدادات",
+      "callback": "mi:1:i:15:14",
+      "status": "DESIGN_ONLY"
+    },
+    {
+      "section": "15",
+      "sectionTitle": "⚙️ الإعدادات والأتمتة",
+      "button": "15",
+      "label": "📜 سجل التعديلات والتراجع",
+      "callback": "mi:1:i:15:15",
+      "status": "DESIGN_ONLY"
+    },
+    {
+      "section": "15",
+      "sectionTitle": "⚙️ الإعدادات والأتمتة",
+      "button": "16",
+      "label": "🔐 الحوكمة والتفويض",
+      "callback": "mi:1:i:15:16",
+      "status": "DESIGN_ONLY"
+    },
+    {
+      "section": "16",
+      "sectionTitle": "🚨 الأمان والتشغيل",
+      "button": "01",
+      "label": "🚨 مركز الحالة والطوارئ",
+      "callback": "mi:1:i:16:01",
+      "status": "DESIGN_ONLY"
+    },
+    {
+      "section": "16",
+      "sectionTitle": "🚨 الأمان والتشغيل",
+      "button": "02",
+      "label": "🩺 فحوص الصحة",
+      "callback": "mi:1:i:16:02",
+      "status": "DESIGN_ONLY"
+    },
+    {
+      "section": "16",
+      "sectionTitle": "🚨 الأمان والتشغيل",
+      "button": "03",
+      "label": "🔒 هوية البوت والتوكنات",
+      "callback": "mi:1:i:16:03",
+      "status": "DESIGN_ONLY"
+    },
+    {
+      "section": "16",
+      "sectionTitle": "🚨 الأمان والتشغيل",
+      "button": "04",
+      "label": "👮 تدقيق الصلاحيات",
+      "callback": "mi:1:i:16:04",
+      "status": "DESIGN_ONLY"
+    },
+    {
+      "section": "16",
+      "sectionTitle": "🚨 الأمان والتشغيل",
+      "button": "05",
+      "label": "🧱 تصاريح المجموعات",
+      "callback": "mi:1:i:16:05",
+      "status": "DESIGN_ONLY"
+    },
+    {
+      "section": "16",
+      "sectionTitle": "🚨 الأمان والتشغيل",
+      "button": "06",
+      "label": "🛡️ الأمن والتهديدات",
+      "callback": "mi:1:i:16:06",
+      "status": "DESIGN_ONLY"
+    },
+    {
+      "section": "16",
+      "sectionTitle": "🚨 الأمان والتشغيل",
+      "button": "07",
+      "label": "📜 سجل التدقيق",
+      "callback": "mi:1:i:16:07",
+      "status": "DESIGN_ONLY"
+    },
+    {
+      "section": "16",
+      "sectionTitle": "🚨 الأمان والتشغيل",
+      "button": "08",
+      "label": "⚖️ غرفة الحوادث",
+      "callback": "mi:1:i:16:08",
+      "status": "DESIGN_ONLY"
+    },
+    {
+      "section": "16",
+      "sectionTitle": "🚨 الأمان والتشغيل",
+      "button": "09",
+      "label": "⛔ مفاتيح الإيقاف",
+      "callback": "mi:1:i:16:09",
+      "status": "DESIGN_ONLY"
+    },
+    {
+      "section": "16",
+      "sectionTitle": "🚨 الأمان والتشغيل",
+      "button": "10",
+      "label": "🔄 الطوابير والتعافي",
+      "callback": "mi:1:i:16:10",
+      "status": "DESIGN_ONLY"
+    },
+    {
+      "section": "16",
+      "sectionTitle": "🚨 الأمان والتشغيل",
+      "button": "11",
+      "label": "💾 النسخ الاحتياطي والاستعادة",
+      "callback": "mi:1:i:16:11",
+      "status": "DESIGN_ONLY"
+    },
+    {
+      "section": "16",
+      "sectionTitle": "🚨 الأمان والتشغيل",
+      "button": "12",
+      "label": "🧪 الاختبارات الآمنة",
+      "callback": "mi:1:i:16:12",
+      "status": "DESIGN_ONLY"
+    },
+    {
+      "section": "16",
+      "sectionTitle": "🚨 الأمان والتشغيل",
+      "button": "13",
+      "label": "🔍 مراقبة الأخطاء",
+      "callback": "mi:1:i:16:13",
+      "status": "DESIGN_ONLY"
+    },
+    {
+      "section": "16",
+      "sectionTitle": "🚨 الأمان والتشغيل",
+      "button": "14",
+      "label": "🧩 بيئات التشغيل",
+      "callback": "mi:1:i:16:14",
+      "status": "DESIGN_ONLY"
+    },
+    {
+      "section": "16",
+      "sectionTitle": "🚨 الأمان والتشغيل",
+      "button": "15",
+      "label": "🧹 الخصوصية والاحتفاظ",
+      "callback": "mi:1:i:16:15",
+      "status": "DESIGN_ONLY"
+    },
+    {
+      "section": "16",
+      "sectionTitle": "🚨 الأمان والتشغيل",
+      "button": "16",
+      "label": "⚙️ إجراءات التشغيل",
+      "callback": "mi:1:i:16:16",
+      "status": "DESIGN_ONLY"
+    }
+  ]
+}

@@ -19,6 +19,7 @@ jobs:
           node-version: '22'
       - run: npm install --no-audit --no-fund
       - run: npm run check
+      - run: node scripts/audit-phase1.mjs
       - run: npm run demo
       - run: npm run demo:education
       - run: npm run demo:faq

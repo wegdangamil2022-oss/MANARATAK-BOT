@@ -1,3 +1,5 @@
+> تحديث جرد 29 أكتوبر 2026: راجع [تقرير المرحلة الأولى](docs/PHASE1_REALITY_AUDIT_AR.md) و[جرد الأزرار الكامل](docs/PHASE1_BUTTON_INVENTORY_AR.md). الأوصاف المؤرخة في الإصدارات السابقة تحفظ حالتها التاريخية؛ لا تثبت تشغيل النسخة الحالية.
+
 ## v0.7.106 — Phase 3 owner group restore quarantine and late reversal integrity
 
 Restored JSON/SQLite databases can contain two or more approvals for the same group ID. Both owner-private group browsing surfaces (inline buttons and the older reply-keyboard menu) now suppress **all** selectors for ambiguous group IDs, including identical copies, revoked-first/approved-later records and conflicting policy epochs. Both screens display an aggregate count of quarantined group IDs but do not expose their individual IDs, member records or protected actions from conflicting approvals. Old owner detail, policy-preview and reversal-inventory selectors stop working after an approval collision. Unrelated uniquely approved groups remain independently inspectable.
