@@ -275,7 +275,7 @@ export class EducationService {
     if(!this.policy.isOwner(actor)||!/^c_[A-Za-z0-9_-]{24}$/u.test(ref))return null;
     return this.store.transaction(s=>{
       const rows=s.callbacks.filter(c=>c.ref===ref),c=rows[0],now=this.clock();
-      if(rows.length!==1||!c||c.actorId!==actor||c.used||c.revoked||!c.oneShot||!Number.isSafeInteger(now)||now<0||
+      if(rows.length!==1||!c||c.actorId!==actor||c.used!==false||c.revoked!==false||c.oneShot!==true||!Number.isSafeInteger(c.expiresAt)||!Number.isSafeInteger(now)||now<0||
         c.expiresAt<=now||c.expiresAt>now+120000||!this.policy.privateFeature(s,'owner.dashboard',actor))return null;
       const m=/^owner\.library\.archive:([a-f0-9]{8}-(?:[a-f0-9]{4}-){3}[a-f0-9]{12}):(~[a-f0-9]{16}):(0|[1-9][0-9]{0,2})$/u.exec(c.action);
       if(!m||m[0]!==c.action)return null;

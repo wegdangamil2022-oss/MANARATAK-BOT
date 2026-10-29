@@ -122,7 +122,7 @@ export class ApprovedAnswerService {
     if(!this.policy.isOwner(by)||!/^c_[A-Za-z0-9_-]{24}$/u.test(ref))return null;
     return this.store.transaction(s=>{
       const rows=s.callbacks.filter(c=>c.ref===ref),c=rows[0],now=this.clock();
-      if(rows.length!==1||!c||c.actorId!==by||c.used||c.revoked||!c.oneShot||
+      if(rows.length!==1||!c||c.actorId!==by||c.used!==false||c.revoked!==false||c.oneShot!==true||!Number.isSafeInteger(c.expiresAt)||
         !Number.isSafeInteger(now)||now<0||c.expiresAt<=now||c.expiresAt>now+120000||
         !this.policy.privateFeature(s,'owner.dashboard',by))return null;
       const m=/^owner\.faq\.(APPROVED|ARCHIVED):([a-f0-9]{8}-(?:[a-f0-9]{4}-){3}[a-f0-9]{12}):(~[a-f0-9]{16}):(0|[1-9][0-9]{0,2})$/u.exec(c.action);

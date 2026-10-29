@@ -112,6 +112,18 @@ for(const engine of ['json','sqlite'] as const){
    assert.equal((await f.store.snapshot()).audit.filter(a=>a.reason==='FAQ_OWNER_APPROVED').length,1);
   }finally{await f.close();}
  });
+ test('FAQ confirmation rejects malformed restored expiry and state flags ('+engine+')',async()=>{
+  const f=await fixture();try{
+   const home=await f.app().handle(event(90,'mi:1:i:10:08')),detail=await f.app().handle(event(91,select(home,'of:1:d:')));
+   const review=await f.app().handle(event(92,select(detail,'of:1:a:'))),token=select(review,'of:1:c:');
+   const saved=structuredClone((await f.store.snapshot()).callbacks.at(-1)!);let i=93;
+   for(const patch of [{expiresAt:'not-a-time'},{expiresAt:String(NOW+120000)},{used:0},{revoked:0},{oneShot:1}]){
+    await f.store.transaction(s=>{Object.assign(s.callbacks.at(-1)!,saved,patch);});
+    assert.equal((await f.app().handle(event(i++,token))).status,'DENIED',JSON.stringify(patch));
+   }
+   assert.equal((await f.store.snapshot()).faqEntries[0]!.status,'DRAFT');
+  }finally{await f.close();}
+ });
  test('group FAQ confirmation cannot survive revoke and reapproval or copied confirmation records ('+engine+')',async()=>{
   const f=await fixture();try{
    await f.policy.approveChat('100','-100123',['navigation']);
