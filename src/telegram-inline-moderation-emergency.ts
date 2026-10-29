@@ -36,8 +36,12 @@ export async function renderOwnerModerationEmergencyStatus(
   typeof o.status==='string');
  const unknown=validRows?ops.filter(o=>o.status==='UNKNOWN_OUTCOME').length:null;
  const pending=validRows?ops.filter(o=>o.status==='INTENT'||o.status==='STARTED').length:null;
- const approved=Array.isArray(state.chats)?
-  state.chats.filter(c=>c?.approved&&c.scopes?.includes('moderation')).length:null;
+ const chats=Array.isArray(state.chats)?state.chats:null;
+ const chatCounts=new Map<string,number>();
+ for(const chat of chats??[])if(chat&&typeof chat.id==='string')
+  chatCounts.set(chat.id,(chatCounts.get(chat.id)??0)+1);
+ const approved=chats?chats.filter(c=>c?.approved&&c.scopes?.includes('moderation')&&
+  chatCounts.get(c.id)===1).length:null;
  const safeLedger=moderationLedgerSafeForDispatch(state,now);
  const needsReview=(unknown??0)>0||(pending??0)>0;
 

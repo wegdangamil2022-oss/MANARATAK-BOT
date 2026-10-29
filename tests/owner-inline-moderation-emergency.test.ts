@@ -68,6 +68,15 @@ for(const engine of ['json','sqlite'] as const){
    assert.equal((await f.app(f.flag).handle(select(3,100,'mi:1:i:02:16',true))).status,'DENIED');
   }finally{await f.close();}
  });
+ test('ambiguous restored group approvals are excluded from authorized group count ('+engine+')',async()=>{
+  const f=await fixture(engine);try{
+   await f.policy.approveChat(OWNER,CHAT,['moderation']);
+   await f.policy.approveChat(OWNER,'-100124',['moderation']);
+   await f.store.transaction(s=>{s.chats.push({...s.chats.find(c=>c.id===CHAT)!});});
+   const view=await renderOwnerModerationEmergencyStatus(f.store,f.policy,OWNER,NOW,f.flag);
+   assert.match(view?.text??'',/المجموعات ذات نطاق الإشراف المعتمد محليًا: 1/);
+  }finally{await f.close();}
+ });
  test('RUN, missing and malformed emergency files never imply STOP or live sanction readiness ('+engine+')',async()=>{
   const f=await fixture(engine);try{
    const app=f.app(f.flag);
