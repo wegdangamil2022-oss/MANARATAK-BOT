@@ -35,6 +35,70 @@ for(const engine of ['json','sqlite'] as const){
    membership:async()=>{throw Error('no network in editor');}});
   return {store,policy,app,setTime:(n:number)=>{now=n;},close:()=>rm(dir,{recursive:true,force:true})};
  }
+ test('link and media approved entries open the scoped editor without changing policies ('+engine+')',async()=>{
+  const f=await fixture();try{
+   for(const [i,data] of ['mi:1:i:02:05','mi:1:i:02:06'].entries()){
+    const root=await f.app().handle(cb(i+1,data));
+    assert.equal(root.status,'APPLIED');
+    const group=await f.app().handle(cb(i+10,route(root,'pr:1:g:')));
+    assert.ok(route(group,'pr:1:b:'));assert.ok(route(group,'pr:1:y:'));
+   }
+   assert.equal((await f.store.snapshot()).protectionPolicies,undefined);
+   assert.equal((await f.app().handle(cb(30,'mi:1:i:02:06',200))).status,'DENIED');
+  }finally{await f.close();}
+ });
+ test('all-link rules start disabled and cannot duplicate the same target ('+engine+')',async()=>{
+  const f=await fixture();try{
+   const home=await f.app().handle(cb(1,'pr:1:h'));
+   const group=await f.app().handle(cb(2,route(home,'pr:1:g:')));
+   const added=await f.app().handle(cb(3,route(group,'pr:1:b:')));
+   assert.equal(added.status,'APPLIED');
+   let cfg=(await f.store.snapshot()).protectionPolicies![0]!.policy;
+   assert.equal(cfg.rules.length,1);assert.equal(cfg.rules[0]!.kind,'LINK');
+   assert.equal(cfg.rules[0]!.enabled,false);assert.equal(cfg.mode,'OFF');
+   assert.equal((cfg.rules[0] as {hosts:string}).hosts,'*');
+   await f.app().handle(cb(4,route(added,'pr:1:b:')));
+   cfg=(await f.store.snapshot()).protectionPolicies![0]!.policy;
+   assert.equal(cfg.rules.length,1);assert.equal(cfg.revision,1);
+  }finally{await f.close();}
+ });
+ test('specific link host input rejects URLs and credentials then saves a bounded host ('+engine+')',async()=>{
+  const f=await fixture();try{
+   const home=await f.app().handle(cb(1,'pr:1:h'));
+   const group=await f.app().handle(cb(2,route(home,'pr:1:g:')));
+   await f.app().handle(cb(3,route(group,'pr:1:j:')));
+   for(const [i,bad] of ['https://evil.test/path','school.edu@evil.test','UPPER.TEST','evil.test\nother.test'].entries()){
+    const retry=await f.app().handle(msg(i+4,bad));assert.equal(retry.reason,'PROTECTION_EDITOR_INPUT_REJECTED');
+    assert.equal((await f.store.snapshot()).protectionPolicies,undefined);
+   }
+   assert.equal((await f.app().handle(msg(10,'evil.test'))).status,'APPLIED');
+   const rule=(await f.store.snapshot()).protectionPolicies![0]!.policy.rules[0]!;
+   assert.equal(rule.kind,'LINK');assert.deepEqual((rule as {hosts:string[]}).hosts,['evil.test']);
+   assert.equal(rule.enabled,false);assert.equal(rule.action,'REVIEW');
+   assert.equal(JSON.stringify(await f.store.snapshot()).includes('school.edu@evil.test'),false);
+  }finally{await f.close();}
+ });
+ test('type picker pages through every supported type and saves one disabled selected rule ('+engine+')',async()=>{
+  const f=await fixture();try{
+   const home=await f.app().handle(cb(1,'pr:1:h'));
+   const group=await f.app().handle(cb(2,route(home,'pr:1:g:')));
+   const first=await f.app().handle(cb(3,route(group,'pr:1:y:')));
+   assert.equal(first.plan!.inlineMarkup!.inline_keyboard.flat().filter(b=>b.callback_data.startsWith('pr:1:n:')).length,8);
+   const next=first.plan!.inlineMarkup!.inline_keyboard.flat().find(b=>b.callback_data.startsWith('pr:1:y:')&&b.callback_data.endsWith(':1'))!;
+   assert.ok(next);const second=await f.app().handle(cb(4,next.callback_data));
+   const choices=second.plan!.inlineMarkup!.inline_keyboard.flat().filter(b=>b.callback_data.startsWith('pr:1:n:'));
+   assert.equal(choices.length,4);assert.ok(isValidTelegramInlineKeyboard(second.plan!.inlineMarkup));
+   const contact=choices[1]!;assert.match(contact.text,/اتصال/);
+   const added=await f.app().handle(cb(5,contact.callback_data));
+   assert.equal(added.status,'APPLIED');
+   const rule=(await f.store.snapshot()).protectionPolicies![0]!.policy.rules[0]!;
+   assert.equal(rule.kind,'TYPE');assert.equal((rule as {type:string}).type,'CONTACT');assert.equal(rule.enabled,false);
+   assert.equal((await f.app().handle(cb(6,choices[0]!.callback_data))).status,'DENIED');
+   const list=await f.app().handle(cb(7,route(added,'pr:1:l:')));
+   const detail=await f.app().handle(cb(8,route(list,'pr:1:r:')));
+   assert.match(detail.plan!.text,/اتصال/);assert.equal(detail.plan!.inlineMarkup!.inline_keyboard.flat().some(b=>b.callback_data.startsWith('pr:1:v:')),false);
+  }finally{await f.close();}
+ });
  test('approved keyword button opens groups and persists a disabled reviewed word ('+engine+')',async()=>{
   const f=await fixture();try{
    const home=await f.app().handle(cb(1,'mi:1:i:02:07'));

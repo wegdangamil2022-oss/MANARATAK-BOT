@@ -2,7 +2,7 @@
 
 المصدر هو MASTER الكامل، وليس ملف الأزرار المختصر. توزيع الأقسام والمراحل أدناه قرار تنفيذ هندسي وفق المقدمة الحالية؛ لا يغير نص المصدر ولا يعد إثبات تنفيذ. تبقى المتطلبات المؤجلة مسجلة دون حذف. NOT_ASSESSED تعني لم تُقيّم تغطيته بعد، وPARTIAL_LOCAL تعني جزءًا محليًا موثقًا. لا يوجد متطلب موسوم مكتملًا بهذا الجرد.
 
-{"requirements":703,"referenceRequirements":691,"extensions":12,"modules":73,"details":50,"acceptanceCases":48,"inStages1to4":690,"deferred":13,"fullyImplementedVerified":0,"inScopeNotAssessed":671,"localPartial":19}
+{"requirements":703,"referenceRequirements":691,"extensions":12,"modules":73,"details":50,"acceptanceCases":48,"inStages1to4":690,"deferred":13,"fullyImplementedVerified":0,"inScopeNotAssessed":670,"localPartial":20}
 
 ## MOD-01 — التأسيس والهوية والربط [مقترح أساسي]
 
@@ -79,7 +79,7 @@
 
 - [ ] **SPAM-001** — فلترة روابط Telegram الخارجية وروابط الدعوات والروابط المختصرة، مع قائمة سماح للنطاقات التعليمية الرسمية.
   - المصدر: docs/MANARATAK_BOT_MASTER_v1.2.1_AR.md:598؛ الأقسام: 2؛ النطاق: 3؛ الحالة: PARTIAL_LOCAL.
-  - دليل جزئي: src/protection-rules.ts؛ tests/protection-rules.test.ts؛ تقييم HTTP وt.me دون شبكة؛ لا حل اختصارات أو جلب أو ربط حماية حي.
+  - دليل جزئي: src/telegram-protection-editor.ts؛ tests/telegram-protection-editor.test.ts؛ قواعد روابط عامة ونطاق محدد بواجهة خاصة ومراقبة النص دون شبكة؛ لا حل اختصارات أو جلب أو تنفيذ عقوبات.
 - [ ] **SPAM-002** — مكافحة الردود الاقتباسية المزعجة، والإشارة الجماعية، والإحالات المكررة، والوسوم الزائدة.
   - المصدر: docs/MANARATAK_BOT_MASTER_v1.2.1_AR.md:599؛ الأقسام: 2؛ النطاق: 3؛ الحالة: NOT_ASSESSED.
 - [ ] **SPAM-003** — AntiFlood: حد رسائل قابل للضبط (مثل 5 في 3 ثوانٍ **كمثال فقط**)، ثم إجراء متدرج.
@@ -538,7 +538,7 @@
   - دليل جزئي: src/protection-rules.ts؛ tests/protection-rules.test.ts؛ استثناء العبارة في موضعها واسم المضيف الدقيق؛ الواجهة والحوكمة الكاملة ناقصتان.
 - [ ] **LEX-007** — لوحة اختبار: أدخل مثال رسالة واعرف القاعدة التي ستطابقها ومبرر القرار قبل تفعيلها.
   - المصدر: docs/MANARATAK_BOT_MASTER_v1.2.1_AR.md:873؛ الأقسام: 2؛ النطاق: 3؛ الحالة: PARTIAL_LOCAL.
-  - دليل جزئي: src/telegram-protection-editor.ts؛ tests/telegram-protection-editor.test.ts؛ واجهة تعديل واختبار قواعد المجموعة دون تخزين العينة؛ السماح المركزي وسائر أنواع القواعد بالواجهة غير مكتملة.
+  - دليل جزئي: src/telegram-protection-editor.ts؛ tests/telegram-protection-editor.test.ts؛ واجهة تعديل واختبار قواعد المجموعة دون تخزين العينة؛ السماح المركزي والاستثناءات بالواجهة غير مكتملة.
 - [ ] **LEX-008** — منع قواعد مطابقة تؤدي إلى حجب كل المحادثة من غير قصد؛ حد لتواتر الحذف ومفتاح استعادة سريعة.
   - المصدر: docs/MANARATAK_BOT_MASTER_v1.2.1_AR.md:874؛ الأقسام: 2؛ النطاق: 3؛ الحالة: NOT_ASSESSED.
 - [ ] **LEX-009** — تحليل النص في شرح الوسائط وبيانات الروابط وملصقات النص وOCR على نحو اختياري مع حدود الدقة.
@@ -1449,13 +1449,14 @@
 
 - [ ] **TYPELOCK-001** — سياسة منفصلة لإشارات الأشخاص ومنشن القنوات والمجموعات، بدل أمر كتم جميع المنشن دفعة واحدة.
   - المصدر: docs/MANARATAK_BOT_MASTER_v1.2.1_AR.md:1479؛ الأقسام: 2؛ النطاق: 3؛ الحالة: PARTIAL_LOCAL.
-  - دليل جزئي: src/protection-rules.ts؛ tests/protection-rules.test.ts؛ تقييم أنواع رسائل محددة محليًا؛ لا تنفيذ قفل أو تعديل أذونات Telegram.
+  - دليل جزئي: src/protection-rules.ts؛ tests/protection-rules.test.ts؛ تقييم أنواع رسائل محددة محليًا؛ السياسات المنفصلة لإشارات الأشخاص والقنوات غير مكتملة.
 - [ ] **TYPELOCK-002** — قاعدة مستقلة لمشاركة جهات الاتصال وأرقام الهواتف وبطاقات vCard، مع حذف البيانات ومنع تخزينها افتراضيًا.
   - المصدر: docs/MANARATAK_BOT_MASTER_v1.2.1_AR.md:1480؛ الأقسام: 2؛ النطاق: 3؛ الحالة: NOT_ASSESSED.
 - [ ] **TYPELOCK-003** — تقييد الرسائل من حسابات تنشر «باسم قناة»، والمشاركة المجهولة وطلبات دعوة بوتات أخرى بحسب سياسة المجموعة.
   - المصدر: docs/MANARATAK_BOT_MASTER_v1.2.1_AR.md:1481؛ الأقسام: 2؛ النطاق: 3؛ الحالة: NOT_ASSESSED.
 - [ ] **TYPELOCK-004** — إعدادات منفصلة للصوتيات والدوائر المرئية وGIF والملصقات والصور والمستندات والروابط والرسائل الطويلة.
-  - المصدر: docs/MANARATAK_BOT_MASTER_v1.2.1_AR.md:1482؛ الأقسام: 2؛ النطاق: 3؛ الحالة: NOT_ASSESSED.
+  - المصدر: docs/MANARATAK_BOT_MASTER_v1.2.1_AR.md:1482؛ الأقسام: 2؛ النطاق: 3؛ الحالة: PARTIAL_LOCAL.
+  - دليل جزئي: src/telegram-protection-editor.ts؛ tests/telegram-protection-editor.test.ts؛ اختيار 12 نوع رسالة بواجهة مقسمة وقواعد معطلة؛ الاستقبال الحي للوسائط والرسائل الطويلة والتنفيذ غير مكتمل.
 - [ ] **TYPELOCK-005** — استثناءات موثّقة للمشرف أو المحرر أو المُميَّز في المجموعة مع عدم تعطيل حمايات الروابط الضارة والاحتيال.
   - المصدر: docs/MANARATAK_BOT_MASTER_v1.2.1_AR.md:1483؛ الأقسام: 2؛ النطاق: 3؛ الحالة: NOT_ASSESSED.
 - [ ] **TYPELOCK-006** — مرشح اختياري للمحارف الخفية والفواصل المضللة والكلمات المشوهة بالعربية، مع تجنّب حذف الرسائل التعليمية عن اللغة.

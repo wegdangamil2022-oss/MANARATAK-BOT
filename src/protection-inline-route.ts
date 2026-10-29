@@ -1,9 +1,9 @@
 export type ProtectionUIRoute={kind:'home';page:number}|{kind:'cancel';nonce:string}|
- {kind:'g'|'w'|'f'|'t'|'m'|'o'|'l'|'r'|'e'|'d'|'x'|'a'|'v';page:number;slot:number;digest:string;rulePage?:number;ruleSlot?:number;action?:'REVIEW'|'WARN'|'DELETE'|'MUTE'};
+ {kind:'g'|'w'|'f'|'t'|'m'|'o'|'l'|'r'|'e'|'d'|'x'|'a'|'v'|'b'|'j'|'y'|'n';page:number;slot:number;digest:string;rulePage?:number;ruleSlot?:number;action?:'REVIEW'|'WARN'|'DELETE'|'MUTE'};
 const p='(0|[1-9][0-9]{0,2})',s='([1-8])',d='([a-f0-9]{16})';
-const simple=new RegExp('^pr:1:([gwftmo]):'+p+':'+s+':'+d+'$','u');
-const list=new RegExp('^pr:1:(l):'+p+':'+s+':'+d+':'+p+'$','u');
-const rule=new RegExp('^pr:1:([redxv]):'+p+':'+s+':'+d+':'+p+':'+s+'$','u');
+const simple=new RegExp('^pr:1:([gwftmobj]):'+p+':'+s+':'+d+'$','u');
+const list=new RegExp('^pr:1:([ly]):'+p+':'+s+':'+d+':'+p+'$','u');
+const rule=new RegExp('^pr:1:([redxvn]):'+p+':'+s+':'+d+':'+p+':'+s+'$','u');
 const action=new RegExp('^pr:1:(a):'+p+':'+s+':'+d+':'+p+':'+s+':([rwdm])$','u');
 export function protectionInlineRoute(data:string):ProtectionUIRoute|null{
  if(typeof data!=='string'||Buffer.byteLength(data,'utf8')>64)return null;

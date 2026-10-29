@@ -13,8 +13,8 @@
     "inStages1to4": 690,
     "deferred": 13,
     "fullyImplementedVerified": 0,
-    "inScopeNotAssessed": 671,
-    "localPartial": 19
+    "inScopeNotAssessed": 670,
+    "localPartial": 20
   },
   "modules": [
     {
@@ -1512,9 +1512,9 @@
       ],
       "implementation": "PARTIAL_LOCAL",
       "evidence": {
-        "code": "src/protection-rules.ts",
-        "tests": "tests/protection-rules.test.ts",
-        "limit": "تقييم HTTP وt.me دون شبكة؛ لا حل اختصارات أو جلب أو ربط حماية حي."
+        "code": "src/telegram-protection-editor.ts",
+        "tests": "tests/telegram-protection-editor.test.ts",
+        "limit": "قواعد روابط عامة ونطاق محدد بواجهة خاصة ومراقبة النص دون شبكة؛ لا حل اختصارات أو جلب أو تنفيذ عقوبات."
       }
     },
     {
@@ -5877,7 +5877,7 @@
       "evidence": {
         "code": "src/telegram-protection-editor.ts",
         "tests": "tests/telegram-protection-editor.test.ts",
-        "limit": "واجهة تعديل واختبار قواعد المجموعة دون تخزين العينة؛ السماح المركزي وسائر أنواع القواعد بالواجهة غير مكتملة."
+        "limit": "واجهة تعديل واختبار قواعد المجموعة دون تخزين العينة؛ السماح المركزي والاستثناءات بالواجهة غير مكتملة."
       }
     },
     {
@@ -14491,7 +14491,7 @@
       "evidence": {
         "code": "src/protection-rules.ts",
         "tests": "tests/protection-rules.test.ts",
-        "limit": "تقييم أنواع رسائل محددة محليًا؛ لا تنفيذ قفل أو تعديل أذونات Telegram."
+        "limit": "تقييم أنواع رسائل محددة محليًا؛ السياسات المنفصلة لإشارات الأشخاص والقنوات غير مكتملة."
       }
     },
     {
@@ -14557,8 +14557,12 @@
           "title": "🛡️ الحماية والعقوبات"
         }
       ],
-      "implementation": "NOT_ASSESSED",
-      "evidence": null
+      "implementation": "PARTIAL_LOCAL",
+      "evidence": {
+        "code": "src/telegram-protection-editor.ts",
+        "tests": "tests/telegram-protection-editor.test.ts",
+        "limit": "اختيار 12 نوع رسالة بواجهة مقسمة وقواعد معطلة؛ الاستقبال الحي للوسائط والرسائل الطويلة والتنفيذ غير مكتمل."
+      }
     },
     {
       "id": "TYPELOCK-005",
