@@ -381,6 +381,12 @@ export class TelegramUpdateApplication {
       const view=await new OwnerGroupSetup(this.opts.store,this.opts.policy,this.clock).handle(actorId,event.callbackData);
       return view?{status:'APPLIED',reason:'RESPONSE_PLANNED_ONLY',plan:this.plan(chatId,view.text,undefined,view.keyboard,event.callbackMessageId)}:{status:'DENIED',reason:'GROUP_SETUP_STALE_OR_UNAUTHORIZED'};
      }
+     if(event.callbackData.startsWith('gp:1:')){
+      const m=/^gp:1:p:(-[1-9][0-9]{0,15}):([1-9][0-9]{0,9})$/u.exec(event.callbackData);
+      if(!m||m[0]!==event.callbackData)return {status:'DENIED',reason:'INVALID_GROUP_PROTECTION_SELECTOR'};
+      const view=await new TelegramProtectionEditor(this.opts.store,this.opts.policy,this.clock).openOwnerGroup(actorId,m[1]!,Number(m[2]));
+      return view?{status:'APPLIED',reason:'RESPONSE_PLANNED_ONLY',plan:this.plan(chatId,view.text,undefined,view.keyboard,event.callbackMessageId)}:{status:'DENIED',reason:'GROUP_PROTECTION_STALE_OR_UNAUTHORIZED'};
+     }
      if(event.callbackData.startsWith('od:1:')){
       const view=await new OwnerDelegationEditor(this.opts.store,this.opts.policy,this.clock).handle(actorId,event.callbackData);
       return view?{status:'APPLIED',reason:'RESPONSE_PLANNED_ONLY',plan:this.plan(chatId,view.text,undefined,view.keyboard,event.callbackMessageId)}:{status:'DENIED',reason:'DELEGATION_STALE_OR_UNAUTHORIZED'};
@@ -1150,7 +1156,7 @@ export class TelegramUpdateApplication {
     }
     const callback=event.callbackData??'';
     const ownerScreen=event.kind==='private'&&this.opts.policy.isOwner(event.actorId)&&(
-     /^(?:mi:1:|ec:1:|od:1:|gw:1:|of:1:|ol:1:|st:1:|ps:1:|pr:1:|pd:1:|pq:1:|mr:1:|mp:1:|c_)/u.test(callback)||
+     /^(?:mi:1:|ec:1:|od:1:|gw:1:|gp:1:|of:1:|ol:1:|st:1:|ps:1:|pr:1:|pd:1:|pq:1:|mr:1:|mp:1:|c_)/u.test(callback)||
      event.text==='/ownerinline'||event.text==='/ownerlegacy'||event.text==='/ownerrecover'||isOwnerMenuText(event.text)||
      handled.reason==='CATEGORY_TEXT_PREVIEW'||handled.reason==='DELEGATION_TEXT_PREVIEW'||handled.reason==='STUDIO_DRAFT_SAVED');
     if(ownerScreen&&handled.plan&&!handled.adminUIAccess){

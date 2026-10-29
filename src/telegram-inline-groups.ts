@@ -109,6 +109,8 @@ export async function renderOwnerInlineGroups(store:BotStore,policy:Policy,actor
    +'إصدار سياسة المجموعة: '+chat.version+'\n'
    +'لا يوجد تحقق حي من Telegram. لا توجد أوامر حظر أو نشر في هذه الشاشة.';
   const actionRows:Button[][]=[];
+  if(chat.scopes.includes('moderation')&&Number.isSafeInteger(Number(chat.id))&&chat.id.length<=17)
+   actionRows.push([button('🛡️ إدارة حماية هذه المجموعة','gp:1:p:'+chat.id+':'+chat.version)]);
   if(chat.scopes.includes('moderation')&&Number.isSafeInteger(Number(chat.id))&&chat.id.length<=17&&!state.protectionPolicies?.some(r=>r.policy.chatId===chat.id))
    actionRows.push([button('🧭 معالج إعداد المجموعة','gw:1:b:'+chat.id+':'+chat.version+':'+route.page)]);
   if(chat.groupAI!=='OFF')
