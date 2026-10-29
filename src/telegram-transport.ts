@@ -26,6 +26,8 @@ import {renderOwnerInlineDelegations} from './telegram-inline-delegations.js';
 import {renderStaffInline} from './telegram-inline-staff.js';
 import {ModerationUnknownOwnerReview} from './moderation-unknown-review.js';
 import {ModerationPendingOwnerView} from './moderation-pending-owner-view.js';
+import {GroupProtectionPolicyService} from './group-protection-policy.js';
+import {TelegramProtectionEditor} from './telegram-protection-editor.js';
 import {renderOwnerPurgeQueue} from './telegram-inline-purge.js';
 import {renderOwnerModerationRateStatus} from './telegram-inline-moderation-rate-status.js';
 import {renderOwnerModerationEmergencyStatus} from './telegram-inline-moderation-emergency.js';
@@ -73,7 +75,8 @@ export interface TelegramResult { status: 'APPLIED' | 'DUPLICATE' | 'DENIED' | '
 type ProcessedReply={status:TelegramResult['status'];reason:string;plan?:TelegramReplyPlan;
  groupQuestionAccess?:TelegramReplyJob['groupQuestionAccess'];
  groupMenuAccess?:TelegramReplyJob['groupMenuAccess'];
- privateGroupAccess?:TelegramReplyJob['privateGroupAccess']};
+ privateGroupAccess?:TelegramReplyJob['privateGroupAccess'];
+ adminUIAccess?:TelegramReplyJob['adminUIAccess']};
 export interface TelegramApplicationOptions {
   store: BotStore; policy: Policy; education: EducationService; admin: EducationAdminFacade;
   faq: ApprovedAnswerService; links: ResourceLinkService; membership: MembershipPort;
@@ -291,6 +294,12 @@ export class TelegramUpdateApplication {
      // Reauthorize the real sender at every tap. Never dispatch a privileged
      // command from untrusted callback_data or from a group context.
      if(kind!=='private'||actorId!==chatId)return {status:'DENIED',reason:'PRIVATE_CALLBACK_ONLY'};
+     if(event.callbackData.startsWith('pr:1:')||event.callbackData==='mi:1:i:02:07'){
+      if(event.callbackData==='mi:1:i:02:07'&&!this.opts.policy.isOwner(actorId))return {status:'DENIED',reason:'OWNER_ONLY'};
+      const view=await new TelegramProtectionEditor(this.opts.store,this.opts.policy,this.clock).handle(event.callbackData,actorId);
+      if(!view)return {status:'DENIED',reason:'PROTECTION_EDITOR_NOT_ACCESSIBLE'};
+      return {status:'APPLIED',reason:'RESPONSE_PLANNED_ONLY',plan:this.plan(chatId,view.text,undefined,view.keyboard,event.callbackMessageId)};
+     }
      if(event.callbackData.startsWith('pd:1:')){
       if(!this.opts.purge)return {status:'DENIED',reason:'DELETE_NOT_CONFIGURED'};
       const result=await handleReplyDeleteCallback(this.opts.store,this.opts.policy,this.opts.purge,actorId,event.callbackData,this.clock());
@@ -404,6 +413,8 @@ export class TelegramUpdateApplication {
      return {status:'APPLIED',reason:'RESPONSE_PLANNED_ONLY',
       plan:this.plan(chatId,view.text,undefined,view.keyboard,event.callbackMessageId)};
     }
+    if(kind==='group')await new GroupProtectionPolicyService(this.opts.store,this.opts.policy,this.clock).observeIncomingText(
+     actorId,chatId,text,event.entities,'b3-webhook:'+this.opts.botId+':'+event.updateId);
     if(kind==='group'&&isReplyDeleteCommand(text,this.opts.botUsername)){
      if(!this.opts.purge)return {status:'DENIED',reason:'DELETE_NOT_CONFIGURED'};
      const result=await previewReplyDelete(this.opts.store,this.opts.policy,this.opts.purge,actorId,chatId,event.messageId,text,event.replyTo,this.clock());
@@ -515,6 +526,10 @@ export class TelegramUpdateApplication {
         +'يمكنك أيضًا استخدام /categories private و /help.\n'
         +'المساعد الذكي وبعض الخدمات ما زالت قيد التطوير.',
         mainMenuKeyboard(owner));
+      const editorResult=await new TelegramProtectionEditor(this.opts.store,this.opts.policy,this.clock).handleText(
+       actorId,text,Object.values(m).some(label=>label===text)||isOwnerMenuText(text));
+      if(editorResult)return {status:editorResult.status,reason:editorResult.reason,
+       plan:this.plan(chatId,editorResult.screen.text,undefined,editorResult.screen.keyboard)};
       if(cmd==='/start'||cmd==='/help'||text===m.home||text===m.back)return main();
       // The runtime selects the inline owner entry; direct integrations can
       // retain legacy mode. Existing authorized tools remain reachable.
@@ -1009,13 +1024,22 @@ export class TelegramUpdateApplication {
     }
     let handled:ProcessedReply;
     try{handled=await this.process(event);}catch(err){handled={status:'DENIED',reason:safeError(err)};}
+    if(event.kind==='private'&&event.callbackData&&!event.callbackData.startsWith('pr:1:')&&
+     event.callbackData!=='mi:1:i:02:07'&&handled.plan){
+     await new TelegramProtectionEditor(this.opts.store,this.opts.policy,this.clock).cancelNavigation(event.actorId);
+    }
+    if(handled.plan&&!handled.plan.chatId.startsWith('-')&&handled.plan.inlineMarkup?.inline_keyboard.flat().some(b=>b.callback_data.startsWith('pr:1:'))){
+     const proof=await new TelegramProtectionEditor(this.opts.store,this.opts.policy,this.clock).witness(event.actorId,handled.plan.inlineMarkup);
+     if(proof)handled={...handled,adminUIAccess:proof};
+     else{const {plan:_,...withoutPlan}=handled;handled={...withoutPlan,reason:'PROTECTION_RESPONSE_WITHHELD'};}
+    }
     const audit:AuditRecord={updateKey:key,decision:handled.status==='APPLIED'?'ALLOW':handled.status==='DENIED'?'DENY':'NOOP',reason:handled.reason,policyVersion:0,at:this.clock()};
     // Commit the decision and outbound reply intent in one durable transaction.
     // No external call occurs before the outbox row exists.
     await this.opts.store.finish(key,audit,handled.plan,handled.groupQuestionAccess,
-     handled.groupMenuAccess,handled.privateGroupAccess);
+     handled.groupMenuAccess,handled.privateGroupAccess,handled.adminUIAccess);
     // Temporary actor IDs are only stored in the guarded queue, never returned.
-    const {groupQuestionAccess:_,groupMenuAccess:__,privateGroupAccess:___,...publicResult}=handled;
+    const {groupQuestionAccess:_,groupMenuAccess:__,privateGroupAccess:___,adminUIAccess:____,...publicResult}=handled;
     const visible=publicResult.plan?{...publicResult,deliveryKey:key}:publicResult;
     return event.callbackQueryId?{...visible,callbackQueryId:event.callbackQueryId}:visible;
   }

@@ -34,13 +34,13 @@ const partial={
  'SEC-004':['src/policy.ts','tests/owner-inline-navigation.test.ts','تتحقق الشرائح الحالية خادميًا؛ الخدمات غير المبرمجة لا تكتسب تغطية تلقائيًا.'],
  'SPAM-001':['src/protection-rules.ts','tests/protection-rules.test.ts','تقييم HTTP وt.me دون شبكة؛ لا حل اختصارات أو جلب أو ربط حماية حي.'],
  'SPAM-006':['src/protection-rules.ts','tests/protection-rules.test.ts','مطابقة أنواع محددة والنص/الشرح في محرك محلي؛ استقبال الوسائط والتوجيه ما زال ناقصًا.'],
- 'LEX-001':['src/group-protection-policy.ts','tests/group-protection-policy.test.ts','تخزين سياسة مرقمة لكل مجموعة؛ القوالب المركزية وواجهة التعديل غير مكتملتين.'],
- 'SPAM-011':['src/group-protection-policy.ts','tests/group-protection-policy.test.ts','حفظ MONITOR واختبار بلا أثر؛ لا ربط تلقائي بالرسائل الواردة.'],
+ 'LEX-001':['src/telegram-protection-editor.ts','tests/telegram-protection-editor.test.ts','تخزين مرقم وواجهة كلمات وعبارات لكل مجموعة؛ القوالب المركزية وحوكمة الشبكات غير مكتملة.'],
+ 'SPAM-011':['src/group-protection-policy.ts','tests/telegram-protection-editor.test.ts','مراقبة النص الوارد وتدقيق بلا محتوى أو عقوبة؛ الوسائط والتعديلات والقياس الشامل غير مكتملة.'],
  'TYPELOCK-001':['src/protection-rules.ts','tests/protection-rules.test.ts','تقييم أنواع رسائل محددة محليًا؛ لا تنفيذ قفل أو تعديل أذونات Telegram.'],
  'LEX-002':['src/protection-rules.ts','tests/protection-rules.test.ts','كلمة كاملة وعبارة متجاورة فقط؛ لا اشتقاق أو تحليل لغوي شامل.'],
  'LEX-003':['src/protection-rules.ts','tests/protection-rules.test.ts','تطبيع Unicode والعربية مع حدود؛ لا ادعاء كشف كل التحايل.'],
  'LEX-006':['src/protection-rules.ts','tests/protection-rules.test.ts','استثناء العبارة في موضعها واسم المضيف الدقيق؛ الواجهة والحوكمة الكاملة ناقصتان.'],
- 'LEX-007':['src/protection-rules.ts','tests/protection-rules.test.ts','محرك Dry Run واختبارات؛ لم تربط شاشة تعديل القواعد بعد.'],
+ 'LEX-007':['src/telegram-protection-editor.ts','tests/telegram-protection-editor.test.ts','واجهة تعديل واختبار قواعد المجموعة دون تخزين العينة؛ السماح المركزي وسائر أنواع القواعد بالواجهة غير مكتملة.'],
  'TYPELOCK-009':['src/protection-rules.ts','tests/protection-rules.test.ts','قرار مقترح واحد للنوع والروابط والكلمات؛ الاستقبال والمنشن والتنفيذ بحاجة للربط.'],
  'OPS-003':['src/store.ts','tests/telegram-moderation-commands.test.ts','سجل تحديث ومحاولة ونتيجة ومنع تكرار؛ الوظائف القادمة تحتاج الربط به.']
 };

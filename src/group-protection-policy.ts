@@ -1,3 +1,4 @@
+import {protectionEntityLinks} from './protection-message-entities.js';
 import {BotStore,type BotState} from './store.js';
 import type {Policy} from './policy.js';
 import {isValidProtectionPolicy,evaluateProtectionRules,type GroupProtectionRecord,type ProtectionEvaluation} from './protection-rules.js';
@@ -38,6 +39,31 @@ export class GroupProtectionPolicyService{
    state.audit.push({actorId:actor,updateKey:'protection:policy:'+candidate.chatId+':'+candidate.revision,
     decision:'ALLOW',reason:'PROTECTION_POLICY_SAVED_'+candidate.mode,policyVersion:expectedChatRevision,at:now});
    return {status:'SAVED' as const,revision:candidate.revision};
+  });
+ }
+ /** Record-only incoming TEXT monitor. Authorization precedes body/entity
+  * evaluation; observations retain no sender identity or message contents. */
+ async observeIncomingText(member:string,chat:string,text:string,entities:unknown,updateKey:string):Promise<string>{
+  if(!/^b3-webhook:[A-Za-z0-9_-]{1,80}:[0-9]+$/u.test(updateKey))return 'DENIED';
+  return this.store.transaction(state=>{
+   const now=this.clock();
+   if(!clockValid(now)||!this.policy.canUseChat(state,chat,'moderation'))return 'DENIED';
+   const record=state.protectionPolicies?.find(r=>r.policy.chatId===chat);
+   if(!record||record.policy.mode!=='MONITOR')return 'DISABLED';
+   if(record.updatedAt>now||record.chatPolicyVersion!==this.policy.chatRevision(state,chat))return 'STALE';
+   if(this.policy.isOwner(member)||this.policy.has(state,member,'chat.manage',chat,now)||record.policy.exemptMemberIds.includes(member))return 'EXEMPT';
+   const key=updateKey+':protection:'+chat;
+   if(state.audit.some(a=>a.updateKey===key))return 'DUPLICATE';
+   const links=typeof text==='string'&&text.length<=4096?protectionEntityLinks(text,entities):null;
+   const result=links===null?null:evaluateProtectionRules(record.policy,{chatId:chat,memberId:member,type:'TEXT',text,links});
+   if(!result||result.status==='INVALID_MESSAGE'||result.status==='INVALID_POLICY'){
+    state.audit.push({updateKey:key,decision:'NOOP',reason:'PROTECTION_MONITOR_INPUT_UNAVAILABLE',policyVersion:record.chatPolicyVersion,at:now});
+    return 'UNAVAILABLE';
+   }
+   if(result.status==='MATCH')state.audit.push({updateKey:key,decision:'NOOP',
+    reason:'PROTECTION_MONITOR_MATCH:revision='+record.policy.revision+';action='+result.proposedAction+';rules='+result.matchedRuleIds.length,
+    policyVersion:record.chatPolicyVersion,at:now});
+   return 'OBSERVED';
   });
  }
  async preview(actor:string,chat:string,message:unknown):Promise<{status:'DENIED'|'UNCONFIGURED'|'STALE'}|{status:'EVALUATED';result:ProtectionEvaluation}>{

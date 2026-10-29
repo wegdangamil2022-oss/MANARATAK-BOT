@@ -1,3 +1,4 @@
+import {validAdminUIAccess,protectionUIEpoch,ADMIN_UI_TTL_MS} from './protection-ui-access.js';
 import {randomUUID} from 'node:crypto';
 import {BotStore,type TelegramReplyJob} from './store.js';
 import {Policy} from './policy.js';
@@ -156,13 +157,17 @@ export function validTelegramReplyJob(v:unknown):v is TelegramReplyJob{
   (j.privateReplyKind===undefined||
    (j.status==='QUEUED'&&validPlan(j.plan)&&
     !j.plan.chatId.startsWith('-')&&
-    (j.privateReplyKind==='LOCAL'||j.privateReplyKind==='GROUP_SCOPED')&&
+    (j.privateReplyKind==='LOCAL'||j.privateReplyKind==='GROUP_SCOPED'||j.privateReplyKind==='ADMIN_SCOPED')&&
     j.groupReplyKind===undefined&&j.groupQuestionAccess===undefined&&
     j.groupMenuAccess===undefined&&
-    ((j.privateReplyKind==='LOCAL'&&j.privateGroupAccess===undefined)||
-     (j.privateReplyKind==='GROUP_SCOPED'&&
+    ((j.privateReplyKind==='LOCAL'&&j.privateGroupAccess===undefined&&j.adminUIAccess===undefined)||
+     (j.privateReplyKind==='ADMIN_SCOPED'&&j.privateGroupAccess===undefined&&validAdminUIAccess(j.adminUIAccess)&&j.plan.chatId===j.adminUIAccess.actorId)||
+     (j.privateReplyKind==='GROUP_SCOPED'&&j.adminUIAccess===undefined&&
       validPrivateGroupAccess(j.privateGroupAccess)&&
       j.plan.chatId===j.privateGroupAccess.actorId))))&&
+  (j.adminUIAccess===undefined||(j.status==='QUEUED'&&validPlan(j.plan)&&validAdminUIAccess(j.adminUIAccess)&&
+   j.plan.chatId===j.adminUIAccess.actorId&&j.privateReplyKind==='ADMIN_SCOPED'&&j.privateGroupAccess===undefined&&
+   j.groupReplyKind===undefined&&j.groupQuestionAccess===undefined&&j.groupMenuAccess===undefined))&&
   (j.privateGroupAccess===undefined||
    (j.status==='QUEUED'&&validPlan(j.plan)&&
     validPrivateGroupAccess(j.privateGroupAccess)&&
@@ -292,7 +297,11 @@ export class TelegramReplyDispatcher {
    // origin cannot be established from the destination or HTML body.
    const noPrivateProvenance=!plan.chatId.startsWith('-')&&
     job.privateReplyKind===undefined&&!dm;
-   const forbidden=noGroupProof||noPrivateProvenance||(!!access&&(
+   const admin=job.adminUIAccess,now=this.clock();
+   const adminDenied=Boolean(admin&&(admin.actorId!==plan.chatId||!Number.isSafeInteger(job.queuedAt)||
+    now<job.queuedAt!||now>=admin.expiresAt||admin.expiresAt>job.queuedAt!+ADMIN_UI_TTL_MS||
+    protectionUIEpoch(s,this.policy,admin.actorId,now)!==admin.epoch));
+   const forbidden=noGroupProof||noPrivateProvenance||adminDenied||(!!access&&(
     !groupPrecheck?.allowed||
     groupPrecheck.kind!==accessKind||
     groupPrecheck.access.actorId!==access.actorId||
@@ -313,7 +322,7 @@ export class TelegramReplyDispatcher {
     job.accessDenialCode=noGroupProof||noPrivateProvenance?
      'LEGACY_UNVERIFIABLE':groupUnavailable?'GROUP_UNAVAILABLE':'ACCESS_RECHECK_FAILED';
     job.status='FAILED_CONFIRMED';
-    delete job.plan;delete job.groupQuestionAccess;delete job.groupMenuAccess;delete job.privateGroupAccess;delete job.privateReplyKind;delete job.groupReplyKind;job.redactedAt=this.clock();
+    delete job.plan;delete job.adminUIAccess;delete job.groupQuestionAccess;delete job.groupMenuAccess;delete job.privateGroupAccess;delete job.privateReplyKind;delete job.groupReplyKind;job.redactedAt=this.clock();
     return {status:'FAILED_CONFIRMED' as const};
    }
    const attemptId=randomUUID();
@@ -321,7 +330,7 @@ export class TelegramReplyDispatcher {
    job.status='SENDING';job.attemptId=attemptId;job.startedAt=at;
    // Remove the durable body *before* the external call. The immediate local
    // copy goes to the sender, but a crash leaves no replayable payload.
-   delete job.plan;delete job.groupQuestionAccess;delete job.groupMenuAccess;delete job.privateGroupAccess;delete job.privateReplyKind;delete job.groupReplyKind;job.redactedAt=at;
+   delete job.plan;delete job.adminUIAccess;delete job.groupQuestionAccess;delete job.groupMenuAccess;delete job.privateGroupAccess;delete job.privateReplyKind;delete job.groupReplyKind;job.redactedAt=at;
    return {status:'SEND' as const,attemptId,plan};
   });
   if(claim.status!=='SEND')return {status:claim.status};

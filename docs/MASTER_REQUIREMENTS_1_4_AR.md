@@ -101,7 +101,7 @@
   - المصدر: docs/MANARATAK_BOT_MASTER_v1.2.1_AR.md:607؛ الأقسام: 2؛ النطاق: 3؛ الحالة: NOT_ASSESSED.
 - [ ] **SPAM-011** — نظام Safe Mode لتجربة قاعدة جديدة دون فرض العقوبة حتى نعرف عدد الإنذارات الكاذبة.
   - المصدر: docs/MANARATAK_BOT_MASTER_v1.2.1_AR.md:608؛ الأقسام: 2؛ النطاق: 3؛ الحالة: PARTIAL_LOCAL.
-  - دليل جزئي: src/group-protection-policy.ts؛ tests/group-protection-policy.test.ts؛ حفظ MONITOR واختبار بلا أثر؛ لا ربط تلقائي بالرسائل الواردة.
+  - دليل جزئي: src/group-protection-policy.ts؛ tests/telegram-protection-editor.test.ts؛ مراقبة النص الوارد وتدقيق بلا محتوى أو عقوبة؛ الوسائط والتعديلات والقياس الشامل غير مكتملة.
 - [ ] **SPAM-012** — كشف المحتوى الخطر بالصورة/OCR أو AI اختياري لاحقًا، مع موافقة وخصوصية وتكلفة وحساسية الأخطاء.
   - المصدر: docs/MANARATAK_BOT_MASTER_v1.2.1_AR.md:609؛ الأقسام: 2؛ النطاق: 3؛ الحالة: NOT_ASSESSED.
 
@@ -522,7 +522,7 @@
 
 - [ ] **LEX-001** — لوائح كلمات وعبارات محظورة خاصة بكل مجموعة وقوائم مركزية اختيارية مع رقم إصدار.
   - المصدر: docs/MANARATAK_BOT_MASTER_v1.2.1_AR.md:867؛ الأقسام: 2؛ النطاق: 3؛ الحالة: PARTIAL_LOCAL.
-  - دليل جزئي: src/group-protection-policy.ts؛ tests/group-protection-policy.test.ts؛ تخزين سياسة مرقمة لكل مجموعة؛ القوالب المركزية وواجهة التعديل غير مكتملتين.
+  - دليل جزئي: src/telegram-protection-editor.ts؛ tests/telegram-protection-editor.test.ts؛ تخزين مرقم وواجهة كلمات وعبارات لكل مجموعة؛ القوالب المركزية وحوكمة الشبكات غير مكتملة.
 - [ ] **LEX-002** — طرق المطابقة: كلمة كاملة، عبارة متجاورة، جذور/تصريفات عربية مدروسة، وحروف لاتينية/أرقام بديلة؛ عدم الاكتفاء بالبحث الجزئي.
   - المصدر: docs/MANARATAK_BOT_MASTER_v1.2.1_AR.md:868؛ الأقسام: 2؛ النطاق: 3؛ الحالة: PARTIAL_LOCAL.
   - دليل جزئي: src/protection-rules.ts؛ tests/protection-rules.test.ts؛ كلمة كاملة وعبارة متجاورة فقط؛ لا اشتقاق أو تحليل لغوي شامل.
@@ -538,7 +538,7 @@
   - دليل جزئي: src/protection-rules.ts؛ tests/protection-rules.test.ts؛ استثناء العبارة في موضعها واسم المضيف الدقيق؛ الواجهة والحوكمة الكاملة ناقصتان.
 - [ ] **LEX-007** — لوحة اختبار: أدخل مثال رسالة واعرف القاعدة التي ستطابقها ومبرر القرار قبل تفعيلها.
   - المصدر: docs/MANARATAK_BOT_MASTER_v1.2.1_AR.md:873؛ الأقسام: 2؛ النطاق: 3؛ الحالة: PARTIAL_LOCAL.
-  - دليل جزئي: src/protection-rules.ts؛ tests/protection-rules.test.ts؛ محرك Dry Run واختبارات؛ لم تربط شاشة تعديل القواعد بعد.
+  - دليل جزئي: src/telegram-protection-editor.ts؛ tests/telegram-protection-editor.test.ts؛ واجهة تعديل واختبار قواعد المجموعة دون تخزين العينة؛ السماح المركزي وسائر أنواع القواعد بالواجهة غير مكتملة.
 - [ ] **LEX-008** — منع قواعد مطابقة تؤدي إلى حجب كل المحادثة من غير قصد؛ حد لتواتر الحذف ومفتاح استعادة سريعة.
   - المصدر: docs/MANARATAK_BOT_MASTER_v1.2.1_AR.md:874؛ الأقسام: 2؛ النطاق: 3؛ الحالة: NOT_ASSESSED.
 - [ ] **LEX-009** — تحليل النص في شرح الوسائط وبيانات الروابط وملصقات النص وOCR على نحو اختياري مع حدود الدقة.

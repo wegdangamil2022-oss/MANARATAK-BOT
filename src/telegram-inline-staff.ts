@@ -1,3 +1,4 @@
+import {TelegramProtectionEditor} from './telegram-protection-editor.js';
 import type {BotStore,Chat,BotState} from './store.js';
 import type {Policy} from './policy.js';
 import type {TelegramInlineKeyboard} from './telegram-inline-owner.js';
@@ -88,6 +89,7 @@ export async function renderStaffInline(store:BotStore,policy:Policy,actor:strin
   if(route.digest!==digest)return null;
   return renderStaffModerationAudit(chat,route.page,route.operationPage,savedOperations,digest);
  }
+ const protectionLink=await new TelegramProtectionEditor(store,policy,()=>now).link(actor,chat.id);
  // No student IDs, complaints, media content or private subscription channels
  // are included: aggregate counts only for an authorized staff member.
  return menu('<b>بطاقة إشراف محلية 🛡️</b>\n'
@@ -99,6 +101,7 @@ export async function renderStaffInline(store:BotStore,policy:Policy,actor:strin
   +'أسباب تقييد نشطة محفوظة: '+moderation+'\n'
   +'الأرقام محلية وليست حالة Telegram الحية.\n'
   +'لا يمكن تنفيذ العقوبات أو تغيير الأذونات من هذه الشاشة.',
-  [[btn('📊 سجل حالات العقوبات',moderationAuditKey(chat,route.page,0,digest))],
+  [...(protectionLink?[[btn('🚫 الكلمات والعبارات',protectionLink)]]:[]),
+   [btn('📊 سجل حالات العقوبات',moderationAuditKey(chat,route.page,0,digest))],
    [btn('↩️ مجموعات الصفحة',pageKey(route.page)),btn('🏠 الرئيسية','ms:1:h')]]);
 }

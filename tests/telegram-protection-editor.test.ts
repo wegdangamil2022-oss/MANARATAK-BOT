@@ -1,0 +1,295 @@
+import {test} from 'node:test';
+import assert from 'node:assert/strict';
+import {mkdtemp,rm} from 'node:fs/promises';
+import {join} from 'node:path';
+import {tmpdir} from 'node:os';
+import {BotStore} from '../src/store.js';
+import {Policy} from '../src/policy.js';
+import {GroupProtectionPolicyService} from '../src/group-protection-policy.js';
+import {EducationService} from '../src/education.js';
+import {EducationAdminFacade} from '../src/education-admin.js';
+import {ApprovedAnswerService,ResourceLinkService} from '../src/education-interactions.js';
+import {TelegramUpdateApplication} from '../src/telegram-transport.js';
+import {TelegramReplyDispatcher} from '../src/telegram-replies.js';
+import {protectionInlineRoute} from '../src/protection-inline-route.js';
+import {isValidTelegramInlineKeyboard} from '../src/telegram-inline-owner.js';
+const NOW=1700000000000,CHAT='-100123';
+const cb=(i:number,data:string,actor=100,group=false)=>({update_id:i,callback_query:{id:'rules_'+i,from:{id:actor,is_bot:false},data,
+ message:{message_id:77,from:{id:999,is_bot:true},chat:{id:group?Number(CHAT):actor,type:group?'supergroup':'private'}}}});
+const msg=(i:number,text:string,actor=100)=>({update_id:i,message:{message_id:i,from:{id:actor,is_bot:false},chat:{id:actor,type:'private'},text}});
+type Result=Awaited<ReturnType<TelegramUpdateApplication['handle']>>;
+const route=(r:Result,prefix:string)=>{const found=r.plan?.inlineMarkup?.inline_keyboard.flat().find(b=>b.callback_data.startsWith(prefix));assert.ok(found,'missing '+prefix);return found.callback_data;};
+test('protection routes reject extra fields, ambiguous numbers and oversized selectors',()=>{
+ for(const bad of ['pr:1:p:00','pr:1:g:0:0:abcdef0123456789','pr:1:a:0:1:abcdef0123456789:0:1:q',
+  'pr:1:g:0:1:abcdef0123456789:other','pr:1:h\n','pr:2:h','pr:1:z:short','pr:1:'+('x'.repeat(65))])
+  assert.equal(protectionInlineRoute(bad),null,bad);
+});
+for(const engine of ['json','sqlite'] as const){
+ async function fixture(){
+  const dir=await mkdtemp(join(tmpdir(),'protection-editor-')),store=new BotStore(join(dir,'state.'+engine),{engine});
+  let now=NOW;
+  const policy=new Policy(store,'100',()=>now),education=new EducationService(store,policy);
+  await policy.approveChat('100',CHAT,['moderation']);
+  const app=()=>new TelegramUpdateApplication({store,policy,education,admin:new EducationAdminFacade(store,policy,education),
+   faq:new ApprovedAnswerService(store,policy),links:new ResourceLinkService(store,policy),botId:'editor-local',botUsername:'ManaratakBot',clock:()=>now,
+   membership:async()=>{throw Error('no network in editor');}});
+  return {store,policy,app,setTime:(n:number)=>{now=n;},close:()=>rm(dir,{recursive:true,force:true})};
+ }
+ test('approved keyword button opens groups and persists a disabled reviewed word ('+engine+')',async()=>{
+  const f=await fixture();try{
+   const home=await f.app().handle(cb(1,'mi:1:i:02:07'));
+   assert.equal(home.status,'APPLIED');assert.ok(isValidTelegramInlineKeyboard(home.plan?.inlineMarkup));
+   const group=await f.app().handle(cb(2,route(home,'pr:1:g:')));
+   const prompt=await f.app().handle(cb(3,route(group,'pr:1:w:')));
+   assert.match(prompt.plan?.text??'',/كلمة/);
+   assert.equal((await f.app().handle(msg(4,'إعلان'))).status,'APPLIED');
+   const saved=(await f.store.snapshot()).protectionPolicies?.[0]?.policy;
+   assert.equal(saved?.mode,'OFF');assert.equal(saved?.rules.length,1);
+   assert.deepEqual(saved?.rules.map(r=>[r.kind,r.enabled,r.action]),[['WORD',false,'REVIEW']]);
+  }finally{await f.close();}
+ });
+ test('dry run evaluates a draft without storing student text or enabling rules ('+engine+')',async()=>{
+  const f=await fixture();try{
+   const home=await f.app().handle(cb(1,'pr:1:h'));
+   const group=await f.app().handle(cb(2,route(home,'pr:1:g:')));
+   await f.app().handle(cb(3,route(group,'pr:1:w:')));
+   const added=await f.app().handle(msg(4,'إعلان'));
+   await f.app().handle(cb(5,route(added,'pr:1:t:')));
+   const before=(await f.store.snapshot()).protectionPolicies;
+   const sample='إعلان PRIVATE_STUDENT_SAMPLE';
+   const result=await f.app().handle(msg(6,sample));
+   assert.equal(result.status,'APPLIED');assert.match(result.plan?.text??'',/مطابقة/);
+   const state=await f.store.snapshot();assert.deepEqual(state.protectionPolicies,before);
+   assert.equal(JSON.stringify(state).includes('PRIVATE_STUDENT_SAMPLE'),false);
+  }finally{await f.close();}
+ });
+ test('scope revocation and foreign callbacks cannot save a pending word ('+engine+')',async()=>{
+  const f=await fixture();try{
+   await f.policy.grant('100','200','chat.manage',CHAT,NOW+600000);
+   const home=await f.app().handle(cb(1,'pr:1:h',200));
+   const groupRoute=route(home,'pr:1:g:');
+   assert.equal((await f.app().handle(cb(2,groupRoute,300))).status,'DENIED');
+   assert.equal((await f.app().handle(cb(3,groupRoute,200,true))).status,'DENIED');
+   const group=await f.app().handle(cb(4,groupRoute,200));
+   await f.app().handle(cb(5,route(group,'pr:1:w:'),200));
+   await f.policy.revokeGrant('100','200','chat.manage',CHAT);
+   assert.equal((await f.app().handle(msg(6,'spam',200))).status,'DENIED');
+   assert.equal((await f.store.snapshot()).protectionPolicies,undefined);
+  }finally{await f.close();}
+ });
+ test('invalid word retries safely and concurrent messages cannot append twice ('+engine+')',async()=>{
+  const f=await fixture();try{
+   const home=await f.app().handle(cb(1,'pr:1:h'));
+   const group=await f.app().handle(cb(2,route(home,'pr:1:g:')));
+   await f.app().handle(cb(3,route(group,'pr:1:w:')));
+   const invalid=await f.app().handle(msg(4,'two words'));
+   assert.equal(invalid.status,'APPLIED');assert.equal((await f.store.snapshot()).protectionPolicies,undefined);
+   await Promise.all([f.app().handle(msg(5,'spam')),f.app().handle(msg(6,'fraud'))]);
+   assert.equal((await f.store.snapshot()).protectionPolicies?.[0]?.policy.rules.length,1);
+  }finally{await f.close();}
+ });
+ test('restored expiry extension is rejected without saving an operator input ('+engine+')',async()=>{
+  const f=await fixture();try{
+   const home=await f.app().handle(cb(1,'pr:1:h'));
+   const group=await f.app().handle(cb(2,route(home,'pr:1:g:')));
+   await f.app().handle(cb(3,route(group,'pr:1:w:')));
+   await f.store.transaction(s=>{s.wizards[0]!.expiresAt+=100000;});f.setTime(NOW+100000);
+   assert.equal((await f.app().handle(msg(4,'must_not_save'))).status,'DENIED');
+   assert.equal((await f.store.snapshot()).protectionPolicies,undefined);
+  }finally{await f.close();}
+ });
+ test('existing custom rule identifiers cannot block adding a valid word ('+engine+')',async()=>{
+  const f=await fixture();try{
+   const service=new GroupProtectionPolicyService(f.store,f.policy,()=>NOW);
+   await service.save('100',{chatId:CHAT,revision:1,mode:'OFF',rules:[{id:'draft',kind:'WORD',value:'old',enabled:false,action:'REVIEW'}],allowedDomains:[],allowedPhrases:[],exemptMemberIds:[]},f.policy.chatRevision(await f.store.snapshot(),CHAT),0);
+   const home=await f.app().handle(cb(1,'pr:1:h'));
+   const group=await f.app().handle(cb(2,route(home,'pr:1:g:')));
+   await f.app().handle(cb(3,route(group,'pr:1:w:')));
+   assert.equal((await f.app().handle(msg(4,'new'))).status,'APPLIED');
+   assert.equal((await f.store.snapshot()).protectionPolicies?.[0]?.policy.rules.length,2);
+  }finally{await f.close();}
+ });
+ test('rule activation, proposed action and deletion confirmation update only the chosen local policy ('+engine+')',async()=>{
+  const f=await fixture();try{
+   let id=1;
+   const home=await f.app().handle(cb(id++,'pr:1:h'));
+   const group=await f.app().handle(cb(id++,route(home,'pr:1:g:')));
+   await f.app().handle(cb(id++,route(group,'pr:1:f:')));
+   let current=await f.app().handle(msg(id++,'عبارة اختبار'));
+   let list=await f.app().handle(cb(id++,route(current,'pr:1:l:')));
+   let detail=await f.app().handle(cb(id++,route(list,'pr:1:r:')));
+   const proposedDelete=detail.plan!.inlineMarkup!.inline_keyboard.flat().find(b=>b.callback_data.startsWith('pr:1:a:')&&b.callback_data.endsWith(':d'))!;
+   current=await f.app().handle(cb(id++,proposedDelete.callback_data));
+   list=await f.app().handle(cb(id++,route(current,'pr:1:l:')));
+   detail=await f.app().handle(cb(id++,route(list,'pr:1:r:')));
+   current=await f.app().handle(cb(id++,route(detail,'pr:1:e:')));
+   current=await f.app().handle(cb(id++,route(current,'pr:1:m:')));
+   const cfg=(await f.store.snapshot()).protectionPolicies![0]!.policy;
+   assert.equal(cfg.mode,'MONITOR');assert.equal(cfg.rules[0]?.enabled,true);assert.equal(cfg.rules[0]?.action,'DELETE');
+   list=await f.app().handle(cb(id++,route(current,'pr:1:l:')));
+   detail=await f.app().handle(cb(id++,route(list,'pr:1:r:')));
+   const deletePreview=await f.app().handle(cb(id++,route(detail,'pr:1:d:')));
+   assert.equal((await f.store.snapshot()).protectionPolicies![0]!.policy.rules.length,1);
+   const confirm=route(deletePreview,'pr:1:x:');
+   assert.equal((await f.app().handle(cb(id++,confirm))).status,'APPLIED');
+   assert.equal((await f.store.snapshot()).protectionPolicies![0]!.policy.rules.length,0);
+   assert.equal((await f.app().handle(cb(id++,confirm))).status,'DENIED');
+   assert.equal((await f.store.snapshot()).moderationOperations.length,0);
+  }finally{await f.close();}
+ });
+ test('a policy revision changed during a prompt rejects its pending input ('+engine+')',async()=>{
+  const f=await fixture();try{
+   const home=await f.app().handle(cb(1,'pr:1:h'));
+   const group=await f.app().handle(cb(2,route(home,'pr:1:g:')));
+   await f.app().handle(cb(3,route(group,'pr:1:w:')));
+   const service=new GroupProtectionPolicyService(f.store,f.policy,()=>NOW);
+   await service.save('100',{chatId:CHAT,revision:1,mode:'OFF',rules:[],allowedDomains:[],allowedPhrases:[],exemptMemberIds:[]},f.policy.chatRevision(await f.store.snapshot(),CHAT),0);
+   assert.equal((await f.app().handle(msg(4,'PRIVATE_UNSAVED_INPUT'))).status,'DENIED');
+   assert.equal(JSON.stringify(await f.store.snapshot()).includes('PRIVATE_UNSAVED_INPUT'),false);
+  }finally{await f.close();}
+ });
+ test('authorized staff enter the correct group editor from their existing staff card ('+engine+')',async()=>{
+  const f=await fixture();try{
+   await f.policy.grant('100','200','chat.manage',CHAT,NOW+600000);
+   const home=await f.app().handle(msg(1,'/staffinline',200));
+   const card=await f.app().handle(cb(2,route(home,'ms:1:g:'),200));
+   const editor=await f.app().handle(cb(3,route(card,'pr:1:g:'),200));
+   assert.equal(editor.status,'APPLIED');assert.match(editor.plan?.text??'',/الكلمات والعبارات/);
+  }finally{await f.close();}
+ });
+ test('an expiry or navigation to another inline area cancels input capture ('+engine+')',async()=>{
+  const f=await fixture();try{
+   const home=await f.app().handle(cb(1,'pr:1:h'));
+   const group=await f.app().handle(cb(2,route(home,'pr:1:g:')));
+   await f.app().handle(cb(3,route(group,'pr:1:w:')));
+   await f.app().handle(cb(4,'mi:1:h'));
+   await f.app().handle(msg(5,'must_not_save'));
+   assert.equal((await f.store.snapshot()).protectionPolicies,undefined);
+   await f.app().handle(cb(6,route(group,'pr:1:w:')));f.setTime(NOW+300000);
+   assert.equal((await f.app().handle(msg(7,'also_not_saved'))).status,'DENIED');
+   assert.equal((await f.store.snapshot()).protectionPolicies,undefined);
+  }finally{await f.close();}
+ });
+ test('ambiguous restored input sessions do not consume or store a private sample ('+engine+')',async()=>{
+  const f=await fixture();try{
+   const home=await f.app().handle(cb(1,'pr:1:h'));
+   const group=await f.app().handle(cb(2,route(home,'pr:1:g:')));
+   await f.app().handle(cb(3,route(group,'pr:1:w:')));
+   await f.store.transaction(s=>{s.wizards.push(structuredClone(s.wizards[0]!));});
+   assert.equal((await f.app().handle(msg(4,'PRIVATE_DUPLICATE_SESSION'))).status,'DENIED');
+   const state=await f.store.snapshot();assert.ok(state.wizards.every(w=>w.status==='ACTIVE'));
+   assert.equal(JSON.stringify(state).includes('PRIVATE_DUPLICATE_SESSION'),false);
+  }finally{await f.close();}
+ });
+ test('editing a word preserves its identifier and chosen settings ('+engine+')',async()=>{
+  const f=await fixture();try{
+   const service=new GroupProtectionPolicyService(f.store,f.policy,()=>NOW);
+   await service.save('100',{chatId:CHAT,revision:1,mode:'MONITOR',rules:[{id:'stable',kind:'WORD',value:'old',enabled:true,action:'DELETE'}],allowedDomains:[],allowedPhrases:[],exemptMemberIds:[]},f.policy.chatRevision(await f.store.snapshot(),CHAT),0);
+   const home=await f.app().handle(cb(1,'pr:1:h'));
+   const group=await f.app().handle(cb(2,route(home,'pr:1:g:')));
+   const list=await f.app().handle(cb(3,route(group,'pr:1:l:')));
+   const detail=await f.app().handle(cb(4,route(list,'pr:1:r:')));
+   await f.app().handle(cb(5,route(detail,'pr:1:v:')));
+   assert.equal((await f.app().handle(msg(6,'new'))).status,'APPLIED');
+   const rules=(await f.store.snapshot()).protectionPolicies![0]!.policy.rules;
+   assert.deepEqual(rules,[{id:'stable',kind:'WORD',value:'new',enabled:true,action:'DELETE'}]);
+  }finally{await f.close();}
+ });
+ test('queued editor screens are reauthorized before delivery after a staff grant is revoked ('+engine+')',async()=>{
+  const f=await fixture();try{
+   await f.policy.grant('100','200','chat.manage',CHAT,NOW+600000);
+   const home=await f.app().handle(cb(1,'pr:1:h',200));
+   const group=await f.app().handle(cb(2,route(home,'pr:1:g:'),200));
+   await f.policy.revokeGrant('100','200','chat.manage',CHAT);
+   let sends=0;
+   const dispatcher=new TelegramReplyDispatcher(f.store,f.policy,{send:async()=>{sends++;return {status:'CONFIRMED',messageId:99};}},()=>NOW);
+   assert.equal((await dispatcher.dispatch(group.deliveryKey!)).status,'FAILED_CONFIRMED');
+   assert.equal(sends,0);
+   const job=(await f.store.snapshot()).telegramReplyJobs!.find(j=>j.updateKey===group.deliveryKey)!;
+   assert.equal(job.plan,undefined);assert.equal('adminUIAccess' in job,false);
+  }finally{await f.close();}
+ });
+ test('a current editor reply delivers and its administrative witness is redacted ('+engine+')',async()=>{
+  const f=await fixture();try{
+   const result=await f.app().handle(cb(1,'pr:1:h'));
+   const job=(await f.store.snapshot()).telegramReplyJobs!.find(j=>j.updateKey===result.deliveryKey)!;
+   assert.equal('adminUIAccess' in result,false);
+   assert.equal(job.privateReplyKind,'ADMIN_SCOPED');
+   let sends=0;
+   const dispatcher=new TelegramReplyDispatcher(f.store,f.policy,{send:async()=>{sends++;return {status:'CONFIRMED',messageId:99};}},()=>NOW);
+   assert.equal((await dispatcher.dispatch(result.deliveryKey!)).status,'CONFIRMED');assert.equal(sends,1);
+   const after=(await f.store.snapshot()).telegramReplyJobs!.find(j=>j.updateKey===result.deliveryKey)!;
+   assert.equal('adminUIAccess' in after,false);assert.equal(after.privateReplyKind,undefined);
+  }finally{await f.close();}
+ });
+ test('queued administrative views reject stale epochs, clock rollback and extended expiry ('+engine+')',async()=>{
+  for(const kind of ['CHANGED','ROLLBACK','EXPIRED','EXTENDED']){
+   const f=await fixture();try{
+    const result=await f.app().handle(cb(1,'pr:1:h'));
+    if(kind==='CHANGED')await new GroupProtectionPolicyService(f.store,f.policy,()=>NOW).save('100',{
+     chatId:CHAT,revision:1,mode:'OFF',rules:[],allowedDomains:[],allowedPhrases:[],exemptMemberIds:[]
+    },f.policy.chatRevision(await f.store.snapshot(),CHAT),0);
+    if(kind==='EXTENDED')await f.store.transaction(s=>{s.telegramReplyJobs![0]!.adminUIAccess!.expiresAt++;});
+    let sends=0;
+    const at=kind==='ROLLBACK'?NOW-1:kind==='EXPIRED'?NOW+120000:NOW;
+    const dispatcher=new TelegramReplyDispatcher(f.store,f.policy,{send:async()=>{sends++;return {status:'CONFIRMED',messageId:99};}},()=>at);
+    assert.equal((await dispatcher.dispatch(result.deliveryKey!)).status,'FAILED_CONFIRMED',kind);assert.equal(sends,0);
+   }finally{await f.close();}
+  }
+ });
+ test('administrative origin cannot lose its guard or be recast as an unscoped private reply ('+engine+')',async()=>{
+  const f=await fixture();try{
+   await f.app().handle(cb(1,'pr:1:h'));
+   const before=await f.store.snapshot();
+   await assert.rejects(f.store.transaction(s=>{delete s.telegramReplyJobs![0]!.adminUIAccess;}),/Unsupported state schema/);
+   await assert.rejects(f.store.transaction(s=>{s.telegramReplyJobs![0]!.privateReplyKind='LOCAL';}),/Unsupported state schema/);
+   assert.deepEqual(await f.store.snapshot(),before);
+  }finally{await f.close();}
+ });
+ test('monitor mode records one privacy-limited observation for a real incoming text update ('+engine+')',async()=>{
+  const f=await fixture();try{
+   await new GroupProtectionPolicyService(f.store,f.policy,()=>NOW).save('100',{
+    chatId:CHAT,revision:1,mode:'MONITOR',rules:[{id:'word',kind:'WORD',value:'spam',enabled:true,action:'DELETE'}],allowedDomains:[],allowedPhrases:[],exemptMemberIds:[]
+   },f.policy.chatRevision(await f.store.snapshot(),CHAT),0);
+   const incoming={update_id:700,message:{message_id:700,chat:{id:Number(CHAT),type:'supergroup'},from:{id:300,is_bot:false},text:'spam PRIVATE_INCOMING_SAMPLE'}};
+   await f.app().handle(incoming);await f.app().handle(incoming);
+   const state=await f.store.snapshot();
+   assert.equal(state.audit.filter(a=>a.reason.startsWith('PROTECTION_MONITOR_MATCH')).length,1);
+   assert.equal(state.moderationOperations.length,0);
+   assert.equal(JSON.stringify(state).includes('PRIVATE_INCOMING_SAMPLE'),false);
+  }finally{await f.close();}
+ });
+ test('hidden text-link entities are monitored and malformed UTF-16 ranges are not treated as clear ('+engine+')',async()=>{
+  const f=await fixture();try{
+   await new GroupProtectionPolicyService(f.store,f.policy,()=>NOW).save('100',{
+    chatId:CHAT,revision:1,mode:'MONITOR',rules:[{id:'links',kind:'LINK',hosts:'*',enabled:true,action:'REVIEW'}],allowedDomains:[],allowedPhrases:[],exemptMemberIds:[]
+   },f.policy.chatRevision(await f.store.snapshot(),CHAT),0);
+   const base={message_id:700,chat:{id:Number(CHAT),type:'supergroup'},from:{id:300,is_bot:false}};
+   await f.app().handle({update_id:700,message:{...base,text:'اضغط هنا',entities:[{type:'text_link',offset:0,length:8,url:'https://external.test/'}]}});
+   await f.app().handle({update_id:701,message:{...base,text:'😀x',entities:[{type:'url',offset:1,length:1}]}});
+   const audit=(await f.store.snapshot()).audit;
+   assert.equal(audit.filter(a=>a.reason.startsWith('PROTECTION_MONITOR_MATCH')).length,1);
+   assert.equal(audit.filter(a=>a.reason==='PROTECTION_MONITOR_INPUT_UNAVAILABLE').length,1);
+  }finally{await f.close();}
+ });
+ test('revoked groups and protected operators do not enter incoming text analysis ('+engine+')',async()=>{
+  const f=await fixture();try{
+   await new GroupProtectionPolicyService(f.store,f.policy,()=>NOW).save('100',{
+    chatId:CHAT,revision:1,mode:'MONITOR',rules:[{id:'word',kind:'WORD',value:'spam',enabled:true,action:'REVIEW'}],allowedDomains:[],allowedPhrases:[],exemptMemberIds:[]
+   },f.policy.chatRevision(await f.store.snapshot(),CHAT),0);
+   const incoming=(id:number,actor:number)=>({update_id:id,message:{message_id:id,chat:{id:Number(CHAT),type:'supergroup'},from:{id:actor,is_bot:false},text:'spam'}});
+   await f.app().handle(incoming(700,100));await f.policy.revokeChat('100',CHAT);await f.app().handle(incoming(701,300));
+   assert.equal((await f.store.snapshot()).audit.filter(a=>a.reason.startsWith('PROTECTION_MONITOR_')).length,0);
+  }finally{await f.close();}
+ });
+ test('home cancels a pending editor before further private text ('+engine+')',async()=>{
+  const f=await fixture();try{
+   const home=await f.app().handle(cb(1,'pr:1:h'));
+   const group=await f.app().handle(cb(2,route(home,'pr:1:g:')));
+   await f.app().handle(cb(3,route(group,'pr:1:w:')));
+   await f.app().handle(msg(4,'🏠 الرئيسية'));
+   await f.app().handle(msg(5,'not_saved'));
+   assert.equal((await f.store.snapshot()).protectionPolicies,undefined);
+  }finally{await f.close();}
+ });
+}

@@ -1741,8 +1741,8 @@
       "implementation": "PARTIAL_LOCAL",
       "evidence": {
         "code": "src/group-protection-policy.ts",
-        "tests": "tests/group-protection-policy.test.ts",
-        "limit": "حفظ MONITOR واختبار بلا أثر؛ لا ربط تلقائي بالرسائل الواردة."
+        "tests": "tests/telegram-protection-editor.test.ts",
+        "limit": "مراقبة النص الوارد وتدقيق بلا محتوى أو عقوبة؛ الوسائط والتعديلات والقياس الشامل غير مكتملة."
       }
     },
     {
@@ -5727,9 +5727,9 @@
       ],
       "implementation": "PARTIAL_LOCAL",
       "evidence": {
-        "code": "src/group-protection-policy.ts",
-        "tests": "tests/group-protection-policy.test.ts",
-        "limit": "تخزين سياسة مرقمة لكل مجموعة؛ القوالب المركزية وواجهة التعديل غير مكتملتين."
+        "code": "src/telegram-protection-editor.ts",
+        "tests": "tests/telegram-protection-editor.test.ts",
+        "limit": "تخزين مرقم وواجهة كلمات وعبارات لكل مجموعة؛ القوالب المركزية وحوكمة الشبكات غير مكتملة."
       }
     },
     {
@@ -5875,9 +5875,9 @@
       ],
       "implementation": "PARTIAL_LOCAL",
       "evidence": {
-        "code": "src/protection-rules.ts",
-        "tests": "tests/protection-rules.test.ts",
-        "limit": "محرك Dry Run واختبارات؛ لم تربط شاشة تعديل القواعد بعد."
+        "code": "src/telegram-protection-editor.ts",
+        "tests": "tests/telegram-protection-editor.test.ts",
+        "limit": "واجهة تعديل واختبار قواعد المجموعة دون تخزين العينة؛ السماح المركزي وسائر أنواع القواعد بالواجهة غير مكتملة."
       }
     },
     {

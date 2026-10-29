@@ -36,7 +36,7 @@ for(let s=0;s<ownerInlineSections.length;s++){
   const screen=ownerInlineRender(route);
   assert.ok(screen&&isValidTelegramInlineKeyboard(screen.keyboard),route);
   assert.ok(screen.keyboard.inline_keyboard.flat().some(b=>b.callback_data==='mi:1:s:'+key+':'+Math.floor(i/8)),route+' back');
-  const special=new Set(['mi:1:i:03:01','mi:1:i:02:01','mi:1:i:02:15','mi:1:i:02:16','mi:1:i:02:13']);
+  const special=new Set(['mi:1:i:03:01','mi:1:i:02:01','mi:1:i:02:15','mi:1:i:02:16','mi:1:i:02:13','mi:1:i:02:07']);
   rows.push({section:key,sectionTitle:section.title,button:code(i+1),label:labels[i],callback:route,
    status:ownerInlineLinkedReadOnly(route)!==null||special.has(route)?'LOCAL_VIEW':'DESIGN_ONLY'});
  }
