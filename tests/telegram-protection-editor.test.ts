@@ -570,6 +570,18 @@ for(const engine of ['json','sqlite'] as const){
    assert.match(detail.plan!.text,/معاد توجيهها/);
   }finally{await f.close();}
  });
+ test('invalid message input does not consume flood capacity or create a false match ('+engine+')',async()=>{
+  const f=await fixture();try{
+   const service=new GroupProtectionPolicyService(f.store,f.policy,()=>NOW);
+   assert.equal((await service.save('100',{chatId:CHAT,revision:1,mode:'MONITOR',rules:[],allowedDomains:[],allowedPhrases:[],exemptMemberIds:[],flood:{enabled:true,limit:1,windowMs:3000,action:'REVIEW'}},f.policy.chatRevision(await f.store.snapshot(),CHAT),0)).status,'SAVED');
+   assert.equal(await service.observeIncomingMessage({chatId:CHAT,memberId:'300',type:'TEXT',text:'x'.repeat(4097)},[], 'b3-webhook:test:1'),'UNAVAILABLE');
+   assert.equal((await f.store.snapshot()).protectionFloodWindows?.length??0,0);
+   assert.equal(await service.observeIncomingMessage({chatId:CHAT,memberId:'300',type:'TEXT',text:'valid'},[], 'b3-webhook:test:2'),'OBSERVED');
+   const state=await f.store.snapshot();
+   assert.equal(state.protectionFloodWindows?.[0]?.events.length,1);
+   assert.equal(state.audit.filter(a=>a.reason.startsWith('PROTECTION_MONITOR_MATCH')).length,0);
+  }finally{await f.close();}
+ });
  test('configured flood monitoring survives app restart and deduplicates incoming updates ('+engine+')',async()=>{
   const f=await fixture();try{
    const saved=await new GroupProtectionPolicyService(f.store,f.policy,()=>NOW).save('100',{

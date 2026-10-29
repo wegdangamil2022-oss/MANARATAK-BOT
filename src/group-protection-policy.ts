@@ -94,12 +94,16 @@ export class GroupProtectionPolicyService{
    if(this.policy.isOwner(member)||this.policy.has(state,member,'chat.manage',chat,now)||record.policy.exemptMemberIds.includes(member))return 'EXEMPT';
    const key=updateKey+':protection:'+chat;
    if(state.audit.some(a=>a.updateKey===key))return 'DUPLICATE';
-   const flood=countTraffic?this.observeFlood(state,record,member,updateKey,now):'CLEAR';
-   if(flood==='DUPLICATE')return 'DUPLICATE';
    const body=message.text??message.caption??'';
    const links=typeof body==='string'&&body.length<=4096?protectionEntityLinks(body,entities):null;
    const result=links===null?null:evaluateProtectionRules(record.policy,{...message,links});
-   if(flood==='INVALID'||!result||result.status==='INVALID_MESSAGE'||result.status==='INVALID_POLICY'){
+   if(!result||result.status==='INVALID_MESSAGE'||result.status==='INVALID_POLICY'){
+    state.audit.push({updateKey:key,decision:'NOOP',reason:'PROTECTION_MONITOR_INPUT_UNAVAILABLE',policyVersion:record.chatPolicyVersion,at:now});
+    return 'UNAVAILABLE';
+   }
+   const flood=countTraffic?this.observeFlood(state,record,member,updateKey,now):'CLEAR';
+   if(flood==='DUPLICATE')return 'DUPLICATE';
+   if(flood==='INVALID'){
     state.audit.push({updateKey:key,decision:'NOOP',reason:'PROTECTION_MONITOR_INPUT_UNAVAILABLE',policyVersion:record.chatPolicyVersion,at:now});
     return 'UNAVAILABLE';
    }
