@@ -8,6 +8,7 @@ import {isValidTelegramInlineKeyboard} from './telegram-inline-owner.js';
 import {validStudioNativeKeyboard} from './telegram-studio-rich.js';
 import {groupQuestionEpochDigest,groupMenuEpochDigest,privateGroupEpochDigest} from './telegram-group-access.js';
 import {privateLibraryEpoch} from './private-library-access.js';
+import {studioPreviewEpoch} from './studio-preview-access.js';
 import {subscriptionRequirementMode,acceptsActiveSubscriptionEvidence} from './subscription-integrity.js';
 import type {SubscriptionGate} from './subscription.js';
 import type {MembershipPort} from './education-interactions.js';
@@ -160,17 +161,17 @@ export function validTelegramReplyJob(v:unknown):v is TelegramReplyJob{
   (j.privateReplyKind===undefined||
    (j.status==='QUEUED'&&validPlan(j.plan)&&
     !j.plan.chatId.startsWith('-')&&
-    (j.privateReplyKind==='LOCAL'||j.privateReplyKind==='GROUP_SCOPED'||j.privateReplyKind==='ADMIN_SCOPED'||j.privateReplyKind==='LIBRARY_SCOPED')&&
+    (j.privateReplyKind==='LOCAL'||j.privateReplyKind==='GROUP_SCOPED'||j.privateReplyKind==='ADMIN_SCOPED'||j.privateReplyKind==='LIBRARY_SCOPED'||j.privateReplyKind==='STUDIO_SCOPED')&&
     j.groupReplyKind===undefined&&j.groupQuestionAccess===undefined&&
     j.groupMenuAccess===undefined&&
     ((j.privateReplyKind==='LOCAL'&&j.privateGroupAccess===undefined&&j.adminUIAccess===undefined&&j.privateLibraryAccess===undefined)||
-     (j.privateReplyKind==='ADMIN_SCOPED'&&j.privateGroupAccess===undefined&&j.privateLibraryAccess===undefined&&validAdminUIAccess(j.adminUIAccess)&&j.plan.chatId===j.adminUIAccess.actorId)||
+     ((j.privateReplyKind==='ADMIN_SCOPED'||j.privateReplyKind==='STUDIO_SCOPED')&&j.privateGroupAccess===undefined&&j.privateLibraryAccess===undefined&&validAdminUIAccess(j.adminUIAccess)&&j.plan.chatId===j.adminUIAccess.actorId)||
      (j.privateReplyKind==='LIBRARY_SCOPED'&&j.privateGroupAccess===undefined&&j.adminUIAccess===undefined&&validAdminUIAccess(j.privateLibraryAccess)&&j.plan.chatId===j.privateLibraryAccess.actorId)||
      (j.privateReplyKind==='GROUP_SCOPED'&&j.adminUIAccess===undefined&&j.privateLibraryAccess===undefined&&
       validPrivateGroupAccess(j.privateGroupAccess)&&
       j.plan.chatId===j.privateGroupAccess.actorId))))&&
   (j.adminUIAccess===undefined||(j.status==='QUEUED'&&validPlan(j.plan)&&validAdminUIAccess(j.adminUIAccess)&&
-   j.plan.chatId===j.adminUIAccess.actorId&&j.privateReplyKind==='ADMIN_SCOPED'&&j.privateGroupAccess===undefined&&
+   j.plan.chatId===j.adminUIAccess.actorId&&(j.privateReplyKind==='ADMIN_SCOPED'||j.privateReplyKind==='STUDIO_SCOPED')&&j.privateGroupAccess===undefined&&
    j.groupReplyKind===undefined&&j.groupQuestionAccess===undefined&&j.groupMenuAccess===undefined))&&
   (j.privateLibraryAccess===undefined||(j.status==='QUEUED'&&validPlan(j.plan)&&validAdminUIAccess(j.privateLibraryAccess)&&
    j.plan.chatId===j.privateLibraryAccess.actorId&&j.privateReplyKind==='LIBRARY_SCOPED'&&j.adminUIAccess===undefined&&j.privateGroupAccess===undefined&&
@@ -307,7 +308,7 @@ export class TelegramReplyDispatcher {
    const admin=job.adminUIAccess,now=this.clock();
    const adminDenied=Boolean(admin&&(admin.actorId!==plan.chatId||!Number.isSafeInteger(job.queuedAt)||
     now<job.queuedAt!||now>=admin.expiresAt||admin.expiresAt>job.queuedAt!+ADMIN_UI_TTL_MS||
-    protectionUIEpoch(s,this.policy,admin.actorId,now)!==admin.epoch));
+    (job.privateReplyKind==='STUDIO_SCOPED'?studioPreviewEpoch(s,this.policy,admin.actorId,now):protectionUIEpoch(s,this.policy,admin.actorId,now))!==admin.epoch));
    const library=job.privateLibraryAccess;
    const libraryDenied=Boolean(library&&(library.actorId!==plan.chatId||!Number.isSafeInteger(job.queuedAt)||
     now<job.queuedAt!||now>=library.expiresAt||library.expiresAt>job.queuedAt!+ADMIN_UI_TTL_MS||

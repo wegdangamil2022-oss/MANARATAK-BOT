@@ -30,6 +30,7 @@ import {EducationCategoryEditor} from './education-category-editor.js';
 import {renderPrivateSettings} from './telegram-inline-private-settings.js';
 import {protectionUIEpoch,ADMIN_UI_TTL_MS} from './protection-ui-access.js';
 import {privateLibraryEpoch} from './private-library-access.js';
+import {studioPreviewEpoch} from './studio-preview-access.js';
 import {OwnerDelegationEditor} from './telegram-inline-delegation-edit.js';
 import {renderOwnerInlineGroups} from './telegram-inline-groups.js';
 import {OwnerGroupSetup} from './telegram-inline-group-setup.js';
@@ -1149,6 +1150,8 @@ export class TelegramUpdateApplication {
      event.callbackData?.startsWith('si:1:')||event.callbackData?.startsWith('si:2:')||event.text==='/studentinline'||
      this.opts.studentMenuMode==='inline'&&([menuLabels.scholarships,menuLabels.courses,menuLabels.universities,menuLabels.exams,menuLabels.files,menuLabels.library] as string[]).includes(event.text));
     const beforeLibrary=libraryInput?privateLibraryEpoch(await this.opts.store.snapshot(),this.opts.policy,event.actorId):null;
+    const studioInput=event.kind==='private'&&this.opts.policy.isOwner(event.actorId)&&/^(?:st:1:[vt]:|st:1:e:08:)/u.test(event.callbackData??'');
+    const beforeStudio=studioInput?studioPreviewEpoch(await this.opts.store.snapshot(),this.opts.policy,event.actorId,this.clock()):null;
     let handled:ProcessedReply;
     try{handled=await this.process(event);}catch(err){handled={status:'DENIED',reason:safeError(err)};}
     if(event.kind==='private'&&event.callbackData&&!event.callbackData.startsWith('pr:1:')&&
@@ -1166,11 +1169,11 @@ export class TelegramUpdateApplication {
      event.text==='/ownerinline'||event.text==='/ownerlegacy'||event.text==='/ownerrecover'||isOwnerMenuText(event.text)||
      handled.reason==='CATEGORY_TEXT_PREVIEW'||handled.reason==='DELEGATION_TEXT_PREVIEW'||handled.reason==='STUDIO_DRAFT_SAVED');
     if(ownerScreen&&handled.plan&&!handled.adminUIAccess){
-     const state=await this.opts.store.snapshot(),now=this.clock(),epoch=protectionUIEpoch(state,this.opts.policy,event.actorId,now);
+     const state=await this.opts.store.snapshot(),now=this.clock(),epoch=studioInput?studioPreviewEpoch(state,this.opts.policy,event.actorId,now):protectionUIEpoch(state,this.opts.policy,event.actorId,now);
      const recovery=!this.opts.policy.privateFeature(state,'owner.dashboard',event.actorId)&&
       (callback.startsWith('ps:1:')||event.text==='/ownerrecover')&&
       (handled.plan.text.startsWith('<b>استعادة لوحة المالك</b>')||handled.plan.text.startsWith('<b>معاينة إعداد الخاص</b>'));
-     if(epoch&&Number.isSafeInteger(now)&&now>=0&&now<=8640000000000000-ADMIN_UI_TTL_MS)handled={...handled,adminUIAccess:{actorId:event.actorId,epoch,expiresAt:now+ADMIN_UI_TTL_MS}};
+     if(epoch&&(!studioInput||epoch===beforeStudio)&&Number.isSafeInteger(now)&&now>=0&&now<=8640000000000000-ADMIN_UI_TTL_MS)handled={...handled,adminUIAccess:{actorId:event.actorId,epoch,expiresAt:now+ADMIN_UI_TTL_MS}};
      else if(!recovery){const {plan:_,...withoutPlan}=handled;handled={...withoutPlan,reason:'OWNER_RESPONSE_WITHHELD'};}
     }
     if(libraryInput&&handled.plan){
@@ -1183,7 +1186,7 @@ export class TelegramUpdateApplication {
     // Commit the decision and outbound reply intent in one durable transaction.
     // No external call occurs before the outbox row exists.
     await this.opts.store.finish(key,audit,handled.plan,handled.groupQuestionAccess,
-     handled.groupMenuAccess,handled.privateGroupAccess,handled.adminUIAccess,handled.privateLibraryAccess);
+     handled.groupMenuAccess,handled.privateGroupAccess,handled.adminUIAccess,handled.privateLibraryAccess,studioInput&&!!handled.adminUIAccess);
     // Temporary actor IDs are only stored in the guarded queue, never returned.
     const {groupQuestionAccess:_,groupMenuAccess:__,privateGroupAccess:___,adminUIAccess:____,privateLibraryAccess:_____,...publicResult}=handled;
     const visible=publicResult.plan?{...publicResult,deliveryKey:key}:publicResult;
