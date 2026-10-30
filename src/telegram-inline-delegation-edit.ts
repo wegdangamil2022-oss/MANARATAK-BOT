@@ -22,6 +22,15 @@ export function delegationGroupEntry(s:BotState,id:string,version:number):string
  if(index<0||Math.floor(index/8)>999||!groups[index]!.scopes.some(scope=>['assistant','publishing','navigation','moderation'].includes(scope)))return null;
  return 'od:1:b:'+id+':'+version+':'+Math.floor(index/8);
 }
+/** The setup entry is only a navigation hint; the wizard reauthorizes on use. */
+function setupReturn(s:BotState,actor:string,id:string,now:number):string|null{
+ const matches=s.wizards.filter(w=>w.userId===actor&&w.chatId===actor&&w.topicId===''&&w.status==='ACTIVE'&&
+  Number.isSafeInteger(w.expiresAt)&&w.expiresAt>now&&w.expiresAt<=now+30*60*1000&&w.flow.startsWith('group-setup:'+id+':'));
+ if(matches.length!==1)return null;
+ const w=matches[0]!,m=/^group-setup:(-[1-9][0-9]{0,15}):(0|[1-9][0-9]{0,2}):[_bl]$/u.exec(w.flow);
+ if(!m||m[1]!==id||!Number.isSafeInteger(w.policyVersion)||w.policyVersion<1||w.policyVersion>9999999999)return null;
+ return 'gw:1:b:'+id+':'+w.policyVersion+':'+m[2];
+}
 const INPUT='delegation.input:',CONFIRM='delegation.confirm:';
 export class OwnerDelegationEditor{
  constructor(private store:BotStore,private policy:Policy,private clock:()=>number=Date.now){}
@@ -55,7 +64,8 @@ export class OwnerDelegationEditor{
   try{
    await this.cancel(actor);
    const selectedConfirm=confirm.exec(data);if(selectedConfirm){const applied=await this.policy.confirmOwnerDelegation(actor,'c_'+selectedConfirm[1],this.clock());if(!applied)return null;
-    return ui('<b>حُفظ '+(applied.kind==='GRANT'?'التفويض':'السحب')+' محليًا ✅</b>\nالنطاق: <code>'+escape(applied.chatId)+'</code>\nالمستخدم: <code>'+escape(applied.actor)+'</code>\nالقدرة: <code>'+escape(applied.capability)+'</code>\nلم تتغير حقوق Telegram.',[[button('↩️ التفويضات','mi:1:d:p:'+(applied.kind==='GRANT'?0:applied.page)),button('🏠 لوحة المالك','mi:1:h')]]);
+    let resume:string|null=null;try{resume=setupReturn(await this.store.snapshot(),actor,applied.chatId,this.clock());}catch{/* The grant is already committed. */}
+    return ui('<b>حُفظ '+(applied.kind==='GRANT'?'التفويض':'السحب')+' محليًا ✅</b>\nالنطاق: <code>'+escape(applied.chatId)+'</code>\nالمستخدم: <code>'+escape(applied.actor)+'</code>\nالقدرة: <code>'+escape(applied.capability)+'</code>\nلم تتغير حقوق Telegram.',[...(resume?[[button('↩️ متابعة معالج المجموعة',resume)]]:[]),[button('↩️ التفويضات','mi:1:d:p:'+(applied.kind==='GRANT'?0:applied.page)),button('🏠 لوحة المالك','mi:1:h')]]);
    }
    if(data==='od:1:x')return ui('أُلغيت خطوة التفويض.',[[button('↩️ التفويضات','mi:1:i:03:01')]]);
    const state=await this.store.snapshot(),now=this.auth(state,actor),r=revoke.exec(data);

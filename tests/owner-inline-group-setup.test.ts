@@ -12,6 +12,7 @@ import {TelegramUpdateApplication} from '../src/telegram-transport.js';
 import {isValidTelegramInlineKeyboard} from '../src/telegram-inline-owner.js';
 const NOW=1700000000000,CHAT='-100123';
 const cb=(i:number,data:string,actor=100,group=false)=>({update_id:i,callback_query:{id:'setup_'+i,from:{id:actor,is_bot:false},data,message:{message_id:77,from:{id:999,is_bot:true},chat:{id:group?Number(CHAT):actor,type:group?'supergroup':'private'}}}});
+const msg=(i:number,text:string)=>({update_id:i,message:{message_id:i,from:{id:100,is_bot:false},chat:{id:100,type:'private'},text}});
 type Result=Awaited<ReturnType<TelegramUpdateApplication['handle']>>;
 const button=(r:Result,text:string)=>{assert.ok(isValidTelegramInlineKeyboard(r.plan?.inlineMarkup));const b=r.plan!.inlineMarkup!.inline_keyboard.flat().find(x=>x.text.includes(text));assert.ok(b,'missing '+text);assert.ok(Buffer.byteLength(b.callback_data)<=64);return b.callback_data;};
 for(const engine of ['json','sqlite'] as const){
@@ -62,6 +63,19 @@ for(const engine of ['json','sqlite'] as const){
   const state=await f.store.snapshot();assert.equal(state.protectionPolicies!.length,1);assert.equal(state.protectionPolicies![0]!.policy.mode,'MONITOR');
   assert.equal(state.protectionPolicies![0]!.policy.rules[0]!.kind,'LINK');assert.equal(state.audit.filter(a=>a.reason==='GROUP_SETUP_MONITOR_SAVED').length,1);
   assert.match(results.find(r=>r.status==='APPLIED')!.plan!.text,/لم تُفحص حقوق Telegram/);
+ }finally{await f.close();}});
+ test(engine+' setup delegates within the selected group and resumes without losing progress',async()=>{const f=await fixture();try{
+  const first=await begin(f),selector=button(first,'تفويض في هذه المجموعة');
+  assert.equal((await f.app().handle(cb(4,selector,200))).status,'DENIED');
+  const options=await f.app().handle(cb(5,selector));assert.match(options.plan!.text,new RegExp(CHAT));
+  const duration=await f.app().handle(cb(6,button(options,'إدارة المجموعة')));
+  const input=await f.app().handle(cb(7,button(duration,'7 يوم')));assert.match(input.plan!.text,/معرّف المستخدم/);
+  const review=await f.app().handle(msg(8,'300'));assert.match(review.plan!.text,/لم يُحفظ بعد/);
+  const saved=await f.app().handle(cb(9,button(review,'تأكيد التفويض')));assert.match(saved.plan!.text,/لم تتغير حقوق Telegram/);
+  const resumed=await f.app().handle(cb(10,button(saved,'متابعة معالج المجموعة')));
+  assert.match(resumed.plan!.text,/استُعيد التقدم/);assert.ok(button(resumed,'متابعة الإعداد'));
+  const state=await f.store.snapshot();assert.equal(f.policy.has(state,'300','chat.manage',CHAT,NOW),true);
+  assert.equal(state.protectionPolicies,undefined);
  }finally{await f.close();}});
  test(engine+' back, cancellation and fresh group policy fence prevent old confirmation',async()=>{const f=await fixture();try{
   const first=await begin(f);const one=await f.app().handle(cb(4,button(first,'متابعة الإعداد')));
