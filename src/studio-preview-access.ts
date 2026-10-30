@@ -6,7 +6,7 @@ import {protectionUIEpoch} from './protection-ui-access.js';
 export function studioPreviewSourceEpoch(s:BotState):string{
  return createHash('sha256').update('MANARATAK:STUDIO-SOURCES:V1:').update(JSON.stringify([
   s.buttonStudio?.templates??[],s.buttonStudio?.settings??null,
-  s.privateFeatures['education.navigate'],s.educationCategories.filter(c=>c.scope==='private'),
+  s.privateSettingsRevision??0,s.privateFeatures['education.navigate'],s.educationCategories.filter(c=>c.scope==='private'),
   s.educationResources.filter(r=>r.scope==='private')
  ])).digest('hex');
 }

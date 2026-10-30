@@ -34,6 +34,10 @@ for(const engine of ['json','sqlite'] as const){
    assert.ok(service&&'callback_data' in service);const opened=await app.handle(cb(4,service.callback_data));assert.equal(opened.status,'APPLIED');
    await education.createCategory('100',{id:'root',scope:'private',title:'منح',order:1});
    assert.equal((await dispatcher.dispatch(library.deliveryKey!)).status,'FAILED_CONFIRMED');assert.equal((await dispatcher.dispatch(opened.deliveryKey!)).status,'FAILED_CONFIRMED');assert.equal(sent,1);
+   const settings=await app.handle(cb(7,route()));
+   await store.transaction(s=>{s.privateFeatures['education.navigate']=false;s.privateSettingsRevision=(s.privateSettingsRevision??0)+1;});
+   await store.transaction(s=>{s.privateFeatures['education.navigate']=true;s.privateSettingsRevision=(s.privateSettingsRevision??0)+1;});
+   assert.equal((await dispatcher.dispatch(settings.deliveryKey!)).status,'FAILED_CONFIRMED');assert.equal(sent,1);
    const revoked=await app.handle(cb(5,route()));await store.transaction(s=>{s.privateFeatures['owner.dashboard']=false;});
    assert.equal((await dispatcher.dispatch(revoked.deliveryKey!)).status,'FAILED_CONFIRMED');assert.equal(sent,1);
    await store.transaction(s=>{s.privateFeatures['owner.dashboard']=true;});
