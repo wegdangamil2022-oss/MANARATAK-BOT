@@ -30,7 +30,7 @@ import {EducationCategoryEditor} from './education-category-editor.js';
 import {renderPrivateSettings} from './telegram-inline-private-settings.js';
 import {protectionUIEpoch,ADMIN_UI_TTL_MS} from './protection-ui-access.js';
 import {privateLibraryEpoch} from './private-library-access.js';
-import {studioPreviewEpoch} from './studio-preview-access.js';
+import {studioPreviewEpoch,studioPreviewSourceEpoch} from './studio-preview-access.js';
 import {OwnerDelegationEditor} from './telegram-inline-delegation-edit.js';
 import {renderOwnerInlineGroups} from './telegram-inline-groups.js';
 import {OwnerGroupSetup} from './telegram-inline-group-setup.js';
@@ -1151,7 +1151,7 @@ export class TelegramUpdateApplication {
      this.opts.studentMenuMode==='inline'&&([menuLabels.scholarships,menuLabels.courses,menuLabels.universities,menuLabels.exams,menuLabels.files,menuLabels.library] as string[]).includes(event.text));
     const beforeLibrary=libraryInput?privateLibraryEpoch(await this.opts.store.snapshot(),this.opts.policy,event.actorId):null;
     const studioInput=event.kind==='private'&&this.opts.policy.isOwner(event.actorId)&&/^(?:st:1:[vt]:|st:1:e:08:)/u.test(event.callbackData??'');
-    const beforeStudio=studioInput?studioPreviewEpoch(await this.opts.store.snapshot(),this.opts.policy,event.actorId,this.clock()):null;
+    const beforeStudio=studioInput?studioPreviewSourceEpoch(await this.opts.store.snapshot()):null;
     let handled:ProcessedReply;
     try{handled=await this.process(event);}catch(err){handled={status:'DENIED',reason:safeError(err)};}
     if(event.kind==='private'&&event.callbackData&&!event.callbackData.startsWith('pr:1:')&&
@@ -1173,7 +1173,7 @@ export class TelegramUpdateApplication {
      const recovery=!this.opts.policy.privateFeature(state,'owner.dashboard',event.actorId)&&
       (callback.startsWith('ps:1:')||event.text==='/ownerrecover')&&
       (handled.plan.text.startsWith('<b>استعادة لوحة المالك</b>')||handled.plan.text.startsWith('<b>معاينة إعداد الخاص</b>'));
-     if(epoch&&(!studioInput||epoch===beforeStudio)&&Number.isSafeInteger(now)&&now>=0&&now<=8640000000000000-ADMIN_UI_TTL_MS)handled={...handled,adminUIAccess:{actorId:event.actorId,epoch,expiresAt:now+ADMIN_UI_TTL_MS}};
+     if(epoch&&(!studioInput||studioPreviewSourceEpoch(state)===beforeStudio)&&Number.isSafeInteger(now)&&now>=0&&now<=8640000000000000-ADMIN_UI_TTL_MS)handled={...handled,adminUIAccess:{actorId:event.actorId,epoch,expiresAt:now+ADMIN_UI_TTL_MS}};
      else if(!recovery){const {plan:_,...withoutPlan}=handled;handled={...withoutPlan,reason:'OWNER_RESPONSE_WITHHELD'};}
     }
     if(libraryInput&&handled.plan){

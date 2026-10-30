@@ -22,8 +22,11 @@ for(const engine of ['json','sqlite'] as const){
   try{
    let t=await svc.create('100','معاينة');t=await svc.edit('100',t.id,t.revision,{kind:'ADD_BUTTON',value:'رابط'});
    t=await svc.edit('100',t.id,t.revision,{kind:'ACTION',buttonId:t.draft.buttons[0]!.id,action:{kind:'URL',target:'https://example.org/path'}});
+   await policy.approveChat('100','-100123',['moderation']);
+   const home=await app.handle(cb(100,'pr:1:h'));const group=await app.handle(cb(101,home.plan!.inlineMarkup!.inline_keyboard.flat().find(b=>b.callback_data.startsWith('pr:1:g:'))!.callback_data));
+   await app.handle(cb(102,group.plan!.inlineMarkup!.inline_keyboard.flat().find(b=>b.callback_data.startsWith('pr:1:w:'))!.callback_data));
    const route=()=>`st:1:v:${t.id}:${t.revision}`;
-   const first=await app.handle(cb(1,route()));assert.equal((await store.snapshot()).telegramReplyJobs!.find(j=>j.updateKey===first.deliveryKey)!.privateReplyKind,'STUDIO_SCOPED');assert.equal((await dispatcher.dispatch(first.deliveryKey!)).status,'CONFIRMED');assert.equal(sent,1);
+   const first=await app.handle(cb(1,route()));assert.ok(first.plan,'navigation must cancel the previous protection input without withholding the preview');assert.equal((await store.snapshot()).telegramReplyJobs!.find(j=>j.updateKey===first.deliveryKey)!.privateReplyKind,'STUDIO_SCOPED');assert.equal((await dispatcher.dispatch(first.deliveryKey!)).status,'CONFIRMED');assert.equal(sent,1);
    const stale=await app.handle(cb(2,route()));t=await svc.edit('100',t.id,t.revision,{kind:'TEXT',value:'تغيير'});
    assert.equal((await dispatcher.dispatch(stale.deliveryKey!)).status,'FAILED_CONFIRMED');assert.equal(sent,1);
    t=await svc.edit('100',t.id,t.revision,{kind:'ACTION',buttonId:t.draft.buttons[0]!.id,action:{kind:'SERVICE',target:'student:open'}});
