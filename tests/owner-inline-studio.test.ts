@@ -147,4 +147,22 @@ for(const engine of ['json','sqlite'] as const){
    assert.equal((await f.app().handle(event(seq++,route))).status,'DENIED');
   }finally{await f.close();}
  });
+ test('studio preview rejects forged buttons from another page and native-only buttons without consuming seats ('+engine+')',async()=>{
+  const f=await fixture();try{
+   let t=await f.svc.create('100','صفحات محمية');
+   t=await f.svc.edit('100',t.id,t.revision,{kind:'ADD_BUTTON',value:'نسخ مباشر'});
+   t=await f.svc.edit('100',t.id,t.revision,{kind:'ADD_BUTTON',value:'خدمة مشروطة'});
+   const direct=t.draft.buttons[0]!,protectedButton=t.draft.buttons[1]!;
+   t=await f.svc.edit('100',t.id,t.revision,{kind:'CONDITION',buttonId:protectedButton.id,condition:{...protectedButton.condition,seats:1}});
+   t=await f.svc.edit('100',t.id,t.revision,{kind:'PAGE_SIZE',rows:1});
+   const prefix='st:1:t:'+t.id+':'+t.revision+':';
+   assert.equal((await f.app().handle(event(700,prefix+protectedButton.id+':0:0'))).status,'DENIED');
+   assert.equal((await f.app().handle(event(701,prefix+direct.id+':0:0'))).status,'DENIED');
+   assert.equal((await f.store.snapshot()).callbacks.some(c=>c.action.startsWith('studio.seat:')),false);
+   const page=await f.app().handle(event(702,'st:1:v:'+t.id+':'+t.revision+':0:1'));
+   const real=buttons(page).find(b=>b.text===protectedButton.title);assert.ok(real);
+   assert.equal((await f.app().handle(event(703,real.callback_data))).status,'APPLIED');
+   assert.equal((await f.store.snapshot()).callbacks.filter(c=>c.action.startsWith('studio.seat:')).length,1);
+  }finally{await f.close();}
+ });
 }

@@ -133,7 +133,8 @@ export async function renderOwnerInlineStudio(store:BotStore,policy:Policy,actor
   if(action==='L'&&button){const next=await svc.edit(actor,id,revision,{kind:'ACTION',buttonId:button.id,action:{kind:'MENU',target:parts[6]!}});return buttonScreen(next,next.draft.buttons.find(b=>b.id===button.id)!);}
   if(action==='t'&&button){
    const textPage=Number(parts[6]??0),buttonPage=Number(parts[7]??0),backRoute=key('v',t,textPage+':'+buttonPage);
-   if(!await renderOwnerInlineStudio(store,policy,actor,backRoute,clock))return null;
+   const preview=await renderOwnerInlineStudio(store,policy,actor,backRoute,clock);
+   if(!preview?.nativeKeyboard?.inline_keyboard.some(row=>row.some(item=>'callback_data' in item&&item.callback_data===data)))return null;
    await svc.pressPreview(actor,id,revision,button.id);
    if(button.action.kind==='MENU'){
     const target=(await svc.list(actor)).find(x=>x.id===button.action.target);if(!target)return null;
