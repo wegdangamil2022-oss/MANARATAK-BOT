@@ -229,4 +229,16 @@ for(const engine of ['json','sqlite'] as const){
    assert.equal((await f.store.snapshot()).callbacks.some(c=>c.action.startsWith('studio.seat:')),false);
   }finally{await f.close();}
  });
+ test('studio unavailable Mini App preview does not consume a seat ('+engine+')',async()=>{
+  const f=await fixture();try{
+   let t=await f.svc.create('100','تطبيق');t=await f.svc.edit('100',t.id,t.revision,{kind:'ADD_BUTTON',value:'التطبيق'});
+   const id=t.draft.buttons[0]!.id;
+   t=await f.svc.edit('100',t.id,t.revision,{kind:'ACTION',buttonId:id,action:{kind:'MINI_APP',target:'https://example.org/app'}});
+   t=await f.svc.edit('100',t.id,t.revision,{kind:'CONDITION',buttonId:id,condition:{role:'ANY',opensAt:0,closesAt:0,seats:1}});
+   const page=await f.app().handle(event(750,'st:1:v:'+t.id+':'+t.revision));
+   const result=await f.app().handle(event(751,select(page,'st:1:t:')));
+   assert.equal(result.status,'APPLIED');assert.match(result.plan!.text,/تحتاج اعتمادًا/);
+   assert.equal((await f.store.snapshot()).callbacks.some(c=>c.action.startsWith('studio.seat:')),false);
+  }finally{await f.close();}
+ });
 }
