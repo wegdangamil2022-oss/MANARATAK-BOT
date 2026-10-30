@@ -202,4 +202,31 @@ for(const engine of ['json','sqlite'] as const){
    assert.equal((await f.app().handle(event(726,next.callback_data))).status,'DENIED');
   }finally{await f.close();}
  });
+ test('studio disabled education service does not consume a preview seat ('+engine+')',async()=>{
+  const f=await fixture();try{
+   let t=await f.svc.create('100','خدمة');t=await f.svc.edit('100',t.id,t.revision,{kind:'ADD_BUTTON',value:'المكتبة'});
+   const id=t.draft.buttons[0]!.id;
+   t=await f.svc.edit('100',t.id,t.revision,{kind:'ACTION',buttonId:id,action:{kind:'SERVICE',target:'student:open'}});
+   t=await f.svc.edit('100',t.id,t.revision,{kind:'CONDITION',buttonId:id,condition:{role:'ANY',opensAt:0,closesAt:0,seats:1}});
+   const page=await f.app().handle(event(730,'st:1:v:'+t.id+':'+t.revision));const press=select(page,'st:1:t:');
+   await f.store.transaction(s=>{s.privateFeatures['education.navigate']=false;});
+   assert.equal((await f.app().handle(event(731,press))).status,'DENIED');
+   assert.equal((await f.store.snapshot()).callbacks.some(c=>c.action.startsWith('studio.seat:')),false);
+   await f.store.transaction(s=>{s.privateFeatures['education.navigate']=true;});
+   assert.equal((await f.app().handle(event(732,press))).status,'APPLIED');
+   assert.equal((await f.store.snapshot()).callbacks.filter(c=>c.action.startsWith('studio.seat:')).length,1);
+  }finally{await f.close();}
+ });
+ test('studio missing menu target does not consume a preview seat ('+engine+')',async()=>{
+  const f=await fixture();try{
+   let source=await f.svc.create('100','المصدر');const target=await f.svc.create('100','الوجهة');
+   source=await f.svc.edit('100',source.id,source.revision,{kind:'ADD_BUTTON',value:'افتح الوجهة'});const id=source.draft.buttons[0]!.id;
+   source=await f.svc.edit('100',source.id,source.revision,{kind:'ACTION',buttonId:id,action:{kind:'MENU',target:target.id}});
+   source=await f.svc.edit('100',source.id,source.revision,{kind:'CONDITION',buttonId:id,condition:{role:'ANY',opensAt:0,closesAt:0,seats:1}});
+   const page=await f.app().handle(event(740,'st:1:v:'+source.id+':'+source.revision));const press=select(page,'st:1:t:');
+   await f.store.transaction(s=>{s.buttonStudio!.templates=s.buttonStudio!.templates.filter(x=>x.id!==target.id);});
+   assert.equal((await f.app().handle(event(741,press))).status,'DENIED');
+   assert.equal((await f.store.snapshot()).callbacks.some(c=>c.action.startsWith('studio.seat:')),false);
+  }finally{await f.close();}
+ });
 }

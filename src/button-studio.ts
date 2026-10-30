@@ -105,6 +105,8 @@ export class ButtonStudioService{
  async cancelInput(actor:string):Promise<void>{await this.store.transaction(s=>{if(!this.policy.isOwner(actor))throw Error('STUDIO_NOT_AUTHORIZED');if(s.buttonStudio)s.buttonStudio.inputs=s.buttonStudio.inputs.filter(i=>i.actor!==actor);});}
  async pressPreview(actor:string,key:string,revision:number,buttonId:string):Promise<StudioButton>{return this.store.transaction(s=>{
   const t=this.current(s,actor,key,revision),b=t.draft.buttons.find(b=>b.id===buttonId),now=this.clock();if(!b||now<b.condition.opensAt||b.condition.closesAt!==0&&now>=b.condition.closesAt||b.condition.role==='OWNER'&&!this.policy.isOwner(actor))throw Error('STUDIO_BUTTON_CONDITION_DENIED');
+  if(b.action.kind==='SERVICE'&&!this.policy.privateFeature(s,'education.navigate',actor))throw Error('STUDIO_SERVICE_UNAVAILABLE');
+  if(b.action.kind==='MENU'&&(b.action.target===t.id||s.buttonStudio?.templates.filter(target=>target.id===b.action.target).length!==1))throw Error('STUDIO_MENU_UNAVAILABLE');
   if(b.condition.seats){
    const action='studio.seat:'+key+':'+revision+':'+buttonId,claims=s.callbacks.filter(c=>c.action===action);
    if(claims.some(c=>c.used!==true||c.revoked!==false||c.oneShot!==true||c.chatId!=='private'||!c.actorId)||new Set(claims.map(c=>c.actorId)).size!==claims.length)throw Error('STUDIO_BUTTON_CLAIMS_INVALID');
