@@ -165,4 +165,41 @@ for(const engine of ['json','sqlite'] as const){
    assert.equal((await f.store.snapshot()).callbacks.filter(c=>c.action.startsWith('studio.seat:')).length,1);
   }finally{await f.close();}
  });
+ test('studio button editor pages return to the selected button and reject stale or invalid pages ('+engine+')',async()=>{
+  const f=await fixture();try{
+   let t=await f.svc.create('100','قالب كثير الأزرار');
+   for(let i=0;i<17;i++)t=await f.svc.edit('100',t.id,t.revision,{kind:'ADD_BUTTON',value:'عنصر '+i});
+   let page=await f.app().handle(event(710,'st:1:e:01:'+t.id+':'+t.revision));
+   assert.equal(buttons(page).filter(b=>b.callback_data.startsWith('st:1:b:')).length,8);
+   page=await f.app().handle(event(711,buttons(page).find(b=>b.text==='التالي')!.callback_data));
+   assert.equal(buttons(page).filter(b=>b.callback_data.startsWith('st:1:b:')).length,8);
+   const target=buttons(page).find(b=>b.text==='عنصر 10');assert.ok(target);
+   const detail=await f.app().handle(event(712,target.callback_data));
+   const back=buttons(detail).find(b=>b.text==='↩️ قائمة الأزرار');assert.ok(back);
+   const returned=await f.app().handle(event(713,back.callback_data));assert.ok(buttons(returned).some(b=>b.text==='عنصر 10'));
+   page=await f.app().handle(event(714,buttons(page).find(b=>b.text==='التالي')!.callback_data));
+   assert.equal(buttons(page).filter(b=>b.callback_data.startsWith('st:1:b:')).length,1);
+   assert.equal((await f.app().handle(event(715,'st:1:E:01:'+t.id+':'+t.revision+':3'))).status,'DENIED');
+   assert.equal((await f.app().handle(event(716,back.callback_data,300))).status,'DENIED');
+   await f.svc.edit('100',t.id,t.revision,{kind:'NAME',value:'نسخة جديدة'});
+   assert.equal((await f.app().handle(event(717,back.callback_data))).status,'DENIED');
+  }finally{await f.close();}
+ });
+ test('studio row editor paginates copying rows and rejects invalid or stale pages ('+engine+')',async()=>{
+  const f=await fixture();try{
+   let t=await f.svc.create('100','صفوف');
+   for(let i=0;i<17;i++)t=await f.svc.edit('100',t.id,t.revision,{kind:'ADD_BUTTON',value:'زر '+i});
+   let page=await f.app().handle(event(720,'st:1:e:03:'+t.id+':'+t.revision));
+   assert.equal(buttons(page).filter(b=>b.callback_data.startsWith('st:1:q:')).length,8);
+   page=await f.app().handle(event(721,buttons(page).find(b=>b.text==='التالي')!.callback_data));
+   assert.ok(buttons(page).some(b=>b.text==='نسخ الصف 9'));assert.ok(buttons(page).some(b=>b.text==='نسخ الصف 16'));
+   const next=buttons(page).find(b=>b.text==='التالي')!;page=await f.app().handle(event(722,next.callback_data));
+   assert.deepEqual(buttons(page).filter(b=>b.callback_data.startsWith('st:1:q:')).map(b=>b.text),['نسخ الصف 17']);
+   assert.equal((await f.app().handle(event(723,'st:1:R:'+t.id+':'+t.revision+':3'))).status,'DENIED');
+   assert.equal((await f.app().handle(event(724,next.callback_data,300))).status,'DENIED');
+   const copied=await f.app().handle(event(725,select(page,'st:1:q:')));assert.equal(copied.status,'APPLIED');
+   const saved=(await f.svc.list('100'))[0]!;assert.equal(saved.draft.layout.length,18);
+   assert.equal((await f.app().handle(event(726,next.callback_data))).status,'DENIED');
+  }finally{await f.close();}
+ });
 }

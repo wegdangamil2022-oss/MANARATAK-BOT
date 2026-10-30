@@ -10,12 +10,14 @@ export interface OwnerStudioScreen extends OwnerInlineScreen{nativeKeyboard?:Stu
 const n='(0|[1-9][0-9]{0,5})',rev='([1-9][0-9]{0,6})',id='([a-f0-9]{12})',mode='(0[1-9]|1[0-6])';
 const patterns=[new RegExp('^st:1:l:'+mode+':'+n+'$','u'),/^st:1:n$/u,/^st:1:g:(?:education|welcome)$/u,/^st:1:c:[A-Za-z0-9_-]{24}$/u,
  new RegExp('^st:1:[dsvhj]:'+id+':'+rev+'$','u'),new RegExp('^st:1:v:'+id+':'+rev+':'+n+'$','u'),new RegExp('^st:1:e:'+mode+':'+id+':'+rev+'$','u'),
+ new RegExp('^st:1:E:(?:01|02|04|06):'+id+':'+rev+':'+n+'$','u'),
  new RegExp('^st:1:i:'+id+':'+rev+':(?:NAME|TEXT|ADD_BUTTON|LAYOUT|TIMEZONE|(?:BUTTON_TITLE|TARGET|OPENS_AT|CLOSES_AT|SEATS):'+id+')$','u'),
  new RegExp('^st:1:[boxt]:'+id+':'+rev+':'+id+'$','u'),new RegExp('^st:1:k:'+id+':'+rev+':'+id+':(?:URL|COPY|INLINE|SERVICE|MINI_APP)$','u'),
  new RegExp('^st:1:u:'+id+':'+rev+':'+id+'$','u'),new RegExp('^st:1:w:'+id+':'+rev+':'+id+':'+n+'$','u'),new RegExp('^st:1:L:'+id+':'+rev+':'+id+':'+id+'$','u'),
  new RegExp('^st:1:y:'+id+':'+rev+':'+id+':(?:default|primary|success|danger)$','u'),new RegExp('^st:1:r:'+id+':'+rev+':'+rev+'$','u'),
  new RegExp('^st:1:f:'+id+':'+rev+':(?:12|24|gregory|islamic)$','u'),new RegExp('^st:1:a:'+id+':'+rev+':'+id+':(?:ANY|OWNER)$','u'),
  new RegExp('^st:1:m:'+id+':'+rev+':'+n+':'+n+'$','u'),new RegExp('^st:1:q:'+id+':'+rev+':'+n+'$','u'),
+ new RegExp('^st:1:R:'+id+':'+rev+':'+n+'$','u'),
  new RegExp('^st:1:h:'+id+':'+rev+':'+n+'$','u'),new RegExp('^st:1:z:'+id+':'+rev+':'+rev+':'+n+'$','u'),
  new RegExp('^st:1:P:'+id+':'+rev+':[1-8]$','u'),new RegExp('^st:1:v:'+id+':'+rev+':'+n+':'+n+'$','u'),/^st:1:C$/u,
  new RegExp('^st:1:t:'+id+':'+rev+':'+id+':'+n+':'+n+'$','u'),
@@ -47,7 +49,7 @@ function buttonScreen(t:StudioTemplate,button:StudioButton):OwnerInlineScreen{
  [b('للجميع',key('a',t,suffix+':ANY')),b('للمالك',key('a',t,suffix+':OWNER'))],
  [b('موعد الفتح',edit(t,'OPENS_AT:'+suffix)),b('موعد الإغلاق',edit(t,'CLOSES_AT:'+suffix)),b('المقاعد',edit(t,'SEATS:'+suffix))],
  ...(moves.length?[moves]:[]),
- [b('نسخ الزر',key('o',t,suffix)),b('حذف الزر',key('x',t,suffix))],[b('↩️ المسودة',key('d',t))],root]);
+ [b('نسخ الزر',key('o',t,suffix)),b('حذف الزر',key('x',t,suffix))],[b('↩️ قائمة الأزرار','st:1:E:01:'+t.id+':'+t.revision+':'+Math.floor(index/8))],[b('↩️ المسودة',key('d',t))],root]);
 }
 export async function renderOwnerInlineStudio(store:BotStore,policy:Policy,actor:string,data:string,clock:()=>number):Promise<OwnerStudioScreen|null>{
  if(!policy.isOwner(actor))return null;
@@ -87,7 +89,7 @@ export async function renderOwnerInlineStudio(store:BotStore,policy:Policy,actor
   if(parts[2]==='n')return studioDraftScreen(await svc.create(actor,'قالب جديد'));
   if(parts[2]==='g')return studioDraftScreen(await svc.create(actor,'نموذج',parts[3]!));
   if(parts[2]==='c'){const t=await svc.confirmDecision(actor,'c_'+parts[3]);return t?studioDraftScreen(t):null;}
-  const mode=parts[2]==='e'?parts[3]:undefined,id=parts[mode?4:3]!,revision=Number(parts[mode?5:4]),t=all.find(t=>t.id===id&&t.revision===revision);if(!t||!studioId(id))return null;
+  const mode=parts[2]==='e'||parts[2]==='E'?parts[3]:undefined,id=parts[mode?4:3]!,revision=Number(parts[mode?5:4]),t=all.find(t=>t.id===id&&t.revision===revision);if(!t||!studioId(id))return null;
   const action=parts[2],button=parts[5]?t.draft.buttons.find(b=>b.id===parts[5]):undefined;
   if(action==='d')return studioDraftScreen(t);
   if(action==='j')return studioDraftScreen(await svc.duplicate(actor,id,revision));
@@ -158,8 +160,21 @@ export async function renderOwnerInlineStudio(store:BotStore,policy:Policy,actor
    ...[1,2,3,4,5,6,7,8].map(size=>[b(size+' صفوف في الصفحة',key('P',t,String(size)))]),[b('👁️ اختبار الصفحات',key('v',t))],[b('↩️ المسودة',key('d',t))],root]);
   if(action==='f'){const v=parts[5]!;return studioDraftScreen(await svc.edit(actor,id,revision,{kind:'FORMAT',hour12:v==='12'?true:v==='24'?false:t.draft.hour12,calendar:v==='gregory'||v==='islamic'?v:t.draft.calendar}));}
   if(mode==='12')return ui('<b>التاريخ والوقت</b>\nالمنطقة: '+studioEscape(t.draft.timezone)+'\nالتوقيت: '+(t.draft.hour12?'12':'24')+'\nالتقويم: '+t.draft.calendar,[[b('12 ساعة',key('f',t,'12')),b('24 ساعة',key('f',t,'24'))],[b('ميلادي',key('f',t,'gregory')),b('هجري',key('f',t,'islamic'))],[b('المنطقة الزمنية',edit(t,'TIMEZONE'))],[b('↩️ المسودة',key('d',t))],root]);
-  if(mode==='03')return ui('<b>ترتيب الصفوف</b>\nالتوزيع الحالي: '+(t.draft.layout.join('-')||'فارغ'),[[b('كتابة توزيع الصفوف',edit(t,'LAYOUT'))],...t.draft.layout.map((_,i)=>[b('نسخ الصف '+(i+1),key('q',t,String(i)))]),[b('↩️ المسودة',key('d',t))],root]);
-  if(action==='e'&&['01','02','04','05','06'].includes(mode!))return ui('<b>أزرار القالب</b>\nاختر زرًا لتحرير عنوانه ووظيفته ونمطه وشرطه.',[...t.draft.buttons.map(bt=>[b(bt.title,key('b',t,bt.id))]),[b('إضافة زر',edit(t,'ADD_BUTTON'))],[b('↩️ المسودة',key('d',t))],root]);
+  if(mode==='03'||action==='R'){
+   const page=action==='R'?Number(parts[5]):0,pages=Math.max(1,Math.ceil(t.draft.layout.length/8));if(page>=pages)return null;
+   const rows=[[b('كتابة توزيع الصفوف',edit(t,'LAYOUT'))],...t.draft.layout.slice(page*8,page*8+8).map((_,i)=>[b('نسخ الصف '+(page*8+i+1),key('q',t,String(page*8+i)))]),],nav=[];
+   if(page)nav.push(b('السابق',key('R',t,String(page-1))));if(page+1<pages)nav.push(b('التالي',key('R',t,String(page+1))));if(nav.length)rows.push(nav);
+   rows.push([b('↩️ المسودة',key('d',t))],root);
+   return ui('<b>ترتيب الصفوف</b>\nالتوزيع الحالي: '+(t.draft.layout.join('-')||'فارغ')+'\nالصفحة '+(page+1)+' من '+pages,rows);
+  }
+  if((action==='e'||action==='E')&&['01','02','04','06'].includes(mode!)){
+   const page=action==='E'?Number(parts[6]):0,pages=Math.max(1,Math.ceil(t.draft.buttons.length/8));if(page>=pages)return null;
+   const rows=t.draft.buttons.slice(page*8,page*8+8).map(bt=>[b(bt.title,key('b',t,bt.id))]);
+   const route=(p:number)=>'st:1:E:'+mode+':'+t.id+':'+t.revision+':'+p,nav=[];
+   if(page)nav.push(b('السابق',route(page-1)));if(page+1<pages)nav.push(b('التالي',route(page+1)));if(nav.length)rows.push(nav);
+   rows.push([b('إضافة زر',edit(t,'ADD_BUTTON'))],[b('↩️ المسودة',key('d',t))],root);
+   return ui('<b>أزرار القالب</b>\nالصفحة '+(page+1)+' من '+pages+'\nاختر زرًا لتحرير عنوانه ووظيفته ونمطه وشرطه.',rows);
+  }
   if(mode==='11')return ui('<b>المتغيرات المسموحة</b>\n{العضو}\n{اسم_المجموعة}\n{التاريخ}\n{الوقت}\n{رابط_القوانين}\nتُستبدل وفق النطاق أثناء العرض؛ لا تُنفذ تعبيرات برمجية.',[[b('تحرير نص القالب',edit(t,'TEXT'))],[b('↩️ المسودة',key('d',t))],root]);
   if(action==='v'||mode==='08'){
    const d=t.draft,fmt=(options:Intl.DateTimeFormatOptions)=>new Intl.DateTimeFormat('ar',{timeZone:d.timezone,calendar:d.calendar,...options}).format(clock());
