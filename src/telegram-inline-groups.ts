@@ -261,6 +261,9 @@ export async function renderOwnerInlineGroups(store:BotStore,policy:Policy,actor
   if(delegation)actionRows.push([button('➕ تفويض في هذه المجموعة',delegation)]);
   if(chat.scopes.includes('moderation')&&Number.isSafeInteger(Number(chat.id))&&chat.id.length<=17)
    actionRows.push([button('🛡️ إدارة حماية هذه المجموعة','gp:1:p:'+chat.id+':'+chat.version)]);
+  if(chat.scopes.includes('moderation'))
+   actionRows.push([button('📑 قوالب حماية المجموعات','gt:1:h'),
+    button('🔄 نسخ ومقارنة الإعدادات','gt:1:s:0')]);
   if(chat.scopes.includes('moderation')&&Number.isSafeInteger(Number(chat.id))&&chat.id.length<=17&&!state.protectionPolicies?.some(r=>r.policy.chatId===chat.id))
    actionRows.push([button('🧭 معالج إعداد المجموعة','gw:1:b:'+chat.id+':'+chat.version+':'+route.page)]);
   if(chat.groupAI!=='OFF')
