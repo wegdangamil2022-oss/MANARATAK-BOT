@@ -316,3 +316,23 @@ for(const engine of ['json','sqlite'] as const){
   }finally{await f.close();}
  });
 }
+
+for(const engine of ['json','sqlite'] as const){
+ test('approved group card provides navigation to built-in templates and safe copy ('+engine+')',async()=>{
+  const f=await fixture(engine);try{
+   await f.approve(TARGET);
+   const listing=await f.app().handle(cb(170,'mi:1:i:01:01'));
+   const detail=await f.app().handle(cb(171,click(listing,TARGET)));
+   assert.equal(detail.status,'APPLIED');
+   assert.equal(buttons(detail).some(x=>x.callback_data==='gt:1:h'),true);
+   assert.equal(buttons(detail).some(x=>x.callback_data==='gt:1:s:0'),true);
+   const templates=await f.app().handle(cb(172,'gt:1:h'));
+   assert.equal(templates.status,'APPLIED');
+   assert.match(templates.plan?.text??'',/قوالب إعدادات/);
+   const compare=await f.app().handle(cb(173,'gt:1:s:0'));
+   assert.equal(compare.status,'APPLIED');
+   assert.match(compare.plan?.text??'',/نسخ ومقارنة/);
+   assert.equal((await f.store.snapshot()).protectionPolicies?.length??0,0);
+  }finally{await f.close();}
+ });
+}
