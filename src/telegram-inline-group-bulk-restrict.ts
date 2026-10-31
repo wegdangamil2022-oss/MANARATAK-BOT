@@ -14,6 +14,8 @@ const page=new RegExp('^gb:1:p:([am]):'+pagePattern+'$','u');
 const preview=new RegExp('^gb:1:v:([am]):'+pagePattern+'$','u');
 const confirm=/^gb:1:c:([A-Za-z0-9_-]{24})$/u;
 const cancel=/^gb:1:k:([A-Za-z0-9_-]{24})$/u;
+const logPage=new RegExp('^gb:1:r:p:'+pagePattern+'$','u');
+const logView=/^gb:1:r:v:([A-Za-z0-9_-]{24})$/u;
 type Mode='a'|'m';
 type Selection={
  all:Chat[];visible:Chat[];eligible:Chat[];records:GroupProtectionRecord[];
@@ -28,7 +30,7 @@ const validTime=(now:number)=>Number.isSafeInteger(now)&&now>=0&&now<=8_640_000_
 const validId=(id:string)=>/^-[1-9][0-9]{0,15}$/u.test(id)&&Number.isSafeInteger(Number(id));
 export function validOwnerGroupBulkRestrictRoute(data:unknown):boolean{
  if(typeof data!=='string'||Buffer.byteLength(data,'utf8')>64)return false;
- return home.test(data)||[page,preview,confirm,cancel].some(regex=>regex.test(data));
+ return home.test(data)||[page,preview,confirm,cancel,logPage,logView].some(regex=>regex.test(data));
 }
 function approved(s:BotState):Chat[]{
  const counts=new Map<string,number>();
@@ -85,6 +87,7 @@ export class OwnerGroupBulkRestrict {
    'الحد 8 مجموعات في الدفعة. لا تُنفذ أوامر Telegram ولا عقوبات حية.',
    [[btn('🤖 إيقاف المساعد جماعيًا','gb:1:p:a:0')],
     [btn('⏹ إيقاف المراقبة جماعيًا','gb:1:p:m:0')],
+    [btn('🕘 سجل الإيقاف الجماعي','gb:1:r:p:0')],
     [btn('↩️ الإجراءات الجماعية','gt:1:b:h'),btn('🏠 لوحة المالك','mi:1:h')]]);
  }
  private list(actor:string,s:BotState,kind:Mode,p:number):OwnerInlineScreen|null{
@@ -202,6 +205,74 @@ export class OwnerGroupBulkRestrict {
     [[btn('↩️ إيقاف خدمات المجموعات','gb:1:h'),btn('🏠 لوحة المالك','mi:1:h')]]);
   });
  }
+
+ /** Verify both durable evidence halves. An audit event alone or callback
+  * receipt alone is never a reliable group-change claim. Duplicate restored
+  * audit keys or callback refs quarantine the entry rather than picking one. */
+ private entries(s:BotState,actor:string,now:number):{
+  nonce:string;kind:Mode;ids:string[];at:number
+ }[]{
+  const events=s.audit.filter(a=>a.reason==='GROUP_BULK_AI_DISABLED_LOCAL'||
+   a.reason==='GROUP_BULK_MONITOR_DISABLED_LOCAL');
+  const result:{nonce:string;kind:Mode;ids:string[];at:number}[]=[];
+  for(const a of events){
+   const match=/^owner-group-bulk:([A-Za-z0-9_-]{24})$/u.exec(a.updateKey);
+   if(!match||a.actorId!==actor||a.decision!=='ALLOW'||a.policyVersion!==0||
+    !Number.isSafeInteger(a.at)||a.at<0||a.at>now||
+    events.filter(x=>x.updateKey===a.updateKey).length!==1)continue;
+   const records=s.callbacks.filter(c=>c.ref==='c_'+match[1]),receipt=records[0];
+   if(records.length!==1||!receipt||receipt.actorId!==actor||
+    receipt.chatId!=='private'||receipt.policyVersion!==0||
+    receipt.oneShot!==true||receipt.used!==true||receipt.revoked!==false||
+    !receipt.action.startsWith(PREFIX)||!Number.isSafeInteger(receipt.expiresAt)||
+    receipt.expiresAt<=a.at||receipt.expiresAt>a.at+TTL)continue;
+   let payload:unknown;
+   try{payload=JSON.parse(receipt.action.slice(PREFIX.length));}catch{continue;}
+   if(!Array.isArray(payload)||payload.length!==4||!['a','m'].includes(payload[0])||
+    !Number.isSafeInteger(payload[1])||payload[1]<0||payload[1]>999||
+    typeof payload[2]!=='string'||!/^[a-f0-9]{64}$/u.test(payload[2])||
+    !Array.isArray(payload[3])||payload[3].length<1||payload[3].length>PAGESIZE||
+    payload[3].some((id:unknown)=>typeof id!=='string'||!validId(id))||
+    new Set(payload[3]).size!==payload[3].length||
+    (a.reason==='GROUP_BULK_AI_DISABLED_LOCAL')!==(payload[0]==='a'))continue;
+   result.push({nonce:match[1]!,kind:payload[0] as Mode,ids:payload[3] as string[],at:a.at});
+  }
+  result.sort((a,b)=>b.at-a.at||b.nonce.localeCompare(a.nonce));
+  return result;
+ }
+ private history(actor:string,s:BotState,now:number,p:number):OwnerInlineScreen|null{
+  if(!Number.isSafeInteger(p)||p<0||p>999)return null;
+  const events=this.entries(s,actor,now),maxPage=Math.max(1,Math.ceil(events.length/PAGESIZE));
+  if(p>=maxPage)return null;
+  const rows=events.slice(p*PAGESIZE,(p+1)*PAGESIZE).map(event=>
+   [btn((event.kind==='a'?'🤖 ':'⏹ ')+event.ids.length+' مجموعة · '+
+     new Date(event.at).toISOString().slice(0,16).replace('T',' '),
+    'gb:1:r:v:'+event.nonce)]);
+  const navigation:{text:string;callback_data:string}[]=[];
+  if(p)navigation.push(btn('⬅️ السابق','gb:1:r:p:'+(p-1)));
+  if(p+1<maxPage)navigation.push(btn('➡️ التالي','gb:1:r:p:'+(p+1)));
+  if(navigation.length)rows.push(navigation);
+  rows.push([btn('↩️ الإيقاف الجماعي','gb:1:h'),btn('🏠 لوحة المالك','mi:1:h')]);
+  return ui('<b>🕘 سجل الإيقاف الجماعي المحلي</b>\n'+
+   'العمليات الموثقة: '+(events.length===1?'عملية واحدة':events.length+' عمليات')+'\n'+
+   'صفحة '+(p+1)+' من '+maxPage+'\n'+
+   (events.length?'اختر عملية لعرض تفاصيل المجموعات والوقت.':
+    'لا توجد عمليات موثقة حاليًا.')+'\n'+
+   'البيانات سجلات إعدادات محلية، ولا تثبت أي تغيير في Telegram.',rows);
+ }
+ private detail(actor:string,s:BotState,now:number,nonce:string):OwnerInlineScreen|null{
+  const records=this.entries(s,actor,now).filter(a=>a.nonce===nonce),event=records[0];
+  if(records.length!==1||!event)return null;
+  return ui('<b>🕘 تفاصيل الإيقاف الجماعي المحلي</b>\n'+
+   'العملية: '+(event.kind==='a'?'إيقاف المساعد':'إيقاف المراقبة')+'\n'+
+   'المجموعات المستهدفة: '+event.ids.length+'\n'+
+   event.ids.map(id=>'• <code>'+escape(id)+'</code>').join('\n')+'\n'+
+   'التوقيت (UTC): '+new Date(event.at).toISOString().replace('T',' ').slice(0,19)+'\n'+
+   'هذا عرض تاريخي للقراءة فقط؛ لم تُنشأ أي موافقة جديدة أو أوامر Telegram.',
+   [[btn('↩️ سجل الإيقاف الجماعي','gb:1:r:p:0'),
+     btn('🏠 لوحة المالك','mi:1:h')]]);
+ }
+
  async handle(actor:string,data:string):Promise<OwnerInlineScreen|null>{
   if(!validOwnerGroupBulkRestrictRoute(data)||!this.policy.isOwner(actor))return null;
   const c=confirm.exec(data);
@@ -211,6 +282,10 @@ export class OwnerGroupBulkRestrict {
   const state=await this.store.snapshot(),now=this.clock();
   if(!this.allowed(state,actor,now))return null;
   if(home.test(data))return this.section();
+  const lp=logPage.exec(data);
+  if(lp)return this.history(actor,state,now,Number(lp[1]));
+  const lv=logView.exec(data);
+  if(lv)return this.detail(actor,state,now,lv[1]!);
   const p=page.exec(data);
   if(p)return this.list(actor,state,p[1] as Mode,Number(p[2]));
   const v=preview.exec(data);
