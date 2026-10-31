@@ -11,6 +11,7 @@ import {isValidGroupProtectionRecord} from './protection-rules.js';
  * No Telegram rights, group title or live membership is inferred from storage.
  */
 export type OwnerInlineGroupRoute={kind:'list';page:number}|{kind:'summary';page:number}|
+ {kind:'alerts';page:number}|{kind:'modes';page:number}|
  {kind:'details'|'subscription'|'access';chatId:string;version:number;page:number}|
  {kind:'reversal';chatId:string;version:number;page:number;digest:string};
 const id='(-[1-9][0-9]{0,18})';
@@ -19,6 +20,8 @@ const page='(0|[1-9][0-9]{0,2})';
 const groupRoute=new RegExp('^mi:1:g:(d|u|a):'+id+':'+ver+':'+page+'$','u');
 const pageRoute=new RegExp('^mi:1:g:p:'+page+'$','u');
 const summaryRoute=new RegExp('^mi:1:g:s:'+page+'$','u');
+const alertsRoute=new RegExp('^mi:1:g:n:'+page+'$','u');
+const modesRoute=new RegExp('^mi:1:g:o:'+page+'$','u');
 const reversalRoute=new RegExp('^mi:1:g:r:'+id+':'+ver+':'+page+':([a-f0-9]{12})$','u');
 export function parseOwnerInlineGroupRoute(input:string):OwnerInlineGroupRoute|null{
  if(typeof input!=='string'||Buffer.byteLength(input,'utf8')>64)return null;
@@ -26,6 +29,10 @@ export function parseOwnerInlineGroupRoute(input:string):OwnerInlineGroupRoute|n
  if(p&&p[0]===input)return {kind:'list',page:Number(p[1])};
  const summary=summaryRoute.exec(input);
  if(summary&&summary[0]===input)return {kind:'summary',page:Number(summary[1])};
+ const alerts=alertsRoute.exec(input);
+ if(alerts&&alerts[0]===input)return {kind:'alerts',page:Number(alerts[1])};
+ const modes=modesRoute.exec(input);
+ if(modes&&modes[0]===input)return {kind:'modes',page:Number(modes[1])};
  const r=reversalRoute.exec(input);
  if(r&&r[0]===input)return {kind:'reversal',chatId:r[1]!,version:Number(r[2]),
   page:Number(r[3]),digest:r[4]!};
@@ -41,6 +48,8 @@ const safe=(v:string)=>v.replace(/&/gu,'&amp;').replace(/</gu,'&lt;').replace(/>
  .replace(/"/gu,'&quot;').replace(/'/gu,'&#39;');
 const listKey=(p:number)=>'mi:1:g:p:'+p;
 const summaryKey=(p:number)=>'mi:1:g:s:'+p;
+const alertsKey=(p:number)=>'mi:1:g:n:'+p;
+const modesKey=(p:number)=>'mi:1:g:o:'+p;
 const detailKey=(chat:Chat,p:number)=>'mi:1:g:d:'+chat.id+':'+chat.version+':'+p;
 const accessKey=(chat:Chat,p:number)=>'mi:1:g:a:'+chat.id+':'+chat.version+':'+p;
 const subKey=(chat:Chat,p:number)=>'mi:1:g:u:'+chat.id+':'+chat.version+':'+p;
@@ -62,6 +71,27 @@ const localProtection=(state:BotState,chat:Chat,now=Date.now()):string=>{
   record.chatPolicyVersion!==chat.version||record.updatedAt>now)return 'تحتاج مراجعة';
  return record.policy.mode==='MONITOR'?'مراقبة فقط':
   record.policy.mode==='OFF'?'متوقفة':'تحتاج مراجعة';
+};
+
+/** Advisory observations from locally saved state only. No message delivery,
+ * Telegram rights probe, or moderation effects are performed by these views. */
+const localGroupAlerts=(state:BotState,chat:Chat):string[]=>{
+ const alerts:string[]=[];
+ if(!chat.present)alerts.push('وجود البوت غير مؤكد');
+ if(chat.scopes.includes('moderation')){
+  const status=localProtection(state,chat);
+  if(status==='غير مضبوطة')alerts.push('سياسة الحماية غير مضبوطة');
+  else if(status==='تحتاج مراجعة')alerts.push('سياسة الحماية تحتاج مراجعة');
+ }
+ const subscriptions=state.subscriptionRequirements.filter(x=>x.chatId===chat.id);
+ if(subscriptions.length>1)alerts.push('متطلبات اشتراك متعارضة');
+ else if(chat.scopes.includes('verification')&&(!subscriptions.length||!subscriptions[0]!.channelIds.length))
+  alerts.push('لا توجد قنوات اشتراك محفوظة');
+ else if(!chat.scopes.includes('verification')&&subscriptions.length)
+  alerts.push('اشتراك محفوظ بلا نطاق تحقق');
+ if(chat.groupAI!=='OFF'&&!chat.scopes.includes('assistant'))
+  alerts.push('المساعد مهيأ خارج نطاقه');
+ return alerts;
 };
 const approvedGroups=(state:BotState,conflicts:ReadonlySet<string>):Chat[]=>
  [...state.chats].filter(c=>c.approved&&!conflicts.has(c.id)&&
@@ -85,7 +115,9 @@ export async function renderOwnerInlineGroups(store:BotStore,policy:Policy,actor
  data:string):Promise<OwnerInlineScreen|null>{
  if(!policy.isOwner(actorId))return null;
  const route=data==='mi:1:i:01:01'?{kind:'list' as const,page:0}:
-  data==='mi:1:i:01:10'?{kind:'summary' as const,page:0}:parseOwnerInlineGroupRoute(data);
+  data==='mi:1:i:01:09'?{kind:'alerts' as const,page:0}:
+  data==='mi:1:i:01:10'?{kind:'summary' as const,page:0}:
+  data==='mi:1:i:01:11'?{kind:'modes' as const,page:0}:parseOwnerInlineGroupRoute(data);
  if(!route)return null;
  const state=await store.snapshot();
  // This defensive second check follows the durable await; it is not the sole
@@ -109,7 +141,8 @@ export async function renderOwnerInlineGroups(store:BotStore,policy:Policy,actor
   if(route.page>0)nav.push(button('⬅️ السابق',listKey(route.page-1)));
   if(route.page+1<pages)nav.push(button('➡️ التالي',listKey(route.page+1)));
   if(nav.length)rows.push(nav);
-  rows.push([button('🔍 فحص الصلاحيات المحلية',summaryKey(0))]);
+  rows.push([button('🔔 تنبيهات الشبكة المحلية',alertsKey(0)),button('🔍 فحص الصلاحيات المحلية',summaryKey(0))]);
+  rows.push([button('🚦 أوضاع التشغيل المحلية',modesKey(0))]);
   rows.push(footer('mi:1:s:01:0'));
   return {text:'<b>المجموعات المعتمدة 👥</b>\n'
    +'عدد المجموعات المصرح لها محليًا: '+approved.length+'\n'
@@ -146,6 +179,48 @@ export async function renderOwnerInlineGroups(store:BotStore,policy:Policy,actor
    +(lines.length?lines.join('\n')+'\n':'لا توجد مجموعات معتمدة لعرضها.\n')
    +'لا يتحقق هذا العرض من حقوق Telegram الحية، ولا يمنح أي صلاحية أو ينفذ أي إجراء.',
    keyboard:markup(rows)};
+ }
+ if(route.kind==='alerts'||route.kind==='modes'){
+  // Only approved, non-conflicting chats are available, even when a callback
+  // is copied from another owner session or points to a stale page.
+  const items=route.kind==='alerts'?
+   approved.map(chat=>({chat,alerts:localGroupAlerts(state,chat)})).filter(x=>x.alerts.length>0):
+   approved.map(chat=>({chat,alerts:[] as string[]}));
+  const maxPage=Math.max(1,Math.ceil(items.length/PAGE_SIZE));
+  if(route.page>=maxPage)return null;
+  const current=items.slice(route.page*PAGE_SIZE,(route.page+1)*PAGE_SIZE);
+  const rows:Button[][]=[],lines:string[]=[];
+  for(const {chat:entry,alerts} of current){
+   const approvedIndex=approved.indexOf(entry);
+   // A diagnostic page is not necessarily the same as the group-browser page.
+   // Reuse the group's actual page and version for the card shortcut.
+   rows.push([button('👥 '+entry.id,detailKey(entry,Math.floor(approvedIndex/PAGE_SIZE)))]);
+   if(route.kind==='alerts'){
+    lines.push('• <code>'+safe(entry.id)+'</code>: '+alerts.join('؛ '));
+   }else{
+    lines.push('• <code>'+safe(entry.id)+'</code>: الحماية: '+localProtection(state,entry)+
+     ' · المساعد: '+safe(entry.groupAI)+
+     ' · النشر: '+(entry.scopes.includes('publishing')?'مصرح محليًا':'غير مصرح'));
+   }
+  }
+  const nav:Button[]=[];
+  const key=route.kind==='alerts'?alertsKey:modesKey;
+  if(route.page>0)nav.push(button('⬅️ السابق',key(route.page-1)));
+  if(route.page+1<maxPage)nav.push(button('➡️ التالي',key(route.page+1)));
+  if(nav.length)rows.push(nav);
+  rows.push([button('📋 مجموعاتي',listKey(0))]);
+  rows.push(footer('mi:1:s:01:1'));
+  const alertsView=route.kind==='alerts';
+  return {
+   text:(alertsView?'<b>🔔 تنبيهات الشبكة المحلية</b>\n':'<b>🚦 أوضاع التشغيل المحلية</b>\n')+
+    'المجموعات المعتمدة: '+approved.length+' · المتعارضة المحجوبة: '+conflictingChats.size+'\n'+
+    (alertsView?'مجموعات تحتاج مراجعة محلية: '+items.length+'\n':'')+
+    'صفحة '+(route.page+1)+' من '+maxPage+'\n'+
+    (lines.length?lines.join('\n')+'\n':alertsView?'لا توجد تنبيهات محلية من السجلات الحالية.\n':'لا توجد مجموعات معتمدة.\n')+
+    (alertsView?'هذا ليس تنبيهًا مرسلًا من Telegram؛ لم تُفحص حقوق البوت الحية ولا تُرسل إشعارات.':
+     'هذه إعدادات محفوظة محليًا فقط؛ لا تنفذ عقوبات Telegram ولا تفعّل الحماية الحية.'),
+   keyboard:markup(rows)
+  };
  }
  const chat=approved.find(c=>c.id===route.chatId);
  // A copied ID/version, an old revoked group or a group shifted to another
