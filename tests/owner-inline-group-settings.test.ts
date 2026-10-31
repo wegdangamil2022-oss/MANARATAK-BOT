@@ -112,7 +112,7 @@ for(const engine of ['json','sqlite'] as const){
    const preview=await f.app().handle(cb(20,'gs:1:v:'+GROUP+':1:0:o'));
    assert.equal(preview.status,'APPLIED');
    assert.match(preview.plan?.text??'',/سياسة الحماية.*مراجعة/);
-   assert.equal((await f.app().handle(cb(21,key(preview,'تأكيد التعديل'))).status,'APPLIED');
+   assert.equal((await f.app().handle(cb(21,key(preview,'تأكيد التعديل')))).status,'APPLIED');
    const s=await f.store.snapshot();
    assert.equal(s.chats[0]!.version,2);
    assert.equal(s.protectionPolicies?.[0]?.chatPolicyVersion,1);
@@ -126,7 +126,7 @@ for(const engine of ['json','sqlite'] as const){
    await f.store.transaction(s=>{s.chats[0]!.groupAI='OWNER_MENTION';});
    const preview=await f.app().handle(cb(31,'gs:1:v:'+GROUP+':1:0:x'));
    assert.equal(preview.status,'APPLIED');
-   assert.equal((await f.app().handle(cb(32,key(preview,'تأكيد التعديل'))).status,'APPLIED');
+   assert.equal((await f.app().handle(cb(32,key(preview,'تأكيد التعديل')))).status,'APPLIED');
    assert.equal((await f.store.snapshot()).chats[0]!.groupAI,'OFF');
   }finally{await f.close();}
  });
@@ -139,7 +139,7 @@ for(const engine of ['json','sqlite'] as const){
    const review=await f.app().handle(cb(41,key(screen,'تشغيل المراقبة')));
    assert.match(review.plan?.text??'',/MONITOR/);
    assert.match(review.plan?.text??'',/لا حذف ولا كتم/);
-   assert.equal((await f.app().handle(cb(42,key(review,'تأكيد التعديل'))).status,'APPLIED');
+   assert.equal((await f.app().handle(cb(42,key(review,'تأكيد التعديل')))).status,'APPLIED');
    let s=await f.store.snapshot();
    assert.equal(s.protectionPolicies?.[0]?.policy.mode,'MONITOR');
    assert.equal(s.protectionPolicies?.[0]?.policy.revision,2);
@@ -149,7 +149,7 @@ for(const engine of ['json','sqlite'] as const){
    assert.equal(s.audit.filter(a=>a.reason==='GROUP_SETTINGS_MONITOR_ENABLED').length,1);
    const card=await f.app().handle(cb(43,'gs:1:g:'+GROUP+':1:0'));
    const off=await f.app().handle(cb(44,key(card,'إيقاف المراقبة')));
-   assert.equal((await f.app().handle(cb(45,key(off,'تأكيد التعديل'))).status,'APPLIED');
+   assert.equal((await f.app().handle(cb(45,key(off,'تأكيد التعديل')))).status,'APPLIED');
    s=await f.store.snapshot();
    assert.equal(s.protectionPolicies?.[0]?.policy.mode,'OFF');
    assert.equal(s.protectionPolicies?.[0]?.policy.revision,3);
@@ -179,7 +179,7 @@ for(const engine of ['json','sqlite'] as const){
    assert.equal((await f.store.snapshot()).chats[0]!.groupAI,'OFF');
    assert.equal((await f.store.snapshot()).audit.filter(a=>a.reason==='GROUP_SETTINGS_PREVIEW_CANCELLED').length,1);
    const newReview=await f.app().handle(cb(64,'gs:1:v:'+GROUP+':1:0:o'));
-   assert.equal((await f.app().handle(cb(65,key(newReview,'تأكيد التعديل'))).status,'APPLIED');
+   assert.equal((await f.app().handle(cb(65,key(newReview,'تأكيد التعديل')))).status,'APPLIED');
   }finally{await f.close();}
  });
  test('expired, duplicate, and racing confirmation references cannot double-change policy ('+engine+')',async()=>{
