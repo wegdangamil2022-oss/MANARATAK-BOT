@@ -251,3 +251,68 @@ test('owner protection return targets the correct card on a later group page',as
   assert.equal((await f.app().handle(cb(504,100,forgedPage))).status,'DENIED');
  }finally{await f.close();}
 });
+
+test('group local-rights summary selector has strict callback grammar',()=>{
+ assert.deepEqual(parseOwnerInlineGroupRoute('mi:1:g:s:0'),{kind:'summary',page:0});
+ assert.deepEqual(parseOwnerInlineGroupRoute('mi:1:g:s:12'),{kind:'summary',page:12});
+ for(const data of ['mi:1:g:s:00','mi:1:g:s:-1','mi:1:g:s:1000',
+  'mi:1:g:s:0:1','mi:1:g:s:0\\n','mi:2:g:s:0'])
+  assert.equal(parseOwnerInlineGroupRoute(data),null,data);
+});
+for(const engine of ['json','sqlite'] as const){
+ test('owner local-rights overview is read-only, safely paged, and linked from approved section ('+engine+')',async()=>{
+  const f=await fixture(engine);try{
+   await f.policy.approveChat(OWNER,GROUP,['navigation','moderation','verification']);
+   for(let i=0;i<10;i++)await f.policy.approveChat(OWNER,'-100'+String(2000+i),['navigation']);
+   const version=(await f.store.snapshot()).chats.find(c=>c.id===GROUP)!.version;
+   assert.equal((await new GroupProtectionPolicyService(f.store,f.policy).save(OWNER,{
+    chatId:GROUP,revision:1,mode:'MONITOR',rules:[
+     {id:'one',kind:'WORD',value:'spam',enabled:true,action:'REVIEW'}],
+    allowedDomains:[],allowedPhrases:[],exemptMemberIds:[]},version,0)).status,'SAVED');
+   const before=(await f.store.snapshot()).protectionPolicies;
+   const groups=await f.app().handle(cb(601,100,'mi:1:i:01:01'));
+   assert.equal(groups.status,'APPLIED');
+   const shortcut=buttons(groups).find(b=>b.callback_data==='mi:1:g:s:0');
+   assert.ok(shortcut,'group browser must offer scoped rights overview');
+   const summary=await f.app().handle(cb(602,100,'mi:1:i:01:10'));
+   assert.equal(summary.status,'APPLIED');
+   assert.match(summary.plan?.text??'',/فحص الصلاحيات المحلية/);
+   assert.match(summary.plan?.text??'',/لا يتحقق.*Telegram/);
+   assert.match(summary.plan?.text??'',/المجموعات المعتمدة: 11/);
+   assert.match(summary.plan?.text??'',/مراقبة فقط/);
+   assert.equal(isValidTelegramInlineKeyboard(summary.plan?.inlineMarkup),true);
+   const groupLink=buttons(summary).find(b=>b.callback_data.startsWith('mi:1:g:d:'));
+   assert.ok(groupLink);
+   const card=await f.app().handle(cb(603,100,groupLink!.callback_data));
+   assert.equal(card.status,'APPLIED');
+   const second=await f.app().handle(cb(604,100,'mi:1:g:s:1'));
+   assert.equal(second.status,'APPLIED');
+   assert.equal(buttons(second).filter(b=>b.callback_data.startsWith('mi:1:g:d:')).length,3);
+   assert.ok(buttons(second).some(b=>b.callback_data==='mi:1:g:s:0'));
+   assert.equal((await f.app().handle(cb(605,100,'mi:1:g:s:2'))).status,'DENIED');
+   assert.deepEqual((await f.store.snapshot()).protectionPolicies,before);
+   assert.equal((await f.app().handle(cb(606,300,'mi:1:i:01:10'))).status,'DENIED');
+   assert.equal((await f.app().handle(cb(607,100,'mi:1:i:01:10','supergroup'))).status,'DENIED');
+  }finally{await f.close();}
+ });
+ test('local-rights summary quarantines stale policy and changes after approval revocation ('+engine+')',async()=>{
+  const f=await fixture(engine);try{
+   await f.policy.approveChat(OWNER,GROUP,['navigation','moderation']);
+   const version=(await f.store.snapshot()).chats.find(c=>c.id===GROUP)!.version;
+   assert.equal((await new GroupProtectionPolicyService(f.store,f.policy).save(OWNER,{
+    chatId:GROUP,revision:1,mode:'MONITOR',rules:[],
+    allowedDomains:[],allowedPhrases:[],exemptMemberIds:[]},version,0)).status,'SAVED');
+   const first=await f.app().handle(cb(611,100,'mi:1:g:s:0'));
+   assert.match(first.plan?.text??'',/مراقبة فقط/);
+   await f.policy.approveChat(OWNER,GROUP,['navigation','moderation']);
+   const stale=await f.app().handle(cb(612,100,'mi:1:g:s:0'));
+   assert.match(stale.plan?.text??'',/تحتاج مراجعة/);
+   assert.doesNotMatch(stale.plan?.text??'',/مراقبة فقط/);
+   await f.policy.revokeChatAtRevision(OWNER,GROUP,(await f.store.snapshot()).chats[0]!.version);
+   const empty=await f.app().handle(cb(613,100,'mi:1:g:s:0'));
+   assert.equal(empty.status,'APPLIED');
+   assert.match(empty.plan?.text??'',/المجموعات المعتمدة: 0/);
+   assert.equal(buttons(empty).some(b=>b.callback_data.startsWith('mi:1:g:d:')),false);
+  }finally{await f.close();}
+ });
+}
