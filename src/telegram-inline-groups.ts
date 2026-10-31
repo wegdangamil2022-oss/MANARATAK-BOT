@@ -1,9 +1,10 @@
-import type {BotStore,Chat,SubscriptionRequirement} from './store.js';
+import type {BotStore,BotState,Chat,SubscriptionRequirement} from './store.js';
 import type {Policy} from './policy.js';
 import type {OwnerInlineScreen,TelegramInlineKeyboard} from './telegram-inline-owner.js';
 import {reversalInventoryDigest,renderReversalInventory} from './moderation-reversal-inventory.js';
 import {ambiguousModerationChatIds} from './moderation-review-integrity.js';
 import {delegationGroupEntry} from './telegram-inline-delegation-edit.js';
+import {isValidGroupProtectionRecord} from './protection-rules.js';
 
 /** Read-only owner group browser. The selector is NEVER a permission token.
  * All screens are rebuilt from current durable state after checking the owner.
@@ -47,6 +48,21 @@ const footer=(back:string):Button[]=>[
  button('↩️ رجوع',back),button('🏠 لوحة المالك','mi:1:h')
 ];
 const PAGE_SIZE=8;
+const approvedGroups=(state:BotState,conflicts:ReadonlySet<string>):Chat[]=>
+ [...state.chats].filter(c=>c.approved&&!conflicts.has(c.id)&&
+  /^-[1-9][0-9]{0,18}$/u.test(c.id)&&Number.isSafeInteger(c.version)&&
+  c.version>=1&&c.version<=9_999_999_999)
+  .sort((a,b)=>a.id.localeCompare(b.id));
+
+/** Return to the exact approved owner group card, not merely an arbitrary
+ * group-list page. This is a locator only: callbacks still recheck the owner,
+ * policy revision, approval and current list membership when tapped. */
+export function ownerGroupCardLink(state:BotState,chatId:string):string|null{
+ const all=approvedGroups(state,ambiguousModerationChatIds(state));
+ const index=all.findIndex(c=>c.id===chatId);
+ return index<0?null:detailKey(all[index]!,Math.floor(index/PAGE_SIZE));
+}
+
 /** The catalogue's "مجموعاتي" entry opens the first group page, not a fake
  * implementation panel. Other inherited owner callbacks keep their routes.
  */
@@ -63,10 +79,7 @@ export async function renderOwnerInlineGroups(store:BotStore,policy:Policy,actor
  // including an identical or revoked copy, cannot be shown as an approved
  // distinct group or used by an existing detail/reversal callback.
  const conflictingChats=ambiguousModerationChatIds(state);
- const approved=[...state.chats].filter(c=>c.approved &&!conflictingChats.has(c.id)&&
-  /^-[1-9][0-9]{0,18}$/u.test(c.id)&&Number.isSafeInteger(c.version)&&
-  c.version>=1&&c.version<=9_999_999_999)
-  .sort((a,b)=>a.id.localeCompare(b.id));
+ const approved=approvedGroups(state,conflictingChats);
  const pages=Math.ceil(approved.length/PAGE_SIZE);
  if(route.kind==='list'){
   if(route.page>(pages?pages-1:0))return null;
@@ -100,6 +113,17 @@ export async function renderOwnerInlineGroups(store:BotStore,policy:Policy,actor
  const subscription:SubscriptionRequirement|undefined=subs[0];
  const enabled=chat.scopes.includes('verification') && Boolean(subscription?.channelIds.length);
  if(route.kind==='details'){
+  const protectionRows=(state.protectionPolicies??[]).filter(r=>r.policy.chatId===chat.id);
+  const protection=protectionRows[0];
+  const currentPolicy=protectionRows.length===1&&protection!==undefined&&
+   isValidGroupProtectionRecord(protection)&&protection.chatPolicyVersion===chat.version;
+  const protectionLabel=!chat.scopes.includes('moderation')?'نطاق الحماية غير مصرح':
+   protectionRows.length===0?'غير مضبوطة':
+   !currentPolicy?'تحتاج مراجعة':
+   protection!.policy.mode==='MONITOR'?'مراقبة فقط':
+   protection!.policy.mode==='OFF'?'متوقفة':'تحتاج مراجعة';
+  const activeRules=currentPolicy?protection!.policy.rules.filter(r=>r.enabled).length:0;
+  const protectionCounts=currentPolicy?'قواعد مفعلة للمراقبة: '+activeRules+' من '+protection!.policy.rules.length+'\\n':'';
   const body='<b>بطاقة المجموعة المحفوظة 👥</b>\n'
    +'معرف المحادثة: <code>'+safe(chat.id)+'</code>\n'
    +'الاعتماد المحلي: '+(chat.approved?'معتمد':'ملغى')+'\n'
@@ -108,6 +132,8 @@ export async function renderOwnerInlineGroups(store:BotStore,policy:Policy,actor
    +'وضع المساعد المحفوظ: '+chat.groupAI+'\n'
    +'الاشتراك المحفوظ: '+(enabled?'لديه '+subscription!.channelIds.length+' قناة مطلوبة':'غير مفعل')+'\n'
    +'إصدار سياسة المجموعة: '+chat.version+'\n'
+   +'حالة الحماية المحلية: '+protectionLabel+'\n'
+   +protectionCounts
    +'لا يوجد تحقق حي من Telegram. لا توجد أوامر حظر أو نشر في هذه الشاشة.';
   const actionRows:Button[][]=[];
   const delegation=delegationGroupEntry(state,chat.id,chat.version);
