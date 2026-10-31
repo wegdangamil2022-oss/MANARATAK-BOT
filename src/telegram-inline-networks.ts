@@ -280,7 +280,11 @@ export class OwnerNetworkEditor{
   const k=cancel.exec(data);if(k)return this.revoke(actor,k[1]!);
   const state=await this.store.snapshot(),now=this.clock();
   if(!this.auth(state,actor,now))return null;
-  if(data==='mi:1:i:01:03'||home.test(data))return this.root(state);
+  // Navigating away from the name-entry step is an actual cancellation,
+  // not merely a different screen while the pending input remains live.
+  if(!begin.test(data))await this.cancelInput(actor);
+  if(data==='mi:1:i:01:03'||home.test(data))
+   return this.root(await this.store.snapshot());
   if(begin.test(data))return this.start(actor);
   const l=list.exec(data);if(l)return this.networkList(state,Number(l[1]));
   const d=detail.exec(data);if(d)return this.networkCard(state,actor,now,d[1]!);
