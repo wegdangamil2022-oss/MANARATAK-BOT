@@ -34,6 +34,7 @@ import {studioPreviewEpoch,studioPreviewSourceEpoch} from './studio-preview-acce
 import {OwnerDelegationEditor} from './telegram-inline-delegation-edit.js';
 import {renderOwnerInlineGroups} from './telegram-inline-groups.js';
 import {OwnerGroupSetup} from './telegram-inline-group-setup.js';
+import {OwnerGroupPolicyTemplates} from './telegram-inline-group-templates.js';
 import {OwnerInlineGroupControls} from './telegram-inline-group-controls.js';
 import {renderOwnerInlineDelegations,delegationOwnerEntry} from './telegram-inline-delegations.js';
 import {renderStaffInline} from './telegram-inline-staff.js';
@@ -380,6 +381,11 @@ export class TelegramUpdateApplication {
        plan:this.plan(chatId,screen.text,undefined,screen.keyboard,event.callbackMessageId)};
      }
      if(!this.opts.policy.isOwner(actorId))return {status:'DENIED',reason:'OWNER_ONLY'};
+     if(event.callbackData==='mi:1:i:01:06'||event.callbackData==='mi:1:i:01:07'||event.callbackData.startsWith('gt:1:')){
+      const screen=await new OwnerGroupPolicyTemplates(this.opts.store,this.opts.policy,this.clock).handle(actorId,event.callbackData);
+      if(!screen)return {status:'DENIED',reason:'GROUP_TEMPLATE_STALE_OR_UNAUTHORIZED'};
+      return {status:'APPLIED',reason:'RESPONSE_PLANNED_ONLY',plan:this.plan(chatId,screen.text,undefined,screen.keyboard,event.callbackMessageId)};
+     }
      if(event.callbackData.startsWith('gw:1:')){
       const view=await new OwnerGroupSetup(this.opts.store,this.opts.policy,this.clock).handle(actorId,event.callbackData);
       return view?{status:'APPLIED',reason:'RESPONSE_PLANNED_ONLY',plan:this.plan(chatId,view.text,undefined,view.keyboard,event.callbackMessageId)}:{status:'DENIED',reason:'GROUP_SETUP_STALE_OR_UNAUTHORIZED'};
@@ -1165,7 +1171,7 @@ export class TelegramUpdateApplication {
     }
     const callback=event.callbackData??'';
     const ownerScreen=event.kind==='private'&&this.opts.policy.isOwner(event.actorId)&&(
-     /^(?:mi:1:|ec:1:|od:1:|gw:1:|gp:1:|of:1:|ol:1:|st:1:|ps:1:|pr:1:|pd:1:|pq:1:|mr:1:|mp:1:|c_)/u.test(callback)||
+     /^(?:mi:1:|ec:1:|od:1:|gw:1:|gt:1:|gp:1:|of:1:|ol:1:|st:1:|ps:1:|pr:1:|pd:1:|pq:1:|mr:1:|mp:1:|c_)/u.test(callback)||
      event.text==='/ownerinline'||event.text==='/ownerlegacy'||event.text==='/ownerrecover'||isOwnerMenuText(event.text)||
      handled.reason==='CATEGORY_TEXT_PREVIEW'||handled.reason==='DELEGATION_TEXT_PREVIEW'||handled.reason==='STUDIO_DRAFT_SAVED');
     if(ownerScreen&&handled.plan&&!handled.adminUIAccess){
