@@ -361,6 +361,9 @@ for(const engine of ['json','sqlite'] as const){
    assert.match(page.plan?.text??'',/صفحة 1 من 3/);
    assert.match(page.plan?.text??'',/8 مجموعات/);
    assert.equal(buttons(page).some(x=>x.callback_data==='gt:1:b:p:e:1'),true);
+   const firstCard=buttons(page).find(x=>x.callback_data.startsWith('mi:1:g:d:'));
+   assert.ok(firstCard,'bulk target rows should link to the actual group card');
+   assert.equal((await f.app().handle(cb(207,firstCard!.callback_data))).status,'APPLIED');
    const preview=await f.app().handle(cb(202,click(page,'معاينة')));
    assert.equal(preview.status,'APPLIED');
    assert.match(preview.plan?.text??'',/تأكيد/);
@@ -442,6 +445,23 @@ for(const engine of ['json','sqlite'] as const){
    assert.equal((await f.app().handle(cb(243,'gt:1:b:p:e:1'))).status,'DENIED');
    assert.equal((await f.app().handle(cb(244,'gt:1:b:v:e:1'))).status,'DENIED');
    assert.equal((await f.app().handle(cb(245,'gt:1:b:v:l:999'))).status,'DENIED');
+  }finally{await f.close();}
+ });
+}
+
+for(const engine of ['json','sqlite'] as const){
+ test('bulk confirmation is invalidated by owner settings epoch or new group insertion ('+engine+')',async()=>{
+  const f=await fixture(engine);try{
+   await f.approve('-1001000');await f.approve('-1001001');
+   const review=await f.app().handle(cb(260,'gt:1:b:v:e:0'));
+   const token=click(review,'تأكيد');
+   await f.store.transaction(s=>{s.privateSettingsRevision=(s.privateSettingsRevision??0)+1;});
+   assert.equal((await f.app().handle(cb(261,token))).status,'DENIED');
+   const another=await f.app().handle(cb(262,'gt:1:b:v:e:0'));
+   const next=click(another,'تأكيد');
+   await f.approve('-1000999');
+   assert.equal((await f.app().handle(cb(263,next))).status,'DENIED');
+   assert.equal((await f.store.snapshot()).protectionPolicies?.length??0,0);
   }finally{await f.close();}
  });
 }
