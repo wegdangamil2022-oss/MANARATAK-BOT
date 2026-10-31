@@ -1,4 +1,5 @@
 import {isValidFloodWindow,type FloodWindow} from './protection-flood.js';
+import {validGroupNetworks,type GroupNetwork} from './group-network-model.js';
 import {validAdminUIAccess,type AdminUIAccess} from './protection-ui-access.js';
 import {validStudioState,type StudioState} from './button-studio-model.js';
 import {validCategoryLanguage} from './education-category-policy.js';
@@ -152,6 +153,8 @@ export interface B6BudgetAttempt {
 }
 export interface BotState {
   buttonStudio?:StudioState;
+  /** Local owner network folders; never evidence of Telegram rights. */
+  groupNetworks?:GroupNetwork[];
   schemaVersion: 8;
   /** Optional additive per-group monitor policy, validated on every read/write. */
   protectionPolicies?:GroupProtectionRecord[];
@@ -235,6 +238,7 @@ export class BotStore {
       previous.purgeJobs = [];
     }
     if (previous.schemaVersion !== 8 ||
+      (previous.groupNetworks!==undefined&&!validGroupNetworks(previous.groupNetworks))||
       (previous.privateSettingsRevision!==undefined&&(typeof previous.privateSettingsRevision!=='number'||!Number.isSafeInteger(previous.privateSettingsRevision)||previous.privateSettingsRevision<0||previous.privateSettingsRevision>=Number.MAX_SAFE_INTEGER))||
       (previous.buttonStudio!==undefined&&!validStudioState(previous.buttonStudio))||
       (previous.protectionFloodWindows!==undefined&&(!Array.isArray(previous.protectionFloodWindows)||
