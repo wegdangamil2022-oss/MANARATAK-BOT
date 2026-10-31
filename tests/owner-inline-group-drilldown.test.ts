@@ -11,6 +11,8 @@ import {ApprovedAnswerService,ResourceLinkService} from '../src/education-intera
 import {TelegramUpdateApplication} from '../src/telegram-transport.js';
 import {isValidTelegramInlineKeyboard} from '../src/telegram-inline-owner.js';
 import {parseOwnerInlineGroupRoute} from '../src/telegram-inline-groups.js';
+import {GroupProtectionPolicyService} from '../src/group-protection-policy.js';
+import {ownerGroupCardLink} from '../src/telegram-inline-groups.js';
 
 const OWNER='100', GROUP='-100123';
 const cb=(update:number,actor:number,data:string,kind:'private'|'supergroup'='private')=>({
@@ -159,5 +161,72 @@ test('duplicate Telegram callback is acknowledged but is not reprocessed',async(
   assert.equal(same.status,'DUPLICATE');
   assert.equal(same.callbackQueryId,'group_61');
   assert.equal(same.plan,undefined);
+ }finally{await f.close();}
+});
+
+for(const engine of ['json','sqlite'] as const){
+ test('owner group card reports persisted monitor-only rules and returns to this exact group ('+engine+')',async()=>{
+  const f=await fixture(engine);try{
+   await f.policy.approveChat(OWNER,GROUP,['navigation','moderation']);
+   const v=(await f.store.snapshot()).chats.find(c=>c.id===GROUP)!.version;
+   const saved=await new GroupProtectionPolicyService(f.store,f.policy).save(OWNER,{
+    chatId:GROUP,revision:1,mode:'MONITOR',rules:[
+     {id:'keyword_one',kind:'WORD',value:'spam',enabled:true,action:'REVIEW'},
+     {id:'phrase_two',kind:'PHRASE',value:'fake offer',enabled:false,action:'WARN'}
+    ],allowedDomains:[],allowedPhrases:[],exemptMemberIds:[]
+   },v,0);
+   assert.equal(saved.status,'SAVED');
+   const list=await f.app().handle(cb(401,100,'mi:1:i:01:01'));
+   const groupLink=buttons(list).find(b=>b.callback_data.startsWith('mi:1:g:d:'))!.callback_data;
+   const detail=await f.app().handle(cb(402,100,groupLink));
+   assert.equal(detail.status,'APPLIED');
+   assert.match(detail.plan?.text??'',/حالة الحماية المحلية: مراقبة فقط/);
+   assert.match(detail.plan?.text??'',/قواعد مفعلة للمراقبة: 1 من 2/);
+   const editorLink=buttons(detail).find(b=>b.callback_data.startsWith('gp:1:p:'))!.callback_data;
+   const editor=await f.app().handle(cb(403,100,editorLink));
+   assert.equal(editor.status,'APPLIED');
+   assert.match(editor.plan?.text??'',/الكلمات والعبارات/);
+   const returnLink=buttons(editor).find(b=>b.text==='👥 بطاقة المجموعة');
+   assert.equal(returnLink?.callback_data,groupLink);
+   const returned=await f.app().handle(cb(404,100,returnLink!.callback_data));
+   assert.equal(returned.status,'APPLIED');
+   assert.match(returned.plan?.text??'',/حالة الحماية المحلية: مراقبة فقط/);
+   await f.policy.approveChat(OWNER,GROUP,['navigation']);
+   assert.equal((await f.app().handle(cb(405,100,returnLink!.callback_data))).status,'DENIED');
+  }finally{await f.close();}
+ });
+ test('group card never calls local policy active without scoped and current evidence ('+engine+')',async()=>{
+  const f=await fixture(engine);try{
+   await f.policy.approveChat(OWNER,GROUP,['navigation','moderation']);
+   let version=(await f.store.snapshot()).chats.find(c=>c.id===GROUP)!.version;
+   let detail=await f.app().handle(cb(411,100,'mi:1:g:d:'+GROUP+':'+version+':0'));
+   assert.match(detail.plan?.text??'',/حالة الحماية المحلية: غير مضبوطة/);
+   await new GroupProtectionPolicyService(f.store,f.policy).save(OWNER,{
+    chatId:GROUP,revision:1,mode:'MONITOR',rules:[
+     {id:'keyword_one',kind:'WORD',value:'spam',enabled:true,action:'REVIEW'}
+    ],allowedDomains:[],allowedPhrases:[],exemptMemberIds:[]
+   },version,0);
+   await f.policy.approveChat(OWNER,GROUP,['navigation','moderation']);
+   version=(await f.store.snapshot()).chats.find(c=>c.id===GROUP)!.version;
+   detail=await f.app().handle(cb(412,100,'mi:1:g:d:'+GROUP+':'+version+':0'));
+   assert.match(detail.plan?.text??'',/حالة الحماية المحلية: تحتاج مراجعة/);
+   await f.policy.approveChat(OWNER,GROUP,['navigation']);
+   version=(await f.store.snapshot()).chats.find(c=>c.id===GROUP)!.version;
+   detail=await f.app().handle(cb(413,100,'mi:1:g:d:'+GROUP+':'+version+':0'));
+   assert.match(detail.plan?.text??'',/حالة الحماية المحلية: نطاق الحماية غير مصرح/);
+   assert.equal(buttons(detail).some(b=>b.callback_data.startsWith('gp:1:p:')),false);
+  }finally{await f.close();}
+ });
+}
+test('owner card shortcut excludes conflicting and revoked approvals',async()=>{
+ const f=await fixture('json');try{
+  await f.policy.approveChat(OWNER,GROUP,['moderation']);
+  const state=await f.store.snapshot();
+  assert.equal(ownerGroupCardLink(state,GROUP),'mi:1:g:d:'+GROUP+':'+state.chats[0]!.version+':0');
+  const corrupted=structuredClone(state);
+  corrupted.chats.push({...corrupted.chats[0]!});
+  assert.equal(ownerGroupCardLink(corrupted,GROUP),null);
+  await f.policy.revokeChatAtRevision(OWNER,GROUP,state.chats[0]!.version);
+  assert.equal(ownerGroupCardLink(await f.store.snapshot(),GROUP),null);
  }finally{await f.close();}
 });
