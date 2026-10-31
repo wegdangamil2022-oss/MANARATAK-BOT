@@ -287,3 +287,32 @@ for(const engine of ['json','sqlite'] as const){
   }finally{await f.close();}
  });
 }
+
+for(const engine of ['json','sqlite'] as const){
+ test('racing distinct confirmations commit one policy and one mutation receipt ('+engine+')',async()=>{
+  const f=await fixture(engine);try{
+   await f.approve(TARGET);
+   const screen=await f.app().handle(cb(150,'gt:1:v:l:'+TARGET+':1'));
+   const token=click(screen,'تأكيد');
+   const [first,second]=await Promise.all([
+    f.app().handle(cb(151,token)),f.app().handle(cb(152,token))
+   ]);
+   assert.deepEqual([first.status,second.status].sort(),['APPLIED','DENIED']);
+   const s=await f.store.snapshot();
+   assert.equal(s.protectionPolicies?.filter(x=>x.policy.chatId===TARGET).length,1);
+   assert.equal(s.audit.filter(x=>x.reason==='GROUP_TEMPLATE_MONITOR_SAVED').length,1);
+   assert.equal(s.callbacks.filter(x=>x.action.startsWith('group-template-confirm:')&&x.used).length,1);
+  }finally{await f.close();}
+ });
+ test('source policy with future timestamp is unusable for copy or compare ('+engine+')',async()=>{
+  const f=await fixture(engine);try{
+   await f.approve(SOURCE);await f.approve(TARGET);
+   assert.equal((await f.save(SOURCE)).status,'SAVED');
+   await f.store.transaction(s=>{s.protectionPolicies![0]!.updatedAt=NOW+120_000;});
+   assert.equal((await f.app().handle(cb(160,'gt:1:x:'+SOURCE+':'+TARGET))).status,'DENIED');
+   const root=await f.app().handle(cb(161,'mi:1:i:01:07'));
+   assert.equal(root.status,'APPLIED');
+   assert.equal(buttons(root).some(x=>x.callback_data.startsWith('gt:1:d:')),false);
+  }finally{await f.close();}
+ });
+}
