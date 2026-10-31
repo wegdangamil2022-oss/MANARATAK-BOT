@@ -105,6 +105,8 @@ for(const engine of ['json','sqlite'] as const){
    const list=await f.app().handle(cb(11,click(home,'مراجعة الروابط')));
    const preview=await f.app().handle(cb(12,click(list,TARGET)));
    assert.match(preview.plan?.text??'',/الروابط/);
+   assert.match(preview.plan?.text??'',/اختبار عينة ثابتة: تطابق/);
+   assert.match(preview.plan?.text??'',/دون تنفيذ/);
    const token=click(preview,'تأكيد');
    const applied=await f.app().handle(cb(13,token));
    assert.equal(applied.status,'APPLIED');
@@ -255,6 +257,30 @@ for(const engine of ['json','sqlite'] as const){
    const dest=(await f.store.snapshot()).protectionPolicies?.find(r=>r.policy.chatId===TARGET)!;
    assert.equal(dest.policy.mode,'OFF');
    assert.equal(dest.policy.rules[0]?.action,'WARN');
+  }finally{await f.close();}
+ });
+}
+
+for(const engine of ['json','sqlite'] as const){
+ test('owner settings epoch change invalidates a previously issued template confirmation ('+engine+')',async()=>{
+  const f=await fixture(engine);try{
+   await f.approve(TARGET);
+   const preview=await f.app().handle(cb(130,'gt:1:v:e:'+TARGET+':1'));
+   const token=click(preview,'تأكيد');
+   await f.store.transaction(s=>{s.privateSettingsRevision=(s.privateSettingsRevision??0)+1;});
+   assert.equal((await f.app().handle(cb(131,token))).status,'DENIED');
+   assert.equal((await f.store.snapshot()).protectionPolicies?.length??0,0);
+  }finally{await f.close();}
+ });
+ test('disabled owner dashboard denies template preview and confirmation ('+engine+')',async()=>{
+  const f=await fixture(engine);try{
+   await f.approve(TARGET);
+   const preview=await f.app().handle(cb(140,'gt:1:v:e:'+TARGET+':1'));
+   const token=click(preview,'تأكيد');
+   await f.store.transaction(s=>{s.privateFeatures['owner.dashboard']=false;});
+   assert.equal((await f.app().handle(cb(141,token))).status,'DENIED');
+   assert.equal((await f.app().handle(cb(142,'mi:1:i:01:06'))).status,'DENIED');
+   assert.equal((await f.store.snapshot()).protectionPolicies?.length??0,0);
   }finally{await f.close();}
  });
 }
