@@ -337,3 +337,72 @@ test('future-dated protection evidence cannot appear active in either owner view
   assert.doesNotMatch(card.plan?.text??'',/قواعد مفعلة للمراقبة/);
  }finally{await f.close();}
 });
+
+
+test('owner group diagnostics route grammar is bounded and canonical',()=>{
+ assert.deepEqual(parseOwnerInlineGroupRoute('mi:1:g:n:0'),{kind:'alerts',page:0});
+ assert.deepEqual(parseOwnerInlineGroupRoute('mi:1:g:o:1'),{kind:'modes',page:1});
+ for(const invalid of ['mi:1:g:n:00','mi:1:g:n:-1','mi:1:g:n:1000','mi:1:g:n:0:extra',
+  'mi:1:g:o:00','mi:1:g:o:9999','mi:1:g:o:0\n','mi:2:g:n:0']){
+  assert.equal(parseOwnerInlineGroupRoute(invalid),null,invalid);
+ }
+});
+for(const engine of ['json','sqlite'] as const){
+ test('network alerts show only approved-group local concerns with protected drilldown ('+engine+')',async()=>{
+  const f=await fixture(engine);try{
+   await f.policy.approveChat(OWNER,GROUP,['navigation','moderation','verification']);
+   await f.policy.approveChat(OWNER,'-100124',['navigation']);
+   await f.policy.setPresence('-100124',true);
+   const groupVersion=(await f.store.snapshot()).chats.find(c=>c.id===GROUP)!.version;
+   const index=await f.app().handle(cb(801,100,'mi:1:i:01:09'));
+   assert.equal(index.status,'APPLIED');
+   assert.match(index.plan?.text??'',/تنبيهات الشبكة المحلية/);
+   assert.match(index.plan?.text??'',/وجود البوت غير مؤكد/);
+   assert.match(index.plan?.text??'',/سياسة الحماية غير مضبوطة/);
+   assert.match(index.plan?.text??'',/لا توجد قنوات اشتراك محفوظة/);
+   assert.match(index.plan?.text??'',/ليس.*تنبيه.*Telegram/);
+   assert.equal(isValidTelegramInlineKeyboard(index.plan?.inlineMarkup),true);
+   const link=buttons(index).find(b=>b.callback_data==='mi:1:g:d:'+GROUP+':'+groupVersion+':0');
+   assert.ok(link);
+   assert.equal((await f.app().handle(cb(802,100,link!.callback_data))).status,'APPLIED');
+   assert.equal((await f.app().handle(cb(803,300,'mi:1:i:01:09'))).status,'DENIED');
+   assert.equal((await f.app().handle(cb(804,100,'mi:1:i:01:09','supergroup'))).status,'DENIED');
+   assert.equal((await f.app().handle(cb(805,100,'mi:1:g:n:1'))).status,'DENIED');
+   await f.policy.revokeChatAtRevision(OWNER,GROUP,groupVersion);
+   const after=await f.app().handle(cb(806,100,'mi:1:g:n:0'));
+   assert.equal(after.status,'APPLIED');
+   assert.doesNotMatch(after.plan?.text??'',new RegExp(GROUP));
+  }finally{await f.close();}
+ });
+ test('group operating modes disclose stored settings without suggesting live enforcement ('+engine+')',async()=>{
+  const f=await fixture(engine);try{
+   for(let i=0;i<9;i++)
+    await f.policy.approveChat(OWNER,'-100'+String(1000+i),['navigation']);
+   await f.policy.approveChat(OWNER,GROUP,['navigation','moderation','publishing','assistant']);
+   const version=(await f.store.snapshot()).chats.find(c=>c.id===GROUP)!.version;
+   const saved=await new GroupProtectionPolicyService(f.store,f.policy).save(OWNER,{
+    chatId:GROUP,revision:1,mode:'MONITOR',rules:[
+     {id:'spamword',kind:'WORD',value:'spam',enabled:true,action:'REVIEW'}],
+    allowedDomains:[],allowedPhrases:[],exemptMemberIds:[]
+   },version,0);
+   assert.equal(saved.status,'SAVED');
+   const before=(await f.store.snapshot()).protectionPolicies;
+   const modes=await f.app().handle(cb(821,100,'mi:1:i:01:11'));
+   assert.equal(modes.status,'APPLIED');
+   assert.match(modes.plan?.text??'',/أوضاع التشغيل المحلية/);
+   assert.match(modes.plan?.text??'',/لا تنفذ عقوبات Telegram/);
+   assert.equal(isValidTelegramInlineKeyboard(modes.plan?.inlineMarkup),true);
+   const next=buttons(modes).find(b=>b.callback_data==='mi:1:g:o:1');
+   assert.ok(next);
+   const more=await f.app().handle(cb(822,100,next!.callback_data));
+   assert.equal(more.status,'APPLIED');
+   assert.match(more.plan?.text??'',/مراقبة فقط/);
+   assert.match(more.plan?.text??'',/النشر: مصرح محليًا/);
+   assert.equal(buttons(more).filter(b=>b.callback_data.startsWith('mi:1:g:d:')).length,2);
+   assert.ok(buttons(more).some(b=>b.callback_data==='mi:1:g:o:0'));
+   assert.equal((await f.app().handle(cb(823,100,'mi:1:g:o:2'))).status,'DENIED');
+   assert.equal((await f.app().handle(cb(824,300,'mi:1:i:01:11'))).status,'DENIED');
+   assert.deepEqual((await f.store.snapshot()).protectionPolicies,before);
+  }finally{await f.close();}
+ });
+}
