@@ -19,6 +19,7 @@ const choose=new RegExp('^gt:1:v:([el]):'+group+':'+ver+'$','u');
 const sources=new RegExp('^gt:1:s:'+page+'$','u');
 const targets=new RegExp('^gt:1:d:'+group+':'+page+'$','u');
 const compare=new RegExp('^gt:1:x:'+group+':'+group+'$','u');
+const compareOnly=new RegExp('^gt:1:q:'+group+':'+group+'$','u');
 const confirm=/^gt:1:c:([A-Za-z0-9_-]{24})$/u;
 const TTL=120_000,PREFIX='group-template-confirm:';
 type Mode='e'|'l'|'c';
@@ -64,7 +65,7 @@ function proof(s:BotState,source:Chat|null,target:Chat,record:GroupProtectionRec
 export function validGroupPolicyStudioRoute(data:unknown):boolean{
  if(typeof data!=='string'||Buffer.byteLength(data,'utf8')>64)return false;
  if(root.test(data)||confirm.test(data)||data==='mi:1:i:01:06'||data==='mi:1:i:01:07')return true;
- return [preset,choose,sources,targets,compare].some(re=>re.test(data));
+ return [preset,choose,sources,targets,compare,compareOnly].some(re=>re.test(data));
 }
 export class OwnerGroupPolicyTemplates{
  constructor(private readonly store:BotStore,private readonly policy:Policy,
@@ -130,7 +131,7 @@ export class OwnerGroupPolicyTemplates{
     e.value.kind,e.value.sourceId,e.value.targetId,e.value.targetVersion,e.value.proof]),
     chatId:'private',actorId:actor,policyVersion:0,expiresAt:now+TTL,
     oneShot:true,used:false,revoked:false});
-   const count=e.policy.rules.length,kindLabel=kind==='c'?'نسخ قواعد مجموعة':'قالب حماية';
+   const count=e.policy.rules.length,kindLabel=kind==='c'?'مقارنة ونسخ قواعد مجموعة':'قالب حماية';
    const returnTo=kind==='c'?'gt:1:d:'+sourceId+':0':'gt:1:p:'+kind+':0';
    const sourceText=kind==='c'?'المصدر: <code>'+esc(sourceId)+'</code>\n':'';
    const note=kind==='c'?
@@ -228,11 +229,34 @@ export class OwnerGroupPolicyTemplates{
   if(d){
    const sourceId=d[1]!,source=groups.find(c=>c.id===sourceId);
    if(!source||!sourceRecord(state,source,now))return null;
-   const choices=targetsForPreset.filter(c=>c.id!==sourceId);
-   return this.listGroups('🔄 اختيار المجموعة الهدف للنسخ',choices,Number(d[2]),
-    chat=>'gt:1:x:'+sourceId+':'+chat.id,
+   const choices=groups.filter(c=>c.id!==sourceId);
+   return this.listGroups('🔄 اختيار المجموعة الهدف للنسخ أو المقارنة',choices,Number(d[2]),
+    chat=>(state.protectionPolicies??[]).some(r=>r.policy.chatId===chat.id)?
+     'gt:1:q:'+sourceId+':'+chat.id:'gt:1:x:'+sourceId+':'+chat.id,
     'gt:1:d:'+sourceId+':'+d[2],
-    'المجموعة المصدر: '+esc(sourceId)+'\nاختر المجموعة الهدف التي ليس لها سياسة حماية محفوظة.');
+    'المجموعة المصدر: '+esc(sourceId)+'\nالهدف بلا سياسة: معاينة النسخ. الهدف بسياسة قائمة: مقارنة للقراءة فقط، دون استبدال.');
+  }
+  const q=compareOnly.exec(data);
+  if(q){
+   const from=groups.find(c=>c.id===q[1]),to=groups.find(c=>c.id===q[2]);
+   if(!from||!to||from.id===to.id)return null;
+   const source=sourceRecord(state,from,now),target=sourceRecord(state,to,now);
+   if(!source||!target)return null;
+   const srcCount=source.policy.rules.length,dstCount=target.policy.rules.length;
+   const srcActive=source.policy.rules.filter(r=>r.enabled).length;
+   const dstActive=target.policy.rules.filter(r=>r.enabled).length;
+   return ui('<b>🔍 مقارنة سياسات حماية محلية</b>\n'+
+    'المصدر: <code>'+esc(from.id)+'</code>\n'+
+    'الهدف: <code>'+esc(to.id)+'</code>\n'+
+    'قواعد المصدر: '+srcCount+' · المفعلة: '+srcActive+'\n'+
+    'قواعد الهدف: '+dstCount+' · المفعلة: '+dstActive+'\n'+
+    'وضع المصدر: '+(source.policy.mode==='MONITOR'?'مراقبة فقط':'متوقفة')+'\n'+
+    'وضع الهدف: '+(target.policy.mode==='MONITOR'?'مراقبة فقط':'متوقفة')+'\n'+
+    'السماح: '+source.policy.allowedDomains.length+' نطاقًا في المصدر، '+
+     target.policy.allowedDomains.length+' في الهدف.\n'+
+    'لا يمكن النسخ فوق سياسة موجودة. هذه مقارنة للقراءة فقط؛ لم تُعدّل أي قواعد أو حقوق Telegram.',
+    [[btn('↩️ اختيار الهدف','gt:1:d:'+from.id+':0'),
+      btn('🏠 لوحة المالك','mi:1:h')]]);
   }
   const x=compare.exec(data);
   if(x)return this.preview(actor,'c',x[1]!,x[2]!);
