@@ -406,3 +406,45 @@ for(const engine of ['json','sqlite'] as const){
   }finally{await f.close();}
  });
 }
+
+for(const engine of ['json','sqlite'] as const){
+ test('network alerts use actual browser page for a filtered group and invalidate stale card links ('+engine+')',async()=>{
+  const f=await fixture(engine);try{
+   for(let i=0;i<9;i++){
+    const clean='-100'+String(1000+i);
+    await f.policy.approveChat(OWNER,clean,['navigation']);
+    await f.policy.setPresence(clean,true);
+   }
+   await f.policy.approveChat(OWNER,GROUP,['navigation','moderation']);
+   const version=(await f.store.snapshot()).chats.find(c=>c.id===GROUP)!.version;
+   const result=await f.app().handle(cb(841,100,'mi:1:g:n:0'));
+   assert.equal(result.status,'APPLIED');
+   assert.match(result.plan?.text??'',/مجموعات تحتاج مراجعة محلية: 1/);
+   const link=buttons(result).find(b=>b.callback_data.startsWith('mi:1:g:d:'));
+   assert.equal(link?.callback_data,'mi:1:g:d:'+GROUP+':'+version+':1');
+   assert.equal((await f.app().handle(cb(842,100,link!.callback_data))).status,'APPLIED');
+   assert.equal((await f.app().handle(cb(843,100,'mi:1:g:n:1'))).status,'DENIED');
+   await f.policy.approveChat(OWNER,GROUP,['navigation','moderation']);
+   assert.equal((await f.app().handle(cb(844,100,link!.callback_data))).status,'DENIED');
+  }finally{await f.close();}
+ });
+ test('stale protection policy cannot masquerade as active monitoring on diagnostic screens ('+engine+')',async()=>{
+  const f=await fixture(engine);try{
+   await f.policy.approveChat(OWNER,GROUP,['navigation','moderation']);
+   const version=(await f.store.snapshot()).chats.find(c=>c.id===GROUP)!.version;
+   assert.equal((await new GroupProtectionPolicyService(f.store,f.policy).save(OWNER,{
+    chatId:GROUP,revision:1,mode:'MONITOR',rules:[
+     {id:'word1',kind:'WORD',value:'spam',enabled:true,action:'REVIEW'}],
+    allowedDomains:[],allowedPhrases:[],exemptMemberIds:[]
+   },version,0)).status,'SAVED');
+   await f.policy.approveChat(OWNER,GROUP,['navigation','moderation']);
+   const alerts=await f.app().handle(cb(851,100,'mi:1:i:01:09'));
+   assert.equal(alerts.status,'APPLIED');
+   assert.match(alerts.plan?.text??'',/سياسة الحماية تحتاج مراجعة/);
+   const modes=await f.app().handle(cb(852,100,'mi:1:i:01:11'));
+   assert.equal(modes.status,'APPLIED');
+   assert.match(modes.plan?.text??'',/الحماية: تحتاج مراجعة/);
+   assert.doesNotMatch(modes.plan?.text??'',/مراقبة فقط/);
+  }finally{await f.close();}
+ });
+}
