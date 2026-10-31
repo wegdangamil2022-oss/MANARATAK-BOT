@@ -230,3 +230,24 @@ test('owner card shortcut excludes conflicting and revoked approvals',async()=>{
   assert.equal(ownerGroupCardLink(await f.store.snapshot(),GROUP),null);
  }finally{await f.close();}
 });
+
+test('owner protection return targets the correct card on a later group page',async()=>{
+ const f=await fixture('sqlite');try{
+  for(let i=0;i<9;i++)await f.policy.approveChat(OWNER,'-10000'+i,['navigation']);
+  await f.policy.approveChat(OWNER,GROUP,['navigation','moderation']);
+  const state=await f.store.snapshot(),v=state.chats.find(c=>c.id===GROUP)!.version;
+  const groupLink=ownerGroupCardLink(state,GROUP);
+  assert.equal(groupLink,'mi:1:g:d:'+GROUP+':'+v+':1');
+  const detail=await f.app().handle(cb(501,100,groupLink!));
+  assert.equal(detail.status,'APPLIED');
+  assert.match(detail.plan?.text??'',new RegExp(GROUP));
+  const editorLink=buttons(detail).find(b=>b.callback_data.startsWith('gp:1:p:'))!.callback_data;
+  const editor=await f.app().handle(cb(502,100,editorLink));
+  assert.equal(editor.status,'APPLIED');
+  assert.equal(buttons(editor).find(b=>b.text==='👥 بطاقة المجموعة')?.callback_data,groupLink);
+  const returned=await f.app().handle(cb(503,100,groupLink!));
+  assert.equal(returned.status,'APPLIED');
+  const forgedPage=groupLink!.replace(/:1$/u,':0');
+  assert.equal((await f.app().handle(cb(504,100,forgedPage))).status,'DENIED');
+ }finally{await f.close();}
+});
