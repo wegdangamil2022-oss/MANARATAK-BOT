@@ -265,6 +265,7 @@ export async function renderOwnerInlineGroups(store:BotStore,policy:Policy,actor
    actionRows.push([button('📑 قوالب حماية المجموعات','gt:1:h'),
     button('🔄 نسخ ومقارنة الإعدادات','gt:1:s:0')]);
   if(chat.scopes.includes('moderation'))actionRows.push([button('👥 إجراءات جماعية محلية','gt:1:b:h')]);
+  actionRows.push([button('🛑 إيقاف خدمات جماعيًا','gb:1:h')]);
   if(/^-[1-9][0-9]{0,15}$/u.test(chat.id)&&Number.isSafeInteger(Number(chat.id)))
    actionRows.push([button('⚙️ إعدادات هذه المجموعة','gs:1:g:'+chat.id+':'+chat.version+':'+route.page)]);
   if(chat.scopes.includes('moderation'))
