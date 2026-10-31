@@ -234,8 +234,8 @@ for(const engine of ['json','sqlite'] as const){
    assert.deepEqual(after.protectionPolicies,before.protectionPolicies);
    // Transport always records successful callback acknowledgement receipts;
    // the read-only comparison must add no actual policy-mutation audit.
-   assert.deepEqual(after.audit.filter(a=>a.reason.startsWith('GROUP_TEMPLATE_')),
-    before.audit.filter(a=>a.reason.startsWith('GROUP_TEMPLATE_')));
+   assert.deepEqual(after.audit.filter(a=>a.reason==='GROUP_TEMPLATE_MONITOR_SAVED'||a.reason==='GROUP_TEMPLATE_COPY_MONITOR_SAVED'),
+    before.audit.filter(a=>a.reason==='GROUP_TEMPLATE_MONITOR_SAVED'||a.reason==='GROUP_TEMPLATE_COPY_MONITOR_SAVED'));
   }finally{await f.close();}
  });
  test('duplicate restored approval quarantines preview and confirmation atomically ('+engine+')',async()=>{
