@@ -63,7 +63,7 @@ function proof(s:BotState,source:Chat|null,target:Chat,record:GroupProtectionRec
 }
 export function validGroupPolicyStudioRoute(data:unknown):boolean{
  if(typeof data!=='string'||Buffer.byteLength(data,'utf8')>64)return false;
- if(root.test(data)||confirm.test(data))return true;
+ if(root.test(data)||confirm.test(data)||data==='mi:1:i:01:06'||data==='mi:1:i:01:07')return true;
  return [preset,choose,sources,targets,compare].some(re=>re.test(data));
 }
 export class OwnerGroupPolicyTemplates{
