@@ -592,3 +592,63 @@ for(const engine of ['json','sqlite'] as const){
   }finally{await f.close();}
  });
 }
+
+
+for(const engine of ['json','sqlite'] as const){
+ test('template history is bounded to eight entries per page and never exposes an undo for single templates ('+engine+')',async()=>{
+  const f=await fixture(engine);try{
+   for(let i=0;i<9;i++){
+    const id='-100'+String(2000+i);
+    await f.approve(id);
+    const initial=await f.app().handle(cb(410+i*2,'gt:1:v:e:'+id+':1'));
+    assert.equal(initial.status,'APPLIED');
+    assert.equal((await f.app().handle(cb(411+i*2,click(initial,'تأكيد')))).status,'APPLIED');
+   }
+   const first=await f.app().handle(cb(450,'gt:1:r:h'));
+   assert.equal(first.status,'APPLIED');
+   assert.equal(buttons(first).filter(b=>b.callback_data.startsWith('gt:1:r:v:')).length,8);
+   assert.ok(buttons(first).some(b=>b.callback_data==='gt:1:r:p:1'));
+   const second=await f.app().handle(cb(451,'gt:1:r:p:1'));
+   assert.equal(second.status,'APPLIED');
+   assert.equal(buttons(second).filter(b=>b.callback_data.startsWith('gt:1:r:v:')).length,1);
+   const detail=await f.app().handle(cb(452,click(second,'📑')));
+   assert.equal(detail.status,'APPLIED');
+   assert.match(detail.plan?.text??'',/حفظ قالب محلي/);
+   assert.equal(buttons(detail).some(b=>b.text.includes('معاينة الاسترجاع')),false);
+   assert.equal((await f.app().handle(cb(453,'gt:1:r:p:2'))).status,'DENIED');
+   assert.equal((await f.store.snapshot()).protectionPolicies?.length,9);
+  }finally{await f.close();}
+ });
+ test('old bulk operations stay visible but cannot be reverted after a week ('+engine+')',async()=>{
+  const f=await fixture(engine);try{
+   await f.approve(TARGET);
+   const draft=await f.app().handle(cb(470,'gt:1:b:v:e:0'));
+   assert.equal((await f.app().handle(cb(471,click(draft,'تأكيد')))).status,'APPLIED');
+   const list=await f.app().handle(cb(472,'gt:1:r:h'));
+   const record=click(list,'👥');
+   const original=await f.app().handle(cb(473,record));
+   const undo=click(original,'معاينة الاسترجاع');
+   f.advance(7*24*60*60*1000+1);
+   const old=await f.app().handle(cb(474,record));
+   assert.equal(old.status,'APPLIED');
+   assert.match(old.plan?.text??'',/انتهت المهلة/);
+   assert.equal(buttons(old).some(b=>b.text.includes('معاينة الاسترجاع')),false);
+   assert.equal((await f.app().handle(cb(475,undo))).status,'DENIED');
+   assert.equal((await f.store.snapshot()).protectionPolicies?.length,1);
+  }finally{await f.close();}
+ });
+ test('owner dashboard revocation prevents invoking a prepared rollback ('+engine+')',async()=>{
+  const f=await fixture(engine);try{
+   await f.approve(TARGET);
+   const draft=await f.app().handle(cb(490,'gt:1:b:v:e:0'));
+   assert.equal((await f.app().handle(cb(491,click(draft,'تأكيد')))).status,'APPLIED');
+   const list=await f.app().handle(cb(492,'gt:1:r:h'));
+   const detail=await f.app().handle(cb(493,click(list,'👥')));
+   const preview=await f.app().handle(cb(494,click(detail,'معاينة الاسترجاع')));
+   const token=click(preview,'تأكيد الاسترجاع');
+   await f.store.transaction(s=>{s.privateFeatures['owner.dashboard']=false;});
+   assert.equal((await f.app().handle(cb(495,token))).status,'DENIED');
+   assert.equal((await f.store.snapshot()).protectionPolicies?.length,1);
+  }finally{await f.close();}
+ });
+}
