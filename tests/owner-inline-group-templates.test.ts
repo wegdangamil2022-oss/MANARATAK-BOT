@@ -652,3 +652,66 @@ for(const engine of ['json','sqlite'] as const){
   }finally{await f.close();}
  });
 }
+
+
+test('template cancellation callbacks use canonical, size-bounded tokens',()=>{
+ assert.equal(validGroupPolicyStudioRoute('gt:1:k:'+'A'.repeat(24)),true);
+ for(const bad of ['gt:1:k:abc','gt:1:k:'+'A'.repeat(25),'gt:1:k:'+'A'.repeat(23),
+  'gt:1:k:'+'A'.repeat(23)+'!','gt:1:k:'+'A'.repeat(24)+'\n']){
+  assert.equal(validGroupPolicyStudioRoute(bad),false,bad);
+ }
+});
+for(const engine of ['json','sqlite'] as const){
+ test('cancel template preview revokes server-side confirmation token for good ('+engine+')',async()=>{
+  const f=await fixture(engine);try{
+   await f.approve(TARGET);
+   const preview=await f.app().handle(cb(510,'gt:1:v:e:'+TARGET+':1'));
+   assert.equal(preview.status,'APPLIED');
+   const token=click(preview,'تأكيد');
+   const cancel=click(preview,'إلغاء');
+   assert.match(cancel,/^gt:1:k:[A-Za-z0-9_-]{24}$/u);
+   assert.equal((await f.app().handle(cb(511,cancel,200))).status,'DENIED');
+   const cancelled=await f.app().handle(cb(512,cancel));
+   assert.equal(cancelled.status,'APPLIED');
+   assert.match(cancelled.plan?.text??'',/أُلغيت المعاينة/);
+   assert.equal((await f.app().handle(cb(513,token))).status,'DENIED');
+   assert.equal((await f.app().handle(cb(514,cancel))).status,'DENIED');
+   const state=await f.store.snapshot();
+   assert.equal(state.protectionPolicies?.length??0,0);
+   assert.equal(state.callbacks.filter(c=>c.action.startsWith('group-template-confirm:')&&c.revoked).length,1);
+   assert.equal(state.audit.filter(a=>a.reason==='GROUP_TEMPLATE_PREVIEW_CANCELLED').length,1);
+  }finally{await f.close();}
+ });
+ test('cancel bulk confirmation prevents group modifications and allows a new independent preview ('+engine+')',async()=>{
+  const f=await fixture(engine);try{
+   await f.approve(TARGET);await f.approve(SOURCE);
+   const preview=await f.app().handle(cb(520,'gt:1:b:v:l:0'));
+   assert.equal(preview.status,'APPLIED');
+   const token=click(preview,'تأكيد');
+   const cancel=click(preview,'إلغاء');
+   assert.equal((await f.app().handle(cb(521,cancel))).status,'APPLIED');
+   assert.equal((await f.app().handle(cb(522,token))).status,'DENIED');
+   assert.equal((await f.store.snapshot()).protectionPolicies?.length??0,0);
+   const other=await f.app().handle(cb(523,'gt:1:b:v:e:0'));
+   const otherToken=click(other,'تأكيد');
+   assert.equal((await f.app().handle(cb(524,otherToken))).status,'APPLIED');
+   assert.equal((await f.store.snapshot()).protectionPolicies?.length,2);
+  }finally{await f.close();}
+ });
+ test('cancel prepared bulk rollback keeps original policies intact ('+engine+')',async()=>{
+  const f=await fixture(engine);try{
+   await f.approve(TARGET);
+   const bulk=await f.app().handle(cb(530,'gt:1:b:v:e:0'));
+   assert.equal((await f.app().handle(cb(531,click(bulk,'تأكيد')))).status,'APPLIED');
+   const history=await f.app().handle(cb(532,'gt:1:r:h'));
+   const detail=await f.app().handle(cb(533,click(history,'👥')));
+   const rollback=await f.app().handle(cb(534,click(detail,'معاينة الاسترجاع')));
+   const token=click(rollback,'تأكيد الاسترجاع');
+   const cancel=click(rollback,'إلغاء');
+   assert.equal((await f.app().handle(cb(535,cancel))).status,'APPLIED');
+   assert.equal((await f.app().handle(cb(536,token))).status,'DENIED');
+   assert.equal((await f.store.snapshot()).protectionPolicies?.length,1);
+   assert.equal((await f.store.snapshot()).audit.filter(a=>a.reason==='GROUP_TEMPLATE_BULK_MONITOR_REVERTED').length,0);
+  }finally{await f.close();}
+ });
+}
