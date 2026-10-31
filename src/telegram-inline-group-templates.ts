@@ -2,7 +2,7 @@ import {createHash,randomBytes} from 'node:crypto';
 import type {BotState,BotStore,Chat} from './store.js';
 import type {Policy} from './policy.js';
 import type {OwnerInlineScreen} from './telegram-inline-owner.js';
-import {isValidGroupProtectionRecord,isValidProtectionPolicy,
+import {evaluateProtectionRules,isValidGroupProtectionRecord,isValidProtectionPolicy,
  type GroupProtectionRecord,type ProtectionPolicy} from './protection-rules.js';
 
 /** Owner-private local group protection templates and copy workflow.
@@ -60,7 +60,8 @@ function copiedPolicy(source:GroupProtectionRecord,id:string):ProtectionPolicy{
  return value;
 }
 function proof(s:BotState,source:Chat|null,target:Chat,record:GroupProtectionRecord|null):string{
- return createHash('sha256').update(JSON.stringify([source??null,record??null,target])).digest('hex');
+ return createHash('sha256').update(JSON.stringify([source??null,record??null,target,
+  s.privateSettingsRevision??0,s.privateFeatures['owner.dashboard']])).digest('hex');
 }
 export function validGroupPolicyStudioRoute(data:unknown):boolean{
  if(typeof data!=='string'||Buffer.byteLength(data,'utf8')>64)return false;
@@ -131,6 +132,11 @@ export class OwnerGroupPolicyTemplates{
     e.value.kind,e.value.sourceId,e.value.targetId,e.value.targetVersion,e.value.proof]),
     chatId:'private',actorId:actor,policyVersion:0,expiresAt:now+TTL,
     oneShot:true,used:false,revoked:false});
+   const sample=evaluateProtectionRules(e.policy,{chatId:targetId,memberId:'999',
+    type:'TEXT',text:'https://example.org'});
+   if(sample.authorizedToSend||sample.status==='INVALID_MESSAGE'||sample.status==='INVALID_POLICY')return null;
+   const sampleText='اختبار عينة ثابتة: '+(sample.status==='MATCH'?'تطابق':sample.status==='OFF'?'متوقفة':'بلا تطابق')+
+    ' · دون تنفيذ أي إجراء.\n';
    const count=e.policy.rules.length,kindLabel=kind==='c'?'مقارنة ونسخ قواعد مجموعة':'قالب حماية';
    const returnTo=kind==='c'?'gt:1:d:'+sourceId+':0':'gt:1:p:'+kind+':0';
    const sourceText=kind==='c'?'المصدر: <code>'+esc(sourceId)+'</code>\n':'';
@@ -141,7 +147,7 @@ export class OwnerGroupPolicyTemplates{
     'الهدف: <code>'+esc(targetId)+'</code>\n'+
     'قواعد القالب: '+count+'\n'+
     'الحماية: '+(e.policy.mode==='MONITOR'?'مراقبة فقط':'متوقفة')+'\n'+
-    note+'\n'+
+    sampleText+note+'\n'+
     'لن تُكتب الإعدادات إلا بعد التأكيد لمرة واحدة خلال دقيقتين. '+
     'لا نسخ فوق سياسة موجودة، ولا حظر أو حذف أو كتم عبر Telegram.',
     [[btn(kind==='c'?'✅ تأكيد النسخ المحلي':'✅ تأكيد حفظ القالب','gt:1:c:'+ref.slice(2))],
