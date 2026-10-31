@@ -123,7 +123,7 @@ export async function renderOwnerInlineGroups(store:BotStore,policy:Policy,actor
    protection!.policy.mode==='MONITOR'?'مراقبة فقط':
    protection!.policy.mode==='OFF'?'متوقفة':'تحتاج مراجعة';
   const activeRules=currentPolicy?protection!.policy.rules.filter(r=>r.enabled).length:0;
-  const protectionCounts=currentPolicy?'قواعد مفعلة للمراقبة: '+activeRules+' من '+protection!.policy.rules.length+'\\n':'';
+  const protectionCounts=currentPolicy?'قواعد مفعلة للمراقبة: '+activeRules+' من '+protection!.policy.rules.length+'\n':'';
   const body='<b>بطاقة المجموعة المحفوظة 👥</b>\n'
    +'معرف المحادثة: <code>'+safe(chat.id)+'</code>\n'
    +'الاعتماد المحلي: '+(chat.approved?'معتمد':'ملغى')+'\n'
