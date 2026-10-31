@@ -465,3 +465,130 @@ for(const engine of ['json','sqlite'] as const){
   }finally{await f.close();}
  });
 }
+
+
+test('group template history and rollback callback grammar is canonical and bounded',()=>{
+ for(const valid of ['gt:1:r:h','gt:1:r:p:0','gt:1:r:p:12',
+  'gt:1:r:v:'+'A'.repeat(24),'gt:1:r:x:'+'B'.repeat(24),
+  'gt:1:r:c:'+'C'.repeat(24)])assert.equal(validGroupPolicyStudioRoute(valid),true,valid);
+ for(const invalid of ['gt:1:r:p:00','gt:1:r:p:-1','gt:1:r:p:1000',
+  'gt:1:r:v:abc','gt:1:r:x:abc','gt:1:r:c:abc',
+  'gt:1:r:h:0','gt:1:r:h\n','gt:1:r:v:'+'A'.repeat(25)])
+  assert.equal(validGroupPolicyStudioRoute(invalid),false,invalid);
+});
+for(const engine of ['json','sqlite'] as const){
+ test('owner sees tamper-resistant local template history and can inspect grouped bulk details ('+engine+')',async()=>{
+  const f=await fixture(engine);try{
+   await f.approve(TARGET);await f.approve(SOURCE);
+   const single=await f.app().handle(cb(300,'gt:1:v:e:'+SOURCE+':1'));
+   assert.equal((await f.app().handle(cb(301,click(single,'تأكيد')))).status,'APPLIED');
+   const bulk=await f.app().handle(cb(302,'gt:1:b:v:l:0'));
+   assert.equal((await f.app().handle(cb(303,click(bulk,'تأكيد')))).status,'APPLIED');
+   const history=await f.app().handle(cb(304,'gt:1:r:h'));
+   assert.equal(history.status,'APPLIED');
+   assert.match(history.plan?.text??'',/سجل تغييرات القوالب/);
+   assert.match(history.plan?.text??'',/عمليتان/);
+   assert.equal(isValidTelegramInlineKeyboard(history.plan?.inlineMarkup),true);
+   const entries=buttons(history).filter(b=>b.callback_data.startsWith('gt:1:r:v:'));
+   assert.equal(entries.length,2);
+   const detail=await f.app().handle(cb(305,entries[0]!.callback_data));
+   assert.equal(detail.status,'APPLIED');
+   assert.match(detail.plan?.text??'',/المجموعات المستهدفة/);
+   assert.match(detail.plan?.text??'',/استرجاع/);
+   assert.equal((await f.app().handle(cb(306,'gt:1:r:h',200))).status,'DENIED');
+   assert.equal((await f.app().handle(cb(307,'gt:1:r:h',100,true))).status,'DENIED');
+  }finally{await f.close();}
+ });
+ test('bulk rollback removes only unchanged generated monitor policies after fresh owner confirmation ('+engine+')',async()=>{
+  const f=await fixture(engine);try{
+   await f.approve(SOURCE);await f.approve(TARGET);
+   assert.equal((await f.save(SOURCE,{allow:true})).status,'SAVED');
+   const previous=(await f.store.snapshot()).protectionPolicies![0]!.policy;
+   const bulk=await f.app().handle(cb(310,'gt:1:b:v:l:0'));
+   assert.equal((await f.app().handle(cb(311,click(bulk,'تأكيد')))).status,'APPLIED');
+   const history=await f.app().handle(cb(312,'gt:1:r:h'));
+   const detail=await f.app().handle(cb(313,click(history,'👥')));
+   assert.equal(detail.status,'APPLIED');
+   const preview=await f.app().handle(cb(314,click(detail,'معاينة الاسترجاع')));
+   assert.equal(preview.status,'APPLIED');
+   assert.match(preview.plan?.text??'',/لن تُحذف سياسات.*معدلة/);
+   assert.equal((await f.store.snapshot()).protectionPolicies?.length,2);
+   const token=click(preview,'تأكيد الاسترجاع');
+   assert.equal((await f.app().handle(cb(315,token,200))).status,'DENIED');
+   const outcomes=await Promise.all([f.app().handle(cb(316,token)),f.app().handle(cb(317,token))]);
+   assert.deepEqual(outcomes.map(x=>x.status).sort(),['APPLIED','DENIED']);
+   const after=await f.store.snapshot();
+   assert.equal(after.protectionPolicies?.length,1);
+   assert.deepEqual(after.protectionPolicies?.[0]?.policy,previous);
+   assert.equal(after.audit.filter(x=>x.reason==='GROUP_TEMPLATE_BULK_MONITOR_REVERTED').length,1);
+   assert.equal((await f.app().handle(cb(318,token))).status,'DENIED');
+   const afterHistory=await f.app().handle(cb(319,'gt:1:r:h'));
+   assert.match(afterHistory.plan?.text??'',/مسترجعة/);
+  }finally{await f.close();}
+ });
+ test('rollback refuses entire bulk when any destination policy was modified ('+engine+')',async()=>{
+  const f=await fixture(engine);try{
+   await f.approve(SOURCE);await f.approve(TARGET);
+   const bulk=await f.app().handle(cb(320,'gt:1:b:v:e:0'));
+   assert.equal((await f.app().handle(cb(321,click(bulk,'تأكيد')))).status,'APPLIED');
+   const history=await f.app().handle(cb(322,'gt:1:r:h'));
+   const detail=await f.app().handle(cb(323,click(history,'👥')));
+   const preview=await f.app().handle(cb(324,click(detail,'معاينة الاسترجاع')));
+   const token=click(preview,'تأكيد الاسترجاع');
+   const s=await f.store.snapshot();
+   const changed=s.protectionPolicies!.find(x=>x.policy.chatId===TARGET)!;
+   assert.equal((await new GroupProtectionPolicyService(f.store,f.policy,()=>NOW).save(OWNER,{
+    ...changed.policy,revision:2,
+    rules:[{id:'custom_new',kind:'WORD',value:'spam',enabled:true,action:'REVIEW'}]
+   },changed.chatPolicyVersion,changed.policy.revision)).status,'SAVED');
+   assert.equal((await f.app().handle(cb(325,token))).status,'DENIED');
+   assert.equal((await f.store.snapshot()).protectionPolicies?.length,2);
+   assert.equal((await f.store.snapshot()).audit.filter(x=>x.reason==='GROUP_TEMPLATE_BULK_MONITOR_REVERTED').length,0);
+  }finally{await f.close();}
+ });
+ test('rollback fails closed when group approval changed or its extra evidence appeared ('+engine+')',async()=>{
+  const f=await fixture(engine);try{
+   await f.approve(SOURCE);await f.approve(TARGET);
+   const bulk=await f.app().handle(cb(330,'gt:1:b:v:l:0'));
+   assert.equal((await f.app().handle(cb(331,click(bulk,'تأكيد')))).status,'APPLIED');
+   const history=await f.app().handle(cb(332,'gt:1:r:h'));
+   const detail=await f.app().handle(cb(333,click(history,'👥')));
+   const preview=await f.app().handle(cb(334,click(detail,'معاينة الاسترجاع')));
+   const token=click(preview,'تأكيد الاسترجاع');
+   await f.policy.approveChat(OWNER,SOURCE,['navigation','moderation']);
+   assert.equal((await f.app().handle(cb(335,token))).status,'DENIED');
+   assert.equal((await f.store.snapshot()).protectionPolicies?.length,2);
+   assert.equal((await f.app().handle(cb(336,click(detail,'معاينة الاسترجاع')))).status,'DENIED');
+  }finally{await f.close();}
+ });
+ test('rollback preview expires and no stale reference can be replayed ('+engine+')',async()=>{
+  const f=await fixture(engine);try{
+   await f.approve(TARGET);
+   const bulk=await f.app().handle(cb(340,'gt:1:b:v:e:0'));
+   assert.equal((await f.app().handle(cb(341,click(bulk,'تأكيد')))).status,'APPLIED');
+   const history=await f.app().handle(cb(342,'gt:1:r:h'));
+   const detail=await f.app().handle(cb(343,click(history,'👥')));
+   const preview=await f.app().handle(cb(344,click(detail,'معاينة الاسترجاع')));
+   const token=click(preview,'تأكيد الاسترجاع');
+   f.advance(121_000);
+   assert.equal((await f.app().handle(cb(345,token))).status,'DENIED');
+   const after=await f.store.snapshot();
+   assert.equal(after.protectionPolicies?.length,1);
+  }finally{await f.close();}
+ });
+ test('history rejects forged receipts and duplicate audit records without deleting policies ('+engine+')',async()=>{
+  const f=await fixture(engine);try{
+   await f.approve(TARGET);
+   const bulk=await f.app().handle(cb(350,'gt:1:b:v:e:0'));
+   assert.equal((await f.app().handle(cb(351,click(bulk,'تأكيد')))).status,'APPLIED');
+   const history=await f.app().handle(cb(352,'gt:1:r:h'));
+   const key=click(history,'👥');
+   await f.store.transaction(s=>{
+    const event=s.audit.find(x=>x.reason==='GROUP_TEMPLATE_BULK_MONITOR_SAVED')!;
+    s.audit.push({...event});
+   });
+   assert.equal((await f.app().handle(cb(353,key))).status,'DENIED');
+   assert.equal((await f.store.snapshot()).protectionPolicies?.length,1);
+  }finally{await f.close();}
+ });
+}
