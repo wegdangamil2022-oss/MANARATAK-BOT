@@ -316,3 +316,24 @@ for(const engine of ['json','sqlite'] as const){
   }finally{await f.close();}
  });
 }
+
+test('future-dated protection evidence cannot appear active in either owner view',async()=>{
+ const f=await fixture('json');try{
+  await f.policy.approveChat(OWNER,GROUP,['navigation','moderation']);
+  const version=(await f.store.snapshot()).chats[0]!.version;
+  assert.equal((await new GroupProtectionPolicyService(f.store,f.policy).save(OWNER,{
+   chatId:GROUP,revision:1,mode:'MONITOR',
+   rules:[{id:'rule_one',kind:'WORD',value:'spam',enabled:true,action:'WARN'}],
+   allowedDomains:[],allowedPhrases:[],exemptMemberIds:[]
+  },version,0)).status,'SAVED');
+  await f.store.transaction(s=>{s.protectionPolicies![0]!.updatedAt=Date.now()+120_000;});
+  const summary=await f.app().handle(cb(701,100,'mi:1:i:01:10'));
+  assert.equal(summary.status,'APPLIED');
+  assert.match(summary.plan?.text??'',/تحتاج مراجعة/);
+  assert.doesNotMatch(summary.plan?.text??'',/مراقبة فقط/);
+  const card=await f.app().handle(cb(702,100,'mi:1:g:d:'+GROUP+':'+version+':0'));
+  assert.equal(card.status,'APPLIED');
+  assert.match(card.plan?.text??'',/حالة الحماية المحلية: تحتاج مراجعة/);
+  assert.doesNotMatch(card.plan?.text??'',/قواعد مفعلة للمراقبة/);
+ }finally{await f.close();}
+});
