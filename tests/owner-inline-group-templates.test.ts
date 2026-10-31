@@ -715,3 +715,41 @@ for(const engine of ['json','sqlite'] as const){
   }finally{await f.close();}
  });
 }
+
+
+test('group-scoped change history callbacks use canonical group IDs and pages',()=>{
+ assert.equal(validGroupPolicyStudioRoute('gt:1:r:g:-100124:0'),true);
+ assert.equal(validGroupPolicyStudioRoute('gt:1:r:g:-100124:12'),true);
+ for(const bad of ['gt:1:r:g:-100124:00','gt:1:r:g:-100124:-1',
+  'gt:1:r:g:100124:0','gt:1:r:g:-100124:1000','gt:1:r:g:-100124:0\n',
+  'gt:1:r:g:-100124:0:extra'])assert.equal(validGroupPolicyStudioRoute(bad),false,bad);
+});
+for(const engine of ['json','sqlite'] as const){
+ test('group card opens a scoped history that excludes other groups and enforces current authorization ('+engine+')',async()=>{
+  const f=await fixture(engine);try{
+   await f.approve(SOURCE);await f.approve(TARGET);
+   const sourceDraft=await f.app().handle(cb(560,'gt:1:v:e:'+SOURCE+':1'));
+   assert.equal((await f.app().handle(cb(561,click(sourceDraft,'تأكيد')))).status,'APPLIED');
+   const targetDraft=await f.app().handle(cb(562,'gt:1:v:l:'+TARGET+':1'));
+   assert.equal((await f.app().handle(cb(563,click(targetDraft,'تأكيد')))).status,'APPLIED');
+   const list=await f.app().handle(cb(564,'mi:1:i:01:01'));
+   const targetCard=await f.app().handle(cb(565,click(list,TARGET)));
+   assert.equal(targetCard.status,'APPLIED');
+   const groupHistory=click(targetCard,'سجل هذه المجموعة');
+   assert.equal(groupHistory,'gt:1:r:g:'+TARGET+':0');
+   const scoped=await f.app().handle(cb(566,groupHistory));
+   assert.equal(scoped.status,'APPLIED');
+   assert.match(scoped.plan?.text??'',/سجل تغييرات هذه المجموعة/);
+   assert.match(scoped.plan?.text??'',/عملية واحدة/);
+   const actions=buttons(scoped).filter(x=>x.callback_data.startsWith('gt:1:r:v:'));
+   assert.equal(actions.length,1);
+   assert.equal((await f.app().handle(cb(567,actions[0]!.callback_data))).status,'APPLIED');
+   assert.equal((await f.app().handle(cb(568,'gt:1:r:g:'+TARGET+':1'))).status,'DENIED');
+   assert.equal((await f.app().handle(cb(569,groupHistory,200))).status,'DENIED');
+   const version=(await f.store.snapshot()).chats.find(c=>c.id===TARGET)!.version;
+   await f.policy.revokeChatAtRevision(OWNER,TARGET,version);
+   assert.equal((await f.app().handle(cb(570,groupHistory))).status,'DENIED');
+   assert.equal((await f.store.snapshot()).protectionPolicies?.length,2);
+  }finally{await f.close();}
+ });
+}
