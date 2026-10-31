@@ -29,6 +29,7 @@ const bulkConfirm=/^gt:1:b:c:([A-Za-z0-9_-]{24})$/u;
 const historyHome=/^gt:1:r:h$/u;
 const historyPage=new RegExp('^gt:1:r:p:'+page+'$','u');
 const historyView=/^gt:1:r:v:([A-Za-z0-9_-]{24})$/u;
+const groupHistory=new RegExp('^gt:1:r:g:'+group+':'+page+'$','u');
 const revertPreview=/^gt:1:r:x:([A-Za-z0-9_-]{24})$/u;
 const revertConfirm=/^gt:1:r:c:([A-Za-z0-9_-]{24})$/u;
 const cancelPreview=/^gt:1:k:([A-Za-z0-9_-]{24})$/u;
@@ -86,7 +87,7 @@ export function validGroupPolicyStudioRoute(data:unknown):boolean{
   historyHome.test(data)||revertConfirm.test(data)||cancelPreview.test(data)||
   data==='mi:1:i:01:06'||data==='mi:1:i:01:07'||data==='mi:1:i:01:08')return true;
  return [preset,choose,sources,targets,compare,compareOnly,bulkPage,bulkPreview,
-  historyPage,historyView,revertPreview].some(re=>re.test(data));
+  historyPage,historyView,groupHistory,revertPreview].some(re=>re.test(data));
 }
 export class OwnerGroupPolicyTemplates{
  constructor(private readonly store:BotStore,private readonly policy:Policy,
@@ -444,6 +445,34 @@ export class OwnerGroupPolicyTemplates{
    'السجل لا يثبت تنفيذ أي عقوبات Telegram؛ إنما يعرض حفظ السياسات المحلية.',
    rows);
  }
+
+ /** Show only the template actions that affected the selected *currently*
+  * approved group. The action detail still rechecks the original receipt.
+  * A stale/revoked group cannot be reached with a copied history callback. */
+ private groupHistoryList(s:BotState,actor:string,now:number,id:string,p:number):OwnerInlineScreen|null{
+  const group=cardScope(s,this.policy,actor,now).find(c=>c.id===id);
+  if(!group)return null;
+  const entries=this.history(s,actor).filter(e=>e.ids.includes(id));
+  if(!pageOf(entries,p))return null;
+  const rows=entries.slice(p*8,p*8+8).map(e=>[btn(
+   (e.type==='bulk'?'👥 جماعي · ':'📑 فردي · ')+
+    (this.alreadyReverted(s,e.nonce)?'مسترجعة':'محفوظة'),
+   'gt:1:r:v:'+e.nonce)]);
+  const nav:{text:string;callback_data:string}[]=[];
+  if(p)nav.push(btn('⬅️ السابق','gt:1:r:g:'+id+':'+(p-1)));
+  if((p+1)*8<entries.length)nav.push(btn('➡️ التالي','gt:1:r:g:'+id+':'+(p+1)));
+  if(nav.length)rows.push(nav);
+  rows.push([btn('↩️ بطاقة المجموعة',ownerGroupCardLink(s,id)??'mi:1:i:01:01'),
+   btn('🕘 سجل القوالب العام','gt:1:r:h')]);
+  return ui('<b>🕘 سجل تغييرات هذه المجموعة</b>\n'+
+   'المجموعة: <code>'+esc(id)+'</code>\n'+
+   'العمليات الموثقة: '+(entries.length===1?'عملية واحدة':entries.length+' عمليات')+'\n'+
+   'صفحة '+(p+1)+' من '+Math.max(1,Math.ceil(entries.length/8))+'\n'+
+   (entries.length?'اختر عملية لقراءة تفاصيلها؛ لا توجد تغييرات تُنفذ من سجل العرض.':
+    'لا توجد قوالب محفوظة موثقة لهذه المجموعة حاليًا.')+'\n'+
+   'السجل محلي ولا يدل على أي عقوبات حية في Telegram.',rows);
+ }
+
  private historyDetails(s:BotState,actor:string,now:number,nonce:string):OwnerInlineScreen|null{
   const e=this.historyEvent(s,actor,nonce);
   if(!e)return null;
@@ -567,6 +596,8 @@ export class OwnerGroupPolicyTemplates{
   if(historyHome.test(data)||historyPageMatch){
    return this.historyList(state,actor,historyPageMatch?Number(historyPageMatch[1]):0);
   }
+  const groupEntry=groupHistory.exec(data);
+  if(groupEntry)return this.groupHistoryList(state,actor,now,groupEntry[1]!,Number(groupEntry[2]));
   const viewed=historyView.exec(data);
   if(viewed)return this.historyDetails(state,actor,now,viewed[1]!);
   const undoView=revertPreview.exec(data);
