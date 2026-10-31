@@ -26,9 +26,20 @@ const bulkRoot=/^gt:1:b:h$/u;
 const bulkPage=new RegExp('^gt:1:b:p:([el]):'+page+'$','u');
 const bulkPreview=new RegExp('^gt:1:b:v:([el]):'+page+'$','u');
 const bulkConfirm=/^gt:1:b:c:([A-Za-z0-9_-]{24})$/u;
-const TTL=120_000,PREFIX='group-template-confirm:',BULK_PREFIX='group-template-bulk:';
+const historyHome=/^gt:1:r:h$/u;
+const historyPage=new RegExp('^gt:1:r:p:'+page+'$','u');
+const historyView=/^gt:1:r:v:([A-Za-z0-9_-]{24})$/u;
+const revertPreview=/^gt:1:r:x:([A-Za-z0-9_-]{24})$/u;
+const revertConfirm=/^gt:1:r:c:([A-Za-z0-9_-]{24})$/u;
+const TTL=120_000,PREFIX='group-template-confirm:',BULK_PREFIX='group-template-bulk:',
+ REVERT_PREFIX='group-template-revert:',REVERT_WINDOW=7*24*60*60*1000;
 type Mode='e'|'l'|'c';
 type Evidence={kind:Mode;sourceId:string;targetId:string;targetVersion:number;proof:string};
+type HistoryEvent={
+ nonce:string;type:'single'|'copy'|'bulk';audit:BotState['audit'][number];
+ receipt:BotState['callbacks'][number];ids:string[];templateKind:'e'|'l'|null;
+ page:number|null;digest:string|null
+};
 const btn=(text:string,callback_data:string)=>({text,callback_data});
 const ui=(text:string,rows:{text:string;callback_data:string}[][]):OwnerInlineScreen=>({text,keyboard:{inline_keyboard:rows}});
 const esc=(s:string)=>s.replace(/&/gu,'&amp;').replace(/</gu,'&lt;').replace(/>/gu,'&gt;').replace(/"/gu,'&quot;').replace(/'/gu,'&#39;');
@@ -71,8 +82,10 @@ function proof(s:BotState,source:Chat|null,target:Chat,record:GroupProtectionRec
 export function validGroupPolicyStudioRoute(data:unknown):boolean{
  if(typeof data!=='string'||Buffer.byteLength(data,'utf8')>64)return false;
  if(root.test(data)||confirm.test(data)||bulkRoot.test(data)||bulkConfirm.test(data)||
+  historyHome.test(data)||revertConfirm.test(data)||
   data==='mi:1:i:01:06'||data==='mi:1:i:01:07'||data==='mi:1:i:01:08')return true;
- return [preset,choose,sources,targets,compare,compareOnly,bulkPage,bulkPreview].some(re=>re.test(data));
+ return [preset,choose,sources,targets,compare,compareOnly,bulkPage,bulkPreview,
+  historyPage,historyView,revertPreview].some(re=>re.test(data));
 }
 export class OwnerGroupPolicyTemplates{
  constructor(private readonly store:BotStore,private readonly policy:Policy,
@@ -309,14 +322,222 @@ export class OwnerGroupPolicyTemplates{
   });
  }
 
+
+ /** The audit + consumed preview receipt are both mandatory evidence for
+  * history. A copied/duplicate/restored row is ambiguous and fails closed. */
+ private historyEvent(s:BotState,actor:string,nonce:string):HistoryEvent|null{
+  if(!/^[A-Za-z0-9_-]{24}$/u.test(nonce))return null;
+  const markers=['group-template:'+nonce,'group-template-bulk:'+nonce];
+  const matching=s.audit.filter(a=>markers.includes(a.updateKey));
+  if(matching.length!==1)return null;
+  const audit=matching[0]!,bulk=audit.updateKey===markers[1];
+  if(audit.decision!=='ALLOW'||audit.actorId!==actor||
+   (bulk?audit.reason!=='GROUP_TEMPLATE_BULK_MONITOR_SAVED'||
+    audit.policyVersion!==0:
+    !['GROUP_TEMPLATE_MONITOR_SAVED','GROUP_TEMPLATE_COPY_MONITOR_SAVED'].includes(audit.reason))||
+   !Number.isSafeInteger(audit.at)||audit.at<0)return null;
+  const rows=s.callbacks.filter(c=>c.ref==='c_'+nonce),receipt=rows[0];
+  if(rows.length!==1||!receipt||receipt.actorId!==actor||
+   receipt.chatId!=='private'||receipt.policyVersion!==0||
+   receipt.used!==true||receipt.revoked!==false||receipt.oneShot!==true||
+   !Number.isSafeInteger(receipt.expiresAt)||receipt.expiresAt<=audit.at||
+   receipt.expiresAt>audit.at+TTL)return null;
+  const prefix=bulk?BULK_PREFIX:PREFIX;
+  if(!receipt.action.startsWith(prefix))return null;
+  let values:unknown;
+  try{values=JSON.parse(receipt.action.slice(prefix.length));}catch{return null;}
+  if(!Array.isArray(values))return null;
+  if(bulk){
+   if(values.length!==4||!['e','l'].includes(values[0])||
+    !Number.isSafeInteger(values[1])||values[1]<0||values[1]>999||
+    typeof values[2]!=='string'||!/^[a-f0-9]{64}$/u.test(values[2])||
+    !Array.isArray(values[3])||values[3].length<1||values[3].length>8||
+    values[3].some((id:unknown)=>typeof id!=='string'||!/^-[1-9][0-9]{0,15}$/u.test(id))||
+    new Set(values[3]).size!==values[3].length)return null;
+   return {nonce,type:'bulk',audit,receipt,ids:values[3] as string[],
+    templateKind:values[0] as 'e'|'l',page:values[1] as number,digest:values[2] as string};
+  }
+  if(values.length!==5||!['e','l','c'].includes(values[0])||
+   typeof values[1]!=='string'||typeof values[2]!=='string'||
+   !/^-[1-9][0-9]{0,15}$/u.test(values[2])||
+   !Number.isSafeInteger(values[3])||values[3]<1||
+   typeof values[4]!=='string'||!/^[a-f0-9]{64}$/u.test(values[4])||
+   (values[0]==='c'?!/^-[1-9][0-9]{0,15}$/u.test(values[1]):values[1]!==''))return null;
+  if(audit.policyVersion!==values[3]||
+   (audit.reason==='GROUP_TEMPLATE_COPY_MONITOR_SAVED')!==(values[0]==='c'))return null;
+  return {nonce,type:values[0]==='c'?'copy':'single',audit,receipt,ids:[values[2] as string],
+   templateKind:values[0]==='c'?null:values[0] as 'e'|'l',page:null,digest:null};
+ }
+ private history(s:BotState,actor:string):HistoryEvent[]{
+  const candidates=s.audit.filter(a=>
+   ['GROUP_TEMPLATE_MONITOR_SAVED','GROUP_TEMPLATE_COPY_MONITOR_SAVED',
+    'GROUP_TEMPLATE_BULK_MONITOR_SAVED'].includes(a.reason));
+  const entries:HistoryEvent[]=[];
+  for(const a of [...candidates].reverse()){
+   const match=/^group-template(?:-bulk)?:([A-Za-z0-9_-]{24})$/u.exec(a.updateKey);
+   if(!match)continue;
+   const found=this.historyEvent(s,actor,match[1]!);
+   if(found&&found.audit===a)entries.push(found);
+  }
+  return entries;
+ }
+ private alreadyReverted(s:BotState,nonce:string):boolean{
+  return s.audit.some(a=>a.updateKey==='group-template-bulk-rollback:'+nonce);
+ }
+ /** A rollback is allowed only for the exact untouched policies created by
+  * the original operation. Reconstruct the PRE-SAVE state and compare the
+  * receipt's original digest: any changed group, policy, page or owner epoch
+  * makes the whole operation non-reversible. */
+ private reversible(s:BotState,actor:string,now:number,event:HistoryEvent):{
+  ids:string[];proof:string
+ }|null{
+  if(event.type!=='bulk'||!event.templateKind||event.page===null||
+   !event.digest||this.alreadyReverted(s,event.nonce)||
+   now<event.audit.at||now-event.audit.at>REVERT_WINDOW)return null;
+  const groupSet=new Set(event.ids),groups=cardScope(s,this.policy,actor,now);
+  if(event.ids.some(id=>!groups.some(c=>c.id===id))||
+   s.protectionFloodWindows?.some(w=>groupSet.has(w.chatId)))return null;
+  const policies:NonNullable<BotState['protectionPolicies']>=[];
+  for(const id of event.ids){
+   const records=(s.protectionPolicies??[]).filter(row=>row.policy.chatId===id);
+   const row=records[0],group=groups.find(g=>g.id===id)!;
+   if(records.length!==1||!row||!isValidGroupProtectionRecord(row)||
+    row.updatedBy!==actor||row.updatedAt!==event.audit.at||
+    row.chatPolicyVersion!==group.version||
+    JSON.stringify(row.policy)!==JSON.stringify(template(event.templateKind,id)))
+    return null;
+   policies.push(row);
+  }
+  const stateBefore:BotState={...s,
+   protectionPolicies:(s.protectionPolicies??[]).filter(row=>!groupSet.has(row.policy.chatId))};
+  const before=this.bulkEvidence(stateBefore,actor,now,event.templateKind,event.page);
+  if(!before||before.digest!==event.digest||
+   JSON.stringify(before.eligible.map(g=>g.id))!==JSON.stringify(event.ids))return null;
+  const proof=createHash('sha256').update(JSON.stringify([
+   event.audit,event.receipt,event.ids,policies,
+   s.privateSettingsRevision??0,s.privateFeatures['owner.dashboard']
+  ])).digest('hex');
+  return {ids:event.ids,proof};
+ }
+ private historyList(s:BotState,actor:string,pageNumber:number):OwnerInlineScreen|null{
+  const entries=this.history(s,actor);
+  if(!pageOf(entries,pageNumber))return null;
+  const chosen=entries.slice(pageNumber*8,pageNumber*8+8);
+  const rows=chosen.map(e=>[btn(
+   (e.type==='bulk'?'👥 ':'📑 ')+e.ids.length+' مجموعة'+
+    (this.alreadyReverted(s,e.nonce)?' · مسترجعة':' · محفوظة'),
+   'gt:1:r:v:'+e.nonce)]);
+  const nav:{text:string;callback_data:string}[]=[];
+  if(pageNumber)nav.push(btn('⬅️ السابق','gt:1:r:p:'+(pageNumber-1)));
+  if((pageNumber+1)*8<entries.length)nav.push(btn('➡️ التالي','gt:1:r:p:'+(pageNumber+1)));
+  if(nav.length)rows.push(nav);
+  rows.push([btn('↩️ قوالب الإعدادات','gt:1:h'),btn('🏠 لوحة المالك','mi:1:h')]);
+  const size=entries.length===2?'عمليتان':entries.length===1?'عملية واحدة':entries.length+' عمليات';
+  return ui('<b>🕘 سجل تغييرات القوالب المحلية</b>\n'+
+   'المحفوظ في تدقيق البوت: '+size+'\n'+
+   'صفحة '+(pageNumber+1)+' من '+Math.max(1,Math.ceil(entries.length/8))+'\n'+
+   (entries.length?'اختر عملية لعرض المجموعة أو المجموعات المستهدفة وحالة الاسترجاع.':
+    'لا توجد عمليات حفظ موثقة حاليًا.')+'\n'+
+   'السجل لا يثبت تنفيذ أي عقوبات Telegram؛ إنما يعرض حفظ السياسات المحلية.',
+   rows);
+ }
+ private historyDetails(s:BotState,actor:string,now:number,nonce:string):OwnerInlineScreen|null{
+  const e=this.historyEvent(s,actor,nonce);
+  if(!e)return null;
+  const reverted=this.alreadyReverted(s,nonce);
+  const reversible=this.reversible(s,actor,now,e);
+  const label=e.type==='bulk'?'تطبيق جماعي لقالب مراقبة':
+   e.type==='copy'?'نسخ سياسة محلية':'حفظ قالب محلي';
+  const rows:{text:string;callback_data:string}[][]=[];
+  if(reversible)rows.push([btn('🔎 معاينة الاسترجاع الآمن','gt:1:r:x:'+nonce)]);
+  rows.push([btn('↩️ سجل القوالب','gt:1:r:h'),btn('🏠 لوحة المالك','mi:1:h')]);
+  return ui('<b>🕘 تفاصيل تغيير إعدادات المجموعات</b>\n'+
+   'العملية: '+label+'\n'+
+   'المجموعات المستهدفة: '+e.ids.length+'\n'+
+   e.ids.map(id=>'• <code>'+esc(id)+'</code>').join('\n')+'\n'+
+   'وقت الحفظ (UTC): '+new Date(e.audit.at).toISOString().slice(0,16).replace('T',' ')+'\n'+
+   'الاسترجاع: '+(reverted?'مسترجعة':
+    reversible?'متاح بعد تأكيد جديد':'غير متاح؛ العملية ليست جماعية أو تغيّرت الأدلة أو انتهت المهلة')+
+   '\nلا توجد تغييرات حية في Telegram.',rows);
+ }
+ private async previewRevert(actor:string,nonce:string):Promise<OwnerInlineScreen|null>{
+  return this.store.transaction(s=>{
+   const now=this.clock();
+   if(!this.auth(s,actor,now))return null;
+   const event=this.historyEvent(s,actor,nonce);
+   if(!event)return null;
+   const evidence=this.reversible(s,actor,now,event);
+   if(!evidence)return null;
+   const live=s.callbacks.filter(c=>c.action.startsWith(REVERT_PREFIX)&&
+    c.actorId===actor&&!c.used&&!c.revoked&&c.expiresAt>now);
+   if(live.length>=100)return null;
+   const ref='c_'+randomBytes(18).toString('base64url');
+   if(s.callbacks.some(c=>c.ref===ref))return null;
+   s.callbacks.push({ref,action:REVERT_PREFIX+JSON.stringify([nonce,evidence.proof]),
+    chatId:'private',actorId:actor,policyVersion:0,expiresAt:now+TTL,
+    oneShot:true,used:false,revoked:false});
+   return ui('<b>🔎 معاينة الاسترجاع الجماعي المحلي</b>\n'+
+    'سيُسترجع وضع '+evidence.ids.length+' مجموعات بإزالة القوالب التي أضافتها هذه العملية فقط:\n'+
+    evidence.ids.map(id=>'• <code>'+esc(id)+'</code>').join('\n')+'\n'+
+    'لن تُحذف سياسات المجموعات المعدلة أو التغييرات اللاحقة؛ عند الشك تُرفض الدفعة كاملة.\n'+
+    'هذا ليس تراجعًا عن عقوبات Telegram؛ لا تُنفذ أي أوامر Telegram.\n'+
+    'التأكيد صالح لدقيقتين ولمرة واحدة.',
+    [[btn('✅ تأكيد الاسترجاع المحلي','gt:1:r:c:'+ref.slice(2))],
+     [btn('↩️ تفاصيل العملية','gt:1:r:v:'+nonce),btn('🏠 لوحة المالك','mi:1:h')]]);
+  });
+ }
+ private async confirmRevert(actor:string,nonce:string):Promise<OwnerInlineScreen|null>{
+  return this.store.transaction(s=>{
+   const now=this.clock();
+   if(!this.auth(s,actor,now))return null;
+   const records=s.callbacks.filter(c=>c.ref==='c_'+nonce),receipt=records[0];
+   if(records.length!==1||!receipt||receipt.actorId!==actor||
+    receipt.chatId!=='private'||receipt.policyVersion!==0||
+    !receipt.action.startsWith(REVERT_PREFIX)||receipt.oneShot!==true||
+    receipt.used!==false||receipt.revoked!==false||
+    !Number.isSafeInteger(receipt.expiresAt)||receipt.expiresAt<=now||
+    receipt.expiresAt>now+TTL)return null;
+   let saved:unknown;
+   try{saved=JSON.parse(receipt.action.slice(REVERT_PREFIX.length));}catch{return null;}
+   if(!Array.isArray(saved)||saved.length!==2||
+    typeof saved[0]!=='string'||!/^[A-Za-z0-9_-]{24}$/u.test(saved[0])||
+    typeof saved[1]!=='string'||!/^[a-f0-9]{64}$/u.test(saved[1]))return null;
+   const event=this.historyEvent(s,actor,saved[0]);
+   if(!event)return null;
+   const evidence=this.reversible(s,actor,now,event);
+   if(!evidence||evidence.proof!==saved[1])return null;
+   const ids=new Set(evidence.ids);
+   s.protectionPolicies=(s.protectionPolicies??[]).filter(row=>!ids.has(row.policy.chatId));
+   receipt.used=true;
+   s.audit.push({actorId:actor,updateKey:'group-template-bulk-rollback:'+event.nonce,
+    decision:'ALLOW',reason:'GROUP_TEMPLATE_BULK_MONITOR_REVERTED',
+    policyVersion:0,at:now});
+   return ui('<b>✅ استرجاع القالب الجماعي محليًا</b>\n'+
+    'أزيلت القواعد المحفوظة في '+evidence.ids.length+' مجموعات دون مساس بأي سياسة أخرى.\n'+
+    'تم تسجيل العملية في سجل التدقيق؛ لا توجد أوامر Telegram حية.',
+    [[btn('🕘 سجل تغييرات القوالب','gt:1:r:h'),btn('📋 مجموعاتي','mi:1:i:01:01')],
+     [btn('🏠 لوحة المالك','mi:1:h')]]);
+  });
+ }
+
  async handle(actor:string,data:string):Promise<OwnerInlineScreen|null>{
   if(!this.policy.isOwner(actor)||!validGroupPolicyStudioRoute(data))return null;
+  const undo= revertConfirm.exec(data);
+  if(undo)return this.confirmRevert(actor,undo[1]!);
   const bulkConfirmation=bulkConfirm.exec(data);
   if(bulkConfirmation)return this.confirmBulk(actor,bulkConfirmation[1]!);
   const confirmation=confirm.exec(data);
   if(confirmation)return this.confirm(actor,confirmation[1]!);
   const state=await this.store.snapshot(),now=this.clock();
   if(!this.auth(state,actor,now))return null;
+  const historyPageMatch=historyPage.exec(data);
+  if(historyHome.test(data)||historyPageMatch){
+   return this.historyList(state,actor,historyPageMatch?Number(historyPageMatch[1]):0);
+  }
+  const viewed=historyView.exec(data);
+  if(viewed)return this.historyDetails(state,actor,now,viewed[1]!);
+  const undoView=revertPreview.exec(data);
+  if(undoView)return this.previewRevert(actor,undoView[1]!);
   const groups=cardScope(state,this.policy,actor,now);
   const targetsForPreset=groups.filter(g=>!(state.protectionPolicies??[]).some(r=>r.policy.chatId===g.id));
   if(data==='gt:1:b:h'||data==='mi:1:i:01:08'){
@@ -325,6 +546,7 @@ export class OwnerGroupPolicyTemplates{
     'المعاينة ثم التأكيد إلزاميان؛ لا عقوبات أو تغييرات Telegram.',
     [[btn('📚 القالب الدراسي الجماعي','gt:1:b:p:e:0')],
      [btn('🔗 مراجعة الروابط جماعيًا','gt:1:b:p:l:0')],
+     [btn('🕘 سجل تغييرات القوالب','gt:1:r:h')],
      [btn('↩️ المجموعات والشبكات','mi:1:s:01:0'),btn('🏠 لوحة المالك','mi:1:h')]]);
   }
   const bp=bulkPage.exec(data);
@@ -338,6 +560,7 @@ export class OwnerGroupPolicyTemplates{
     [[btn('📚 القالب الدراسي الفارغ','gt:1:p:e:0')],
      [btn('🔗 مراجعة الروابط','gt:1:p:l:0')],
      [btn('🔄 نسخ ومقارنة مجموعة','gt:1:s:0')],
+     [btn('🕘 سجل تغييرات القوالب','gt:1:r:h')],
      [btn('↩️ المجموعات والشبكات','mi:1:s:01:0'),btn('🏠 لوحة المالك','mi:1:h')]]);
   }
   const p=preset.exec(data);
