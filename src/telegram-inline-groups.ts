@@ -158,8 +158,9 @@ export async function renderOwnerInlineGroups(store:BotStore,policy:Policy,actor
  if(route.kind==='details'){
   const protectionRows=(state.protectionPolicies??[]).filter(r=>r.policy.chatId===chat.id);
   const protection=protectionRows[0];
-  const currentPolicy=protectionRows.length===1&&protection!==undefined&&
-   isValidGroupProtectionRecord(protection)&&protection.chatPolicyVersion===chat.version;
+  const currentPolicy=chat.scopes.includes('moderation')&&protectionRows.length===1&&protection!==undefined&&
+   isValidGroupProtectionRecord(protection)&&protection.chatPolicyVersion===chat.version&&
+   protection.updatedAt<=Date.now();
   const protectionLabel=!chat.scopes.includes('moderation')?'نطاق الحماية غير مصرح':
    protectionRows.length===0?'غير مضبوطة':
    !currentPolicy?'تحتاج مراجعة':
