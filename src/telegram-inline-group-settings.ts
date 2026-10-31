@@ -13,6 +13,7 @@ const home=/^gs:1:h$/u;
 const pages=new RegExp('^gs:1:p:'+page+'$','u');
 const group=new RegExp('^gs:1:g:'+id+':'+version+':'+page+'$','u');
 const preview=new RegExp('^gs:1:v:'+id+':'+version+':'+page+':([xosamf])$','u');
+const history=new RegExp('^gs:1:l:'+id+':'+version+':'+page+'$','u');
 const confirm=/^gs:1:c:([A-Za-z0-9_-]{24})$/u;
 const cancel=/^gs:1:k:([A-Za-z0-9_-]{24})$/u;
 type Change='x'|'o'|'s'|'a'|'m'|'f';
@@ -29,7 +30,7 @@ const targetAI:Record<'x'|'o'|'s'|'a',GroupAIMode>={
 };
 export function validOwnerGroupSettingsRoute(data:unknown):boolean{
  if(typeof data!=='string'||Buffer.byteLength(data,'utf8')>64)return false;
- return data==='mi:1:i:01:12'||home.test(data)||[pages,group,preview,confirm,cancel].some(re=>re.test(data));
+ return data==='mi:1:i:01:12'||home.test(data)||[pages,group,preview,history,confirm,cancel].some(re=>re.test(data));
 }
 /** Restore-safe approved group list. Reject duplicates instead of selecting
  * the first copy of an approval with conflicting rights. */
@@ -141,6 +142,7 @@ export class OwnerGroupSettings{
    if(recordStatus.status==='OFF')rows.push([make('👁️ تشغيل المراقبة','m')]);
    if(recordStatus.status==='MONITOR')rows.push([make('⏹ إيقاف المراقبة','f')]);
   }
+  rows.push([button('🕘 سجل تغييرات إعدادات المجموعة','gs:1:l:'+id+':'+version+':'+p)]);
   rows.push([button('👥 بطاقة المجموعة','mi:1:g:d:'+id+':'+version+':'+p),
    button('↩️ كل المجموعات','gs:1:p:'+p)]);
   const help=recordStatus.status==='STALE'?
@@ -153,6 +155,61 @@ export class OwnerGroupSettings{
    'الحماية المحلية: '+policyLabel(recordStatus.status)+'\n'+help+
    'لن يُفعَّل وضع الإنفاذ ENFORCE أو أي إجراء حقيقي في Telegram.',rows);
  }
+
+ /** An audit row is shown only when paired with its unique, consumed preview
+  * receipt. Duplicate audit keys, ambiguous callback refs and malformed
+  * restored evidence are quarantined rather than treated as genuine changes. */
+ private auditHistory(s:BotState,actor:string,now:number,id:string,version:number,p:number):OwnerInlineScreen|null{
+  const selected=this.details(s,actor,now,id,version,Math.floor(approved(s).findIndex(c=>c.id===id)/PAGE_SIZE));
+  if(!selected||p<0||p>999)return null;
+  type Entry={at:number;reason:string;change:Change};
+  const changes:Entry[]=[];
+  const candidate=s.audit.filter(a=>a.reason==='GROUP_SETTINGS_AI_MODE_SAVED'||
+   a.reason==='GROUP_SETTINGS_MONITOR_ENABLED'||a.reason==='GROUP_SETTINGS_MONITOR_DISABLED');
+  for(const a of candidate){
+   const m=/^owner-group-settings:([A-Za-z0-9_-]{24})$/u.exec(a.updateKey);
+   if(!m||a.decision!=='ALLOW'||a.actorId!==actor||
+    !Number.isSafeInteger(a.at)||a.at<0||a.at>now||
+    candidate.filter(x=>x.updateKey===a.updateKey).length!==1)continue;
+   const receipts=s.callbacks.filter(c=>c.ref==='c_'+m[1]),receipt=receipts[0];
+   if(receipts.length!==1||!receipt||receipt.actorId!==actor||
+    receipt.chatId!=='private'||receipt.policyVersion!==0||receipt.oneShot!==true||
+    receipt.used!==true||receipt.revoked!==false||!receipt.action.startsWith(PREFIX)||
+    !Number.isSafeInteger(receipt.expiresAt)||receipt.expiresAt<=a.at||
+    receipt.expiresAt>a.at+TTL)continue;
+   let payload:unknown;
+   try{payload=JSON.parse(receipt.action.slice(PREFIX.length));}catch{continue;}
+   if(!Array.isArray(payload)||payload.length!==5||payload[0]!==id||
+    !validVersion(payload[1])||!Number.isSafeInteger(payload[2])||
+    payload[2]<0||payload[2]>999||!['x','o','s','a','m','f'].includes(payload[3])||
+    typeof payload[4]!=='string'||!/^[a-f0-9]{64}$/u.test(payload[4]))continue;
+   const change=payload[3] as Change,isAI=!['m','f'].includes(change);
+   if(a.reason!==(isAI?'GROUP_SETTINGS_AI_MODE_SAVED':
+    change==='m'?'GROUP_SETTINGS_MONITOR_ENABLED':'GROUP_SETTINGS_MONITOR_DISABLED')||
+    a.policyVersion!==payload[1]+(isAI?1:0))continue;
+   changes.push({at:a.at,reason:a.reason,change});
+  }
+  changes.reverse();
+  const count=changes.length,pagesTotal=Math.max(1,Math.ceil(count/PAGE_SIZE));
+  if(p>=pagesTotal)return null;
+  const current=changes.slice(p*PAGE_SIZE,(p+1)*PAGE_SIZE);
+  const lines=current.map(item=>'• '+new Date(item.at).toISOString().slice(0,16).replace('T',' ')+
+   ' UTC — '+item.reason).join('\n');
+  const rows:{text:string;callback_data:string}[][]=[];
+  const nav:{text:string;callback_data:string}[]=[];
+  if(p>0)nav.push(button('⬅️ السابق','gs:1:l:'+id+':'+version+':'+(p-1)));
+  if(p+1<pagesTotal)nav.push(button('➡️ التالي','gs:1:l:'+id+':'+version+':'+(p+1)));
+  if(nav.length)rows.push(nav);
+  const index=approved(s).findIndex(c=>c.id===id);
+  rows.push([button('↩️ إعدادات المجموعة','gs:1:g:'+id+':'+version+':'+Math.floor(index/PAGE_SIZE)),
+   button('🏠 لوحة المالك','mi:1:h')]);
+  return ui('<b>🕘 سجل تغييرات إعدادات المجموعة</b>\n'+
+   'المجموعة: <code>'+escape(id)+'</code>\n'+
+   'العمليات الموثقة: '+count+' · صفحة '+(p+1)+' من '+pagesTotal+'\n'+
+   (lines?lines:'لا توجد تغييرات موثقة لهذه المجموعة.')+'\n'+
+   'هذا سجل محلي للقراءة فقط، لا يثبت تنفيذ إجراءات Telegram.',rows);
+ }
+
  private async preview(actor:string,id:string,version:number,p:number,mode:Change):Promise<OwnerInlineScreen|null>{
   return this.store.transaction(s=>{
    const now=this.clock(),ctx=this.context(s,actor,now,id,version,p,mode);
@@ -255,6 +312,8 @@ export class OwnerGroupSettings{
   if(p)return this.groupList(state,Number(p[1]));
   const g=group.exec(data);
   if(g)return this.card(state,actor,now,g[1]!,Number(g[2]),Number(g[3]));
+  const log=history.exec(data);
+  if(log)return this.auditHistory(state,actor,now,log[1]!,Number(log[2]),Number(log[3]));
   const v=preview.exec(data);
   if(v)return this.preview(actor,v[1]!,Number(v[2]),Number(v[3]),v[4] as Change);
   return null;
