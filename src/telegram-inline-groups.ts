@@ -265,7 +265,10 @@ export async function renderOwnerInlineGroups(store:BotStore,policy:Policy,actor
    actionRows.push([button('📑 قوالب حماية المجموعات','gt:1:h'),
     button('🔄 نسخ ومقارنة الإعدادات','gt:1:s:0')]);
   if(chat.scopes.includes('moderation'))actionRows.push([button('👥 إجراءات جماعية محلية','gt:1:b:h')]);
-  if(chat.scopes.includes('moderation'))actionRows.push([button('🕘 سجل تغييرات القوالب','gt:1:r:h')]);
+  if(chat.scopes.includes('moderation'))
+   actionRows.push([/^-[1-9][0-9]{0,15}$/u.test(chat.id)&&Number.isSafeInteger(Number(chat.id))?
+    button('🕘 سجل هذه المجموعة','gt:1:r:g:'+chat.id+':0'):
+    button('🕘 سجل تغييرات القوالب','gt:1:r:h')]);
   if(chat.scopes.includes('moderation')&&Number.isSafeInteger(Number(chat.id))&&chat.id.length<=17&&!state.protectionPolicies?.some(r=>r.policy.chatId===chat.id))
    actionRows.push([button('🧭 معالج إعداد المجموعة','gw:1:b:'+chat.id+':'+chat.version+':'+route.page)]);
   if(chat.groupAI!=='OFF')
