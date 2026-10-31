@@ -336,3 +336,112 @@ for(const engine of ['json','sqlite'] as const){
   }finally{await f.close();}
  });
 }
+
+
+test('bulk group local-template callback grammar rejects noncanonical pages and tokens',()=>{
+ for(const valid of ['gt:1:b:h','gt:1:b:p:e:0','gt:1:b:p:l:12',
+  'gt:1:b:v:e:0','gt:1:b:v:l:1','gt:1:b:c:'+'A'.repeat(24)]){
+  assert.equal(validGroupPolicyStudioRoute(valid),true,valid);
+ }
+ for(const bad of ['gt:1:b:p:e:00','gt:1:b:p:z:1','gt:1:b:p:l:1000',
+  'gt:1:b:v:e:000','gt:1:b:v:l:-1','gt:1:b:c:abc',
+  'gt:1:b:h:0','gt:1:b:p:e:0\n']){
+  assert.equal(validGroupPolicyStudioRoute(bad),false,bad);
+ }
+});
+for(const engine of ['json','sqlite'] as const){
+ test('owner bulk page preview applies monitor template to only eight unconfigured groups atomically ('+engine+')',async()=>{
+  const f=await fixture(engine);try{
+   for(let i=0;i<17;i++)await f.approve('-100'+String(1000+i));
+   const launch=await f.app().handle(cb(200,'mi:1:i:01:08'));
+   assert.equal(launch.status,'APPLIED');
+   assert.match(launch.plan?.text??'',/الإجراءات الجماعية/);
+   const page=await f.app().handle(cb(201,click(launch,'القالب الدراسي')));
+   assert.equal(page.status,'APPLIED');
+   assert.match(page.plan?.text??'',/صفحة 1 من 3/);
+   assert.match(page.plan?.text??'',/8 مجموعات/);
+   assert.equal(buttons(page).some(x=>x.callback_data==='gt:1:b:p:e:1'),true);
+   const preview=await f.app().handle(cb(202,click(page,'معاينة')));
+   assert.equal(preview.status,'APPLIED');
+   assert.match(preview.plan?.text??'',/تأكيد/);
+   assert.match(preview.plan?.text??'',/لن تمس/);
+   assert.equal((await f.store.snapshot()).protectionPolicies?.length??0,0);
+   const confirm=click(preview,'تأكيد');
+   assert.equal((await f.app().handle(cb(203,confirm,200))).status,'DENIED');
+   const results=await Promise.all([f.app().handle(cb(204,confirm)),f.app().handle(cb(205,confirm))]);
+   assert.deepEqual(results.map(x=>x.status).sort(),['APPLIED','DENIED']);
+   const s=await f.store.snapshot();
+   assert.equal(s.protectionPolicies?.length,8);
+   assert.equal(s.protectionPolicies?.every(x=>x.policy.mode==='MONITOR'&&x.policy.rules.length===0),true);
+   assert.deepEqual(s.protectionPolicies?.map(x=>x.policy.chatId).sort(),
+    Array.from({length:8},(_,i)=>'-100'+String(1000+i)));
+   assert.equal(s.audit.filter(x=>x.reason==='GROUP_TEMPLATE_BULK_MONITOR_SAVED').length,1);
+   assert.equal(s.callbacks.filter(x=>x.action.startsWith('group-template-bulk:')&&x.used).length,1);
+   const another=await f.app().handle(cb(206,'gt:1:b:p:e:1'));
+   assert.equal(another.status,'APPLIED');
+   assert.match(another.plan?.text??'',/صفحة 2 من 3/);
+  }finally{await f.close();}
+ });
+ test('bulk page excludes already configured group rather than overriding its rules ('+engine+')',async()=>{
+  const f=await fixture(engine);try{
+   for(let i=0;i<9;i++)await f.approve('-100'+String(1000+i));
+   assert.equal((await f.save('-1001003',{allow:true})).status,'SAVED');
+   const previous=(await f.store.snapshot()).protectionPolicies![0]!.policy;
+   const page=await f.app().handle(cb(210,'gt:1:b:p:l:0'));
+   assert.equal(page.status,'APPLIED');
+   assert.match(page.plan?.text??'',/7 مجموعات/);
+   const review=await f.app().handle(cb(211,'gt:1:b:v:l:0'));
+   assert.equal(review.status,'APPLIED');
+   const done=await f.app().handle(cb(212,click(review,'تأكيد')));
+   assert.equal(done.status,'APPLIED');
+   const state=await f.store.snapshot();
+   assert.equal(state.protectionPolicies?.length,8);
+   assert.deepEqual(state.protectionPolicies?.find(x=>x.policy.chatId==='-1001003')?.policy,previous);
+   assert.equal(state.protectionPolicies?.filter(x=>x.policy.rules[0]?.action==='REVIEW').length,7);
+   assert.equal(state.protectionPolicies?.every(x=>x.policy.mode==='MONITOR'),true);
+  }finally{await f.close();}
+ });
+ test('bulk confirmation rejects changed approval or new target policy without partial save ('+engine+')',async()=>{
+  const f=await fixture(engine);try{
+   for(let i=0;i<8;i++)await f.approve('-100'+String(1000+i));
+   const review=await f.app().handle(cb(220,'gt:1:b:v:e:0'));
+   const token=click(review,'تأكيد');
+   assert.equal((await f.save('-1001004')).status,'SAVED');
+   assert.equal((await f.app().handle(cb(221,token))).status,'DENIED');
+   const after=await f.store.snapshot();
+   assert.equal(after.protectionPolicies?.length,1);
+   assert.equal(after.audit.filter(x=>x.reason==='GROUP_TEMPLATE_BULK_MONITOR_SAVED').length,0);
+   const reviewAgain=await f.app().handle(cb(222,'gt:1:b:v:e:0'));
+   const newToken=click(reviewAgain,'تأكيد');
+   await f.policy.approveChat(OWNER,'-1001005',['navigation','moderation']);
+   assert.equal((await f.app().handle(cb(223,newToken))).status,'DENIED');
+   assert.equal((await f.store.snapshot()).protectionPolicies?.length,1);
+  }finally{await f.close();}
+ });
+ test('bulk confirmation fails closed after expiry, dashboard shutdown and restored duplicates ('+engine+')',async()=>{
+  const f=await fixture(engine);try{
+   await f.approve(TARGET);
+   const review=await f.app().handle(cb(230,'gt:1:b:v:e:0'));
+   const token=click(review,'تأكيد');
+   f.advance(121_000);
+   assert.equal((await f.app().handle(cb(231,token))).status,'DENIED');
+   const fresh=await f.app().handle(cb(232,'gt:1:b:v:e:0'));
+   const freshToken=click(fresh,'تأكيد');
+   await f.store.transaction(s=>{s.chats.push({...s.chats[0]!});});
+   assert.equal((await f.app().handle(cb(233,freshToken))).status,'DENIED');
+   assert.equal((await f.store.snapshot()).protectionPolicies?.length??0,0);
+   assert.equal((await f.app().handle(cb(234,'gt:1:b:v:e:0'))).status,'DENIED');
+  }finally{await f.close();}
+ });
+ test('bulk approval can be scoped only to owner private callbacks and rejects invalid pages ('+engine+')',async()=>{
+  const f=await fixture(engine);try{
+   await f.approve(TARGET);
+   assert.equal((await f.app().handle(cb(240,'mi:1:i:01:08',200))).status,'DENIED');
+   assert.equal((await f.app().handle(cb(241,'gt:1:b:h',200))).status,'DENIED');
+   assert.equal((await f.app().handle(cb(242,'gt:1:b:h',100,true))).status,'DENIED');
+   assert.equal((await f.app().handle(cb(243,'gt:1:b:p:e:1'))).status,'DENIED');
+   assert.equal((await f.app().handle(cb(244,'gt:1:b:v:e:1'))).status,'DENIED');
+   assert.equal((await f.app().handle(cb(245,'gt:1:b:v:l:999'))).status,'DENIED');
+  }finally{await f.close();}
+ });
+}
