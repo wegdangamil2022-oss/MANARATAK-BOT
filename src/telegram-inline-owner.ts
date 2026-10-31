@@ -681,6 +681,7 @@ export function isValidTelegramInlineKeyboard(input:unknown):input is TelegramIn
     /[\u0000-\u001f\u007f]/u.test(button.callback_data)||
     !/^mi:1:(?:h|p:[01]|s:(?:0[1-9]|1[0-6]):[0-2]|i:(?:0[1-9]|1[0-6]):(?:0[1-9]|1[0-7])|g:(?:p:(?:0|[1-9][0-9]{0,2})|[dua]:-[1-9][0-9]{0,18}:[1-9][0-9]{0,9}:(?:0|[1-9][0-9]{0,2})|v:-[1-9][0-9]{0,18}:[1-9][0-9]{0,9}:(?:0|[1-9][0-9]{0,2}):[xapsr])|d:(?:p:(?:0|[1-9][0-9]{0,2})|i:(?:0|[1-9][0-9]{0,2}):[1-8]:[a-f0-9]{12}))$/u.test(button.callback_data)&&
      !/^mi:1:g:r:-[1-9][0-9]{0,18}:[1-9][0-9]{0,9}:(?:0|[1-9][0-9]{0,2}):[a-f0-9]{12}$/u.test(button.callback_data)&&
+     !/^mi:1:g:s:(?:0|[1-9][0-9]{0,2})$/u.test(button.callback_data)&&
      !/^gp:1:p:-[1-9][0-9]{0,15}:[1-9][0-9]{0,9}$/u.test(button.callback_data)&&
      !/^c_[A-Za-z0-9_-]{24}$/u.test(button.callback_data)&&
      !/^ms:1:(?:h|p:(?:0|[1-9][0-9]{0,2})|g:-[1-9][0-9]{0,18}:[1-9][0-9]{0,9}:(?:0|[1-9][0-9]{0,2}))$/u.test(button.callback_data)&&
@@ -729,7 +730,7 @@ function sectionScreen(sectionIndex:number,page:number):OwnerInlineScreen|null{
   rows.push(Array.from({length:Math.min(2,end-i)},(_,j)=>{
    const itemIndex=i+j;
    const selector='mi:1:i:'+number(sectionIndex+1)+':'+number(itemIndex+1);
-   const browsable=ownerInlineLinkedReadOnly(selector)!==null||selector==='mi:1:i:03:01'||selector==='mi:1:i:02:01'||selector==='mi:1:i:02:15'||selector==='mi:1:i:02:16'||selector==='mi:1:i:02:13'||/^mi:1:i:02:(?:0[5678]|12)$/u.test(selector);
+   const browsable=ownerInlineLinkedReadOnly(selector)!==null||selector==='mi:1:i:01:10'||selector==='mi:1:i:03:01'||selector==='mi:1:i:02:01'||selector==='mi:1:i:02:15'||selector==='mi:1:i:02:16'||selector==='mi:1:i:02:13'||/^mi:1:i:02:(?:0[5678]|12)$/u.test(selector);
    // Read-only connected views are different from design-only placeholders.
    const editing=delegationOwnerEntry(selector)||selector==='mi:1:i:10:16'||selector==='mi:1:i:11:03'||studioOwnerEntry(selector);
    return callback((editing?'🛠️ ':browsable?'👁️ ':'⌛ ')+section.items[itemIndex],selector);
