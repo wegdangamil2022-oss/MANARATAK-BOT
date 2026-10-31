@@ -300,3 +300,19 @@ for(const engine of ['json','sqlite'] as const){
   }finally{await f.close();}
  });
 }
+
+for(const engine of ['json','sqlite'] as const){
+ test('settings history always opens its first page from a group on a later browser page ('+engine+')',async()=>{
+  const f=await fixture(engine);try{
+   for(let i=0;i<9;i++)await f.approve('-100'+String(1000+i),['navigation','moderation','assistant']);
+   const id='-1001008';
+   const card=await f.app().handle(cb(200,'gs:1:g:'+id+':1:1'));
+   assert.equal(card.status,'APPLIED');
+   const history=key(card,'سجل تغييرات');
+   assert.equal(history,'gs:1:l:'+id+':1:0');
+   const screen=await f.app().handle(cb(201,history));
+   assert.equal(screen.status,'APPLIED');
+   assert.match(screen.plan?.text??'',/لا توجد تغييرات موثقة/);
+  }finally{await f.close();}
+ });
+}
