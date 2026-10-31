@@ -335,7 +335,8 @@ export class OwnerGroupPolicyTemplates{
    (bulk?audit.reason!=='GROUP_TEMPLATE_BULK_MONITOR_SAVED'||
     audit.policyVersion!==0:
     !['GROUP_TEMPLATE_MONITOR_SAVED','GROUP_TEMPLATE_COPY_MONITOR_SAVED'].includes(audit.reason))||
-   !Number.isSafeInteger(audit.at)||audit.at<0)return null;
+   !Number.isSafeInteger(audit.at)||audit.at<0||
+   audit.at>8_640_000_000_000_000)return null;
   const rows=s.callbacks.filter(c=>c.ref==='c_'+nonce),receipt=rows[0];
   if(rows.length!==1||!receipt||receipt.actorId!==actor||
    receipt.chatId!=='private'||receipt.policyVersion!==0||
@@ -433,8 +434,9 @@ export class OwnerGroupPolicyTemplates{
   if(nav.length)rows.push(nav);
   rows.push([btn('↩️ قوالب الإعدادات','gt:1:h'),btn('🏠 لوحة المالك','mi:1:h')]);
   const size=entries.length===2?'عمليتان':entries.length===1?'عملية واحدة':entries.length+' عمليات';
+  const restored=entries.filter(e=>this.alreadyReverted(s,e.nonce)).length;
   return ui('<b>🕘 سجل تغييرات القوالب المحلية</b>\n'+
-   'المحفوظ في تدقيق البوت: '+size+'\n'+
+   'المحفوظ في تدقيق البوت: '+size+' · المسترجعة: '+restored+'\n'+
    'صفحة '+(pageNumber+1)+' من '+Math.max(1,Math.ceil(entries.length/8))+'\n'+
    (entries.length?'اختر عملية لعرض المجموعة أو المجموعات المستهدفة وحالة الاسترجاع.':
     'لا توجد عمليات حفظ موثقة حاليًا.')+'\n'+
