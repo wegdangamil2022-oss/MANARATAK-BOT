@@ -31,6 +31,7 @@ const historyPage=new RegExp('^gt:1:r:p:'+page+'$','u');
 const historyView=/^gt:1:r:v:([A-Za-z0-9_-]{24})$/u;
 const revertPreview=/^gt:1:r:x:([A-Za-z0-9_-]{24})$/u;
 const revertConfirm=/^gt:1:r:c:([A-Za-z0-9_-]{24})$/u;
+const cancelPreview=/^gt:1:k:([A-Za-z0-9_-]{24})$/u;
 const TTL=120_000,PREFIX='group-template-confirm:',BULK_PREFIX='group-template-bulk:',
  REVERT_PREFIX='group-template-revert:',REVERT_WINDOW=7*24*60*60*1000;
 type Mode='e'|'l'|'c';
@@ -82,7 +83,7 @@ function proof(s:BotState,source:Chat|null,target:Chat,record:GroupProtectionRec
 export function validGroupPolicyStudioRoute(data:unknown):boolean{
  if(typeof data!=='string'||Buffer.byteLength(data,'utf8')>64)return false;
  if(root.test(data)||confirm.test(data)||bulkRoot.test(data)||bulkConfirm.test(data)||
-  historyHome.test(data)||revertConfirm.test(data)||
+  historyHome.test(data)||revertConfirm.test(data)||cancelPreview.test(data)||
   data==='mi:1:i:01:06'||data==='mi:1:i:01:07'||data==='mi:1:i:01:08')return true;
  return [preset,choose,sources,targets,compare,compareOnly,bulkPage,bulkPreview,
   historyPage,historyView,revertPreview].some(re=>re.test(data));
@@ -170,7 +171,7 @@ export class OwnerGroupPolicyTemplates{
     'لن تُكتب الإعدادات إلا بعد التأكيد لمرة واحدة خلال دقيقتين. '+
     'لا نسخ فوق سياسة موجودة، ولا حظر أو حذف أو كتم عبر Telegram.',
     [[btn(kind==='c'?'✅ تأكيد النسخ المحلي':'✅ تأكيد حفظ القالب','gt:1:c:'+ref.slice(2))],
-     [btn('↩️ إلغاء والعودة',returnTo),btn('🏠 لوحة المالك','mi:1:h')]]);
+     [btn('✖ إلغاء المعاينة','gt:1:k:'+ref.slice(2)),btn('↩️ رجوع',returnTo)]]);
   });
  }
  private async confirm(actor:string,nonce:string):Promise<OwnerInlineScreen|null>{
@@ -275,7 +276,7 @@ export class OwnerGroupPolicyTemplates{
     'سيُحفظ وضع MONITOR المحلي فقط، بدون حذف أو كتم أو حظر أو إرسال إلى Telegram.\n'+
     'التأكيد صالح لدقيقتين ولمرة واحدة. إذا تغيرت حالة أي مجموعة تُرفض الدفعة بأكملها.',
     [[btn('✅ تأكيد الحفظ الجماعي','gt:1:b:c:'+ref.slice(2))],
-     [btn('↩️ العودة للصفحة','gt:1:b:p:'+kind+':'+p),btn('🏠 لوحة المالك','mi:1:h')]]);
+     [btn('✖ إلغاء المعاينة','gt:1:k:'+ref.slice(2)),btn('↩️ العودة للصفحة','gt:1:b:p:'+kind+':'+p)]]);
   });
  }
  private async confirmBulk(actor:string,nonce:string):Promise<OwnerInlineScreen|null>{
@@ -485,7 +486,7 @@ export class OwnerGroupPolicyTemplates{
     'هذا ليس تراجعًا عن عقوبات Telegram؛ لا تُنفذ أي أوامر Telegram.\n'+
     'التأكيد صالح لدقيقتين ولمرة واحدة.',
     [[btn('✅ تأكيد الاسترجاع المحلي','gt:1:r:c:'+ref.slice(2))],
-     [btn('↩️ تفاصيل العملية','gt:1:r:v:'+nonce),btn('🏠 لوحة المالك','mi:1:h')]]);
+     [btn('✖ إلغاء المعاينة','gt:1:k:'+ref.slice(2)),btn('↩️ تفاصيل العملية','gt:1:r:v:'+nonce)]]);
   });
  }
  private async confirmRevert(actor:string,nonce:string):Promise<OwnerInlineScreen|null>{
@@ -522,9 +523,39 @@ export class OwnerGroupPolicyTemplates{
   });
  }
 
+
+ /** Cancels an existing preview's authority, not merely its navigation. It
+  * must not revoke unrelated callbacks or policies. The token is tombstoned
+  * atomically and cannot be confirmed even if its old message is replayed. */
+ private async cancel(actor:string,nonce:string):Promise<OwnerInlineScreen|null>{
+  return this.store.transaction(s=>{
+   const now=this.clock();
+   if(!this.auth(s,actor,now))return null;
+   const rows=s.callbacks.filter(c=>c.ref==='c_'+nonce),receipt=rows[0];
+   if(rows.length!==1||!receipt||
+    ![PREFIX,BULK_PREFIX,REVERT_PREFIX].some(prefix=>receipt.action.startsWith(prefix))||
+    receipt.actorId!==actor||receipt.chatId!=='private'||receipt.policyVersion!==0||
+    receipt.oneShot!==true||receipt.used!==false||receipt.revoked!==false||
+    !Number.isSafeInteger(receipt.expiresAt)||receipt.expiresAt<=now||
+    receipt.expiresAt>now+TTL)return null;
+   receipt.revoked=true;
+   s.audit.push({actorId:actor,updateKey:'group-template-cancel:'+nonce,
+    decision:'NOOP',reason:'GROUP_TEMPLATE_PREVIEW_CANCELLED',
+    policyVersion:0,at:now});
+   return ui('<b>✖ أُلغيت المعاينة</b>\n'+
+    'تم إبطال رمز التأكيد نهائيًا. لا يمكن إعادة استخدام الرسالة القديمة.\n'+
+    'لم تتغير أي سياسة حماية أو صلاحية في المجموعة، ولا توجد أوامر Telegram حية.',
+    [[btn('📑 قوالب الإعدادات','gt:1:h'),
+      btn('🕘 سجل تغييرات القوالب','gt:1:r:h')],
+     [btn('🏠 لوحة المالك','mi:1:h')]]);
+  });
+ }
+
  async handle(actor:string,data:string):Promise<OwnerInlineScreen|null>{
   if(!this.policy.isOwner(actor)||!validGroupPolicyStudioRoute(data))return null;
-  const undo= revertConfirm.exec(data);
+  const cancelled=cancelPreview.exec(data);
+  if(cancelled)return this.cancel(actor,cancelled[1]!);
+  const undo=revertConfirm.exec(data);
   if(undo)return this.confirmRevert(actor,undo[1]!);
   const bulkConfirmation=bulkConfirm.exec(data);
   if(bulkConfirmation)return this.confirmBulk(actor,bulkConfirmation[1]!);
