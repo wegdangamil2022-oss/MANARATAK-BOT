@@ -142,7 +142,7 @@ export class OwnerGroupSettings{
    if(recordStatus.status==='OFF')rows.push([make('👁️ تشغيل المراقبة','m')]);
    if(recordStatus.status==='MONITOR')rows.push([make('⏹ إيقاف المراقبة','f')]);
   }
-  rows.push([button('🕘 سجل تغييرات إعدادات المجموعة','gs:1:l:'+id+':'+version+':'+p)]);
+  rows.push([button('🕘 سجل تغييرات إعدادات المجموعة','gs:1:l:'+id+':'+version+':0)]);
   rows.push([button('👥 بطاقة المجموعة','mi:1:g:d:'+id+':'+version+':'+p),
    button('↩️ كل المجموعات','gs:1:p:'+p)]);
   const help=recordStatus.status==='STALE'?
