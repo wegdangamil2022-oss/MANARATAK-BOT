@@ -228,3 +228,75 @@ for(const engine of ['json','sqlite'] as const){
   }finally{await f.close();}
  });
 }
+
+test('group settings history route has canonical versioned page grammar',()=>{
+ assert.equal(validOwnerGroupSettingsRoute('gs:1:l:-100123:1:0'),true);
+ assert.equal(validOwnerGroupSettingsRoute('gs:1:l:-100123:35:12'),true);
+ for(const bad of ['gs:1:l:-100123:0:0','gs:1:l:-100123:1:00',
+  'gs:1:l:-100123:1:1000','gs:1:l:100123:1:0','gs:1:l:-100123:01:0',
+  'gs:1:l:-100123:1:0\n'])assert.equal(validOwnerGroupSettingsRoute(bad),false,bad);
+});
+for(const engine of ['json','sqlite'] as const){
+ test('group settings history shows only verified, scoped AI and monitor changes ('+engine+')',async()=>{
+  const f=await fixture(engine);try{
+   await f.approve();assert.equal((await f.save()).status,'SAVED');
+   const monitor=await f.app().handle(cb(110,'gs:1:v:'+GROUP+':1:0:m'));
+   assert.equal((await f.app().handle(cb(111,key(monitor,'تأكيد التعديل')))).status,'APPLIED');
+   const ai=await f.app().handle(cb(112,'gs:1:v:'+GROUP+':1:0:o'));
+   assert.equal((await f.app().handle(cb(113,key(ai,'تأكيد التعديل')))).status,'APPLIED');
+   const card=await f.app().handle(cb(114,'gs:1:g:'+GROUP+':2:0'));
+   const history=await f.app().handle(cb(115,key(card,'سجل تغييرات')));
+   assert.equal(history.status,'APPLIED');
+   assert.match(history.plan?.text??'',/سجل تغييرات إعدادات المجموعة/);
+   assert.match(history.plan?.text??'',/GROUP_SETTINGS_AI_MODE_SAVED/);
+   assert.match(history.plan?.text??'',/GROUP_SETTINGS_MONITOR_ENABLED/);
+   assert.equal(buttons(history).some(x=>x.text.includes('تأكيد')),false);
+   assert.equal((await f.app().handle(cb(116,'gs:1:l:'+GROUP+':2:0',200))).status,'DENIED');
+   assert.equal((await f.app().handle(cb(117,'gs:1:l:'+GROUP+':2:0',100,true))).status,'DENIED');
+   assert.equal((await f.app().handle(cb(118,'gs:1:l:'+GROUP+':1:0'))).status,'DENIED');
+  }finally{await f.close();}
+ });
+ test('history hides duplicated audit receipts and rejects revoked groups ('+engine+')',async()=>{
+  const f=await fixture(engine);try{
+   await f.approve();
+   const preview=await f.app().handle(cb(120,'gs:1:v:'+GROUP+':1:0:o'));
+   assert.equal((await f.app().handle(cb(121,key(preview,'تأكيد التعديل')))).status,'APPLIED');
+   await f.store.transaction(s=>{
+    const a=s.audit.find(x=>x.reason==='GROUP_SETTINGS_AI_MODE_SAVED')!;
+    s.audit.push({...a});
+   });
+   const history=await f.app().handle(cb(122,'gs:1:l:'+GROUP+':2:0'));
+   assert.equal(history.status,'APPLIED');
+   assert.match(history.plan?.text??'',/لا توجد تغييرات موثقة/);
+   assert.doesNotMatch(history.plan?.text??'',/GROUP_SETTINGS_AI_MODE_SAVED/);
+   await f.policy.revokeChatAtRevision(OWNER,GROUP,2);
+   assert.equal((await f.app().handle(cb(123,'gs:1:l:'+GROUP+':2:0'))).status,'DENIED');
+  }finally{await f.close();}
+ });
+ test('settings history has bounded paging and no live side effects ('+engine+')',async()=>{
+  const f=await fixture(engine);try{
+   await f.approve();
+   let version=1;
+   for(let i=0;i<9;i++){
+    const change=i%2===0?'o':'x';
+    const screen=await f.app().handle(cb(130+i*2,'gs:1:v:'+GROUP+':'+version+':0:'+change));
+    assert.equal(screen.status,'APPLIED');
+    assert.equal((await f.app().handle(cb(131+i*2,key(screen,'تأكيد التعديل')))).status,'APPLIED');
+    version++;
+   }
+   const before=await f.store.snapshot();
+   const first=await f.app().handle(cb(160,'gs:1:l:'+GROUP+':'+version+':0'));
+   assert.equal(first.status,'APPLIED');
+   assert.match(first.plan?.text??'',/صفحة 1 من 2/);
+   assert.ok(buttons(first).some(x=>x.callback_data==='gs:1:l:'+GROUP+':'+version+':1'));
+   const next=await f.app().handle(cb(161,'gs:1:l:'+GROUP+':'+version+':1'));
+   assert.equal(next.status,'APPLIED');
+   assert.match(next.plan?.text??'',/صفحة 2 من 2/);
+   assert.equal((await f.app().handle(cb(162,'gs:1:l:'+GROUP+':'+version+':2'))).status,'DENIED');
+   const after=await f.store.snapshot();
+   assert.deepEqual(after.chats,before.chats);
+   assert.deepEqual(after.protectionPolicies,before.protectionPolicies);
+   assert.equal(after.audit.filter(x=>x.reason==='GROUP_SETTINGS_AI_MODE_SAVED').length,9);
+  }finally{await f.close();}
+ });
+}
