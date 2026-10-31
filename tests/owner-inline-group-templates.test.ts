@@ -207,3 +207,54 @@ for(const engine of ['json','sqlite'] as const){
   }finally{await f.close();}
  });
 }
+
+for(const engine of ['json','sqlite'] as const){
+ test('configured destination offers read-only group policy comparison without overwrite ('+engine+')',async()=>{
+  const f=await fixture(engine);try{
+   await f.approve(SOURCE);await f.approve(TARGET);
+   assert.equal((await f.save(SOURCE,{allow:true})).status,'SAVED');
+   assert.equal((await f.save(TARGET,{mode:'OFF',rule:false})).status,'SAVED');
+   const before=await f.store.snapshot();
+   const sources=await f.app().handle(cb(100,'mi:1:i:01:07'));
+   const targetList=await f.app().handle(cb(101,click(sources,SOURCE)));
+   const compareLink=click(targetList,TARGET);
+   assert.equal(compareLink,'gt:1:q:'+SOURCE+':'+TARGET);
+   const comparison=await f.app().handle(cb(102,compareLink));
+   assert.equal(comparison.status,'APPLIED');
+   assert.match(comparison.plan?.text??'',/مقارنة/);
+   assert.match(comparison.plan?.text??'',/قواعد المصدر: 1/);
+   assert.match(comparison.plan?.text??'',/قواعد الهدف: 0/);
+   assert.match(comparison.plan?.text??'',/لا يمكن النسخ فوق سياسة موجودة/);
+   assert.equal(buttons(comparison).some(b=>b.text.includes('تأكيد')),false);
+   assert.equal((await f.app().handle(cb(103,compareLink,200))).status,'DENIED');
+   assert.equal((await f.app().handle(cb(104,'gt:1:q:'+SOURCE+':'+SOURCE))).status,'DENIED');
+   const after=await f.store.snapshot();
+   assert.deepEqual(after.protectionPolicies,before.protectionPolicies);
+   assert.deepEqual(after.audit,before.audit);
+  }finally{await f.close();}
+ });
+ test('duplicate restored approval quarantines preview and confirmation atomically ('+engine+')',async()=>{
+  const f=await fixture(engine);try{
+   await f.approve(TARGET);
+   const preview=await f.app().handle(cb(110,'gt:1:v:l:'+TARGET+':1'));
+   const token=click(preview,'تأكيد');
+   await f.store.transaction(s=>{s.chats.push({...s.chats[0]!});});
+   assert.equal((await f.app().handle(cb(111,token))).status,'DENIED');
+   assert.equal((await f.store.snapshot()).protectionPolicies?.length??0,0);
+   assert.equal((await f.app().handle(cb(112,'gt:1:v:l:'+TARGET+':1'))).status,'DENIED');
+  }finally{await f.close();}
+ });
+ test('copying an OFF template preserves OFF and does not import active enforcement ('+engine+')',async()=>{
+  const f=await fixture(engine);try{
+   await f.approve(SOURCE);await f.approve(TARGET);
+   assert.equal((await f.save(SOURCE,{mode:'OFF'})).status,'SAVED');
+   const preview=await f.app().handle(cb(120,'gt:1:x:'+SOURCE+':'+TARGET));
+   assert.match(preview.plan?.text??'',/متوقفة/);
+   const done=await f.app().handle(cb(121,click(preview,'تأكيد')));
+   assert.equal(done.status,'APPLIED');
+   const dest=(await f.store.snapshot()).protectionPolicies?.find(r=>r.policy.chatId===TARGET)!;
+   assert.equal(dest.policy.mode,'OFF');
+   assert.equal(dest.policy.rules[0]?.action,'WARN');
+  }finally{await f.close();}
+ });
+}
