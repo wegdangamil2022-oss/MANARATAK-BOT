@@ -482,7 +482,7 @@ export class TelegramUpdateApplication {
      }
      // Group browsing is the first migrated *drill-down* feature. Every page,
      // chat revision and local policy is freshly authorized from durable state.
-     if(event.callbackData==='mi:1:i:01:01'||event.callbackData.startsWith('mi:1:g:')){
+     if(event.callbackData==='mi:1:i:01:01'||event.callbackData==='mi:1:i:01:10'||event.callbackData.startsWith('mi:1:g:')){
       const screen=await renderOwnerInlineGroups(this.opts.store,this.opts.policy,actorId,event.callbackData);
       if(!screen)return {status:'DENIED',reason:'INVALID_OR_STALE_GROUP_CALLBACK'};
       return {status:'APPLIED',reason:'RESPONSE_PLANNED_ONLY',
