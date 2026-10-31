@@ -21,7 +21,11 @@ const targets=new RegExp('^gt:1:d:'+group+':'+page+'$','u');
 const compare=new RegExp('^gt:1:x:'+group+':'+group+'$','u');
 const compareOnly=new RegExp('^gt:1:q:'+group+':'+group+'$','u');
 const confirm=/^gt:1:c:([A-Za-z0-9_-]{24})$/u;
-const TTL=120_000,PREFIX='group-template-confirm:';
+const bulkRoot=/^gt:1:b:h$/u;
+const bulkPage=new RegExp('^gt:1:b:p:([el]):'+page+'$','u');
+const bulkPreview=new RegExp('^gt:1:b:v:([el]):'+page+'$','u');
+const bulkConfirm=/^gt:1:b:c:([A-Za-z0-9_-]{24})$/u;
+const TTL=120_000,PREFIX='group-template-confirm:',BULK_PREFIX='group-template-bulk:';
 type Mode='e'|'l'|'c';
 type Evidence={kind:Mode;sourceId:string;targetId:string;targetVersion:number;proof:string};
 const btn=(text:string,callback_data:string)=>({text,callback_data});
@@ -65,8 +69,9 @@ function proof(s:BotState,source:Chat|null,target:Chat,record:GroupProtectionRec
 }
 export function validGroupPolicyStudioRoute(data:unknown):boolean{
  if(typeof data!=='string'||Buffer.byteLength(data,'utf8')>64)return false;
- if(root.test(data)||confirm.test(data)||data==='mi:1:i:01:06'||data==='mi:1:i:01:07')return true;
- return [preset,choose,sources,targets,compare,compareOnly].some(re=>re.test(data));
+ if(root.test(data)||confirm.test(data)||bulkRoot.test(data)||bulkConfirm.test(data)||
+  data==='mi:1:i:01:06'||data==='mi:1:i:01:07'||data==='mi:1:i:01:08')return true;
+ return [preset,choose,sources,targets,compare,compareOnly,bulkPage,bulkPreview].some(re=>re.test(data));
 }
 export class OwnerGroupPolicyTemplates{
  constructor(private readonly store:BotStore,private readonly policy:Policy,
@@ -192,14 +197,139 @@ export class OwnerGroupPolicyTemplates{
      [btn('🏠 لوحة المالك','mi:1:h')]]);
   });
  }
+
+ /** A bulk operation is deliberately bounded to one *visible* page of eight
+  * approved groups. Configured groups stay on the page but are read-only.
+  * Retaining page membership in the proof avoids target shifting on confirm. */
+ private bulkEvidence(s:BotState,actor:string,now:number,kind:'e'|'l',p:number):{
+  all:Chat[];visible:Chat[];eligible:Chat[];pages:number;digest:string
+ }|null{
+  if(!this.auth(s,actor,now)||!Number.isSafeInteger(p)||p<0||p>999)return null;
+  const all=cardScope(s,this.policy,actor,now);
+  const pages=Math.max(1,Math.ceil(all.length/8));
+  if(p>=pages)return null;
+  const visible=all.slice(p*8,p*8+8);
+  const eligible=visible.filter(c=>!(s.protectionPolicies??[]).some(row=>row.policy.chatId===c.id));
+  const records=visible.map(c=>(s.protectionPolicies??[]).filter(row=>row.policy.chatId===c.id));
+  const digest=createHash('sha256').update(JSON.stringify([
+   kind,p,all.length,visible,records,
+   s.privateSettingsRevision??0,s.privateFeatures['owner.dashboard']
+  ])).digest('hex');
+  return {all,visible,eligible,pages,digest};
+ }
+ private bulkPageView(actor:string,s:BotState,kind:'e'|'l',p:number):OwnerInlineScreen|null{
+  const evidence=this.bulkEvidence(s,actor,this.clock(),kind,p);
+  if(!evidence)return null;
+  const rows=evidence.visible.map(chat=>{
+   const ready=evidence.eligible.some(c=>c.id===chat.id);
+   return [btn((ready?'✅ جاهزة: ':'🔒 مضبوطة مسبقًا: ')+chat.id,
+    'gt:1:b:p:'+kind+':'+p)];
+  });
+  const nav:{text:string;callback_data:string}[]=[];
+  if(p>0)nav.push(btn('⬅️ السابق','gt:1:b:p:'+kind+':'+(p-1)));
+  if(p+1<evidence.pages)nav.push(btn('➡️ التالي','gt:1:b:p:'+kind+':'+(p+1)));
+  if(nav.length)rows.push(nav);
+  if(evidence.eligible.length)rows.push([btn('🔎 معاينة تطبيق القالب على الصفحة',
+   'gt:1:b:v:'+kind+':'+p)]);
+  rows.push([btn('↩️ الإجراءات الجماعية','gt:1:b:h'),btn('🏠 لوحة المالك','mi:1:h')]);
+  return ui('<b>👥 صفحة الإجراءات الجماعية المحلية</b>\n'+
+   'القالب: '+(kind==='e'?'القالب الدراسي الفارغ':'مراجعة الروابط')+'\n'+
+   'صفحة '+(p+1)+' من '+evidence.pages+'\n'+
+   'المستهدفة: '+evidence.eligible.length+' مجموعات من أصل '+evidence.visible.length+' في الصفحة.\n'+
+   'المجموعات المضبوطة مسبقًا لن تمس. المعاينة وحدها لا تحفظ إعدادات أو ترسل أوامر Telegram.',
+   rows);
+ }
+ private async previewBulk(actor:string,kind:'e'|'l',p:number):Promise<OwnerInlineScreen|null>{
+  return this.store.transaction(s=>{
+   const now=this.clock(),v=this.bulkEvidence(s,actor,now,kind,p);
+   if(!v||!v.eligible.length||(s.protectionPolicies??[]).length+v.eligible.length>500)return null;
+   const active=s.callbacks.filter(c=>c.actorId===actor&&c.action.startsWith(BULK_PREFIX)&&
+    !c.used&&!c.revoked&&Number.isSafeInteger(c.expiresAt)&&c.expiresAt>now);
+   if(active.length>=100)return null;
+   for(const c of v.eligible)if(!isValidProtectionPolicy(template(kind,c.id)))return null;
+   const ref='c_'+randomBytes(18).toString('base64url');
+   if(s.callbacks.some(x=>x.ref===ref))return null;
+   const receipt=[kind,p,v.digest,v.eligible.map(c=>c.id)];
+   s.callbacks.push({ref,action:BULK_PREFIX+JSON.stringify(receipt),
+    chatId:'private',actorId:actor,policyVersion:0,expiresAt:now+TTL,
+    oneShot:true,used:false,revoked:false});
+   const ids=v.eligible.map(c=>'• <code>'+esc(c.id)+'</code>').join('\n');
+   return ui('<b>🔎 معاينة الإجراء الجماعي المحلي</b>\n'+
+    'القالب: '+(kind==='e'?'القالب الدراسي الفارغ':'مراجعة الروابط')+'\n'+
+    'المجموعات المشمولة: '+v.eligible.length+' فقط (الحد الأقصى 8)\n'+ids+'\n'+
+    'لن تمس أي مجموعة لديها سياسة حماية محفوظة.\n'+
+    'سيُحفظ وضع MONITOR المحلي فقط، بدون حذف أو كتم أو حظر أو إرسال إلى Telegram.\n'+
+    'التأكيد صالح لدقيقتين ولمرة واحدة. إذا تغيرت حالة أي مجموعة تُرفض الدفعة بأكملها.',
+    [[btn('✅ تأكيد الحفظ الجماعي','gt:1:b:c:'+ref.slice(2))],
+     [btn('↩️ العودة للصفحة','gt:1:b:p:'+kind+':'+p),btn('🏠 لوحة المالك','mi:1:h')]]);
+  });
+ }
+ private async confirmBulk(actor:string,nonce:string):Promise<OwnerInlineScreen|null>{
+  return this.store.transaction(s=>{
+   const now=this.clock();
+   if(!this.auth(s,actor,now))return null;
+   const rows=s.callbacks.filter(c=>c.ref==='c_'+nonce),c=rows[0];
+   if(rows.length!==1||!c||!c.action.startsWith(BULK_PREFIX)||
+    c.chatId!=='private'||c.actorId!==actor||c.policyVersion!==0||
+    c.oneShot!==true||c.used!==false||c.revoked!==false||
+    !Number.isSafeInteger(c.expiresAt)||c.expiresAt<=now||c.expiresAt>now+TTL)return null;
+   let saved:unknown;
+   try{saved=JSON.parse(c.action.slice(BULK_PREFIX.length));}catch{return null;}
+   if(!Array.isArray(saved)||saved.length!==4||!['e','l'].includes(saved[0])||
+    !Number.isSafeInteger(saved[1])||saved[1]<0||saved[1]>999||
+    typeof saved[2]!=='string'||!/^[a-f0-9]{64}$/u.test(saved[2])||
+    !Array.isArray(saved[3])||saved[3].length<1||saved[3].length>8||
+    saved[3].some((id:unknown)=>typeof id!=='string'||!/^-[1-9][0-9]{0,15}$/u.test(id))||
+    new Set(saved[3]).size!==saved[3].length)return null;
+   const kind=saved[0] as 'e'|'l',p=saved[1] as number;
+   const current=this.bulkEvidence(s,actor,now,kind,p);
+   if(!current||!current.eligible.length||current.digest!==saved[2]||
+    JSON.stringify(current.eligible.map(g=>g.id))!==JSON.stringify(saved[3])||
+    (s.protectionPolicies??[]).length+current.eligible.length>500)return null;
+   const proposed=current.eligible.map(group=>({
+    policy:template(kind,group.id),chatPolicyVersion:group.version,updatedBy:actor,updatedAt:now
+   }));
+   if(proposed.some(row=>!isValidProtectionPolicy(row.policy)||row.policy.mode!=='MONITOR'))return null;
+   s.protectionPolicies??=[];
+   s.protectionPolicies.push(...proposed);
+   if(s.protectionFloodWindows){
+    const targets=new Set(current.eligible.map(g=>g.id));
+    s.protectionFloodWindows=s.protectionFloodWindows.filter(w=>!targets.has(w.chatId));
+   }
+   c.used=true;
+   s.audit.push({actorId:actor,updateKey:'group-template-bulk:'+nonce,decision:'ALLOW',
+    reason:'GROUP_TEMPLATE_BULK_MONITOR_SAVED',policyVersion:0,at:now});
+   return ui('<b>✅ حُفظ القالب الجماعي محليًا</b>\n'+
+    'المجموعات التي تم ضبطها: '+proposed.length+'\n'+
+    'الحماية: مراقبة محلية فقط (MONITOR).\n'+
+    'لم تُعدّل أي سياسة قديمة، ولم يُنفذ أمر حظر أو كتم أو حذف في Telegram.',
+    [[btn('↩️ الإجراءات الجماعية','gt:1:b:h'),btn('📋 مجموعاتي','mi:1:i:01:01')],
+     [btn('🏠 لوحة المالك','mi:1:h')]]);
+  });
+ }
+
  async handle(actor:string,data:string):Promise<OwnerInlineScreen|null>{
   if(!this.policy.isOwner(actor)||!validGroupPolicyStudioRoute(data))return null;
+  const bulkConfirmation=bulkConfirm.exec(data);
+  if(bulkConfirmation)return this.confirmBulk(actor,bulkConfirmation[1]!);
   const confirmation=confirm.exec(data);
   if(confirmation)return this.confirm(actor,confirmation[1]!);
   const state=await this.store.snapshot(),now=this.clock();
   if(!this.auth(state,actor,now))return null;
   const groups=cardScope(state,this.policy,actor,now);
   const targetsForPreset=groups.filter(g=>!(state.protectionPolicies??[]).some(r=>r.policy.chatId===g.id));
+  if(data==='gt:1:b:h'||data==='mi:1:i:01:08'){
+   return ui('<b>👥 الإجراءات الجماعية — قوالب مراقبة محلية</b>\n'+
+    'تطبيق قالب على حتى 8 مجموعات معتمدة في صفحة واحدة، دون الكتابة فوق السياسات القائمة.\n'+
+    'المعاينة ثم التأكيد إلزاميان؛ لا عقوبات أو تغييرات Telegram.',
+    [[btn('📚 القالب الدراسي الجماعي','gt:1:b:p:e:0')],
+     [btn('🔗 مراجعة الروابط جماعيًا','gt:1:b:p:l:0')],
+     [btn('↩️ المجموعات والشبكات','mi:1:s:01:0'),btn('🏠 لوحة المالك','mi:1:h')]]);
+  }
+  const bp=bulkPage.exec(data);
+  if(bp)return this.bulkPageView(actor,state,bp[1] as 'e'|'l',Number(bp[2]));
+  const bv=bulkPreview.exec(data);
+  if(bv)return this.previewBulk(actor,bv[1] as 'e'|'l',Number(bv[2]));
   if(data==='gt:1:h'||data==='mi:1:i:01:06'){
    return ui('<b>📑 قوالب إعدادات المجموعات</b>\n'+
     'قوالب محلية مقيدة بوضع المراقبة، وليست أوامر حماية حية.\n'+
