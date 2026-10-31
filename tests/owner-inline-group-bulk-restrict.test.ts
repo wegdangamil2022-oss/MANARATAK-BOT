@@ -208,3 +208,54 @@ for(const engine of ['json','sqlite'] as const){
   }finally{await f.close();}
  });
 }
+
+test('bulk group restrict history grammar accepts only canonical bounded actions',()=>{
+ for(const valid of ['gb:1:r:p:0','gb:1:r:p:999','gb:1:r:v:'+'A'.repeat(24)])
+  assert.equal(validOwnerGroupBulkRestrictRoute(valid),true,valid);
+ for(const bad of ['gb:1:r:p:00','gb:1:r:p:1000','gb:1:r:v:tiny',
+   'gb:1:r:v:'+'a'.repeat(25),'gb:1:r:p:0\n'])
+  assert.equal(validOwnerGroupBulkRestrictRoute(bad),false,bad);
+});
+for(const engine of ['json','sqlite'] as const){
+ test('owner can inspect verified bulk restriction audit, without actionable permissions ('+engine+')',async()=>{
+  const f=await fixture(engine);try{
+   await f.approve(GROUP);await f.ai(GROUP);assert.equal((await f.monitor(GROUP)).status,'SAVED');
+   const ai=await f.app().handle(cb(90,'gb:1:v:a:0'));
+   assert.equal((await f.app().handle(cb(91,pick(ai,'تأكيد')))).status,'APPLIED');
+   const state=await f.store.snapshot(),rev=state.chats.find(c=>c.id===GROUP)!.version;
+   assert.equal((await new GroupProtectionPolicyService(f.store,f.policy,()=>NOW).save(OWNER,{
+    chatId:GROUP,revision:2,mode:'MONITOR',rules:[{id:'keep',kind:'WORD',value:'ads',enabled:true,action:'REVIEW'}],
+    allowedDomains:['university.edu'],allowedPhrases:['scholarship'],exemptMemberIds:[]
+   },rev,1)).status,'STALE');
+   const root=await f.app().handle(cb(92,'gb:1:h'));
+   assert.ok(buttons(root).some(b=>b.callback_data==='gb:1:r:p:0'));
+   const history=await f.app().handle(cb(93,'gb:1:r:p:0'));
+   assert.equal(history.status,'APPLIED');
+   assert.match(history.plan?.text??'',/سجل الإيقاف الجماعي/);
+   assert.match(history.plan?.text??'',/عملية واحدة/);
+   const details=await f.app().handle(cb(94,pick(history,'🤖')));
+   assert.equal(details.status,'APPLIED');
+   assert.match(details.plan?.text??'',/المجموعات المستهدفة/);
+   assert.match(details.plan?.text??'',new RegExp(GROUP));
+   assert.equal(buttons(details).some(b=>b.text.includes('تأكيد')),false);
+   assert.equal((await f.app().handle(cb(95,'gb:1:r:p:1'))).status,'DENIED');
+   assert.equal((await f.app().handle(cb(96,'gb:1:r:p:0',200))).status,'DENIED');
+   assert.equal((await f.app().handle(cb(97,'gb:1:r:p:0',100,true))).status,'DENIED');
+  }finally{await f.close();}
+ });
+ test('bulk restriction audit rejects duplicate or forged receipts after restoration ('+engine+')',async()=>{
+  const f=await fixture(engine);try{
+   await f.approve(GROUP);await f.ai(GROUP);
+   const draft=await f.app().handle(cb(100,'gb:1:v:a:0'));
+   assert.equal((await f.app().handle(cb(101,pick(draft,'تأكيد')))).status,'APPLIED');
+   const first=await f.app().handle(cb(102,'gb:1:r:p:0'));
+   assert.equal(buttons(first).filter(b=>b.callback_data.startsWith('gb:1:r:v:')).length,1);
+   await f.store.transaction(s=>{const event=s.audit.find(a=>a.reason==='GROUP_BULK_AI_DISABLED_LOCAL')!;s.audit.push({...event});});
+   const second=await f.app().handle(cb(103,'gb:1:r:p:0'));
+   assert.equal(second.status,'APPLIED');
+   assert.match(second.plan?.text??'',/لا توجد عمليات موثقة/);
+   assert.equal(buttons(second).some(b=>b.callback_data.startsWith('gb:1:r:v:')),false);
+   assert.equal((await f.store.snapshot()).chats.find(c=>c.id===GROUP)?.groupAI,'OFF');
+  }finally{await f.close();}
+ });
+}
