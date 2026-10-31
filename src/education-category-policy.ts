@@ -1,6 +1,21 @@
 import {createHash} from 'node:crypto';
 import type {BotState,EducationCategory} from './store.js';
 const idPattern=/^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/u;
+/** A restored cycle, missing parent or duplicated ID must never grant visibility. */
+export function visibleEducationCategory(state:BotState,category:EducationCategory):boolean{
+ const seen=new Set<string>();let current:EducationCategory|undefined=category;
+ while(current){
+  if(current.scope!==category.scope||current.enabled!==true||seen.has(current.id)||
+   state.educationCategories.filter(x=>x.id===current!.id).length!==1)return false;
+  seen.add(current.id);if(current.parentId===null)return true;
+  const parents=state.educationCategories.filter(x=>x.id===current!.parentId);
+  if(parents.length!==1)return false;current=parents[0];
+ }
+ return false;
+}
+export function validCategoryLanguage(value:unknown):value is string{
+ try{return typeof value==='string'&&/^[a-z]{2,3}(?:-[A-Za-z0-9]{2,8}){0,3}$/u.test(value)&&Intl.getCanonicalLocales(value).length===1;}catch{return false;}
+}
 /** Compact text label token, uniquely resolved against current authorized
  * categories on each tap. Not an authentication credential.
  */
@@ -14,7 +29,7 @@ export function ownerCategoryChoiceToken(id:string):string{
  */
 export function categoryVisibilityFingerprint(cat:EducationCategory):string{
  return '~'+createHash('sha256').update(JSON.stringify([
-  cat.id,cat.scope,cat.parentId,cat.title,cat.order,cat.enabled,cat.revision??0
+  cat.id,cat.scope,cat.parentId,cat.title,cat.order,cat.enabled,cat.revision??0,...(cat.language===undefined?[]:[cat.language])
  ]),'utf8').digest('hex').slice(0,16);
 }
 

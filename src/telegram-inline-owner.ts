@@ -1,4 +1,12 @@
 import {protectionInlineRoute} from './protection-inline-route.js';
+import {validOwnerFAQInlineRoute} from './telegram-inline-faq.js';
+import {validOwnerLibraryInlineRoute} from './telegram-inline-library.js';
+import {validStudioInlineRoute,studioOwnerEntry} from './telegram-inline-studio.js';
+import {validOwnerCategoryInlineRoute} from './telegram-inline-categories.js';
+import {validPrivateSettingsRoute} from './telegram-inline-private-settings.js';
+import {validDelegationEditRoute} from './telegram-inline-delegation-edit.js';
+import {delegationOwnerEntry} from './telegram-inline-delegations.js';
+import {validGroupSetupRoute} from './telegram-inline-group-setup.js';
 /** The approved 2026-10-23 owner catalogue from docs/أزرار_منارتك.md.
  * READ-ONLY navigation: do NOT treat a visible catalogue item as a permission
  * or operationally implemented action. Existing owner actions remain available
@@ -673,6 +681,7 @@ export function isValidTelegramInlineKeyboard(input:unknown):input is TelegramIn
     /[\u0000-\u001f\u007f]/u.test(button.callback_data)||
     !/^mi:1:(?:h|p:[01]|s:(?:0[1-9]|1[0-6]):[0-2]|i:(?:0[1-9]|1[0-6]):(?:0[1-9]|1[0-7])|g:(?:p:(?:0|[1-9][0-9]{0,2})|[dua]:-[1-9][0-9]{0,18}:[1-9][0-9]{0,9}:(?:0|[1-9][0-9]{0,2})|v:-[1-9][0-9]{0,18}:[1-9][0-9]{0,9}:(?:0|[1-9][0-9]{0,2}):[xapsr])|d:(?:p:(?:0|[1-9][0-9]{0,2})|i:(?:0|[1-9][0-9]{0,2}):[1-8]:[a-f0-9]{12}))$/u.test(button.callback_data)&&
      !/^mi:1:g:r:-[1-9][0-9]{0,18}:[1-9][0-9]{0,9}:(?:0|[1-9][0-9]{0,2}):[a-f0-9]{12}$/u.test(button.callback_data)&&
+     !/^gp:1:p:-[1-9][0-9]{0,15}:[1-9][0-9]{0,9}$/u.test(button.callback_data)&&
      !/^c_[A-Za-z0-9_-]{24}$/u.test(button.callback_data)&&
      !/^ms:1:(?:h|p:(?:0|[1-9][0-9]{0,2})|g:-[1-9][0-9]{0,18}:[1-9][0-9]{0,9}:(?:0|[1-9][0-9]{0,2}))$/u.test(button.callback_data)&&
      !/^ms:1:o:-[1-9][0-9]{0,18}:[1-9][0-9]{0,9}:(?:0|[1-9][0-9]{0,2}):(?:0|[1-9][0-9]{0,2}):[a-f0-9]{12}$/u.test(button.callback_data)&&
@@ -680,7 +689,7 @@ export function isValidTelegramInlineKeyboard(input:unknown):input is TelegramIn
      !/^mp:1:(?:h|p:(?:0|[1-9][0-9]{0,2})|d:(?:0|[1-9][0-9]{0,2}):[1-8]:[a-f0-9]{12})$/u.test(button.callback_data)&&
      !/^si:1:(?:h|p:(?:0|[1-9][0-9]{0,2})|c:(?:0|[1-9][0-9]{0,2}):[1-8]:[a-f0-9]{12}|l:(?:0|[1-9][0-9]{0,2}):[1-8]:[a-f0-9]{12}:(?:0|[1-9][0-9]{0,2})|r:(?:0|[1-9][0-9]{0,2}):[1-8]:[a-f0-9]{12}:(?:0|[1-9][0-9]{0,2}):[1-8]:[a-f0-9]{12})$/u.test(button.callback_data)&&
      !/^pq:1:(?:h|p:(?:0|[1-9][0-9]{0,2})|v:(?:0|[1-9][0-9]{0,2}):[1-8]:[a-f0-9]{16})$/u.test(button.callback_data)&&
-     protectionInlineRoute(button.callback_data)===null&&
+     protectionInlineRoute(button.callback_data)===null&&!validOwnerFAQInlineRoute(button.callback_data)&&!validOwnerLibraryInlineRoute(button.callback_data)&&!validStudioInlineRoute(button.callback_data)&&!validOwnerCategoryInlineRoute(button.callback_data)&&!validPrivateSettingsRoute(button.callback_data)&&!validDelegationEditRoute(button.callback_data)&&!validGroupSetupRoute(button.callback_data)&&
      !/^pd:1:[cx]:[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}:[a-f0-9]{16}$/u.test(button.callback_data)&&
      !/^si:2:[ascuef]:(?:h|p:(?:0|[1-9][0-9]{0,2})|c:(?:0|[1-9][0-9]{0,2}):[1-8]:[a-f0-9]{12}|l:(?:0|[1-9][0-9]{0,2}):[1-8]:[a-f0-9]{12}:(?:0|[1-9][0-9]{0,2})|r:(?:0|[1-9][0-9]{0,2}):[1-8]:[a-f0-9]{12}:(?:0|[1-9][0-9]{0,2}):[1-8]:[a-f0-9]{12})$/u.test(button.callback_data))
     return false;
@@ -711,17 +720,19 @@ function home(page:0|1):OwnerInlineScreen{
 export function ownerInlineHome():OwnerInlineScreen{return home(0);}
 function sectionScreen(sectionIndex:number,page:number):OwnerInlineScreen|null{
  const section=ownerInlineSections[sectionIndex]!;
- const pages=Math.ceil(section.items.length/8);
+ const pages=sectionIndex===5?2:Math.ceil(section.items.length/8);
  if(page<0||page>=pages)return null;
  const rows=[] as {text:string;callback_data:string}[][];
- const start=page*8,end=Math.min(start+8,section.items.length);
+ const start=sectionIndex===5?(page===0?0:9):page*8;
+ const end=Math.min(sectionIndex===5?(page===0?9:17):start+8,section.items.length);
  for(let i=start;i<end;i+=2){
   rows.push(Array.from({length:Math.min(2,end-i)},(_,j)=>{
    const itemIndex=i+j;
    const selector='mi:1:i:'+number(sectionIndex+1)+':'+number(itemIndex+1);
    const browsable=ownerInlineLinkedReadOnly(selector)!==null||selector==='mi:1:i:03:01'||selector==='mi:1:i:02:01'||selector==='mi:1:i:02:15'||selector==='mi:1:i:02:16'||selector==='mi:1:i:02:13'||/^mi:1:i:02:(?:0[5678]|12)$/u.test(selector);
    // Read-only connected views are different from design-only placeholders.
-   return callback((browsable?'👁️ ':'⌛ ')+section.items[itemIndex],selector);
+   const editing=delegationOwnerEntry(selector)||selector==='mi:1:i:10:16'||selector==='mi:1:i:11:03'||studioOwnerEntry(selector);
+   return callback((editing?'🛠️ ':browsable?'👁️ ':'⌛ ')+section.items[itemIndex],selector);
   }));
  }
  const controls=[] as {text:string;callback_data:string}[];
@@ -742,7 +753,7 @@ function itemScreen(sectionIndex:number,itemIndex:number):OwnerInlineScreen{
  return {text:'<b>'+esc(label)+'</b>\n'+esc(detail)+'\n\n'
   +'⌛ غير مفعّلة بعد في لوحة الأزرار الشفافة. هذا عرض للمواصفة المعتمدة، '
   +'ولا ينفذ أي إجراء في Telegram أو قاعدة البيانات.',
-  keyboard:keyboard([navigation('mi:1:s:'+number(sectionIndex+1)+':'+Math.floor(itemIndex/8))])};
+  keyboard:keyboard([navigation('mi:1:s:'+number(sectionIndex+1)+':'+(sectionIndex===5?(itemIndex<9?0:1):Math.floor(itemIndex/8)))])};
 }
 /** Strict stateless route decoder. Unknown, stale-version, malformed or
  * out-of-range selectors fail closed. The caller MUST authorize the actor.

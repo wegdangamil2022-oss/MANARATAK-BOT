@@ -33,6 +33,10 @@ async function fixture(){
  return {dir,file,store,close:()=>rm(dir,{recursive:true,force:true})};
 }
 const command=(file:string,extra:string[]=[])=>spawnSync(process.execPath,[
+ // SQLite's runtime warning includes a random process ID, which can contain
+ // fixture identities such as 100 or 300. Keep it out of application-output
+ // assertions while retaining exact stdout and stderr checks below.
+ '--disable-warning=ExperimentalWarning',
  'dist/src/moderation-recovery-monitor-cli.js','--once','--state',file,
  '--stale-ms',String(STALE),...extra
 ],{encoding:'utf8',timeout:15_000,env:{...process.env,
@@ -171,8 +175,11 @@ test('CLI has no network or token dependence and only reports safe aggregate cou
   assert.equal(report.state,'ATTENTION_REQUIRED');
   assert.equal(report.unknownOutcome,1);
   assert.equal(report.manualAttention,1);
+  assert.deepEqual(report,{...baseline,state:'ATTENTION_REQUIRED',totalOperations:1,
+   unknownOutcome:1,awaitingFirstReview:1,distinctBlockedTargets:1,manualAttention:1});
+  assert.equal(x.stderr,'');
   for(const secret of ['private-case','SENSITIVE_EVIDENCE','SECRET_TOKEN_MUST_NOT_LEAK',
-   f.file,CHAT,MEMBER,'100'])assert.equal((x.stdout+x.stderr).includes(secret),false);
+   f.file,CHAT,MEMBER,'100'])assert.equal((x.stdout+x.stderr).includes(secret),false,'output leaked fixture identity: '+secret);
   assert.deepEqual(await readFile(f.file),before);
  }finally{await f.close();}
 });

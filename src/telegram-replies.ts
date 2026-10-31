@@ -5,7 +5,10 @@ import {Policy} from './policy.js';
 import type {TelegramReplyPlan} from './telegram-transport.js';
 import {isValidTelegramReplyKeyboard} from './telegram-menu.js';
 import {isValidTelegramInlineKeyboard} from './telegram-inline-owner.js';
+import {validStudioNativeKeyboard} from './telegram-studio-rich.js';
 import {groupQuestionEpochDigest,groupMenuEpochDigest,privateGroupEpochDigest} from './telegram-group-access.js';
+import {privateLibraryEpoch} from './private-library-access.js';
+import {studioPreviewEpoch} from './studio-preview-access.js';
 import {subscriptionRequirementMode,acceptsActiveSubscriptionEvidence} from './subscription-integrity.js';
 import type {SubscriptionGate} from './subscription.js';
 import type {MembershipPort} from './education-interactions.js';
@@ -20,13 +23,14 @@ const validChat=(chat:string)=>/^(?:[1-9]\d{0,15}|-[1-9]\d{0,15})$/.test(chat)&&
 const validPlan=(p:unknown):p is TelegramReplyPlan=>{
  if(!p||typeof p!=='object'||Array.isArray(p))return false;
  const v=p as Record<string,unknown>;
- return (Object.keys(v).length===(3+(v.replyMarkup===undefined?0:1)+(v.inlineMarkup===undefined?0:1)+(v.editMessageId===undefined?0:1)))&&
-  Object.keys(v).every(k=>['chatId','parseMode','text','replyMarkup','inlineMarkup','editMessageId'].includes(k))&&
-  !(v.replyMarkup!==undefined&&v.inlineMarkup!==undefined)&&
+ return (Object.keys(v).length===(3+(v.replyMarkup===undefined?0:1)+(v.inlineMarkup===undefined?0:1)+(v.studioMarkup===undefined?0:1)+(v.editMessageId===undefined?0:1)))&&
+  Object.keys(v).every(k=>['chatId','parseMode','text','replyMarkup','inlineMarkup','studioMarkup','editMessageId'].includes(k))&&
+  [v.replyMarkup,v.inlineMarkup,v.studioMarkup].filter(x=>x!==undefined).length<=1&&
   (v.replyMarkup===undefined||isValidTelegramReplyKeyboard(v.replyMarkup))&&
   (v.inlineMarkup===undefined||isValidTelegramInlineKeyboard(v.inlineMarkup))&&
+  (v.studioMarkup===undefined||typeof v.chatId==='string'&&!v.chatId.startsWith('-')&&validStudioNativeKeyboard(v.studioMarkup))&&
   (v.editMessageId===undefined||(typeof v.editMessageId==='number'&&
-    Number.isSafeInteger(v.editMessageId)&&v.editMessageId>0&&v.inlineMarkup!==undefined))&&
+    Number.isSafeInteger(v.editMessageId)&&v.editMessageId>0&&(v.inlineMarkup!==undefined||v.studioMarkup!==undefined)))&&
   v.parseMode==='HTML'&&typeof v.chatId==='string'&&
   validChat(v.chatId)&&typeof v.text==='string'&&v.text.length>0&&
   Buffer.byteLength(v.text,'utf8')<=4096&& !/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/u.test(v.text);
@@ -51,7 +55,7 @@ export class TelegramBotApiTextSender implements TelegramReplySender {
     body:JSON.stringify({chat_id:plan.chatId,text:plan.text,parse_mode:'HTML',
      link_preview_options:{is_disabled:true},
      ...(plan.editMessageId===undefined?{protect_content:true}:{message_id:plan.editMessageId}),
-     ...(plan.inlineMarkup?{reply_markup:plan.inlineMarkup}:plan.replyMarkup?{reply_markup:plan.replyMarkup}:{})}),
+     ...(plan.studioMarkup?{reply_markup:plan.studioMarkup}:plan.inlineMarkup?{reply_markup:plan.inlineMarkup}:plan.replyMarkup?{reply_markup:plan.replyMarkup}:{})}),
     redirect:'error',signal:AbortSignal.timeout(8000)
    });
   }catch{return {status:'UNKNOWN_OUTCOME'};}
@@ -157,16 +161,20 @@ export function validTelegramReplyJob(v:unknown):v is TelegramReplyJob{
   (j.privateReplyKind===undefined||
    (j.status==='QUEUED'&&validPlan(j.plan)&&
     !j.plan.chatId.startsWith('-')&&
-    (j.privateReplyKind==='LOCAL'||j.privateReplyKind==='GROUP_SCOPED'||j.privateReplyKind==='ADMIN_SCOPED')&&
+    (j.privateReplyKind==='LOCAL'||j.privateReplyKind==='GROUP_SCOPED'||j.privateReplyKind==='ADMIN_SCOPED'||j.privateReplyKind==='LIBRARY_SCOPED'||j.privateReplyKind==='STUDIO_SCOPED')&&
     j.groupReplyKind===undefined&&j.groupQuestionAccess===undefined&&
     j.groupMenuAccess===undefined&&
-    ((j.privateReplyKind==='LOCAL'&&j.privateGroupAccess===undefined&&j.adminUIAccess===undefined)||
-     (j.privateReplyKind==='ADMIN_SCOPED'&&j.privateGroupAccess===undefined&&validAdminUIAccess(j.adminUIAccess)&&j.plan.chatId===j.adminUIAccess.actorId)||
-     (j.privateReplyKind==='GROUP_SCOPED'&&j.adminUIAccess===undefined&&
+    ((j.privateReplyKind==='LOCAL'&&j.privateGroupAccess===undefined&&j.adminUIAccess===undefined&&j.privateLibraryAccess===undefined)||
+     ((j.privateReplyKind==='ADMIN_SCOPED'||j.privateReplyKind==='STUDIO_SCOPED')&&j.privateGroupAccess===undefined&&j.privateLibraryAccess===undefined&&validAdminUIAccess(j.adminUIAccess)&&j.plan.chatId===j.adminUIAccess.actorId)||
+     (j.privateReplyKind==='LIBRARY_SCOPED'&&j.privateGroupAccess===undefined&&j.adminUIAccess===undefined&&validAdminUIAccess(j.privateLibraryAccess)&&j.plan.chatId===j.privateLibraryAccess.actorId)||
+     (j.privateReplyKind==='GROUP_SCOPED'&&j.adminUIAccess===undefined&&j.privateLibraryAccess===undefined&&
       validPrivateGroupAccess(j.privateGroupAccess)&&
       j.plan.chatId===j.privateGroupAccess.actorId))))&&
   (j.adminUIAccess===undefined||(j.status==='QUEUED'&&validPlan(j.plan)&&validAdminUIAccess(j.adminUIAccess)&&
-   j.plan.chatId===j.adminUIAccess.actorId&&j.privateReplyKind==='ADMIN_SCOPED'&&j.privateGroupAccess===undefined&&
+   j.plan.chatId===j.adminUIAccess.actorId&&(j.privateReplyKind==='ADMIN_SCOPED'||j.privateReplyKind==='STUDIO_SCOPED')&&j.privateGroupAccess===undefined&&
+   j.groupReplyKind===undefined&&j.groupQuestionAccess===undefined&&j.groupMenuAccess===undefined))&&
+  (j.privateLibraryAccess===undefined||(j.status==='QUEUED'&&validPlan(j.plan)&&validAdminUIAccess(j.privateLibraryAccess)&&
+   j.plan.chatId===j.privateLibraryAccess.actorId&&j.privateReplyKind==='LIBRARY_SCOPED'&&j.adminUIAccess===undefined&&j.privateGroupAccess===undefined&&
    j.groupReplyKind===undefined&&j.groupQuestionAccess===undefined&&j.groupMenuAccess===undefined))&&
   (j.privateGroupAccess===undefined||
    (j.status==='QUEUED'&&validPlan(j.plan)&&
@@ -300,8 +308,12 @@ export class TelegramReplyDispatcher {
    const admin=job.adminUIAccess,now=this.clock();
    const adminDenied=Boolean(admin&&(admin.actorId!==plan.chatId||!Number.isSafeInteger(job.queuedAt)||
     now<job.queuedAt!||now>=admin.expiresAt||admin.expiresAt>job.queuedAt!+ADMIN_UI_TTL_MS||
-    protectionUIEpoch(s,this.policy,admin.actorId,now)!==admin.epoch));
-   const forbidden=noGroupProof||noPrivateProvenance||adminDenied||(!!access&&(
+    (job.privateReplyKind==='STUDIO_SCOPED'?studioPreviewEpoch(s,this.policy,admin.actorId,now):protectionUIEpoch(s,this.policy,admin.actorId,now))!==admin.epoch));
+   const library=job.privateLibraryAccess;
+   const libraryDenied=Boolean(library&&(library.actorId!==plan.chatId||!Number.isSafeInteger(job.queuedAt)||
+    now<job.queuedAt!||now>=library.expiresAt||library.expiresAt>job.queuedAt!+ADMIN_UI_TTL_MS||
+    privateLibraryEpoch(s,this.policy,library.actorId)!==library.epoch));
+   const forbidden=noGroupProof||noPrivateProvenance||adminDenied||libraryDenied||(!!access&&(
     !groupPrecheck?.allowed||
     groupPrecheck.kind!==accessKind||
     groupPrecheck.access.actorId!==access.actorId||
@@ -322,7 +334,7 @@ export class TelegramReplyDispatcher {
     job.accessDenialCode=noGroupProof||noPrivateProvenance?
      'LEGACY_UNVERIFIABLE':groupUnavailable?'GROUP_UNAVAILABLE':'ACCESS_RECHECK_FAILED';
     job.status='FAILED_CONFIRMED';
-    delete job.plan;delete job.adminUIAccess;delete job.groupQuestionAccess;delete job.groupMenuAccess;delete job.privateGroupAccess;delete job.privateReplyKind;delete job.groupReplyKind;job.redactedAt=this.clock();
+    delete job.plan;delete job.adminUIAccess;delete job.privateLibraryAccess;delete job.groupQuestionAccess;delete job.groupMenuAccess;delete job.privateGroupAccess;delete job.privateReplyKind;delete job.groupReplyKind;job.redactedAt=this.clock();
     return {status:'FAILED_CONFIRMED' as const};
    }
    const attemptId=randomUUID();
@@ -330,7 +342,7 @@ export class TelegramReplyDispatcher {
    job.status='SENDING';job.attemptId=attemptId;job.startedAt=at;
    // Remove the durable body *before* the external call. The immediate local
    // copy goes to the sender, but a crash leaves no replayable payload.
-   delete job.plan;delete job.adminUIAccess;delete job.groupQuestionAccess;delete job.groupMenuAccess;delete job.privateGroupAccess;delete job.privateReplyKind;delete job.groupReplyKind;job.redactedAt=at;
+   delete job.plan;delete job.adminUIAccess;delete job.privateLibraryAccess;delete job.groupQuestionAccess;delete job.groupMenuAccess;delete job.privateGroupAccess;delete job.privateReplyKind;delete job.groupReplyKind;job.redactedAt=at;
    return {status:'SEND' as const,attemptId,plan};
   });
   if(claim.status!=='SEND')return {status:claim.status};

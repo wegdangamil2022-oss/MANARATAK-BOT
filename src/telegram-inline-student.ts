@@ -3,6 +3,7 @@ import type {BotStore,BotState,EducationCategory,EducationResource} from './stor
 import type {Policy} from './policy.js';
 import {publicEducationResource} from './education.js';
 import {matchingCategories} from './telegram-menu.js';
+import {visibleEducationCategory} from './education-category-policy.js';
 import type {OwnerInlineScreen,TelegramInlineKeyboard} from './telegram-inline-owner.js';
 
 /** Student's reviewed PRIVATE library only.
@@ -84,14 +85,7 @@ const resourceKey=(p:number,slot:number,cd:string,rp:number,i:number,rd:string)=
  * guard to prevent corrupted parent references from hanging the bot.
  */
 function visible(c:EducationCategory,s:BotState):boolean{
- const seen=new Set<string>();let next:EducationCategory|undefined=c;
- while(next){
-  if(!next.enabled||seen.has(next.id))return false;
-  seen.add(next.id);
-  if(next.parentId===null)return true;
-  next=s.educationCategories.find(x=>x.scope===c.scope&&x.id===next!.parentId);
- }
- return false;
+ return visibleEducationCategory(s,c);
 }
 const categories=(s:BotState,section='all')=>matchingCategories(s.educationCategories
  .filter(c=>c.scope==='private'&&visible(c,s))

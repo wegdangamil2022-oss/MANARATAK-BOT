@@ -5,6 +5,7 @@ import { publicEducationResource, type PublicEducationResource } from './educati
 import {faqReviewFingerprint} from './faq-review.js';
 import {normalizeEducationDiscovery} from './education-search-normalization.js';
 import {subscriptionRequirementMode,acceptsActiveSubscriptionEvidence} from './subscription-integrity.js';
+import {visibleEducationCategory} from './education-category-policy.js';
 
 /** Only a trusted Telegram adapter may attest the chat membership status; user-provided claims are not evidence. */
 export type MembershipStatus = 'VERIFIED' | 'NOT_MEMBER' | 'UNKNOWN';
@@ -20,18 +21,10 @@ const questionKey=(text:string):string=>text.normalize('NFKC').toLocaleLowerCase
  */
 const validText=(text:string,max:number):boolean=>typeof text==='string' && text.trim().length>0 && text.length<=max && !/[\u0000-\u001F\u007F]/u.test(text);
 function hasApprovedSource(s:BotState, scope:string, id:string):boolean {
-  const resource=s.educationResources.find(r=>r.id===id && r.scope===scope && r.status==='PUBLISHED');
-  if(!resource) return false;
-  const category=s.educationCategories.find(c=>c.id===resource.categoryId && c.scope===scope);
-  if(!category || !category.enabled) return false;
-  let node=category; const visited=new Set<string>();
-  while(node.parentId) {
-    if(visited.has(node.id)) return false; visited.add(node.id);
-    const parent=s.educationCategories.find(c=>c.id===node.parentId && c.scope===scope);
-    if(!parent || !parent.enabled) return false;
-    node=parent;
-  }
-  return true;
+  const resources=s.educationResources.filter(r=>r.id===id),resource=resources[0];
+  if(resources.length!==1||!resource||resource.scope!==scope||resource.status!=='PUBLISHED')return false;
+  const categories=s.educationCategories.filter(c=>c.id===resource.categoryId),category=categories[0];
+  return categories.length===1&&Boolean(category&&category.scope===scope&&visibleEducationCategory(s,category));
 }
 const scopeActive=(s:BotState, policy:Policy, scope:string):boolean=>scope==='private'||policy.canUseChat(s,scope,'navigation');
 const mayUpload=(s:BotState, policy:Policy, by:string, scope:string, now:number):boolean=>scopeActive(s,policy,scope) && (scope==='private'
@@ -100,6 +93,43 @@ export class ApprovedAnswerService {
       s.audit.push({updateKey:'owner:faq:'+id+':'+target,
        decision:'ALLOW',reason:target==='APPROVED'?'FAQ_OWNER_APPROVED':'FAQ_OWNER_ARCHIVED',
        policyVersion,at:this.clock()});
+    });
+  }
+  /** Durable owner-bound two-minute confirmation for the inline FAQ editor.
+   * The record and transition are consumed in the same store transaction. */
+  async issueInlineReview(by:string,id:string,target:'APPROVED'|'ARCHIVED',proof:string,scopeVersion:number,returnPage=0):Promise<string>{
+    return this.store.transaction(s=>{
+      const q=s.faqEntries.find(q=>q.id===id),now=this.clock();
+      if(!this.policy.isOwner(by)||!this.policy.privateFeature(s,'owner.dashboard',by)||
+        !Number.isSafeInteger(returnPage)||returnPage<0||returnPage>999||!q||!scopeActive(s,this.policy,q.scope)||faqReviewFingerprint(s,q)!==proof||
+        (q.scope==='private'?0:this.policy.chatRevision(s,q.scope))!==scopeVersion||
+        !Number.isSafeInteger(now)||now<0||now>8_640_000_000_000_000-120000||
+        (target==='APPROVED'?(q.status!=='DRAFT'||!hasApprovedSource(s,q.scope,q.sourceResourceId)):q.status!=='APPROVED'))throw Error('FAQ_REVIEW_STALE');
+      const ref='c_'+randomBytes(18).toString('base64url');
+      s.callbacks.push({ref,action:'owner.faq.'+target+':'+id+':'+proof+':'+returnPage,chatId:q.scope,actorId:by,
+        policyVersion:scopeVersion,expiresAt:now+120000,oneShot:true,used:false,revoked:false});
+      return ref;
+    });
+  }
+  async confirmInlineReview(by:string,ref:string):Promise<{returnPage:number}|null>{
+    if(!this.policy.isOwner(by)||!/^c_[A-Za-z0-9_-]{24}$/u.test(ref))return null;
+    return this.store.transaction(s=>{
+      const rows=s.callbacks.filter(c=>c.ref===ref),c=rows[0],now=this.clock();
+      if(rows.length!==1||!c||c.actorId!==by||c.used!==false||c.revoked!==false||c.oneShot!==true||!Number.isSafeInteger(c.expiresAt)||
+        !Number.isSafeInteger(now)||now<0||c.expiresAt<=now||c.expiresAt>now+120000||
+        !this.policy.privateFeature(s,'owner.dashboard',by))return null;
+      const m=/^owner\.faq\.(APPROVED|ARCHIVED):([a-f0-9]{8}-(?:[a-f0-9]{4}-){3}[a-f0-9]{12}):(~[a-f0-9]{16}):(0|[1-9][0-9]{0,2})$/u.exec(c.action);
+      if(!m)return null;
+      const entries=s.faqEntries.filter(q=>q.id===m[2]),q=entries[0];
+      if(entries.length!==1||!q||q.scope!==c.chatId||!scopeActive(s,this.policy,q.scope)||
+        (q.scope==='private'?0:this.policy.chatRevision(s,q.scope))!==c.policyVersion||
+        faqReviewFingerprint(s,q)!==m[3])return null;
+      const approve=m[1]==='APPROVED';
+      if(approve?(q.status!=='DRAFT'||!hasApprovedSource(s,q.scope,q.sourceResourceId)):q.status!=='APPROVED')return null;
+      c.used=true;q.status=approve?'APPROVED':'ARCHIVED';if(approve)q.approvedBy=by;
+      s.audit.push({actorId:by,updateKey:'owner:faq:'+q.id+':'+q.status,decision:'ALLOW',
+        reason:approve?'FAQ_OWNER_APPROVED':'FAQ_OWNER_ARCHIVED',policyVersion:c.policyVersion,at:now});
+      return {returnPage:Number(m[4])};
     });
   }
   private match(s:BotState,scope:string,question:string):FAQResult {

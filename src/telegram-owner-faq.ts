@@ -57,7 +57,7 @@ const screen=(text:string,choices:readonly string[]=[],page:readonly string[]=[]
 };
 const pageLabel=(page:number,dir:FAQPage['direction']):string=>
  (dir==='next'?'➡️ التالي':'⬅️ السابق')+' · o:f:'+page;
-function sourceAvailable(s:BotState,q:FAQEntry):boolean{
+export function ownerFAQSourceAvailable(s:BotState,q:FAQEntry):boolean{
  const r=s.educationResources.find(r=>r.id===q.sourceResourceId&&
   r.scope===q.scope&&r.status==='PUBLISHED');
  if(!r)return false;
@@ -110,7 +110,7 @@ export class OwnerTelegramFAQMenu{
   const epoch=q.scope==='private'?0:this.policy.chatRevision(state,q.scope);
   const fp=faqReviewFingerprint(state,q);
   const suffix=' · '+q.id+':'+fp+':'+epoch;
-  const isSourceValid=sourceAvailable(state,q);
+  const isSourceValid=ownerFAQSourceAvailable(state,q);
   if(action.kind==='detail'){
    const choice=q.status==='DRAFT'&&isSourceValid?
     '🧾 معاينة اعتماد FAQ'+suffix:

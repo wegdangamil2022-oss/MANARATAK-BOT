@@ -3,8 +3,8 @@ import type {BotStore,Grant,BotState,Capability} from './store.js';
 import type {Policy} from './policy.js';
 import type {OwnerInlineScreen,TelegramInlineKeyboard} from './telegram-inline-owner.js';
 
-/** Owner-private AUDIT of stored internal grants only, not a proof of any
- * Telegram chat-administrator rights or a grant/revoke action surface.
+/** Owner-private view of stored internal grants. Editing routes are separately
+ * reviewed and never imply Telegram chat-administrator rights.
  * A route is an untrusted selector; the current sorted ledger is re-read on
  * every press and its fingerprint checked before exposing a specific entry.
  */
@@ -32,6 +32,7 @@ const capabilities=new Set<Capability>([
  'education.navigate','owner.dashboard','subscription.verify','support.use'
 ]);
 const PAGE_SIZE=8;
+export const delegationOwnerEntry=(data:string)=>/^mi:1:i:03:(?:01|02|04|05|07)$/u.test(data);
 const sortGrants=(a:Grant,b:Grant)=>a.actor.localeCompare(b.actor)||
  a.chatId.localeCompare(b.chatId)||a.capability.localeCompare(b.capability)||
  a.expiresAt-b.expiresAt;
@@ -48,9 +49,14 @@ function localStatus(g:Grant,s:BotState,now:number):string {
 }
 const digest=(g:Grant,status:string):string=>
  createHash('sha256').update('MANARATAK:OWNER:DELEGATION:V1:').update(JSON.stringify([
-  g.actor,g.capability,g.chatId,g.expiresAt,g.grantedBy,g.revoked,status
+  g.actor,g.capability,g.chatId,g.expiresAt,g.grantedBy,g.revoked,status,g.chatPolicyVersion??null,g.grantId??null
  ])).digest('hex').slice(0,12);
 const allGrants=(s:BotState)=>s.grants.filter(validGrant).sort(sortGrants);
+export function selectedOwnerDelegation(s:BotState,now:number,route:Extract<OwnerInlineDelegationRoute,{kind:'detail'}>):Grant|null{
+ const all=allGrants(s),grant=all[route.page*PAGE_SIZE+route.ordinal-1];
+ if(!grant||route.ordinal>Math.min(PAGE_SIZE,all.length-route.page*PAGE_SIZE)||digest(grant,localStatus(grant,s,now))!==route.digest)return null;
+ return grant;
+}
 function listScreen(s:BotState,now:number,page:number):OwnerInlineScreen|null {
  const all=allGrants(s),pages=Math.ceil(all.length/PAGE_SIZE);
  if(page>(pages?pages-1:0))return null;
@@ -67,6 +73,7 @@ function listScreen(s:BotState,now:number,page:number):OwnerInlineScreen|null {
  if(page>0)nav.push(b('⬅️ السابق','mi:1:d:p:'+(page-1)));
  if(page+1<pages)nav.push(b('➡️ التالي','mi:1:d:p:'+(page+1)));
  if(nav.length)rows.push(nav);
+ rows.push([b('➕ إنشاء تفويض داخلي','od:1:g:0')]);
  rows.push([b('↩️ قسم المشرفين','mi:1:s:03:0'),b('🏠 لوحة المالك','mi:1:h')]);
  const tally={current:0,expired:0,revoked:0,unapproved:0};
  for(const g of all){
@@ -82,16 +89,14 @@ function listScreen(s:BotState,now:number,page:number):OwnerInlineScreen|null {
     ' · الملغاة: '+tally.revoked+' · مجموعات غير معتمدة: '+tally.unapproved+'\n'
    +(pages?'صفحة '+(page+1)+' من '+pages+'\n':'لا توجد تفويضات داخلية محفوظة.\n')
    +'هذه قائمة قدرات داخل منارتك فقط. لا تثبت صلاحيات Telegram ولا عضوية المشرفين الحية.\n'
-   +'لا تُمنح أي صلاحية أو تُعدّل من هذه الشاشة.',
+   +'يمكن إنشاء تفويض محلي للمجموعة أو سحبه بعد مراجعة وتأكيد.',
   keyboard:keyboard(rows)
  };
 }
-function detailScreen(s:BotState,now:number,route:Extract<OwnerInlineDelegationRoute,{kind:'detail'}>):OwnerInlineScreen|null {
- const all=allGrants(s);
- const grant=all[route.page*PAGE_SIZE+route.ordinal-1];
- if(!grant||route.ordinal>Math.min(PAGE_SIZE,all.length-route.page*PAGE_SIZE))return null;
+function detailScreen(s:BotState,now:number,route:Extract<OwnerInlineDelegationRoute,{kind:'detail'}>,policy:Policy):OwnerInlineScreen|null {
+ const grant=selectedOwnerDelegation(s,now,route);if(!grant)return null;
  const status=localStatus(grant,s,now);
- if(digest(grant,status)!==route.digest)return null;
+ const matchingChats=s.chats.filter(c=>c.id===grant.chatId),canReview=status==='ساري زمنيًا'&&matchingChats.length===1&&matchingChats[0]!.approved&&grant.chatPolicyVersion===matchingChats[0]!.version&&policy.has(s,grant.actor,grant.capability,grant.chatId,now);
  return {text:'<b>تفاصيل التفويض الداخلي 👑</b>\n'
   +'معرف المفوض: <code>'+esc(grant.actor)+'</code>\n'
   +'القدرة المحلية: <code>'+esc(grant.capability)+'</code>\n'
@@ -100,16 +105,16 @@ function detailScreen(s:BotState,now:number,route:Extract<OwnerInlineDelegationR
   +'الحالة: '+status+'\n'
   +'انتهاء الصلاحية (Unix ms): <code>'+grant.expiresAt+'</code>\n'
   +'لا تمثل هذه السجلات صلاحيات Telegram الفعلية، ولا تسمح برفع الصلاحيات.',
-  keyboard:keyboard([[b('↩️ صفحة التفويضات','mi:1:d:p:'+route.page),
+  keyboard:keyboard([...(canReview&&grant.chatId.startsWith('-')?[[b('🔴 مراجعة سحب التفويض','od:1:r:'+route.page+':'+route.ordinal+':'+route.digest)]]:[]),[b('↩️ صفحة التفويضات','mi:1:d:p:'+route.page),
    b('🏠 لوحة المالك','mi:1:h')]])};
 }
 export async function renderOwnerInlineDelegations(store:BotStore,policy:Policy,
  actorId:string,data:string,now:number):Promise<OwnerInlineScreen|null>{
  if(!policy.isOwner(actorId)||!Number.isSafeInteger(now)||now<0)return null;
- const route=data==='mi:1:i:03:01'?{kind:'list' as const,page:0}:
+ const route=delegationOwnerEntry(data)?{kind:'list' as const,page:0}:
   parseOwnerInlineDelegationRoute(data);
  if(!route)return null;
  const state=await store.snapshot();
- if(!policy.isOwner(actorId))return null;
- return route.kind==='list'?listScreen(state,now,route.page):detailScreen(state,now,route);
+ if(!policy.isOwner(actorId)||!policy.privateFeature(state,'owner.dashboard',actorId))return null;
+ return route.kind==='list'?listScreen(state,now,route.page):detailScreen(state,now,route,policy);
 }

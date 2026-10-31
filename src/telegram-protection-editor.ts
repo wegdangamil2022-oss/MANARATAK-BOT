@@ -83,6 +83,17 @@ export class TelegramProtectionEditor{
   if(index<0)return null;const f=this.frame(state,actor,Math.floor(index/8),index%8+1);
   return f?this.groupScreen(actor,f,notice):null;
  }
+ /** The group-card selector is only a locator; rebuild the actual editor from
+  * current authorized policy and its current group-specific fingerprint. */
+ async openOwnerGroup(actor:string,chat:string,revision:number):Promise<OwnerInlineScreen|null>{
+  if(!this.policy.isOwner(actor)||!Number.isSafeInteger(revision)||revision<1)return null;
+  const state=await this.store.snapshot();
+  if(!this.policy.privateFeature(state,'owner.dashboard',actor))return null;
+  const index=this.groups(state,actor).findIndex(c=>c.id===chat&&c.version===revision);
+  if(index<0)return null;
+  const frame=this.frame(state,actor,Math.floor(index/8),index%8+1);
+  return frame?this.groupScreen(actor,frame):null;
+ }
  private failure(actor:string,text='تغيرت الصلاحية أو السياسة؛ افتح القسم من جديد.'):OwnerInlineScreen{return screen(text,[this.back(actor)]);}
  async handle(data:string,actor:string):Promise<OwnerInlineScreen|null>{
   if(!validTime(this.clock()))return null;

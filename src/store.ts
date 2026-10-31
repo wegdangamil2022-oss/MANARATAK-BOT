@@ -1,5 +1,7 @@
 import {isValidFloodWindow,type FloodWindow} from './protection-flood.js';
 import {validAdminUIAccess,type AdminUIAccess} from './protection-ui-access.js';
+import {validStudioState,type StudioState} from './button-studio-model.js';
+import {validCategoryLanguage} from './education-category-policy.js';
 import { mkdir, open, readFile, rename, rm, stat, lstat, realpath, writeFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
 import { randomUUID } from 'node:crypto';
@@ -19,7 +21,7 @@ export interface ProcessedUpdate { key: string; status: 'CLAIMED' | 'DONE' | 'UN
 export interface Operation { id: string; updateKey: string; kind: 'CHAT_LEAVE'; chatId: string; policyVersion: number; status: OperationStatus; startedAt?: number; }
 export interface AuditRecord { actorId?: string; updateKey: string; decision: 'ALLOW' | 'DENY' | 'NOOP'; reason: string; policyVersion: number; at: number; /** For owner-moderation reviews only; absent on legacy audit events. */ moderationEvidenceDigest?:string; }
 import type { Candidate, ImportFormat, ImportReport } from './ingestion.js';
-export interface EducationCategory { id: string; scope: string; parentId: string | null; title: string; order: number; enabled: boolean; /** Monotonic optional revision for preexisting saved categories. */ revision?: number; }
+export interface EducationCategory { id: string; scope: string; parentId: string | null; title: string; order: number; enabled: boolean; language?:string; /** Monotonic optional revision for preexisting saved categories. */ revision?: number; }
 export interface EducationResource { id: string; categoryId: string; scope: string; title: string; university: string; cycle: string; degree: string; seats: number | null; sourceImportId: string; sourceLocator: string; reviewedBy: string; status: 'PUBLISHED' | 'ARCHIVED'; publicationText?: string; publicationTextReviewedBy?: string; }
 export interface ImportRun { id: string; scope: string; uploadedBy: string; origin: 'TELEGRAM_ADMIN' | 'ADMIN_WEB'; format: ImportFormat; filename: string; digest: string; report: ImportReport; candidates: Candidate[]; createdAt: number; }
 export type RestrictionKind = 'NONE' | 'MUTE' | 'BAN';
@@ -88,6 +90,7 @@ export interface TelegramReplyJob {
  updateKey:string;plan?:{chatId:string;parseMode:'HTML';text:string;
   replyMarkup?:import('./telegram-menu.js').TelegramReplyKeyboard;
   inlineMarkup?:import('./telegram-inline-owner.js').TelegramInlineKeyboard;
+  studioMarkup?:import('./telegram-studio-rich.js').StudioNativeKeyboard;
   editMessageId?:number};
  status:'QUEUED'|'SENDING'|'SENT'|'FAILED_CONFIRMED'|'UNKNOWN_OUTCOME';
  attemptId?:string;startedAt?:number;messageId?:number;
@@ -108,9 +111,11 @@ export interface TelegramReplyJob {
  /** New private replies declare origin; pre-v0.7.56 private QUEUED rows
   * without either this or privateGroupAccess are quarantine-only on dispatch.
   */
- privateReplyKind?:'LOCAL'|'GROUP_SCOPED'|'ADMIN_SCOPED';
+ privateReplyKind?:'LOCAL'|'GROUP_SCOPED'|'ADMIN_SCOPED'|'LIBRARY_SCOPED'|'STUDIO_SCOPED';
  /** Ephemeral administrative view witness, removed before any outbound attempt. */
  adminUIAccess?:AdminUIAccess;
+ /** Short-lived witness for private inline library contents. */
+ privateLibraryAccess?:AdminUIAccess;
  /** Explicit bounded classification of a locally denied QUEUED send.
   * No actor ID, chat ID, text, evidence key or provider description.
   * Historical FAILED_CONFIRMED and network-provider failures remain untagged.
@@ -146,6 +151,7 @@ export interface B6BudgetAttempt {
   operatorReview?:{reviewedBy:string;reviewedAt:number};
 }
 export interface BotState {
+  buttonStudio?:StudioState;
   schemaVersion: 8;
   /** Optional additive per-group monitor policy, validated on every read/write. */
   protectionPolicies?:GroupProtectionRecord[];
@@ -154,6 +160,7 @@ export interface BotState {
   grants: Grant[];
   privateAI: PrivateAIMode;
   privateFeatures: Record<string, boolean>;
+  privateSettingsRevision?: number;
   updates: ProcessedUpdate[];
   operations: Operation[];
   callbacks: CallbackRecord[];
@@ -228,6 +235,8 @@ export class BotStore {
       previous.purgeJobs = [];
     }
     if (previous.schemaVersion !== 8 ||
+      (previous.privateSettingsRevision!==undefined&&(typeof previous.privateSettingsRevision!=='number'||!Number.isSafeInteger(previous.privateSettingsRevision)||previous.privateSettingsRevision<0||previous.privateSettingsRevision>=Number.MAX_SAFE_INTEGER))||
+      (previous.buttonStudio!==undefined&&!validStudioState(previous.buttonStudio))||
       (previous.protectionFloodWindows!==undefined&&(!Array.isArray(previous.protectionFloodWindows)||
        previous.protectionFloodWindows.length>1000||previous.protectionFloodWindows.some(row=>!isValidFloodWindow(row))||
        new Set(previous.protectionFloodWindows.map((row:FloodWindow)=>JSON.stringify([row.chatId,row.memberId]))).size!==previous.protectionFloodWindows.length||
@@ -370,15 +379,21 @@ export class BotStore {
             !Number.isSafeInteger(Number(plan.chatId))||
             job.groupReplyKind!==undefined||
             job.groupMenuAccess!==undefined||job.groupQuestionAccess!==undefined||
-            (job.privateReplyKind!=='LOCAL'&&job.privateReplyKind!=='GROUP_SCOPED'&&job.privateReplyKind!=='ADMIN_SCOPED')||
-            (job.privateReplyKind==='LOCAL'&&(job.privateGroupAccess!==undefined||job.adminUIAccess!==undefined))||
-            (job.privateReplyKind==='GROUP_SCOPED'&&(job.privateGroupAccess===undefined||job.adminUIAccess!==undefined))||
-            (job.privateReplyKind==='ADMIN_SCOPED'&&(job.adminUIAccess===undefined||job.privateGroupAccess!==undefined)))
+            (job.privateReplyKind!=='LOCAL'&&job.privateReplyKind!=='GROUP_SCOPED'&&job.privateReplyKind!=='ADMIN_SCOPED'&&job.privateReplyKind!=='LIBRARY_SCOPED'&&job.privateReplyKind!=='STUDIO_SCOPED')||
+            (job.privateReplyKind==='LOCAL'&&(job.privateGroupAccess!==undefined||job.adminUIAccess!==undefined||job.privateLibraryAccess!==undefined))||
+            (job.privateReplyKind==='GROUP_SCOPED'&&(job.privateGroupAccess===undefined||job.adminUIAccess!==undefined||job.privateLibraryAccess!==undefined))||
+            ((job.privateReplyKind==='ADMIN_SCOPED'||job.privateReplyKind==='STUDIO_SCOPED')&&(job.adminUIAccess===undefined||job.privateGroupAccess!==undefined||job.privateLibraryAccess!==undefined))||
+            (job.privateReplyKind==='LIBRARY_SCOPED'&&(job.privateLibraryAccess===undefined||job.privateGroupAccess!==undefined||job.adminUIAccess!==undefined)))
           return true;
         }
         if(job.adminUIAccess!==undefined){
          if(!validAdminUIAccess(job.adminUIAccess)||job.status!=='QUEUED'||!plan||plan.chatId!==job.adminUIAccess.actorId||
-          job.privateReplyKind!=='ADMIN_SCOPED'||job.privateGroupAccess!==undefined||job.groupReplyKind!==undefined||
+          (job.privateReplyKind!=='ADMIN_SCOPED'&&job.privateReplyKind!=='STUDIO_SCOPED')||job.privateGroupAccess!==undefined||job.groupReplyKind!==undefined||
+          job.groupQuestionAccess!==undefined||job.groupMenuAccess!==undefined)return true;
+        }
+        if(job.privateLibraryAccess!==undefined){
+         if(!validAdminUIAccess(job.privateLibraryAccess)||job.status!=='QUEUED'||!plan||plan.chatId!==job.privateLibraryAccess.actorId||
+          job.privateReplyKind!=='LIBRARY_SCOPED'||job.privateGroupAccess!==undefined||job.adminUIAccess!==undefined||job.groupReplyKind!==undefined||
           job.groupQuestionAccess!==undefined||job.groupMenuAccess!==undefined)return true;
         }
         if(job.privateGroupAccess!==undefined){
@@ -413,6 +428,7 @@ export class BotStore {
       !Array.isArray(previous.resourceLinks) || !Array.isArray(previous.moderationReasons) ||
       !Array.isArray(previous.moderationOperations) || !Array.isArray(previous.subscriptionRequirements) ||
       !Array.isArray(previous.warnings) || !Array.isArray(previous.educationCategories) ||
+      previous.educationCategories.some(c=>c&&typeof c==='object'&&Object.hasOwn(c,'language')&&!validCategoryLanguage((c as Record<string,unknown>).language)) ||
       !Array.isArray(previous.educationResources) || !Array.isArray(previous.importRuns))
       throw new Error('Unsupported state schema');
     return previous as unknown as BotState;
@@ -694,7 +710,7 @@ export class BotStore {
     groupQuestionAccess?:TelegramReplyJob['groupQuestionAccess'],
     groupMenuAccess?:TelegramReplyJob['groupMenuAccess'],
     privateGroupAccess?:TelegramReplyJob['privateGroupAccess'],
-    adminUIAccess?:TelegramReplyJob['adminUIAccess']): Promise<void> {
+    adminUIAccess?:TelegramReplyJob['adminUIAccess'],privateLibraryAccess?:TelegramReplyJob['privateLibraryAccess'],studioScoped=false): Promise<void> {
     await this.transaction(s => {
       const update = s.updates.find(x => x.key === key);
       if (!update || update.status !== 'CLAIMED') throw new Error('Update not claimed');
@@ -707,11 +723,12 @@ export class BotStore {
          s.telegramReplyJobs.push({updateKey:key,plan:structuredClone(reply),status:'QUEUED',queuedAt:decision.at,
           ...(reply.chatId.startsWith('-')
            ?{groupReplyKind:groupQuestionAccess?'REVIEWED_FAQ' as const:'GENERAL' as const}
-           :{privateReplyKind:adminUIAccess?'ADMIN_SCOPED' as const:privateGroupAccess?'GROUP_SCOPED' as const:'LOCAL' as const}),
+           :{privateReplyKind:adminUIAccess?(studioScoped?'STUDIO_SCOPED' as const:'ADMIN_SCOPED' as const):privateGroupAccess?'GROUP_SCOPED' as const:privateLibraryAccess?'LIBRARY_SCOPED' as const:'LOCAL' as const}),
           ...(groupQuestionAccess?{groupQuestionAccess:structuredClone(groupQuestionAccess)}:{}),
           ...(groupMenuAccess?{groupMenuAccess:structuredClone(groupMenuAccess)}:{}),
           ...(privateGroupAccess?{privateGroupAccess:structuredClone(privateGroupAccess)}:{}),
-          ...(adminUIAccess?{adminUIAccess:structuredClone(adminUIAccess)}:{})});
+          ...(adminUIAccess?{adminUIAccess:structuredClone(adminUIAccess)}:{}),
+          ...(privateLibraryAccess?{privateLibraryAccess:structuredClone(privateLibraryAccess)}:{})});
       }
     });
   }

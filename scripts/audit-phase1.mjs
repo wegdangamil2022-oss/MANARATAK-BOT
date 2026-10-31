@@ -10,9 +10,11 @@ import {EducationService} from '../dist/src/education.js';
 import {EducationAdminFacade} from '../dist/src/education-admin.js';
 import {ApprovedAnswerService,ResourceLinkService} from '../dist/src/education-interactions.js';
 import {TelegramUpdateApplication} from '../dist/src/telegram-transport.js';
+import {studioOwnerEntry} from '../dist/src/telegram-inline-studio.js';
+import {delegationOwnerEntry} from '../dist/src/telegram-inline-delegations.js';
 
 // Explicit offline audit. No deployment, credentials, real groups or network.
-const doc=await readFile(new URL('../docs/أزرار_منارتك.md',import.meta.url),'utf8');
+const doc=(await readFile(new URL('../docs/أزرار_منارتك.md',import.meta.url),'utf8')).replace(/\r\n/g,'\n');
 const code=(n)=>String(n).padStart(2,'0');
 const rows=[];
 for(let s=0;s<ownerInlineSections.length;s++){
@@ -26,19 +28,20 @@ for(let s=0;s<ownerInlineSections.length;s++){
  const labels=[...official.matchAll(/^\| \d\d \| (.*?) \|/gm)].map(m=>m[1]);
  assert.deepEqual(section.items,labels,'official button names/order '+key);
  assert.equal(section.descriptions.length,labels.length);
- for(let p=0;p<Math.ceil(labels.length/8);p++){
+ const pageSizes=s===5?[9,8]:Array.from({length:Math.ceil(labels.length/8)},(_,p)=>Math.min(8,labels.length-p*8));
+ for(let p=0;p<pageSizes.length;p++){
   const page=ownerInlineRender('mi:1:s:'+key+':'+p);
   assert.ok(page&&isValidTelegramInlineKeyboard(page.keyboard));
-  assert.equal(page.keyboard.inline_keyboard.flat().filter(b=>b.callback_data.startsWith('mi:1:i:')).length,labels.slice(p*8,p*8+8).length);
+  assert.equal(page.keyboard.inline_keyboard.flat().filter(b=>b.callback_data.startsWith('mi:1:i:')).length,pageSizes[p]);
  }
  for(let i=0;i<labels.length;i++){
   const route='mi:1:i:'+key+':'+code(i+1);
   const screen=ownerInlineRender(route);
   assert.ok(screen&&isValidTelegramInlineKeyboard(screen.keyboard),route);
-  assert.ok(screen.keyboard.inline_keyboard.flat().some(b=>b.callback_data==='mi:1:s:'+key+':'+Math.floor(i/8)),route+' back');
+  assert.ok(screen.keyboard.inline_keyboard.flat().some(b=>b.callback_data==='mi:1:s:'+key+':'+(s===5?(i<9?0:1):Math.floor(i/8))),route+' back');
   const special=new Set(['mi:1:i:03:01','mi:1:i:02:01','mi:1:i:02:15','mi:1:i:02:16','mi:1:i:02:13','mi:1:i:02:05','mi:1:i:02:06','mi:1:i:02:07','mi:1:i:02:08','mi:1:i:02:12']);
   rows.push({section:key,sectionTitle:section.title,button:code(i+1),label:labels[i],callback:route,
-   status:ownerInlineLinkedReadOnly(route)!==null||special.has(route)?'LOCAL_VIEW':'DESIGN_ONLY'});
+   status:delegationOwnerEntry(route)?'LOCAL_DELEGATION_EDITOR':route==='mi:1:i:10:16'?'LOCAL_CATEGORY_EDITOR':route==='mi:1:i:11:03'?'LOCAL_PRIVATE_SETTINGS':studioOwnerEntry(route)?'LOCAL_STUDIO_DRAFT':ownerInlineLinkedReadOnly(route)!==null||special.has(route)?'LOCAL_VIEW':'DESIGN_ONLY'});
  }
 }
 assert.equal(rows.length,253);
@@ -82,11 +85,15 @@ const report={schemaVersion:1,sourceCommit:execFileSync('git',['rev-parse','HEAD
  officialPlan:'docs/MANARATAK_BOT_MASTER_v1.2.1_AR.md',officialButtons:'docs/أزرار_منارتك.md',
  scope:'LOCAL_PHASE1_INVENTORY_ONLY',liveTelegram:'NOT_TESTED_DEFERRED_BY_OWNER',networkCalls,
  ownerSections:16,ownerButtons:253,localViews:rows.filter(r=>r.status==='LOCAL_VIEW').length,
+ localDraftEditors:rows.filter(r=>r.status==='LOCAL_STUDIO_DRAFT').length,
+ localCategoryEditors:rows.filter(r=>r.status==='LOCAL_CATEGORY_EDITOR').length,
+ localPrivateSettings:rows.filter(r=>r.status==='LOCAL_PRIVATE_SETTINGS').length,
+ localDelegationEditors:rows.filter(r=>r.status==='LOCAL_DELEGATION_EDITOR').length,
  designOnly:rows.filter(r=>r.status==='DESIGN_ONLY').length,engines,buttons:rows};
 if(process.argv.includes('--write')){
  await writeFile(new URL('../docs/PHASE1_BUTTON_INVENTORY.json',import.meta.url),JSON.stringify(report,null,2)+'\n');
  const lines=['# جرد أزرار المرحلة الأولى','',
-  'هذا جرد للنسخة المحلية: LOCAL_VIEW شاشة مرتبطة ببيانات محلية؛ DESIGN_ONLY مواصفة للعرض فقط. لا يثبت أي تصنيف تشغيل الوظيفة على Telegram.',
+  'هذا جرد للنسخة المحلية: LOCAL_VIEW شاشة مرتبطة ببيانات محلية؛ LOCAL_STUDIO_DRAFT مدخل لتحرير مسودات الاستوديو؛ LOCAL_CATEGORY_EDITOR محرر شجرة التصنيفات؛ LOCAL_PRIVATE_SETTINGS مفاتيح الخاص؛ LOCAL_DELEGATION_EDITOR محرر تفويضات محلية. تبقى تفاصيل غير مكتملة في هذه المداخل. DESIGN_ONLY مواصفة للعرض فقط. لا يثبت أي تصنيف تشغيل الوظيفة على Telegram.',
   '', '| القسم | الزر | الحالة المحلية | callback |','|---|---|---|---|',
   ...rows.map(r=>'| '+r.section+' — '+r.sectionTitle+' | '+r.button+' — '+r.label+' | '+r.status+' | `'+r.callback+'` |')];
  await writeFile(new URL('../docs/PHASE1_BUTTON_INVENTORY_AR.md',import.meta.url),lines.join('\n')+'\n');
