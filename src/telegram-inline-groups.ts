@@ -10,7 +10,7 @@ import {isValidGroupProtectionRecord} from './protection-rules.js';
  * All screens are rebuilt from current durable state after checking the owner.
  * No Telegram rights, group title or live membership is inferred from storage.
  */
-export type OwnerInlineGroupRoute={kind:'list'|'summary';page:number}|
+export type OwnerInlineGroupRoute={kind:'list';page:number}|{kind:'summary';page:number}|
  {kind:'details'|'subscription'|'access';chatId:string;version:number;page:number}|
  {kind:'reversal';chatId:string;version:number;page:number;digest:string};
 const id='(-[1-9][0-9]{0,18})';
