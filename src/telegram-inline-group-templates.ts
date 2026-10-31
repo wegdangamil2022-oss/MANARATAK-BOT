@@ -2,6 +2,7 @@ import {createHash,randomBytes} from 'node:crypto';
 import type {BotState,BotStore,Chat} from './store.js';
 import type {Policy} from './policy.js';
 import type {OwnerInlineScreen} from './telegram-inline-owner.js';
+import {ownerGroupCardLink} from './telegram-inline-groups.js';
 import {evaluateProtectionRules,isValidGroupProtectionRecord,isValidProtectionPolicy,
  type GroupProtectionRecord,type ProtectionPolicy} from './protection-rules.js';
 
@@ -223,7 +224,7 @@ export class OwnerGroupPolicyTemplates{
   const rows=evidence.visible.map(chat=>{
    const ready=evidence.eligible.some(c=>c.id===chat.id);
    return [btn((ready?'✅ جاهزة: ':'🔒 مضبوطة مسبقًا: ')+chat.id,
-    'gt:1:b:p:'+kind+':'+p)];
+    ownerGroupCardLink(s,chat.id)??'mi:1:i:01:01')];
   });
   const nav:{text:string;callback_data:string}[]=[];
   if(p>0)nav.push(btn('⬅️ السابق','gt:1:b:p:'+kind+':'+(p-1)));
