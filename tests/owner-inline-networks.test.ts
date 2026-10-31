@@ -170,3 +170,16 @@ for(const engine of ['json','sqlite'] as const){
   }finally{await f.close();}
  });
 }
+
+for(const engine of ['json','sqlite'] as const){
+ test('returning to network home truly cancels unfinished name input ('+engine+')',async()=>{
+  const f=await setup(engine);try{
+   assert.equal((await f.app().handle(callback(80,'nw:1:n'))).status,'APPLIED');
+   assert.equal((await f.app().handle(callback(81,'nw:1:h'))).status,'APPLIED');
+   const unrelated=await f.app().handle(textMsg(82,'شبكة متروكة'));
+   assert.notEqual(unrelated.reason,'NETWORK_TEXT_PREVIEW');
+   assert.equal((await f.store.snapshot()).groupNetworks?.length??0,0);
+   assert.equal((await f.store.snapshot()).callbacks.filter(c=>c.action==='owner-network-input:'&&!c.revoked&&!c.used).length,0);
+  }finally{await f.close();}
+ });
+}
