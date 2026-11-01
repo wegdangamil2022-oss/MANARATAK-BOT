@@ -162,7 +162,7 @@ export class OwnerGroupSettings{
  private auditHistory(s:BotState,actor:string,now:number,id:string,version:number,p:number):OwnerInlineScreen|null{
   const selected=this.details(s,actor,now,id,version,Math.floor(approved(s).findIndex(c=>c.id===id)/PAGE_SIZE));
   if(!selected||p<0||p>999)return null;
-  type Entry={at:number;reason:string;change:Change};
+  type Entry={at:number;actor:string;change:Change};
   const changes:Entry[]=[];
   const candidate=s.audit.filter(a=>a.reason==='GROUP_SETTINGS_AI_MODE_SAVED'||
    a.reason==='GROUP_SETTINGS_MONITOR_ENABLED'||a.reason==='GROUP_SETTINGS_MONITOR_DISABLED');
@@ -187,14 +187,15 @@ export class OwnerGroupSettings{
    if(a.reason!==(isAI?'GROUP_SETTINGS_AI_MODE_SAVED':
     change==='m'?'GROUP_SETTINGS_MONITOR_ENABLED':'GROUP_SETTINGS_MONITOR_DISABLED')||
     a.policyVersion!==payload[1]+(isAI?1:0))continue;
-   changes.push({at:a.at,reason:a.reason,change});
+   changes.push({at:a.at,actor:a.actorId,change});
   }
   changes.reverse();
   const count=changes.length,pagesTotal=Math.max(1,Math.ceil(count/PAGE_SIZE));
   if(p>=pagesTotal)return null;
   const current=changes.slice(p*PAGE_SIZE,(p+1)*PAGE_SIZE);
+  const descriptions:Record<Change,string>={x:'المساعد: متوقف',o:'المساعد: يجيب للمالك عند الإشارة',s:'المساعد: يجيب للمشرفين عند الإشارة',a:'المساعد: يجيب للجميع عند الإشارة',m:'الحماية: مراقبة فقط',f:'الحماية: متوقفة'};
   const lines=current.map(item=>'• '+new Date(item.at).toISOString().slice(0,16).replace('T',' ')+
-   ' UTC — '+item.reason).join('\n');
+   ' UTC — '+descriptions[item.change]+' · المعدّل: <code>'+escape(item.actor)+'</code>').join('\n');
   const rows:{text:string;callback_data:string}[][]=[];
   const nav:{text:string;callback_data:string}[]=[];
   if(p>0)nav.push(button('⬅️ السابق','gs:1:l:'+id+':'+version+':'+(p-1)));

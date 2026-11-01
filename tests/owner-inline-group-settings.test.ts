@@ -248,8 +248,10 @@ for(const engine of ['json','sqlite'] as const){
    const history=await f.app().handle(cb(115,key(card,'سجل تغييرات')));
    assert.equal(history.status,'APPLIED');
    assert.match(history.plan?.text??'',/سجل تغييرات إعدادات المجموعة/);
-   assert.match(history.plan?.text??'',/GROUP_SETTINGS_AI_MODE_SAVED/);
-   assert.match(history.plan?.text??'',/GROUP_SETTINGS_MONITOR_ENABLED/);
+   assert.match(history.plan?.text??'',/المساعد: يجيب للمالك عند الإشارة/);
+   assert.match(history.plan?.text??'',/الحماية: مراقبة فقط/);
+   assert.match(history.plan?.text??'',/المعدّل: <code>100<\/code>/);
+   assert.doesNotMatch(history.plan?.text??'',/GROUP_SETTINGS_/);
    assert.equal(buttons(history).some(x=>x.text.includes('تأكيد')),false);
    assert.equal((await f.app().handle(cb(116,'gs:1:l:'+GROUP+':2:0',200))).status,'DENIED');
    assert.equal((await f.app().handle(cb(117,'gs:1:l:'+GROUP+':2:0',100,true))).status,'DENIED');
