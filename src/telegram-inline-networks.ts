@@ -395,8 +395,8 @@ export class OwnerNetworkEditor{
     return ui('<b>✅ فُصل الارتباط القديم محليًا</b>\n'+
      'الشبكة: '+escape(n.name)+'\nالمجموعة: <code>'+escape(groupId)+'</code>\n'+
      'بقي اعتماد Telegram وإعدادات المجموعة دون تغيير.',
-     [[btn('🌐 بطاقة الشبكة','nw:1:d:'+id),
-       btn('🧹 بقية الارتباطات القديمة','nw:1:s:'+id+':0')]]);
+     [[btn('🌐 بطاقة الشبكة','nw:1:d:'+id)],
+      ...(staleLinks(n,current).length?[[btn('🧹 بقية الارتباطات القديمة','nw:1:s:'+id+':0')]]:[])]);
    }
    if(!receipt.action.startsWith(PREFIX+'toggle:'))return null;
    try{data=JSON.parse(receipt.action.slice((PREFIX+'toggle:').length));}catch{return null;}
