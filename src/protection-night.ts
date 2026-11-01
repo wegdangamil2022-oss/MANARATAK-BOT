@@ -31,7 +31,7 @@ export async function tickProtectionNight(store:BotStore,policy:Policy,locks:Gro
    return Number.isSafeInteger(at)&&at>=now&&at<now+5000&&at>=window.start&&at<window.end-30000&&rows.length===1&&JSON.stringify(rows[0])===JSON.stringify(record)&&record.updatedAt<=at&&
     policy.canUseChat(s,record.policy.chatId,'moderation')&&policy.chatRevision(s,record.policy.chatId)===record.chatPolicyVersion&&policy.has(s,record.updatedBy,'chat.manage',record.policy.chatId,at);
   };
-  const job=await locks.preview(record.updatedBy,record.policy.chatId,'LOCK','MESSAGES',Math.floor((window.end-now)/1000),undefined,s=>current(s)&&!(s.groupPermissionJobs??[]).some(j=>j.actorId===record.updatedBy&&j.status==='PREVIEW'),key,window.end);
+  const job=await locks.preview(record.updatedBy,record.policy.chatId,'LOCK','MESSAGES',Math.floor((window.end-now)/1000),undefined,s=>current(s)&&!(s.groupPermissionJobs??[]).some(j=>(j.actorId===record.updatedBy||j.chatId===record.policy.chatId)&&j.status==='PREVIEW'),key,window.end);
   if(!job)continue;result.attempted++;if(await locks.confirm(record.updatedBy,job.id,current)==='CONFIRMED')result.confirmed++;
  }
  return result;

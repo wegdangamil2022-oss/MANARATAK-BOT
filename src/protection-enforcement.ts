@@ -19,7 +19,7 @@ export function moderationProtectionEnforcer(service:ModerationService,groupPerm
   supportsRaid:()=>Boolean(groupPermissions),
   async executeRaid(actor:string,chat:string,seconds:number,current:(s:BotState)=>boolean){
    if(!groupPermissions)return 'DENIED';
-   const job=await groupPermissions.preview(actor,chat,'LOCK','MESSAGES',seconds,undefined,s=>current(s)&&!(s.groupPermissionJobs??[]).some(j=>j.actorId===actor&&j.status==='PREVIEW'));
+   const job=await groupPermissions.preview(actor,chat,'LOCK','MESSAGES',seconds,undefined,s=>current(s)&&!(s.groupPermissionJobs??[]).some(j=>(j.actorId===actor||j.chatId===chat)&&j.status==='PREVIEW'));
    if(!job)return 'DENIED';return groupPermissions.confirm(actor,job.id,current);
   },
   supports:(action:ProtectionAction)=>action==='REVIEW'||action==='WARN'||action==='MUTE'||action==='DELETE'&&Boolean(deletion),

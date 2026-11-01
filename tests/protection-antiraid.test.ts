@@ -39,10 +39,10 @@ for(const engine of ['json','sqlite'] as const){
   }finally{await f.close();}
  });
  test(engine+' AntiRaid excludes edits and exempt members, refuses stale policy and never replaces a human preview',async()=>{
-  for(const scenario of ['edit','exempt','policy','preview'] as const){const f=await fixture();try{
+  for(const scenario of ['edit','exempt','policy','preview','otherPreview'] as const){const f=await fixture();try{
    await f.service.save('100',{...config,...(scenario==='exempt'?{exemptMemberIds:['301']}:{})},1,0);
    await f.observe(1);await f.observe(2);await f.observe(3,'301');
-   let previewId:string|undefined;if(scenario==='preview'){const p=await f.locks.preview('100','-100','LOCK','PHOTOS');previewId=p!.id;}
+   let previewId:string|undefined;if(scenario==='otherPreview')await f.policy.grant('100','200','chat.manage','-100',999999);if(scenario==='preview'||scenario==='otherPreview'){const p=await f.locks.preview(scenario==='otherPreview'?'200':'100','-100','LOCK','PHOTOS');previewId=p!.id;}
    if(scenario==='policy')f.before(async()=>{await f.store.transaction(s=>{s.protectionPolicies![0]!.policy.mode='OFF';});});
    await f.observe(4,'301',scenario!=='edit');assert.equal(f.calls(),0);
    if(previewId)assert.equal((await f.store.snapshot()).groupPermissionJobs!.find(j=>j.id===previewId)!.status,'PREVIEW');

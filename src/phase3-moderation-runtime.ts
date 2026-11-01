@@ -1,7 +1,7 @@
 import {tickProtectionNight} from './protection-night.js';
 import type {BotStore} from './store.js';
 import type {Policy} from './policy.js';
-import {ModerationService} from './moderation.js';
+import {ModerationService,moderationReasonFingerprint} from './moderation.js';
 import {TelegramBotApiModerationGateway} from './telegram-moderation-gateway.js';
 import {GroupPermissionLockService} from './group-permission-lock.js';
 import {telegramGroupPermissionGateway} from './telegram-group-permission-gateway.js';
@@ -16,7 +16,7 @@ export async function createPhase3ModerationRuntime(store:BotStore,policy:Policy
  // Old simulation receipts must never suppress a real dispatch or become a
  // restoration baseline. Refuse mixed ledgers without rewriting any data.
  if(state.moderationOperations.some(o=>o.status!=='CANCELLED'&&o.attemptGateway!=='TELEGRAM_API')||
-  state.moderationReasons.some(r=>r.active&&!state.moderationOperations.some(o=>o.chatId===r.chatId&&o.memberId===r.memberId&&o.status==='CONFIRMED'&&o.attemptGateway==='TELEGRAM_API')))
+  state.moderationReasons.some(r=>r.active&&!state.moderationOperations.some(o=>o.chatId===r.chatId&&o.memberId===r.memberId&&o.attemptGateway==='TELEGRAM_API'&&o.reasonFingerprint===moderationReasonFingerprint(state,r.chatId,r.memberId))))
   throw Error('PHASE3_UNPROVEN_MODERATION_HISTORY');
  const moderation=new ModerationService(store,policy,new TelegramBotApiModerationGateway(token,request,safetyGate,clock),clock);
  const groupPermissions=new GroupPermissionLockService(store,policy,telegramGroupPermissionGateway(token,request,safetyGate),clock);

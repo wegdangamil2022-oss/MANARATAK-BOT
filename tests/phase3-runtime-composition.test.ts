@@ -53,6 +53,11 @@ for(const engine of ['json','sqlite'] as const){
    const fake=new ModerationService(store,policy,new FakeModerationGateway(),()=>100000);await fake.addManualReason('100','-100','300','simulated','MUTE');
    const before=await store.snapshot();let calls=0;const request=(async()=>{calls++;throw Error('network forbidden');}) as typeof fetch;
    await assert.rejects(createPhase3ModerationRuntime(store,policy,TOKEN,request),/PHASE3_UNPROVEN_MODERATION_HISTORY/);assert.equal(calls,0);assert.deepEqual(await store.snapshot(),before);
+   // An official UNKNOWN receipt must remain inspectable after restart; it is not permission to retry.
+   await store.transaction(s=>{s.moderationOperations[0]!.attemptGateway='TELEGRAM_API';s.moderationOperations[0]!.status='UNKNOWN_OUTCOME';});
+   const quarantined=await createPhase3ModerationRuntime(store,policy,TOKEN,request);await quarantined.tick(true);assert.equal(calls,0);
+   await store.transaction(s=>{s.moderationReasons[0]!.reference='changed-source';});
+   await assert.rejects(createPhase3ModerationRuntime(store,policy,TOKEN,request),/PHASE3_UNPROVEN_MODERATION_HISTORY/);assert.equal(calls,0);
   }finally{await rm(dir,{recursive:true,force:true});}
  });
 }

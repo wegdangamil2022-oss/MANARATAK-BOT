@@ -1,3 +1,4 @@
+import {TelegramProtectionEditor} from './telegram-protection-editor.js';
 import type {BotStore,BotState,Chat} from './store.js';
 import type {Policy} from './policy.js';
 import {GroupPermissionLockService,groupPermissionEpoch} from './group-permission-lock.js';
@@ -38,7 +39,8 @@ export class TelegramGroupPermissionLock{
    if(a)return a[1]==='u'&&a[6]!==undefined?null:this.command(actor,chat,a[1]==='u'?'RESTORE':'LOCK',modes[a[5]!]!,a[6]===undefined?undefined:Number(a[6]));
    if(data.startsWith('lk:1:t:'))return this.build(s,actor,'<b>قفل نوع محدد</b>\nالمجموعة: <code>'+chat+'</code>\nاختر النوع ثم راجع الأذونات قبل التأكيد. تبقى بقية الأذونات كما هي. Telegram يجمع الملصقات وGIF والألعاب في إذن واحد؛ لا فصل بينها من هذا القفل.',
     [...(['p','i','d','s','a','o','n','q'] as const).map(code=>[b('🔒 '+labels[({p:'can_send_photos',i:'can_send_videos',d:'can_send_documents',s:'can_send_other_messages',a:'can_send_audios',o:'can_send_voice_notes',n:'can_send_video_notes',q:'can_send_polls'} as const)[code]],'lk:1:l:'+chat+':'+version+':'+page+':'+code)]),[b('↩️ قفل وفتح المجموعة',groupKey(c,page))]]);
-   const stem=':'+chat+':'+version+':'+page+':';return this.build(s,actor,'<b>قفل وفتح المجموعة</b>\nالمجموعة: <code>'+chat+'</code>\nكل تغيير يبدأ بقراءة الأذونات الحالية ومعاينة وتأكيد. الفتح يستعيد لقطة قفل موثقة فقط؛ لا يفتح جميع الصلاحيات.',[[b('⏱ قفل الإرسال 10 دقائق','lk:1:l:'+chat+':'+version+':'+page+':m:600')],[b('🧩 قفل نوع محدد','lk:1:t:'+chat+':'+version+':'+page)],[b('🔒 قفل الإرسال','lk:1:l'+stem+'m')],[b('🎞️ قفل الوسائط','lk:1:l'+stem+'v')],[b('🔗 قفل معاينات الروابط','lk:1:l'+stem+'l')],[b('🔓 استعادة ما قبل القفل','lk:1:u'+stem+'m')],[b('↩️ المجموعات','lk:1:p:'+page)]]);
+   const protectionLink=await new TelegramProtectionEditor(this.store,this.policy,this.clock).link(actor,chat);
+   const stem=':'+chat+':'+version+':'+page+':';return this.build(s,actor,'<b>قفل وفتح المجموعة</b>\nالمجموعة: <code>'+chat+'</code>\nكل تغيير يبدأ بقراءة الأذونات الحالية ومعاينة وتأكيد. الفتح يستعيد لقطة قفل موثقة فقط؛ لا يفتح جميع الصلاحيات.',[...(protectionLink?[[b('🌙 الوضع الليلي وسياسة المؤقتات',protectionLink)]]:[]),[b('⏱ قفل الإرسال 10 دقائق','lk:1:l:'+chat+':'+version+':'+page+':m:600')],[b('🧩 قفل نوع محدد','lk:1:t:'+chat+':'+version+':'+page)],[b('🔒 قفل الإرسال','lk:1:l'+stem+'m')],[b('🎞️ قفل الوسائط','lk:1:l'+stem+'v')],[b('🔗 قفل معاينات الروابط','lk:1:l'+stem+'l')],[b('🔓 استعادة ما قبل القفل','lk:1:u'+stem+'m')],[b('↩️ المجموعات','lk:1:p:'+page)]]);
   }
   const page=data.startsWith('lk:1:p:')?Number(data.slice(7)):0,pages=Math.max(1,Math.ceil(all.length/8));if(page>=pages)return null;
   const rows=all.slice(page*8,page*8+8).map(c=>[b('👥 '+c.id,groupKey(c,page))]);const nav=[];if(page>0)nav.push(b('⬅️ السابق','lk:1:p:'+(page-1)));if(page+1<pages)nav.push(b('➡️ التالي','lk:1:p:'+(page+1)));if(nav.length)rows.push(nav);rows.push([this.policy.isOwner(actor)?b('↩️ قسم الحماية','mi:1:s:02:0'):b('🏠 الرئيسية','pn:1:h')]);

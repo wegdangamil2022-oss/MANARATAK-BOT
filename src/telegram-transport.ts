@@ -1120,6 +1120,7 @@ export class TelegramUpdateApplication {
         +'تُدار صلاحيات المجموعات والتحقق من العضوية ضمن أنظمة منارتك.\n'
         +'دليل عام وروابط انضمام موثقة للمجموعات لم تُنشر بعد.',
         backMenuKeyboard());
+      if(text===m.help&&this.opts.studentMenuMode!=='inline')return result('<b>المساعدة والدعم 🆘</b>\nللتصفح اختر أحد أقسام القائمة أو استخدم /categories private.\nطلبات مراجعة العقوبات الخاصة: /appeals. التواصل المباشر ونظام تذاكر الدعم العام لم يُفعّلا بعد.',backMenuKeyboard());
       if(text===m.help)return {status:'APPLIED',reason:'RESPONSE_PLANNED_ONLY',plan:this.plan(actorId,
         '<b>المساعدة والدعم 🆘</b>\nللتصفح اختر أحد أقسام القائمة أو استخدم /categories private.\nطلبات مراجعة العقوبات خاصة، ولا ترفع القيد تلقائيًا. التواصل المباشر ونظام تذاكر الدعم العام لم يُفعّلا بعد.',undefined,{inline_keyboard:[[{text:'📨 حالاتي واعتراضاتي',callback_data:'ap:1:h:0'}],[{text:'🏠 الرئيسية',callback_data:'pn:1:h'}]]})};
       // A stateless search-result button may carry a query and page so the

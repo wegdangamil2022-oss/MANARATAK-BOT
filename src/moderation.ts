@@ -39,9 +39,11 @@ export class FakeModerationGateway implements ModerationGateway {
   }
 }
 const byTarget = (r: {chatId: string; memberId: string}, chatId: string, memberId: string): boolean => r.chatId === chatId && r.memberId === memberId;
-const fingerprint = (s: BotState, chatId: string, memberId: string): string =>
+export const moderationReasonFingerprint = (s: BotState, chatId: string, memberId: string): string =>
   JSON.stringify(s.moderationReasons.filter(x => byTarget(x, chatId, memberId) && x.active)
     .map(x => [x.source, x.reference, x.kind,...(x.expiresAt===undefined?[]:[{expiresAt:x.expiresAt}])]).sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b))));
+
+const fingerprint=moderationReasonFingerprint;
 
 /** Match a durable operation's immutable dispatch identity. Terminal status
  * or owner review metadata is not evidence that a different payload may be

@@ -45,9 +45,9 @@ for(const engine of ['json','sqlite'] as const){
   }finally{await f.close();}
  });
  test(engine+' night does not replace human previews, ignores stopped/stale policies and never retries an uncertain mutation',async()=>{
-  for(const mode of ['preview','policy','late','unknown'] as const){const f=await fixture();try{
+  for(const mode of ['preview','otherPreview','policy','late','unknown'] as const){const f=await fixture();try{
    await f.service.save('100',config,1,0);
-   let id:string|undefined;if(mode==='preview')id=(await f.locks.preview('100','-100','LOCK','PHOTOS'))!.id;
+   let id:string|undefined;if(mode==='otherPreview')await f.policy.grant('100','200','chat.manage','-100',f.clock()+999999);if(mode==='preview'||mode==='otherPreview')id=(await f.locks.preview(mode==='otherPreview'?'200':'100','-100','LOCK','PHOTOS'))!.id;
    if(mode==='policy')f.before(async()=>{await f.store.transaction(s=>{s.protectionPolicies![0]!.policy.mode='OFF';});});
    if(mode==='late')f.time(nowAt('2026-11-03T02:59:30Z'));if(mode==='unknown')f.unknown();
    const result=await tickProtectionNight(f.store,f.policy,f.locks,f.clock,true);assert.equal(result.confirmed,0);assert.equal(f.calls(),mode==='unknown'?1:0);
