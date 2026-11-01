@@ -477,6 +477,72 @@ test('group template history and rollback callback grammar is canonical and boun
   assert.equal(validGroupPolicyStudioRoute(invalid),false,invalid);
 });
 for(const engine of ['json','sqlite'] as const){
+ test('single template rollback reviews, confirms once and preserves unrelated policy ('+engine+')',async()=>{
+  const f=await fixture(engine);try{
+   await f.approve(SOURCE);await f.approve(TARGET);await f.save(SOURCE,{allow:true});
+   const original=(await f.store.snapshot()).protectionPolicies![0]!;
+   const draft=await f.app().handle(cb(800,'gt:1:v:l:'+TARGET+':1'));await f.app().handle(cb(801,click(draft,'تأكيد')));
+   const list=await f.app().handle(cb(802,'gt:1:r:h')),detail=await f.app().handle(cb(803,click(list,'📑')));
+   const preview=await f.app().handle(cb(804,click(detail,'معاينة الاسترجاع')));assert.equal(preview.status,'APPLIED');
+   const confirm=click(preview,'تأكيد الاسترجاع');assert.equal((await f.store.snapshot()).protectionPolicies!.length,2);
+   assert.equal((await f.app().handle(cb(805,confirm,200))).status,'DENIED');
+   const results=await Promise.all([f.app().handle(cb(806,confirm)),f.app().handle(cb(807,confirm))]);assert.equal(results.filter(x=>x.status==='APPLIED').length,1);
+   assert.deepEqual((await f.store.snapshot()).protectionPolicies,[original]);
+   const after=await f.app().handle(cb(808,click(list,'📑')));assert.match(after.plan!.text,/مسترجعة/);
+  }finally{await f.close();}
+ });
+ test('copied template rollback requires unchanged source and destination ('+engine+')',async()=>{
+  const f=await fixture(engine);try{
+   await f.approve(SOURCE);await f.approve(TARGET);await f.save(SOURCE);
+   const draft=await f.app().handle(cb(810,'gt:1:x:'+SOURCE+':'+TARGET));await f.app().handle(cb(811,click(draft,'تأكيد')));
+   const list=await f.app().handle(cb(812,'gt:1:r:h')),detail=await f.app().handle(cb(813,click(list,'📑')));
+   const preview=await f.app().handle(cb(814,click(detail,'معاينة الاسترجاع')));assert.equal(preview.status,'APPLIED');
+   assert.equal((await f.app().handle(cb(815,click(preview,'تأكيد الاسترجاع')))).status,'APPLIED');
+   const state=await f.store.snapshot();assert.equal(state.protectionPolicies!.length,1);assert.equal(state.protectionPolicies![0]!.policy.chatId,SOURCE);
+  }finally{await f.close();}
+ });
+ test('single rollback rejects cancellation, expiry and edited destination ('+engine+')',async()=>{
+  const f=await fixture(engine);try{
+   await f.approve(TARGET);const draft=await f.app().handle(cb(820,'gt:1:v:l:'+TARGET+':1'));await f.app().handle(cb(821,click(draft,'تأكيد')));
+   const list=await f.app().handle(cb(822,'gt:1:r:h')),detail=await f.app().handle(cb(823,click(list,'📑'))),route=click(detail,'معاينة الاسترجاع');
+   let review=await f.app().handle(cb(824,route)),token=click(review,'تأكيد الاسترجاع');
+   await f.app().handle(cb(825,click(review,'إلغاء المعاينة')));assert.equal((await f.app().handle(cb(826,token))).status,'DENIED');
+   review=await f.app().handle(cb(827,route));token=click(review,'تأكيد الاسترجاع');f.advance(120000);assert.equal((await f.app().handle(cb(828,token))).status,'DENIED');
+   review=await f.app().handle(cb(829,route));token=click(review,'تأكيد الاسترجاع');
+   const policy=(await f.store.snapshot()).protectionPolicies![0]!.policy;
+   assert.equal((await new GroupProtectionPolicyService(f.store,f.policy,()=>NOW+120000).save(OWNER,{...policy,revision:2,allowedDomains:['school.edu']},1,1)).status,'SAVED');
+   assert.equal((await f.app().handle(cb(830,token))).status,'DENIED');assert.equal((await f.app().handle(cb(831,route))).status,'DENIED');
+   assert.deepEqual((await f.store.snapshot()).protectionPolicies![0]!.policy.allowedDomains,['school.edu']);
+  }finally{await f.close();}
+ });
+ test('copy rollback rejects changed source before removing any destination ('+engine+')',async()=>{
+  const f=await fixture(engine);try{
+   await f.approve(SOURCE);await f.approve(TARGET);await f.save(SOURCE);
+   const draft=await f.app().handle(cb(840,'gt:1:x:'+SOURCE+':'+TARGET));await f.app().handle(cb(841,click(draft,'تأكيد')));
+   const list=await f.app().handle(cb(842,'gt:1:r:h')),detail=await f.app().handle(cb(843,click(list,'📑')));
+   const review=await f.app().handle(cb(844,click(detail,'معاينة الاسترجاع'))),token=click(review,'تأكيد الاسترجاع');
+   const source=(await f.store.snapshot()).protectionPolicies!.find(p=>p.policy.chatId===SOURCE)!;
+   assert.equal((await new GroupProtectionPolicyService(f.store,f.policy,()=>NOW).save(OWNER,{...source.policy,revision:2,allowedPhrases:['new source']},1,1)).status,'SAVED');
+   assert.equal((await f.app().handle(cb(845,token))).status,'DENIED');assert.equal((await f.store.snapshot()).protectionPolicies!.length,2);
+  }finally{await f.close();}
+ });
+ test('single rollback rejects stale operation after seven days ('+engine+')',async()=>{
+  const f=await fixture(engine);try{
+   await f.approve(TARGET);const draft=await f.app().handle(cb(850,'gt:1:v:e:'+TARGET+':1'));await f.app().handle(cb(851,click(draft,'تأكيد')));
+   const list=await f.app().handle(cb(852,'gt:1:r:h')),detail=await f.app().handle(cb(853,click(list,'📑'))),route=click(detail,'معاينة الاسترجاع');
+   f.advance(7*24*60*60*1000+1);assert.equal((await f.app().handle(cb(854,route))).status,'DENIED');
+   assert.equal((await f.store.snapshot()).protectionPolicies!.length,1);
+  }finally{await f.close();}
+ });
+ test('single rollback rechecks approval before confirmation ('+engine+')',async()=>{
+  const f=await fixture(engine);try{
+   await f.approve(TARGET);const draft=await f.app().handle(cb(860,'gt:1:v:e:'+TARGET+':1'));await f.app().handle(cb(861,click(draft,'تأكيد')));
+   const list=await f.app().handle(cb(862,'gt:1:r:h')),detail=await f.app().handle(cb(863,click(list,'📑'))),route=click(detail,'معاينة الاسترجاع');
+   const review=await f.app().handle(cb(864,route)),token=click(review,'تأكيد الاسترجاع');
+   await f.policy.revokeChatAtRevision(OWNER,TARGET,1);assert.equal((await f.app().handle(cb(865,token))).status,'DENIED');assert.equal((await f.app().handle(cb(866,route))).status,'DENIED');
+   assert.equal((await f.store.snapshot()).protectionPolicies!.length,1);
+  }finally{await f.close();}
+ });
  test('owner sees tamper-resistant local template history and can inspect grouped bulk details ('+engine+')',async()=>{
   const f=await fixture(engine);try{
    await f.approve(TARGET);await f.approve(SOURCE);
@@ -595,7 +661,7 @@ for(const engine of ['json','sqlite'] as const){
 
 
 for(const engine of ['json','sqlite'] as const){
- test('template history is bounded to eight entries per page and never exposes an undo for single templates ('+engine+')',async()=>{
+ test('template history is bounded to eight entries per page and exposes guarded undo for untouched single templates ('+engine+')',async()=>{
   const f=await fixture(engine);try{
    for(let i=0;i<9;i++){
     const id='-100'+String(2000+i);
@@ -614,7 +680,7 @@ for(const engine of ['json','sqlite'] as const){
    const detail=await f.app().handle(cb(452,click(second,'📑')));
    assert.equal(detail.status,'APPLIED');
    assert.match(detail.plan?.text??'',/حفظ قالب محلي/);
-   assert.equal(buttons(detail).some(b=>b.text.includes('معاينة الاسترجاع')),false);
+   assert.equal(buttons(detail).some(b=>b.text.includes('معاينة الاسترجاع')),true);
    assert.equal((await f.app().handle(cb(453,'gt:1:r:p:2'))).status,'DENIED');
    assert.equal((await f.store.snapshot()).protectionPolicies?.length,9);
   }finally{await f.close();}
