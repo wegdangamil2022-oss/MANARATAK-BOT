@@ -28,6 +28,18 @@ for(const engine of ['json','sqlite'] as const){
    assert.equal(await service.observeIncomingText('300','-100','😀',[{type:'text_mention',offset:1,length:1}],'b3-webhook:limit:3'),'UNAVAILABLE');
   }finally{await rm(dir,{recursive:true,force:true});}
  });
+ test(engine+' word matching button persists its choice through editing and rejects stale toggles',async()=>{
+  const dir=await mkdtemp(join(tmpdir(),'protection-word-mode-'));try{
+   const store=new BotStore(join(dir,'state.'+engine),{engine}),policy=new Policy(store,'100',()=>100000);await policy.approveChat('100','-100',['moderation']);
+   const service=new GroupProtectionPolicyService(store,policy,()=>100000);await service.save('100',{chatId:'-100',revision:1,mode:'OFF',rules:[{id:'word',kind:'WORD',value:'اعلان',enabled:false,action:'REVIEW'}],allowedDomains:[],allowedPhrases:[],exemptMemberIds:[]},1,0);
+   const ui=new TelegramProtectionEditor(store,policy,()=>100000),home=()=>ui.link('100','-100').then(link=>ui.handle(link!,'100'));
+   let g=await home(),list=await ui.handle(route(g,'pr:1:l:'),'100'),detail=await ui.handle(route(list,'pr:1:r:'),'100');const toggle=route(detail,'pr:1:R:');assert.ok(await ui.handle(toggle,'100'));
+   let rule=(await store.snapshot()).protectionPolicies![0]!.policy.rules[0]!;assert.equal(rule.kind==='WORD'&&rule.match,'PARTIAL');assert.equal(rule.enabled,false);assert.equal(await ui.handle(toggle,'100'),null);
+   g=await home();list=await ui.handle(route(g,'pr:1:l:'),'100');detail=await ui.handle(route(list,'pr:1:r:'),'100');await ui.handle(route(detail,'pr:1:v:'),'100');await ui.handleText('100','منح',false);
+   rule=(await store.snapshot()).protectionPolicies![0]!.policy.rules[0]!;assert.equal(rule.kind==='WORD'&&rule.match,'PARTIAL');assert.equal(rule.kind==='WORD'&&rule.value,'منح');
+   g=await home();list=await ui.handle(route(g,'pr:1:l:'),'100');detail=await ui.handle(route(list,'pr:1:r:'),'100');await ui.handle(route(detail,'pr:1:R:'),'100');rule=(await store.snapshot()).protectionPolicies![0]!.policy.rules[0]!;assert.equal(Object.hasOwn(rule,'match'),false);
+  }finally{await rm(dir,{recursive:true,force:true});}
+ });
  test(engine+' scoped limit editor validates, starts disabled, preserves back and cancels stale input',async()=>{
   const dir=await mkdtemp(join(tmpdir(),'protection-limit-ui-'));try{
    const store=new BotStore(join(dir,'state.'+engine),{engine}),policy=new Policy(store,'100',()=>100000);await policy.approveChat('100','-100',['moderation']);const ui=new TelegramProtectionEditor(store,policy,()=>100000);

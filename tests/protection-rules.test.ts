@@ -91,3 +91,13 @@ test('forward rules preserve content-type filtering and do not treat allow-liste
  assert.equal(evaluateProtectionRules(cfg,{...message('درس طبي'),forwarded:'yes'}).status,'INVALID_MESSAGE');
  assert.equal(evaluateProtectionRules({...cfg,rules:[{...cfg.rules[0],source:'*'}]},message('x')).status,'INVALID_POLICY');
 });
+
+test('partial word mode is explicit, normalized, phrase-exemption bounded and strictly validated',()=>{
+ const cfg=policy([{id:'word',kind:'WORD',value:'إعلان',match:'PARTIAL',action:'WARN',enabled:true}]);
+ assert.equal(isValidProtectionPolicy(cfg),true);
+ assert.equal(evaluateProtectionRules(cfg,message('هذه إِعْلانات')).status,'MATCH');
+ cfg.allowedPhrases=['هذه إعلانات'];assert.equal(evaluateProtectionRules(cfg,message('هذه إعلانات')).status,'CLEAR');
+ assert.equal(evaluateProtectionRules(cfg,message('هذه إعلانات وإعلان آخر')).status,'MATCH');
+ const invalid=structuredClone(cfg) as any;invalid.rules[0].match='PREFIX';assert.equal(isValidProtectionPolicy(invalid),false);
+ invalid.rules[0].kind='PHRASE';invalid.rules[0].match='PARTIAL';assert.equal(isValidProtectionPolicy(invalid),false);
+});

@@ -28,7 +28,7 @@ const validTime=(n:number)=>Number.isSafeInteger(n)&&n>=0&&n<=8640000000000000-T
 function rulesWithInput(config:ProtectionPolicy,kind:'WORD'|'PHRASE'|'LINK',value:string,id:string,editing:boolean):ProtectionRule[]|null{
  const old=config.rules.find(r=>r.id===id);
  if(editing&&(!old||old.kind!==kind))return null;
- const rule:ProtectionRule=kind==='LINK'?{id,kind,hosts:[value],enabled:old?.enabled??false,action:old?.action??'REVIEW'}:{id,kind,value,enabled:old?.enabled??false,action:old?.action??'REVIEW'};
+ const rule:ProtectionRule=kind==='LINK'?{id,kind,hosts:[value],enabled:old?.enabled??false,action:old?.action??'REVIEW'}:{id,kind,value,enabled:old?.enabled??false,action:old?.action??'REVIEW',...(kind==='WORD'&&old?.kind==='WORD'&&old.match?{match:old.match}:{})};
  return editing?config.rules.map(r=>r.id===id?rule:r):[...config.rules,rule];
 }
 function inputPolicy(config:ProtectionPolicy,kind:Exclude<InputKind,'TEST'>,text:string,id:string,editing:boolean,now:number):ProtectionPolicy|null{
@@ -259,6 +259,7 @@ export class TelegramProtectionEditor{
   if(route.kind==='r')return screen('<b>تفاصيل القاعدة</b>\n'
    +escape(ruleName(rule))+'\nالحالة: '+(rule.enabled?'مفعلة':'معطلة')+'\nالإجراء المقترح: '+actions[rule.action]+'\n'+(f.config.mode==='ENFORCE'?'هذه سياسة تنفيذ محفوظة؛ ينفذ الإجراء عند اتصال خدمته واستيفاء شروطه. الكتم لدقيقة والحذف لرسالة مرصودة موثوقة فقط.':'وضع المجموعة لا يرسل عقوبات تلقائية.'),[
     ...(rule.kind==='WORD'||rule.kind==='PHRASE'?[[btn('✏️ تعديل النص',key('v',f,suffix))]]:[]),
+    ...(rule.kind==='WORD'?[[btn(rule.match==='PARTIAL'?'🔎 المطابقة: جزئية — اضغط للكاملة':'🔎 المطابقة: كلمة كاملة — اضغط للجزئية',key('R',f,suffix))]]:[]),
     [btn(rule.enabled?'⏸ تعطيل القاعدة':'✅ تفعيل القاعدة',key('e',f,suffix))],
     [btn('مراجعة',key('a',f,suffix+':r')),btn('تحذير',key('a',f,suffix+':w'))],
     [btn('حذف مقترح',key('a',f,suffix+':d')),btn('كتم مقترح',key('a',f,suffix+':m'))],
@@ -266,7 +267,8 @@ export class TelegramProtectionEditor{
    ]);
   if(route.kind==='d')return screen('هل تريد حذف هذه القاعدة من إعدادات المجموعة؟ لن تُحذف أي رسالة.',[[btn('✅ تأكيد حذف القاعدة',key('x',f,suffix)),btn('↩️ إلغاء',key('r',f,suffix))]]);
   const next=structuredClone(f.config);next.revision++;
-  if(route.kind==='e')next.rules[index]!.enabled=!rule.enabled;
+  if(route.kind==='R'&&rule.kind==='WORD'){const changed=next.rules[index]!;if(changed.kind!=='WORD')return null;if(changed.match==='PARTIAL')delete changed.match;else changed.match='PARTIAL';}
+  else if(route.kind==='e')next.rules[index]!.enabled=!rule.enabled;
   else if(route.kind==='a'&&route.action)next.rules[index]!.action=route.action;
   else if(route.kind==='x')next.rules.splice(index,1);
   else return null;
@@ -408,7 +410,7 @@ export class TelegramProtectionEditor{
    const matched=f.config.rules.filter(r=>result.matchedRuleIds.includes(r.id));
    const explanations=matched.slice(0,6).map(r=>{
     const name=Array.from(ruleName(r)).slice(0,45).join('');
-    const reason=r.kind==='WORD'?'كلمة كاملة':r.kind==='PHRASE'?'عبارة متجاورة':r.kind==='TYPE'?'نوع رسالة':r.kind==='FORWARD'?'إعادة توجيه':r.kind==='LIMIT'?'تجاوز الحد المضبوط':'سياسة روابط';
+    const reason=r.kind==='WORD'?(r.match==='PARTIAL'?'جزء من كلمة':'كلمة كاملة'):r.kind==='PHRASE'?'عبارة متجاورة':r.kind==='TYPE'?'نوع رسالة':r.kind==='FORWARD'?'إعادة توجيه':r.kind==='LIMIT'?'تجاوز الحد المضبوط':'سياسة روابط';
     return '• '+escape(name)+' — '+reason+'؛ '+actions[r.action];
    }).join('\n');
    return {status:'APPLIED',reason:'PROTECTION_DRY_RUN_ONLY',screen:screen('نتيجة الاختبار المحلي: '+(result.status==='MATCH'?'مطابقة':'لا مطابقة')+'\nنسخة الاختبار: '+f.config.revision+'\nالقواعد المطابقة: '+result.matchedRuleIds.length+'\nالإجراء المقترح: '+(result.proposedAction?actions[result.proposedAction]:'لا شيء')+'\n'+explanations+(matched.length>6?'\nتوجد مطابقات إضافية؛ راجع قائمة القواعد.':'')+'\nلم تُحفظ العينة أو تُفعّل عقوبة.',[[btn('↩️ إعدادات المجموعة',key('g',f))]])};
