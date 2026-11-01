@@ -20,12 +20,18 @@ export function isCanonicalSubscriptionRule(value:unknown):value is Subscription
  if(!value||typeof value!=='object'||Array.isArray(value))return false;
  const r=value as Partial<SubscriptionRequirement>;
  if(typeof r.chatId!=='string'||!canonicalId.test(r.chatId)||
-   (r.mode!=='ALL'&&r.mode!=='ANY')||
+   (r.mode!=='ALL'&&r.mode!=='ANY'&&r.mode!=='AT_LEAST')||
    !Number.isSafeInteger(r.version)||r.version===undefined||r.version<1||
    !Array.isArray(r.channelIds)||r.channelIds.length>10)return false;
  if(r.channelIds.some(id=>typeof id!=='string'||!canonicalId.test(id)))return false;
+ if(r.mode==='AT_LEAST'){
+  if(!Number.isSafeInteger(r.minimumCount)||r.minimumCount===undefined||r.minimumCount<1||r.minimumCount>r.channelIds.length)return false;
+ }else if(Object.hasOwn(r,'minimumCount'))return false;
  return new Set(r.channelIds).size===r.channelIds.length;
 }
+/** Preserve legacy witness bytes while including restored numeric-rule changes. */
+export const subscriptionRuleWitness=(r:SubscriptionRequirement):unknown[]=>[r.version,r.mode,...r.channelIds,...(Object.hasOwn(r,'minimumCount')?[{minimumCount:r.minimumCount}]:[])];
+export const subscriptionRuleLabel=(r:SubscriptionRequirement):string=>r.mode==='AT_LEAST'?'حد أدنى '+r.minimumCount+' من '+r.channelIds.length:r.mode;
 /** One canonical policy per group. A malformed or duplicated saved rule
  * is never equivalent to an explicitly owner-paused requirement. This helper
  * makes link, group-message and private-group browsing gates agree.

@@ -1,3 +1,4 @@
+import {subscriptionRuleLabel} from './subscription-integrity.js';
 import type {BotStore,BotState,Chat,SubscriptionRequirement} from './store.js';
 import type {Policy} from './policy.js';
 import type {OwnerInlineScreen,TelegramInlineKeyboard} from './telegram-inline-owner.js';
@@ -319,7 +320,7 @@ export async function renderOwnerInlineGroups(store:BotStore,policy:Policy,actor
  return {text:'<b>الاشتراك المحفوظ 📋</b>\n'
   +'المجموعة: <code>'+safe(chat.id)+'</code>\n'
   +'صلاحية التحقق المحلية: '+(chat.scopes.includes('verification')?'متاحة':'معطلة')+'\n'
-  +'نمط الاشتراك: '+(enabled?subscription!.mode:'غير مفعل')+'\n'
+  +'نمط الاشتراك: '+(enabled?subscriptionRuleLabel(subscription!):'غير مفعل')+'\n'
   +'عدد القنوات المطلوبة: '+channels.length+'\n'
   +(channels.length?'القنوات (حد العرض 12):\n'+channels.slice(0,12)
    .map(c=>'• <code>'+safe(c)+'</code>').join('\n')+'\n':'')

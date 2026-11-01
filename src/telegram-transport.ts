@@ -11,7 +11,7 @@ import type { ImportFormat } from './ingestion.js';
 import type { SubscriptionGate } from './subscription.js';
 import type {PlatformCatalogPreviewService} from './platform-catalog-preview.js';
 import type {B6AnswerPreflight} from './b6-approved-answer-preflight.js';
-import {subscriptionRequirementMode,acceptsActiveSubscriptionEvidence} from './subscription-integrity.js';
+import {subscriptionRequirementMode,subscriptionRuleWitness,acceptsActiveSubscriptionEvidence} from './subscription-integrity.js';
 import type { TelegramReplyDispatcher } from './telegram-replies.js';
 import {BoundedIngress,decodeStrictJsonBytes,type IngressOptions} from './http-ingress-guard.js';
 import {menuLabels,mainMenuKeyboard,backMenuKeyboard,categoryButton,
@@ -283,7 +283,7 @@ export class TelegramUpdateApplication {
     const epoch=(state:Awaited<ReturnType<BotStore['snapshot']>>):string=>{
       const group=state.chats.find(c=>c.id===scope);
       const rules=state.subscriptionRequirements.filter(r=>r.chatId===scope)
-       .map(r=>[r.version,r.mode,...r.channelIds]);
+       .map(subscriptionRuleWitness);
       return JSON.stringify([group?.version,group?.approved,group?.scopes,rules]);
     };
     const originalEpoch=epoch(before);

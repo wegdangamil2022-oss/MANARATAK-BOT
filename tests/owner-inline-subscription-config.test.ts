@@ -77,4 +77,12 @@ for(const engine of ['json','sqlite'] as const){
    let sent=0;const dispatcher=new TelegramReplyDispatcher(f.store,f.policy,{send:async()=>{sent++;return {status:'CONFIRMED',messageId:55};}},()=>NOW);assert.equal((await dispatcher.dispatch(queued)).status,'FAILED_CONFIRMED');assert.equal(sent,0);
   }finally{await f.close();}
  });
+ test(engine+' owner confirms two of five, restores the saved minimum, and explicitly switches back to ANY or pause',async()=>{
+  const f=await fixture();try{
+   let r=await f.click('sc:1:h');r=await f.click(choose(r,'👥 '+GROUP));for(let i=0;i<5;i++)r=await f.click(choose(r,'▫️ -10020'+i));r=await f.click(choose(r,'🔢 حد أدنى'));r=await f.click(choose(r,'👁️ معاينة'));assert.ok(r.plan!.text.includes('حد أدنى 2 من 5'));assert.equal((await f.store.snapshot()).subscriptionRequirements.length,0);r=await f.click(choose(r,'✅ حفظ'));let rule=(await f.store.snapshot()).subscriptionRequirements[0]!;assert.equal(rule.mode,'AT_LEAST');assert.equal(rule.minimumCount,2);
+   r=await f.click('sc:1:h');r=await f.click(choose(r,'👥 '+GROUP));assert.ok(choose(r,'👁️ معاينة 2 من 5'));r=await f.click(choose(r,'🔢 3 من 5'));r=await f.click(choose(r,'👁️ معاينة'));const stale=choose(r,'✅ حفظ');await f.store.transaction(s=>{s.subscriptionRequirements[0]!.minimumCount=3;});assert.equal((await f.click(stale)).status,'DENIED');
+   r=await f.click('sc:1:h');r=await f.click(choose(r,'👥 '+GROUP));r=await f.click(choose(r,'🔘 قناة واحدة'));r=await f.click(choose(r,'👁️ معاينة'));r=await f.click(choose(r,'✅ حفظ'));rule=(await f.store.snapshot()).subscriptionRequirements[0]!;assert.equal(rule.mode,'ANY');assert.equal(Object.hasOwn(rule,'minimumCount'),false);
+   r=await f.click('sc:1:h');r=await f.click(choose(r,'👥 '+GROUP));r=await f.click(choose(r,'🔢 حد أدنى'));r=await f.click(choose(r,'👁️ معاينة'));r=await f.click(choose(r,'✅ حفظ'));r=await f.click(choose(r,'⏸️ معاينة تعطيل'));r=await f.click(choose(r,'✅ حفظ'));rule=(await f.store.snapshot()).subscriptionRequirements[0]!;assert.equal(rule.mode,'ALL');assert.equal(Object.hasOwn(rule,'minimumCount'),false);assert.deepEqual(rule.channelIds,[]);
+  }finally{await f.close();}
+ });
 }

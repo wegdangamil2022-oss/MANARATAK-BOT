@@ -7,14 +7,15 @@ import {subscriptionConfigEpoch} from './subscription-config-epoch.js';
 import type {OwnerInlineScreen} from './telegram-inline-owner.js';
 import {protectionUIEpoch,type AdminUIAccess} from './protection-ui-access.js';
 const PREFIX='subscription-editor:',TTL=120000;
-type Step={kind:'groups'|'edit'|'review'|'confirm';page:number;group:string;channels:string[];mode:'ALL'|'ANY'};
+type Step={kind:'groups'|'edit'|'review'|'confirm';page:number;group:string;channels:string[];mode:'ALL'|'ANY'|'AT_LEAST';minimumCount?:number};
 const initial:Step={kind:'groups',page:0,group:'',channels:[],mode:'ALL'};
+const basicMode=(step:Step,mode:'ALL'|'ANY'):Step=>{const next={...step,mode};delete next.minimumCount;return next;};
 const canonical=(id:string)=>/^-[1-9][0-9]{0,15}$/u.test(id)&&Number.isSafeInteger(Number(id));
 const available=(s:BotState,p:Policy)=>s.chats.filter(c=>canonical(c.id)&&s.chats.filter(x=>x.id===c.id).length===1&&p.canUseChat(s,c.id,'verification')).sort((a,b)=>a.id.localeCompare(b.id));
 export const validSubscriptionConfigRoute=(data:string):boolean=>data==='sc:1:h'||/^sc:1:[A-Za-z0-9_-]{24}$/u.exec(data)?.[0]===data;
 function validStep(v:unknown):v is Step{
  if(!v||typeof v!=='object'||Array.isArray(v))return false;const a=v as Record<string,unknown>;
- return Object.keys(a).length===5&&['groups','edit','review','confirm'].includes(String(a.kind))&&Number.isSafeInteger(a.page)&&Number(a.page)>=0&&Number(a.page)<=999&&typeof a.group==='string'&&(a.group===''||canonical(a.group))&&Array.isArray(a.channels)&&a.channels.length<=10&&a.channels.every(c=>typeof c==='string'&&canonical(c))&&new Set(a.channels).size===a.channels.length&&(a.mode==='ALL'||a.mode==='ANY')&&(a.kind==='groups'?a.group===''&&a.channels.length===0:a.group!=='');
+ return Object.keys(a).length===(Object.hasOwn(a,'minimumCount')?6:5)&&['groups','edit','review','confirm'].includes(String(a.kind))&&Number.isSafeInteger(a.page)&&Number(a.page)>=0&&Number(a.page)<=999&&typeof a.group==='string'&&(a.group===''||canonical(a.group))&&Array.isArray(a.channels)&&a.channels.length<=10&&a.channels.every(c=>typeof c==='string'&&canonical(c))&&new Set(a.channels).size===a.channels.length&&((a.mode==='ALL'||a.mode==='ANY')?!Object.hasOwn(a,'minimumCount'):a.mode==='AT_LEAST'&&Number.isSafeInteger(a.minimumCount)&&Number(a.minimumCount)>=1&&Number(a.minimumCount)<=a.channels.length)&&(a.kind==='groups'?a.group===''&&a.channels.length===0:a.group!=='');
 }
 export async function cancelSubscriptionConfig(store:BotStore,actor:string):Promise<void>{
  await store.transaction(s=>{
@@ -37,7 +38,7 @@ export async function renderSubscriptionConfig(store:BotStore,policy:Policy,gate
  if(!request)return null;let step=request.step,saved=false;
  if(step.kind==='confirm'){
   if(!gate)return null;
-  try{await gate.configure(actor,step.group,[...step.channels],step.mode,request.epoch);saved=true;step={...step,kind:'edit',page:0};}catch{return null;}
+  try{await gate.configure(actor,step.group,[...step.channels],step.mode,request.epoch,step.minimumCount);saved=true;step={...step,kind:'edit',page:0};}catch{return null;}
  }
  return store.transaction(s=>{
   const now=clock();if(!Number.isSafeInteger(now)||now<0||now>8640000000000000-TTL||!policy.privateFeature(s,'owner.dashboard',actor)||!saved&&subscriptionConfigEpoch(s)!==request.epoch)return null;
@@ -51,21 +52,25 @@ export async function renderSubscriptionConfig(store:BotStore,policy:Policy,gate
    text='<b>اختيار مجموعة الاشتراك</b>\nصفحة '+(step.page+1)+' من '+pages+'\nتظهر النطاقات المعتمدة للتصفح والتحقق فقط. لا يغير هذا المحرر اعتماد أي جهة.';
    for(const group of groups.slice(step.page*8,step.page*8+8)){
     const matches=s.subscriptionRequirements.filter(r=>r.chatId===group.id),rule=matches[0];if(matches.length>1||rule&&!isCanonicalSubscriptionRule(rule))continue;
-    rows.push([b('👥 '+group.id,{kind:'edit',group:group.id,page:0,channels:rule?[...rule.channelIds]:[],mode:rule?.mode??'ALL'})]);
+    rows.push([b('👥 '+group.id,{kind:'edit',group:group.id,page:0,channels:rule?[...rule.channelIds]:[],mode:rule?.mode??'ALL',...(rule?.mode==='AT_LEAST'?{minimumCount:rule.minimumCount}:{})})]);
    }
    const nav=[];if(step.page>0)nav.push(b('⬅️ السابق',{...step,page:step.page-1}));if(step.page+1<pages)nav.push(b('➡️ التالي',{...step,page:step.page+1}));if(nav.length)rows.push(nav);
   }else{
    if(!groups.some(c=>c.id===step.group))return null;
    const channels=chats.filter(c=>c.id!==step.group);if(step.channels.some(id=>!channels.some(c=>c.id===id)))return null;
    if(step.kind==='review'){
-    text='<b>معاينة شرط الاشتراك</b>\nالمجموعة: <code>'+step.group+'</code>\nالقاعدة: '+(step.channels.length?(step.mode==='ALL'?'جميع الجهات المختارة':'جهة واحدة على الأقل'):'تعطيل الشرط')+'\nالمختار: '+step.channels.join('، ')+'\nيتحقق الحفظ من قابلية فحص الجهات المختارة؛ لا يغير عضوية أحد أو ينفذ عقوبة. الحد الأدنى العددي غير متاح هنا.';
+    text='<b>معاينة شرط الاشتراك</b>\nالمجموعة: <code>'+step.group+'</code>\nالقاعدة: '+(step.channels.length?(step.mode==='ALL'?'جميع الجهات المختارة':step.mode==='ANY'?'جهة واحدة على الأقل':'حد أدنى '+step.minimumCount+' من '+step.channels.length):'تعطيل الشرط')+'\nالمختار: '+step.channels.join('، ')+'\nيتحقق الحفظ من قابلية فحص الجهات المختارة؛ لا يغير عضوية أحد أو ينفذ عقوبة.';
     rows.push([b('✅ حفظ والتحقق من الصلاحيات',{...step,kind:'confirm'})]);
    }else{
     const pages=Math.max(1,Math.ceil(channels.length/8));if(step.page>=pages)return null;
     text=(saved?'<b>حُفظ شرط الاشتراك</b>':'<b>اختيار جهات التحقق</b>')+'\nالمجموعة: <code>'+step.group+'</code>\nالمختار: '+step.channels.length+' من 10\nصفحة '+(step.page+1)+' من '+pages+'\nكل تغيير يحتاج معاينة وتأكيدًا. لا يُفترض نوع الجهة من معرّفها؛ تُستعمل الجهات المعتمدة للتحقق.';
-    for(const c of channels.slice(step.page*8,step.page*8+8)){const selected=step.channels.includes(c.id);if(!selected&&step.channels.length===10)continue;rows.push([b((selected?'✅ ':'▫️ ')+c.id,{...step,channels:selected?step.channels.filter(id=>id!==c.id):[...step.channels,c.id]})]);}
+    if(step.mode==='AT_LEAST')text+='\nالحد الأدنى: '+step.minimumCount+' من '+step.channels.length+'\nالجهات المختارة: '+step.channels.join('، ')+'\nإذا بلغ عدد المختار الحد الأدنى، اخفض الحد أو غيّر الوضع قبل إزالة جهة.';
+    for(const c of channels.slice(step.page*8,step.page*8+8)){const selected=step.channels.includes(c.id);if(!selected&&step.channels.length===10||selected&&step.mode==='AT_LEAST'&&step.channels.length===step.minimumCount)continue;rows.push([b((selected?'✅ ':'▫️ ')+c.id,{...step,channels:selected?step.channels.filter(id=>id!==c.id):[...step.channels,c.id]})]);}
     const nav=[];if(step.page>0)nav.push(b('⬅️ السابق',{...step,page:step.page-1}));if(step.page+1<pages)nav.push(b('➡️ التالي',{...step,page:step.page+1}));if(nav.length)rows.push(nav);
-    rows.push([b('☑️ جميع القنوات',{...step,mode:'ALL'}),b('🔘 قناة واحدة على الأقل',{...step,mode:'ANY'})],[b('👁️ معاينة '+(step.mode==='ALL'?'الكل':'واحدة'),{...step,kind:'review'}),b('⏸️ معاينة تعطيل الشرط',{...step,kind:'review',channels:[]})]);
+    rows.push([b('☑️ جميع القنوات',basicMode(step,'ALL')),b('🔘 قناة واحدة على الأقل',basicMode(step,'ANY'))]);
+    if(step.channels.length>=2)rows.push([b('🔢 حد أدنى (الافتراضي 2)',{...step,mode:'AT_LEAST',minimumCount:2})]);
+    if(step.mode==='AT_LEAST')for(let n=1;n<=step.channels.length;n+=3)rows.push(Array.from({length:Math.min(3,step.channels.length-n+1)},(_,i)=>b('🔢 '+(n+i)+' من '+step.channels.length,{...step,minimumCount:n+i})));
+    rows.push([b('👁️ معاينة '+(step.mode==='ALL'?'الكل':step.mode==='ANY'?'واحدة':step.minimumCount+' من '+step.channels.length),{...step,kind:'review'}),b('⏸️ معاينة تعطيل الشرط',{...basicMode(step,step.mode==='ANY'?'ANY':'ALL'),kind:'review',channels:[]})]);
    }
   }
   rows.push([{text:'↩️ إلغاء / مجموعات الاشتراك',callback_data:'sc:1:h'},{text:'↩️ قسم الانضمام',callback_data:'mi:1:s:04:0'}]);
