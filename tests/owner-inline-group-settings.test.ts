@@ -357,6 +357,60 @@ for(const engine of ['json','sqlite'] as const){
    const card=await f.app().handle(cb(465,'gs:1:g:'+GROUP+':3:0'));assert.match(card.plan!.text,/تحتاج مراجعة/);
   }finally{await f.close();}
  });
+ test('owner reviews and restores the last verified monitor mode with unchanged rules ('+engine+')',async()=>{
+  const f=await fixture(engine);try{
+   await f.approve();assert.equal((await f.save()).status,'SAVED');
+   const review=await f.app().handle(cb(470,'gs:1:v:'+GROUP+':1:0:m'));assert.equal((await f.app().handle(cb(471,key(review,'تأكيد التعديل')))).status,'APPLIED');
+   const history=await f.app().handle(cb(472,'gs:1:l:'+GROUP+':1:0'));assert.match(history.plan!.text,/السابق: متوقفة/);
+   const route=key(history,'استعادة وضع الحماية السابق');assert.equal((await f.app().handle(cb(473,route,200))).status,'DENIED');
+   const restore=await f.app().handle(cb(474,route));assert.match(restore.plan!.text,/معاينة استعادة/);
+   const confirm=key(restore,'تأكيد');const results=await Promise.all([f.app().handle(cb(475,confirm)),f.app().handle(cb(476,confirm))]);assert.equal(results.filter(r=>r.status==='APPLIED').length,1);
+   const state=await f.store.snapshot();assert.equal(state.protectionPolicies![0]!.policy.mode,'OFF');assert.equal(state.protectionPolicies![0]!.policy.revision,3);
+   assert.deepEqual(state.protectionPolicies![0]!.policy.rules,[{id:'rule_one',kind:'WORD',value:'spam',enabled:true,action:'REVIEW'}]);
+   assert.deepEqual(state.protectionPolicies![0]!.policy.allowedDomains,['example.org']);assert.equal((await f.app().handle(cb(477,route))).status,'DENIED');
+  }finally{await f.close();}
+ });
+ test('monitor restore rejects cancellation, expiry, changed policy and altered receipts ('+engine+')',async()=>{
+  const f=await fixture(engine);try{
+   await f.approve();await f.save();const review=await f.app().handle(cb(480,'gs:1:v:'+GROUP+':1:0:m'));await f.app().handle(cb(481,key(review,'تأكيد التعديل')));
+   const history=await f.app().handle(cb(482,'gs:1:l:'+GROUP+':1:0')),route=key(history,'استعادة وضع الحماية السابق');
+   let r=await f.app().handle(cb(483,route)),confirm=key(r,'تأكيد');await f.app().handle(cb(484,key(r,'إلغاء')));assert.equal((await f.app().handle(cb(485,confirm))).status,'DENIED');
+   r=await f.app().handle(cb(486,route));confirm=key(r,'تأكيد');f.advance(120000);assert.equal((await f.app().handle(cb(487,confirm))).status,'DENIED');
+   r=await f.app().handle(cb(488,route));confirm=key(r,'تأكيد');
+   const policy=(await f.store.snapshot()).protectionPolicies![0]!.policy;
+   assert.equal((await new GroupProtectionPolicyService(f.store,f.policy,()=>NOW+120000).save(OWNER,{...policy,revision:3,allowedDomains:['changed.org']},1,2)).status,'SAVED');
+   assert.equal((await f.app().handle(cb(489,confirm))).status,'DENIED');assert.equal((await f.app().handle(cb(490,route))).status,'DENIED');
+   const state=await f.store.snapshot();assert.equal(state.protectionPolicies![0]!.policy.mode,'MONITOR');assert.deepEqual(state.protectionPolicies![0]!.policy.allowedDomains,['changed.org']);
+  }finally{await f.close();}
+ });
+ test('monitor restore rejects source and audit evidence altered after review ('+engine+')',async()=>{
+  const f=await fixture(engine);try{
+   await f.approve();await f.save();const review=await f.app().handle(cb(500,'gs:1:v:'+GROUP+':1:0:m'));await f.app().handle(cb(501,key(review,'تأكيد التعديل')));
+   const history=await f.app().handle(cb(502,'gs:1:l:'+GROUP+':1:0')),route=key(history,'استعادة وضع الحماية السابق');
+   const preview=await f.app().handle(cb(503,route)),confirm=key(preview,'تأكيد');
+   await f.store.transaction(s=>{const prior=s.audit.find(a=>a.updateKey==='owner-group-settings-prior:'+route.slice('gs:1:q:'.length))!;s.audit.push({...prior});});
+   assert.equal((await f.app().handle(cb(504,confirm))).status,'DENIED');assert.equal((await f.app().handle(cb(505,route))).status,'DENIED');
+   assert.equal((await f.store.snapshot()).protectionPolicies![0]!.policy.mode,'MONITOR');
+  }finally{await f.close();}
+ });
+ test('legacy monitor history stays readable without offering unproven restoration ('+engine+')',async()=>{
+  const f=await fixture(engine);try{
+   await f.approve();await f.save();const review=await f.app().handle(cb(510,'gs:1:v:'+GROUP+':1:0:m')),confirm=key(review,'تأكيد التعديل');
+   await f.store.transaction(s=>{const c=s.callbacks.find(x=>x.ref==='c_'+confirm.slice('gs:1:c:'.length))!;const a=JSON.parse(c.action.slice('owner-group-settings:'.length));c.action='owner-group-settings:'+JSON.stringify(a.slice(0,5));});
+   assert.equal((await f.app().handle(cb(511,confirm))).status,'APPLIED');
+   const history=await f.app().handle(cb(512,'gs:1:l:'+GROUP+':1:0'));assert.match(history.plan!.text,/الحماية: مراقبة فقط/);
+   assert.equal(buttons(history).some(b=>b.text.includes('استعادة وضع الحماية السابق')),false);
+  }finally{await f.close();}
+ });
+ test('monitor restore rechecks approved group before confirmation ('+engine+')',async()=>{
+  const f=await fixture(engine);try{
+   await f.approve();await f.save();const review=await f.app().handle(cb(520,'gs:1:v:'+GROUP+':1:0:m'));await f.app().handle(cb(521,key(review,'تأكيد التعديل')));
+   const history=await f.app().handle(cb(522,'gs:1:l:'+GROUP+':1:0')),route=key(history,'استعادة وضع الحماية السابق');
+   const restore=await f.app().handle(cb(523,route)),confirm=key(restore,'تأكيد');await f.policy.revokeChatAtRevision(OWNER,GROUP,1);
+   assert.equal((await f.app().handle(cb(524,confirm))).status,'DENIED');assert.equal((await f.app().handle(cb(525,route))).status,'DENIED');
+   assert.equal((await f.store.snapshot()).protectionPolicies![0]!.policy.mode,'MONITOR');
+  }finally{await f.close();}
+ });
  test('settings history has bounded paging and no live side effects ('+engine+')',async()=>{
   const f=await fixture(engine);try{
    await f.approve();
