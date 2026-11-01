@@ -398,3 +398,82 @@ for(const engine of ['json','sqlite'] as const){
   }finally{await f.close();}
  });
 }
+
+
+test('stale network cleanup callback routes are canonical and length bounded',()=>{
+ for(const key of ['nw:1:s:abcdef123456:0',
+  'nw:1:q:abcdef123456:2:-100123:1:0'])
+  assert.equal(validOwnerNetworkRoute(key),true,key);
+ for(const key of ['nw:1:s:abcdef123456:00',
+  'nw:1:q:ABCDEF123456:2:-100123:1:0',
+  'nw:1:q:abcdef123456:02:-100123:1:0',
+  'nw:1:q:abcdef123456:2:-100123:01:0',
+  'nw:1:q:abcdef123456:2:100123:1:0',
+  'nw:1:q:abcdef123456:2:-100123:1:0\\n',
+  'nw:1:q:abcdef123456:9999999999:-1234567890123456:9999999999:999'])
+  assert.equal(validOwnerNetworkRoute(key),false,key);
+});
+for(const engine of ['json','sqlite'] as const){
+ test('stale network association cleanup is one-shot, owner-only and audited ('+engine+')',async()=>{
+  const f=await setup(engine);try{
+   await f.approve(GROUP);
+   const n=await f.create();
+   const linked=await f.app().handle(callback(800,'nw:1:t:'+n.id+':1:'+GROUP+':1:0'));
+   assert.equal((await f.app().handle(callback(801,find(linked,'تأكيد')))).status,'APPLIED');
+   await f.approve(GROUP); // approval revision changes: the old association is stale
+   const card=await f.app().handle(callback(802,'nw:1:d:'+n.id));
+   assert.match(card.plan?.text??'',/ارتباطات تحتاج مراجعة: 1/);
+   const cleanup=await f.app().handle(callback(803,find(card,'مراجعة الارتباطات القديمة')));
+   assert.equal(cleanup.status,'APPLIED');
+   assert.match(cleanup.plan?.text??'',/الارتباطات القديمة/);
+   const preview=await f.app().handle(callback(804,find(cleanup,GROUP)));
+   assert.equal(preview.status,'APPLIED');
+   assert.match(preview.plan?.text??'',/معاينة فصل ارتباط قديم/);
+   const token=find(preview,'تأكيد الفصل');
+   assert.equal((await f.app().handle(callback(805,token,200))).status,'DENIED');
+   assert.equal((await f.app().handle(callback(806,token,100,true))).status,'DENIED');
+   const results=await Promise.all([
+    f.app().handle(callback(807,token)),f.app().handle(callback(808,token))
+   ]);
+   assert.deepEqual(results.map(x=>x.status).sort(),['APPLIED','DENIED']);
+   const state=await f.store.snapshot();
+   assert.deepEqual(state.groupNetworks?.[0]?.members,[]);
+   assert.equal(state.groupNetworks?.[0]?.revision,3);
+   assert.equal(state.audit.filter(x=>x.reason==='OWNER_NETWORK_STALE_MEMBER_REMOVED').length,1);
+   assert.equal(state.chats.find(x=>x.id===GROUP)?.approved,true);
+   const history=await f.app().handle(callback(809,'nw:1:r:p:0'));
+   assert.match(history.plan?.text??'',/تنظيف ارتباط قديم/);
+   const detail=await f.app().handle(callback(810,find(history,'تنظيف ارتباط قديم')));
+   assert.match(detail.plan?.text??'',/OWNER_NETWORK_STALE_MEMBER_REMOVED/);
+   assert.equal((await f.app().handle(callback(811,token))).status,'DENIED');
+  }finally{await f.close();}
+ });
+ test('stale cleanup rejects active associations, changed proof, cancel and expiry ('+engine+')',async()=>{
+  const f=await setup(engine);try{
+   await f.approve(GROUP);
+   const n=await f.create();
+   const link=await f.app().handle(callback(820,'nw:1:t:'+n.id+':1:'+GROUP+':1:0'));
+   assert.equal((await f.app().handle(callback(821,find(link,'تأكيد')))).status,'APPLIED');
+   const live=await f.app().handle(callback(822,'nw:1:d:'+n.id));
+   assert.equal(buttons(live).some(x=>x.text.includes('مراجعة الارتباطات القديمة')),false);
+   assert.equal((await f.app().handle(callback(823,'nw:1:s:'+n.id+':0'))).status,'DENIED');
+   assert.equal((await f.app().handle(callback(824,'nw:1:q:'+n.id+':2:'+GROUP+':1:0'))).status,'DENIED');
+   await f.approve(GROUP);
+   const pending=await f.app().handle(callback(825,'nw:1:q:'+n.id+':2:'+GROUP+':1:0'));
+   assert.equal(pending.status,'APPLIED');
+   const token=find(pending,'تأكيد الفصل');
+   await f.approve(GROUP); // network revision unchanged, group approval proof changed
+   assert.equal((await f.app().handle(callback(826,token))).status,'DENIED');
+   assert.equal((await f.store.snapshot()).groupNetworks?.[0]?.members.length,1);
+   const cancelPreview=await f.app().handle(callback(827,'nw:1:q:'+n.id+':2:'+GROUP+':1:0'));
+   const cancelToken=find(cancelPreview,'تأكيد الفصل');
+   assert.equal((await f.app().handle(callback(828,find(cancelPreview,'إلغاء')))).status,'APPLIED');
+   assert.equal((await f.app().handle(callback(829,cancelToken))).status,'DENIED');
+   const timeout=await f.app().handle(callback(830,'nw:1:q:'+n.id+':2:'+GROUP+':1:0'));
+   const timedToken=find(timeout,'تأكيد الفصل');
+   f.advance(121000);
+   assert.equal((await f.app().handle(callback(831,timedToken))).status,'DENIED');
+   assert.equal((await f.store.snapshot()).groupNetworks?.[0]?.members.length,1);
+  }finally{await f.close();}
+ });
+}
