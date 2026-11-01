@@ -4,7 +4,7 @@ import {BotStore,type BotState} from './store.js';
 import type {Policy} from './policy.js';
 import type {ProtectionEnforcer} from './protection-enforcement.js';
 import type {ProtectionAction} from './protection-rules.js';
-import {isValidProtectionPolicy,evaluateProtectionRules,type GroupProtectionRecord,type ProtectionEvaluation,type ProtectionMessage} from './protection-rules.js';
+import {isValidProtectionPolicy,protectionMemberExempt,evaluateProtectionRules,type GroupProtectionRecord,type ProtectionEvaluation,type ProtectionMessage} from './protection-rules.js';
 type Inspection={status:'DENIED'|'UNCONFIGURED'|'STALE'}|{status:'CONFIGURED';record:GroupProtectionRecord;enforcementConnected:boolean};
 const clockValid=(n:number)=>Number.isSafeInteger(n)&&n>=0&&n<=8640000000000000;
 /** Owner/delegated operator control of one group's local rules. Saving a
@@ -99,12 +99,12 @@ export class GroupProtectionPolicyService{
    if(record.policy.mode==='ENFORCE'&&!this.canEnforce(record.policy))return 'ENFORCEMENT_NOT_CONNECTED';
    if(record.policy.mode==='ENFORCE'&&!this.allowed(state,record.updatedBy,chat,now))return 'DENIED';
    if(record.updatedAt>now||record.chatPolicyVersion!==this.policy.chatRevision(state,chat))return 'STALE';
-   if(this.policy.isOwner(member)||this.policy.has(state,member,'chat.manage',chat,now)||record.policy.exemptMemberIds.includes(member))return 'EXEMPT';
+   if(this.policy.isOwner(member)||this.policy.has(state,member,'chat.manage',chat,now)||protectionMemberExempt(record.policy,member,now))return 'EXEMPT';
    const key=updateKey+':protection:'+chat;
    if(state.audit.some(a=>a.updateKey===key))return 'DUPLICATE';
    const body=message.text??message.caption??'';
    const links=typeof body==='string'&&body.length<=4096?protectionEntityLinks(body,entities):null;
-   const result=links===null?null:evaluateProtectionRules(record.policy,{...message,links});
+   const result=links===null?null:evaluateProtectionRules(record.policy,{...message,links},now);
    if(!result||result.status==='INVALID_MESSAGE'||result.status==='INVALID_POLICY'){
     state.audit.push({updateKey:key,decision:'NOOP',reason:'PROTECTION_MONITOR_INPUT_UNAVAILABLE',policyVersion:record.chatPolicyVersion,at:now});
     return 'UNAVAILABLE';
@@ -131,7 +131,7 @@ export class GroupProtectionPolicyService{
    return clockValid(now)&&now>=prepared.at&&now<prepared.at+5000&&rows.length===1&&
     JSON.stringify(rows[0])===JSON.stringify(prepared.record)&&this.allowed(state,prepared.record.updatedBy,chat,now)&&
     prepared.record.chatPolicyVersion===this.policy.chatRevision(state,chat)&&
-    !this.policy.isOwner(member)&&!this.policy.has(state,member,'chat.manage',chat,now)&&!prepared.record.policy.exemptMemberIds.includes(member);
+    !this.policy.isOwner(member)&&!this.policy.has(state,member,'chat.manage',chat,now)&&!protectionMemberExempt(prepared.record.policy,member,now);
   };
   // The durable claim precedes the external authority reads. A lost/failed
   // attempt is not replayed by redelivery, even after a process restart.
@@ -146,6 +146,6 @@ export class GroupProtectionPolicyService{
  async preview(actor:string,chat:string,message:unknown):Promise<{status:'DENIED'|'UNCONFIGURED'|'STALE'}|{status:'EVALUATED';result:ProtectionEvaluation}>{
   const inspection=await this.inspect(actor,chat);
   if(inspection.status!=='CONFIGURED')return inspection;
-  return {status:'EVALUATED',result:evaluateProtectionRules(inspection.record.policy,message)};
+  return {status:'EVALUATED',result:evaluateProtectionRules(inspection.record.policy,message,this.clock())};
  }
 }

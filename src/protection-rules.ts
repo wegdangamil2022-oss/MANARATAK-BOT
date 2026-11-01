@@ -5,7 +5,7 @@ export type ProtectionAction='REVIEW'|'WARN'|'DELETE'|'MUTE';
 export type ProtectionMessageType='TEXT'|'PHOTO'|'VIDEO'|'ANIMATION'|'STICKER'|'DOCUMENT'|'AUDIO'|'VOICE'|'VIDEO_NOTE'|'CONTACT'|'LOCATION'|'POLL';
 type BaseRule={id:string;enabled:boolean;action:ProtectionAction};
 export type ProtectionRule=BaseRule & ({kind:'WORD'|'PHRASE';value:string}|{kind:'TYPE';type:ProtectionMessageType}|{kind:'LINK';hosts:'*'|string[]}|{kind:'FORWARD'});
-export interface ProtectionPolicy{chatId:string;revision:number;mode:'OFF'|'MONITOR'|'ENFORCE';rules:ProtectionRule[];allowedDomains:string[];allowedPhrases:string[];exemptMemberIds:string[];flood?:FloodPolicy;}
+export interface ProtectionPolicy{chatId:string;revision:number;mode:'OFF'|'MONITOR'|'ENFORCE';rules:ProtectionRule[];allowedDomains:string[];allowedPhrases:string[];exemptMemberIds:string[];flood?:FloodPolicy;temporaryExemptions?:{memberId:string;createdAt:number;expiresAt:number}[];}
 export interface ProtectionMessage{chatId:string;memberId:string;type:ProtectionMessageType;text?:string;caption?:string;links?:string[];forwarded?:boolean;}
 export interface ProtectionEvaluation{status:'INVALID_POLICY'|'INVALID_MESSAGE'|'OFF'|'EXEMPT'|'CLEAR'|'MATCH';matchedRuleIds:string[];proposedAction:ProtectionAction|null;authorizedToSend:false;}
 const object=(v:unknown):v is Record<string,unknown>=>v!==null&&typeof v==='object'&&!Array.isArray(v);
@@ -23,11 +23,23 @@ function host(v:unknown):v is string{
  try{const u=new URL('https://'+v);return u.hostname===v&&u.port===''&&u.username===''&&u.password===''&&u.pathname==='/';}catch{return false;}
 }
 const stringList=(v:unknown,check:(x:unknown)=>boolean,max:number):v is string[]=>Array.isArray(v)&&v.length<=max&&new Set(v).size===v.length&&v.every(check);
+function validTemporaryExemptions(v:unknown):boolean{
+ if(!Array.isArray(v)||v.length>100)return false;
+ const seen=new Set<string>();return v.every(e=>{
+  if(!object(e)||!keys(e,['memberId','createdAt','expiresAt'])||!member(e.memberId)||seen.has(e.memberId)||
+   typeof e.createdAt!=='number'||!Number.isSafeInteger(e.createdAt)||e.createdAt<0||typeof e.expiresAt!=='number'||
+   !Number.isSafeInteger(e.expiresAt)||e.expiresAt>8640000000000000||e.expiresAt<e.createdAt+60000||e.expiresAt>e.createdAt+86400000)return false;
+  seen.add(e.memberId);return true;
+ });
+}
+export function protectionMemberExempt(config:ProtectionPolicy,memberId:string,now:number):boolean{
+ return config.exemptMemberIds.includes(memberId)||Boolean(config.temporaryExemptions?.some(e=>e.memberId===memberId&&now>=e.createdAt&&now<e.expiresAt));
+}
 export function isValidProtectionPolicy(v:unknown):v is ProtectionPolicy{
- if(!object(v)||!keys(v,['chatId','revision','mode','rules','allowedDomains','allowedPhrases','exemptMemberIds',...(Object.hasOwn(v,'flood')?['flood']:[])])||Object.hasOwn(v,'flood')&&!isValidFloodPolicy(v.flood)||!group(v.chatId)||
+ if(!object(v)||!keys(v,['chatId','revision','mode','rules','allowedDomains','allowedPhrases','exemptMemberIds',...(Object.hasOwn(v,'flood')?['flood']:[]),...(Object.hasOwn(v,'temporaryExemptions')?['temporaryExemptions']:[])])||Object.hasOwn(v,'flood')&&!isValidFloodPolicy(v.flood)||!group(v.chatId)||
   !Number.isSafeInteger(v.revision)||typeof v.revision!=='number'||v.revision<1||(typeof v.mode!=='string'||!['OFF','MONITOR','ENFORCE'].includes(v.mode))||
   !stringList(v.allowedDomains,host,100)||!stringList(v.allowedPhrases,phrase,100)||!stringList(v.exemptMemberIds,member,100)||
-  !Array.isArray(v.rules)||v.rules.length>100)return false;
+  Object.hasOwn(v,'temporaryExemptions')&&!validTemporaryExemptions(v.temporaryExemptions)||!Array.isArray(v.rules)||v.rules.length>100)return false;
  const seen=new Set<string>();
  return v.rules.every(r=>{
   if(!object(r)||typeof r.id!=='string'||!/^[A-Za-z0-9][A-Za-z0-9_-]{0,47}$/u.test(r.id)||seen.has(r.id)||
@@ -54,12 +66,12 @@ function urlHost(raw:string):string|null{
 }
 const contains=(normalized:string,value:string)=>(' '+normalized+' ').includes(' '+normalizeProtectionText(value)+' ');
 const severity:Readonly<Record<ProtectionAction,number>>={REVIEW:0,WARN:1,DELETE:2,MUTE:3};
-export function evaluateProtectionRules(config:unknown,input:unknown):ProtectionEvaluation{
+export function evaluateProtectionRules(config:unknown,input:unknown,now:number=Date.now()):ProtectionEvaluation{
  const result=(status:ProtectionEvaluation['status'],ids:string[]=[],action:ProtectionAction|null=null):ProtectionEvaluation=>({status,matchedRuleIds:ids,proposedAction:action,authorizedToSend:false});
  if(!isValidProtectionPolicy(config))return result('INVALID_POLICY');
- if(!validMessage(input,config.chatId))return result('INVALID_MESSAGE');
+ if(!Number.isSafeInteger(now)||now<0||now>8640000000000000||!validMessage(input,config.chatId))return result('INVALID_MESSAGE');
  if(config.mode==='OFF')return result('OFF');
- if(config.exemptMemberIds.includes(input.memberId))return result('EXEMPT');
+ if(protectionMemberExempt(config,input.memberId,now))return result('EXEMPT');
  const body=input.text??input.caption??'',normalized=normalizeProtectionText(body);
  // Mask only the reviewed phrase span, never unrelated words elsewhere.
  let lexicalBody=' '+normalized+' ';
