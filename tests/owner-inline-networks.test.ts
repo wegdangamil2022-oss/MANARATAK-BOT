@@ -40,7 +40,7 @@ async function setup(engine:'json'|'sqlite'){
   assert.match(input.plan?.text??'',/معاينة/);
   const saved=await app().handle(callback(base+2,find(input,'تأكيد')));
   assert.equal(saved.status,'APPLIED');
-  return (await store.snapshot()).groupNetworks![0]!;
+  return (await store.snapshot()).groupNetworks!.find(n=>n.name===name)!;
  };
  return {store,policy,app,approve,create,advance:(ms:number)=>now+=ms,
   close:()=>rm(dir,{recursive:true,force:true})};
