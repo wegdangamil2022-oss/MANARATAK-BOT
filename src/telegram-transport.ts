@@ -28,7 +28,7 @@ import {ButtonStudioService} from './button-studio.js';
 import {renderOwnerInlineCategories} from './telegram-inline-categories.js';
 import {EducationCategoryEditor} from './education-category-editor.js';
 import {renderPrivateSettings} from './telegram-inline-private-settings.js';
-import {protectionUIEpoch,ADMIN_UI_TTL_MS} from './protection-ui-access.js';
+import {protectionUIEpoch,protectionUISourceEpoch,ADMIN_UI_TTL_MS} from './protection-ui-access.js';
 import {privateLibraryEpoch} from './private-library-access.js';
 import {studioPreviewEpoch,studioPreviewSourceEpoch} from './studio-preview-access.js';
 import {cancelOwnerPreview,ownerPreviewCancelData} from './telegram-owner-preview-cancel.js';
@@ -1199,6 +1199,8 @@ export class TelegramUpdateApplication {
     }
     const publicText=event.kind==='private'&&event.callbackData?.startsWith('pn:1:')?await readPublicNavigation(this.opts.store,event.actorId,event.callbackData,publicMenuText,this.clock):null;
     const effectiveText=publicText??event.text;
+    const staffInput=event.kind==='private'&&(event.callbackData?.startsWith('ms:1:')||event.text==='/staffinline');
+    const beforeStaff=staffInput?protectionUISourceEpoch(await this.opts.store.snapshot(),this.opts.policy,event.actorId,this.clock()):null;
     const libraryInput=event.kind==='private'&&(
      event.callbackData?.startsWith('si:1:')||event.callbackData?.startsWith('si:2:')||event.text==='/studentinline'||
      this.opts.studentMenuMode==='inline'&&(([menuLabels.scholarships,menuLabels.courses,menuLabels.universities,menuLabels.exams,menuLabels.files,menuLabels.library] as string[]).includes(effectiveText)||effectiveText===catalogBackToCategories||isPrivateFAQBrowseText(effectiveText)||isPrivateFAQSearchText(effectiveText)||effectiveText.startsWith('/search')||Boolean(parseSearchResourceSelection(effectiveText)||parseSearchPageCommand(effectiveText)||parseSearchResultsBreadcrumb(effectiveText)||categoryButtonId(effectiveText)||resourceButtonId(effectiveText)||parseMenuPageCommand(effectiveText)||parseCatalogBackToCategory(effectiveText))));
@@ -1212,7 +1214,9 @@ export class TelegramUpdateApplication {
       const markup=await publicNavigationMarkup(this.opts.store,event.actorId,handled.plan.replyMarkup,menuLabels.owner,publicMenuText,this.clock);
       if(markup){const {replyMarkup:_,...plan}=handled.plan;handled={...handled,plan:{...plan,inlineMarkup:markup}};}
      }
-     if(handled.plan?.inlineMarkup&&(libraryInput||event.callbackData?.startsWith('pn:1:'))){
+     const mainEntry=['/start','/help',menuLabels.home,menuLabels.back].includes(effectiveText);
+     if(mainEntry&&handled.plan?.inlineMarkup&&await renderStaffInline(this.opts.store,this.opts.policy,event.actorId,'staff:open',this.clock()))handled={...handled,plan:{...handled.plan,inlineMarkup:{inline_keyboard:[...handled.plan.inlineMarkup.inline_keyboard,[{text:'🛡️ لوحة المشرف',callback_data:'ms:1:h'}]]}}};
+     if(handled.plan?.inlineMarkup&&(libraryInput||staffInput||event.callbackData?.startsWith('pn:1:'))){
       const isHome=['/start','/help',menuLabels.home,menuLabels.back].includes(effectiveText),rows=handled.plan.inlineMarkup.inline_keyboard;
       handled={...handled,plan:{...handled.plan,inlineMarkup:{inline_keyboard:[...rows,...(!isHome&&!rows.flat().some(b=>b.callback_data==='pn:1:h')?[[{text:menuLabels.home,callback_data:'pn:1:h'}]]:[])]},...(event.callbackMessageId!==undefined?{editMessageId:event.callbackMessageId}:{})}};
      }
@@ -1238,6 +1242,11 @@ export class TelegramUpdateApplication {
       (handled.plan.text.startsWith('<b>استعادة لوحة المالك</b>')||handled.plan.text.startsWith('<b>معاينة إعداد الخاص</b>'));
      if(epoch&&(!studioInput||studioPreviewSourceEpoch(state)===beforeStudio)&&Number.isSafeInteger(now)&&now>=0&&now<=8640000000000000-ADMIN_UI_TTL_MS)handled={...handled,adminUIAccess:{actorId:event.actorId,epoch,expiresAt:now+ADMIN_UI_TTL_MS}};
      else if(!recovery){const {plan:_,...withoutPlan}=handled;handled={...withoutPlan,reason:'OWNER_RESPONSE_WITHHELD'};}
+    }
+    if(staffInput&&handled.plan){
+     const state=await this.opts.store.snapshot(),now=this.clock(),epoch=protectionUIEpoch(state,this.opts.policy,event.actorId,now);
+     if(epoch&&beforeStaff!==null&&protectionUISourceEpoch(state,this.opts.policy,event.actorId,now)===beforeStaff&&Number.isSafeInteger(now)&&now>=0&&now<=8640000000000000-ADMIN_UI_TTL_MS)handled={...handled,adminUIAccess:{actorId:event.actorId,epoch,expiresAt:now+ADMIN_UI_TTL_MS}};
+     else{const {plan:_,adminUIAccess:__,...withoutPlan}=handled;handled={...withoutPlan,reason:'STAFF_RESPONSE_WITHHELD'};}
     }
     if(libraryInput&&handled.plan){
      const state=await this.opts.store.snapshot(),now=this.clock(),epoch=privateLibraryEpoch(state,this.opts.policy,event.actorId);

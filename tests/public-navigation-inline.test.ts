@@ -26,7 +26,7 @@ for(const engine of ['json','sqlite'] as const){
   const policy=new Policy(store,'100',()=>now),education=new EducationService(store,policy,()=>now);await education.createCategory('100',{id:'grants',scope:'private',title:'المنح',order:1});
   await store.transaction(s=>{for(let i=0;i<12;i++){const id=randomUUID();s.educationResources.push({id,scope:'private',categoryId:'grants',title:'مورد موثق '+i,university:'جامعة',cycle:'2026',degree:'بكالوريوس',seats:1,sourceImportId:'secret-import',sourceLocator:'secret-locator',reviewedBy:'100',status:'PUBLISHED'});s.faqEntries.push({id:randomUUID(),scope:'private',question:'سؤال معتمد '+i,aliases:[],answer:'جواب <معتمد> '+i,sourceResourceId:id,createdBy:'100',approvedBy:'100',status:'APPROVED',createdAt:NOW});}});
   const app=(inline=true)=>new TelegramUpdateApplication({store,policy,education,admin:new EducationAdminFacade(store,policy,education,()=>now),faq:new ApprovedAnswerService(store,policy,()=>now),links:new ResourceLinkService(store,policy,()=>now),studentMenuMode:inline?'inline':'legacy',ownerMenuMode:'inline',clock:()=>now,botId:'public-navigation',botUsername:'ManaratakBot',membership:async()=>{throw Error('NETWORK_FORBIDDEN');}});
-  return {store,policy,app,time:(value:number)=>{now=value;},close:()=>rm(dir,{recursive:true,force:true})};
+  return {store,policy,app,time:(value:number)=>{now=value;},now:()=>now,close:()=>rm(dir,{recursive:true,force:true})};
  }
  test(engine+' inline start preserves every student entry and each click edits the message with a working home return',async()=>{
   const f=await fixture();try{
@@ -61,6 +61,19 @@ for(const engine of ['json','sqlite'] as const){
    let screen=await f.app().handle(msg(120,menuLabels.assistant));screen=await f.app().handle(cb(121,choose(screen,privateFAQBrowseLabel)));const answer=await f.app().handle(cb(122,prefix(screen,'📖 سؤال ')));assert.equal(answer.status,'APPLIED');
    let sent=0;const dispatcher=new TelegramReplyDispatcher(f.store,f.policy,{send:async()=>{sent++;return {status:'CONFIRMED',messageId:55};}},()=>NOW);
    await f.store.transaction(s=>{s.faqEntries[0]!.answer='جواب جديد';});assert.equal((await dispatcher.dispatch(answer.deliveryKey!)).status,'FAILED_CONFIRMED');assert.equal(sent,0);
+  }finally{await f.close();}
+ });
+ test(engine+' main staff entry follows current scoped grants and queued staff views recheck authorization and data',async()=>{
+  const f=await fixture();try{
+   await f.policy.approveChat('100','-100123',['moderation']);await f.policy.grant('100','300','chat.manage','-100123',NOW+60000);
+   const home=await f.app().handle(msg(150,'/start'));assert.equal(choose(home,'🛡️ لوحة المشرف'),'ms:1:h');
+   const staff=await f.app().handle(cb(151,'ms:1:h'));assert.equal(staff.status,'APPLIED');assert.equal(staff.plan!.editMessageId,55);assert.equal(choose(staff,menuLabels.home),'pn:1:h');
+   let sent=0;const dispatcher=new TelegramReplyDispatcher(f.store,f.policy,{send:async()=>{sent++;return {status:'CONFIRMED',messageId:55};}},f.now);
+   assert.equal((await dispatcher.dispatch(staff.deliveryKey!)).status,'CONFIRMED');
+   const pending=await f.app().handle(cb(152,'ms:1:h'));assert.equal((await f.store.snapshot()).telegramReplyJobs!.find(j=>j.updateKey===pending.deliveryKey)!.privateReplyKind,'ADMIN_SCOPED');
+   await f.store.transaction(s=>{s.warnings.push({chatId:'-100123',memberId:'400',reference:'w1',actorId:'100',at:NOW,active:true});});assert.equal((await dispatcher.dispatch(pending.deliveryKey!)).status,'FAILED_CONFIRMED');
+   const revoked=await f.app().handle(cb(153,'ms:1:h'));await f.policy.revokeGrant('100','300','chat.manage','-100123');assert.equal((await dispatcher.dispatch(revoked.deliveryKey!)).status,'FAILED_CONFIRMED');assert.equal((await f.app().handle(cb(154,'ms:1:h'))).status,'DENIED');
+   assert.equal(buttons(await f.app().handle(msg(155,'/start'))).some(b=>b.text==='🛡️ لوحة المشرف'),false);assert.equal(sent,1);
   }finally{await f.close();}
  });
 }
