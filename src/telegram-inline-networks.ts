@@ -138,7 +138,7 @@ export class OwnerNetworkEditor{
     !c.used&&!c.revoked)c.revoked=true;
    const ref='c_'+randomBytes(18).toString('base64url');
    if(s.callbacks.some(c=>c.ref===ref))return null;
-   s.callbacks.push({ref,action:PREFIX+'input:rename:'+id,actorId:actor,
+   s.callbacks.push({ref,action:PREFIX+'input:rename:'+id+':'+n.revision,actorId:actor,
     chatId:'private',policyVersion:0,expiresAt:now+INPUT_TTL,
     oneShot:true,used:false,revoked:false});
    return ui('<b>✏️ الاسم الجديد للشبكة</b>\n'+
@@ -202,9 +202,13 @@ export class OwnerNetworkEditor{
     intent.expiresAt<=now||intent.expiresAt>now+INPUT_TTL)throw Error('NETWORK_INPUT_EXPIRED');
    if(matchesName(s.groupNetworks??[],name))throw Error('NETWORK_DUPLICATE_OR_LIMIT');
    const isRename=intent.action.startsWith(PREFIX+'input:rename:');
-   const targetId=isRename?intent.action.slice((PREFIX+'input:rename:').length):'';
+   const scope=isRename?new RegExp('^'+PREFIX+'input:rename:([a-f0-9]{12}):([1-9][0-9]{0,9})$','u')
+    .exec(intent.action):null;
+   const targetId=scope?.[1]??'';
+   const expectedVersion=scope?Number(scope[2]):0;
    const target=isRename?this.find(s,targetId):null;
-   if(isRename&&(!target||!(/^[a-f0-9]{12}$/u).test(targetId)||target.name===name||
+   if(isRename&&(!scope||!target||!Number.isSafeInteger(expectedVersion)||
+    target.revision!==expectedVersion||target.name===name||
     target.revision>=9_999_999_999))throw Error('NETWORK_RENAME_STALE');
    if(!isRename&&(intent.action!==PREFIX+'input:'||(s.groupNetworks??[]).length>=32))
     throw Error('NETWORK_INPUT_INVALID');
