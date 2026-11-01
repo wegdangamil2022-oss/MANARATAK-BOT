@@ -1,3 +1,4 @@
+import {TelegramModerationReports} from './telegram-moderation-reports.js';
 import {TelegramModerationAppeals} from './telegram-moderation-appeals.js';
 import {protectionMediaFromMessage,type ProtectionMedia} from './telegram-protection-media.js';
 import { timingSafeEqual,createHash } from 'node:crypto';
@@ -386,6 +387,14 @@ export class TelegramUpdateApplication {
      return {status:'IGNORED',reason:'PROTECTION_EDIT_MONITOR_ONLY'};
     }
     if(event.kind==='private'&&this.opts.policy.isOwner(event.actorId)&&!event.callbackData?.startsWith('sc:1:')&&event.callbackData!=='mi:1:i:04:02'&&event.callbackData!=='mi:1:i:04:04')await cancelSubscriptionConfig(this.opts.store,event.actorId);
+    if(event.kind==='group'&&(event.text==='/report'||event.text.toLowerCase()==='/report@'+this.opts.botUsername.toLowerCase())){
+     const status=await new TelegramModerationReports(this.opts.store,this.opts.policy,this.clock).submit(event.actorId,event.chatId,event.messageId,event.replyTo);
+     return {status:status==='RECORDED'?'APPLIED':'DENIED',reason:'MODERATION_REPORT_'+status,...(status==='RECORDED'?{plan:this.plan(event.chatId,'سُجل البلاغ للمراجعة الخاصة دون عقوبة. يمكنك متابعة الحالة عبر /reports في خاص البوت.')}:{})};
+    }
+    if(event.kind==='private'&&event.text==='/reports'){
+     const view=await new TelegramModerationReports(this.opts.store,this.opts.policy,this.clock).handle(event.actorId,'rp:1:h:0');
+     return view?{status:'APPLIED',reason:'MODERATION_REPORT_VIEW',plan:this.plan(event.actorId,view.text,undefined,view.keyboard)}:{status:'DENIED',reason:'MODERATION_REPORT_UNAVAILABLE'};
+    }
     if(event.kind==='private'&&event.text==='/appeals'){
      const view=await new TelegramModerationAppeals(this.opts.store,this.opts.policy,this.clock).handle(event.actorId,'ap:1:h:0');
      return view?{status:'APPLIED',reason:'MODERATION_APPEAL_VIEW',plan:this.plan(event.actorId,view.text,undefined,view.keyboard)}:{status:'DENIED',reason:'MODERATION_APPEAL_UNAVAILABLE'};
@@ -402,6 +411,10 @@ export class TelegramUpdateApplication {
      // Reauthorize the real sender at every tap. Never dispatch a privileged
      // command from untrusted callback_data or from a group context.
      if(kind!=='private'||actorId!==chatId)return {status:'DENIED',reason:'PRIVATE_CALLBACK_ONLY'};
+     if(event.callbackData.startsWith('rp:1:')){
+      const view=await new TelegramModerationReports(this.opts.store,this.opts.policy,this.clock).handle(actorId,event.callbackData);
+      return view?{status:'APPLIED',reason:'MODERATION_REPORT_VIEW',...(view.access?{adminUIAccess:view.access}:{}),plan:this.plan(actorId,view.text,undefined,view.keyboard,event.callbackMessageId)}:{status:'DENIED',reason:'MODERATION_REPORT_STALE_OR_UNAUTHORIZED'};
+     }
      if(event.callbackData.startsWith('ap:1:')){
       const view=await new TelegramModerationAppeals(this.opts.store,this.opts.policy,this.clock).handle(actorId,event.callbackData);
       return view?{status:'APPLIED',reason:'MODERATION_APPEAL_VIEW',...(view.access?{adminUIAccess:view.access}:{}),plan:this.plan(actorId,view.text,undefined,view.keyboard,event.callbackMessageId)}:{status:'DENIED',reason:'MODERATION_APPEAL_STALE_OR_UNAUTHORIZED'};

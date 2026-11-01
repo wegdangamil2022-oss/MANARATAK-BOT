@@ -40,6 +40,7 @@ export class TelegramModerationCases{
    const mode=root[1] as Mode,page=Number(root[2]),pages=Math.max(1,Math.ceil(all.length/8));if(page>=pages)return null;
    const rows=all.slice(page*8,page*8+8).map((c,i)=>[b('👥 '+c.id,'cs:1:g:'+mode+':'+page+':'+(i+1)+':'+this.digest(s,actor,c,mode))]);
    const nav=[];if(page>0)nav.push(b('⬅️ السابق','cs:1:h:'+mode+':'+(page-1)));if(page+1<pages)nav.push(b('➡️ التالي','cs:1:h:'+mode+':'+(page+1)));if(nav.length)rows.push(nav);
+   rows.push([b('📨 بلاغات الأعضاء','rp:1:r:0')]);
    if(mode==='w')rows.push([b('📨 مراجعة الاعتراضات','ap:1:r:0')]);
    rows.push([b('↩️ '+(this.policy.isOwner(actor)?'قسم الحماية':'الرئيسية'),this.policy.isOwner(actor)?'mi:1:s:02:0':'pn:1:h')]);
    return this.screen(s,actor,'<b>'+(mode==='w'?'التحذيرات المسجلة':'العقوبات والأعضاء')+'</b>\nاختر المجموعة المخولة · صفحة '+(page+1)+' من '+pages+'\n'+(!this.service?'منفذ الإشراف غير موصول؛ العرض فقط.':'كل إلغاء يبدأ بمعاينة وتأكيد خاصين.'),rows);
