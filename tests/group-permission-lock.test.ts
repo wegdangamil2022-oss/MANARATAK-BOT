@@ -28,6 +28,18 @@ for(const engine of ['json','sqlite'] as const){
   const click=(data:string,actor=301,group=false)=>app.handle({update_id:++id,callback_query:{id:'lock-'+id,from:{id:actor,is_bot:false},data,message:{message_id:55,from:{id:999,is_bot:true},chat:{id:group?Number(CHAT):actor,type:group?'supergroup':'private'}}}});
   return {store,policy,service,port,command,click,current:()=>current,change:(v:GroupPermissions)=>{current=v;},calls:()=>calls,time:(v:number)=>{now=v;},now:()=>now,setUnknown:()=>{unknown=true;},before:(f:()=>Promise<void>)=>{beforeApply=f;},after:(f:()=>Promise<void>)=>{afterApply=f;},close:()=>rm(dir,{recursive:true,force:true})};
  }
+ test(engine+' automatic lock requires a fresh source witness after reopening',async()=>{
+  const f=await fixture();try{
+   const key='a'.repeat(64);
+   assert.equal(await f.service.preview('301',CHAT,'LOCK','MESSAGES',60,undefined,undefined,key),null);
+   const job=await f.service.preview('301',CHAT,'LOCK','MESSAGES',60,undefined,()=>true,key);assert.ok(job);
+   const reopened=new GroupPermissionLockService(f.store,f.policy,f.port,f.now);
+   assert.equal(await reopened.confirm('301',job.id),'DENIED');assert.equal(f.calls(),0);
+   assert.equal(await reopened.confirm('301',job.id,()=>false),'DENIED');assert.equal(f.calls(),0);
+   assert.equal((await f.store.snapshot()).groupPermissionJobs![0]!.status,'PREVIEW');
+   assert.equal(await reopened.confirm('301',job.id,()=>true),'CONFIRMED');assert.equal(f.calls(),1);
+  }finally{await f.close();}
+ });
  type Result=Awaited<ReturnType<Awaited<ReturnType<typeof fixture>>['command']>>;
  const choose=(r:Result,starts:string)=>{const b=r.plan?.inlineMarkup?.inline_keyboard.flat().find(b=>b.text.startsWith(starts));assert.ok(b,JSON.stringify(r));return b.callback_data;};
  test(engine+' timed lock persists its approved deadline and restores only once through an explicit enabled tick',async()=>{
