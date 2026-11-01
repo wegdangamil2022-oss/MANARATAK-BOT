@@ -22,6 +22,7 @@ export function parseReplyModerationCommand(text:string,botUsername:string,
   !positive(reply.from.id)||reply.from.is_bot!==false||reply.sender_chat!==undefined||
   reply.via_bot!==undefined||reply.forward_origin!==undefined||reply.forward_date!==undefined||
   reply.is_automatic_forward===true||duration!==undefined&&(!['ban','mute'].includes(syntax[1]!)||!Number.isSafeInteger(duration)||duration<60||duration>2592000))return {status:'INVALID'};
+ if(syntax[1]==='warn'&&syntax[2]!.startsWith('law_')&&Number(/_m([1-9][0-9]{0,15})$/u.exec(syntax[2]!)?.[1])!==reply.message_id)return {status:'INVALID'};
  return {status:'COMMAND',command:{kind:syntax[1] as ReplyModerationCommand['kind'],reference:syntax[2]!,memberId:String(reply.from.id),...(duration===undefined?{}:{durationSeconds:duration})}};
 }
 /** Shared domain service owns grants, target protection, pending/unknown

@@ -1,3 +1,4 @@
+import {parseReplyModerationCommand} from '../src/telegram-moderation-commands.js';
 import {ModerationService,FakeModerationGateway} from '../src/moderation.js';
 import {ModerationCommandReview} from '../src/telegram-moderation-command-review.js';
 import {groupRuleDescription} from '../src/telegram-group-rules.js';
@@ -19,7 +20,7 @@ import {protectionUIEpoch} from '../src/protection-ui-access.js';
 import {groupMenuEpochDigest} from '../src/telegram-group-access.js';
 const NOW=1700000000000,CHAT='-100';
 const route=(s:OwnerInlineScreen|null,p:string)=>{assert.ok(s&&isValidTelegramInlineKeyboard(s.keyboard));const b=s.keyboard.inline_keyboard.flat().find(b=>b.callback_data.startsWith(p));assert.ok(b,p);return b.callback_data;};
-test('group rules reject malformed selectors',()=>{for(const bad of ['rl:1:h:00','rl:1:h:0\n','rl:1:g:0:0:aaaaaaaaaaaaaaaa','rl:1:c:short'])assert.equal(validGroupRulesRoute(bad),false);});
+test('group rules reject malformed selectors',()=>{const reply={message_id:42,chat:{id:-100,type:'supergroup'},from:{id:400,is_bot:false}};assert.equal(parseReplyModerationCommand('/warn law_v1_p1_m41','ManaratakBot','-100',100,reply).status,'INVALID');assert.equal(parseReplyModerationCommand('/warn law_v1_p1_m42','ManaratakBot','-100',100,reply).status,'COMMAND');for(const bad of ['rl:1:h:00','rl:1:h:0\n','rl:1:g:0:0:aaaaaaaaaaaaaaaa','rl:1:c:short'])assert.equal(validGroupRulesRoute(bad),false);});
 for(const engine of ['json','sqlite'] as const){
  async function fixture(){const dir=await mkdtemp(join(tmpdir(),'group-rules-')),file=join(dir,'state.'+engine),store=new BotStore(file,{engine});let now=NOW;const policy=new Policy(store,'100',()=>now);await policy.approveChat('100',CHAT,['moderation','navigation']);await policy.grant('100','301','chat.manage',CHAT,NOW+600000);return {store,file,policy,ui:new TelegramGroupRules(store,policy,()=>now),time:(v:number)=>{now=v;},close:()=>rm(dir,{recursive:true,force:true})};}
  test(engine+' numbered versions require confirmation, survive restart, escape HTML and invalidate queued old views',async()=>{
