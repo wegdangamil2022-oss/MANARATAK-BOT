@@ -73,7 +73,7 @@ import {isReplyDeleteCommand,previewReplyDelete,handleReplyDeleteCallback} from 
 import {parseReplyModerationCommand,executeReplyModerationCommand} from './telegram-moderation-commands.js';
 import {parseB6OwnerReplyTarget} from './b6-telegram-owner-reply.js';
 
-/** Inbound-only boundary. A test double may supply bytes; there is intentionally no live HTTP implementation. */
+/** Inbound-only boundary. Live downloads use the fixed-host, bounded, safety-gated adapter. */
 export interface TelegramDocumentPort {
   download(fileId: string, maxBytes: number): Promise<Uint8Array>;
 }

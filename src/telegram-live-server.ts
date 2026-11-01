@@ -12,6 +12,7 @@ import {ApprovedAnswerService,ResourceLinkService} from './education-interaction
 import {TelegramUpdateApplication,telegramWebhookListener} from './telegram-transport.js';
 import {TelegramReplyDispatcher,TelegramBotApiTextSender,TelegramBotApiCallbackAcker} from './telegram-replies.js';
 import {TelegramBotApiMembershipGateway} from './telegram-membership.js';
+import {TelegramBotApiDocumentDownloader} from './telegram-document-download.js';
 import {SubscriptionGate} from './subscription.js';
 import {ModerationService,FakeModerationGateway} from './moderation.js';
 import {readTelegramSafetySwitch,createTelegramSafetyGate} from './telegram-safety-switch.js';
@@ -175,6 +176,7 @@ export async function createLiveTelegramServer(config:LiveTelegramConfig,
  const app=new TelegramUpdateApplication({store,policy,education,admin,faq,links,
   botId:check.botId,botUsername:check.botUsername,
   membership:(chatId,actorId)=>membership.verifyMembership(chatId,actorId),subscription,
+  documentDownload:new TelegramBotApiDocumentDownloader(check.token,request,safetyGate),
   moderationSafetyFile:check.safetySwitchFile,ownerMenuMode:'inline',studentMenuMode:'inline'});
  const dispatcher=new TelegramReplyDispatcher(store,policy,
   new TelegramBotApiTextSender(check.token,request),Date.now,safetyGate,subscription,
