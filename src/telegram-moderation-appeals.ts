@@ -17,7 +17,7 @@ function ownCases(s:BotState,p:Policy,actor:string):Case[]{
  const values:Case[]=[];
  for(const w of s.warnings)if(w.memberId===actor&&w.active)values.push({chat:w.chatId,member:actor,reference:w.reference,kind:'WARNING',source:hash(w)});
  for(const r of s.moderationReasons)if(r.memberId===actor&&r.active&&r.source==='MANUAL')values.push({chat:r.chatId,member:actor,reference:r.reference,kind:r.kind,source:hash(r)});
- return values.filter(c=>p.canUseChat(s,c.chat,'moderation')).sort((a,b)=>a.chat.localeCompare(b.chat)||a.reference.localeCompare(b.reference)||a.kind.localeCompare(b.kind));
+ return values.filter(c=>c.reference.length>=1&&c.reference.length<=128&&p.canUseChat(s,c.chat,'moderation')).sort((a,b)=>a.chat.localeCompare(b.chat)||a.reference.localeCompare(b.reference)||a.kind.localeCompare(b.kind));
 }
 function readAppeals(s:BotState):Appeal[]{
  const result:Appeal[]=[];

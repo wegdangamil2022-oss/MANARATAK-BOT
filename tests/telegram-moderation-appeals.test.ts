@@ -26,7 +26,7 @@ for(const engine of ['json','sqlite'] as const){
   const confirm=route(preview,'ap:1:c:');await f.ui.handle('300',confirm);assert.equal(await f.ui.handle('300',confirm),null);
   const reopened=new TelegramModerationAppeals(new BotStore(f.file,{engine}),f.policy,()=>100000);let inbox=await reopened.handle('200','ap:1:r:0');const pick=route(inbox,'ap:1:p:');assert.equal(await reopened.handle('300',pick),null);
   const details=await reopened.handle('200',pick),accept=route(details,'ap:1:a:');const before=protectionUIEpoch(await f.store.snapshot(),f.policy,'200',100000);
-  await reopened.handle('200',accept);assert.equal(await reopened.handle('200',accept),null);const s=await f.store.snapshot();assert.equal(s.warnings[0]!.active,true);assert.equal(f.gateway.calls.length,0);assert.notEqual(protectionUIEpoch(s,f.policy,'200',100000),before);
+  const accepted=await reopened.handle('200',accept);assert.ok(accepted?.access);assert.equal(accepted.access.epoch,protectionUIEpoch(await f.store.snapshot(),f.policy,'200',100000));assert.equal(await reopened.handle('200',accept),null);const s=await f.store.snapshot();assert.equal(s.warnings[0]!.active,true);assert.equal(f.gateway.calls.length,0);assert.notEqual(protectionUIEpoch(s,f.policy,'200',100000),before);
   assert.match((await f.ui.handle('300','ap:1:h:0'))!.text,/مراجعة مقبولة/u);
   await f.store.transaction(s=>{s.warnings[0]!.active=false;});const journal=await f.ui.handle('300',route(await f.ui.handle('300','ap:1:h:0'),'ap:1:j:'));const record=await f.ui.handle('300',route(journal,'ap:1:v:'));assert.match(record!.text,/مراجعة مقبولة/u);
  }finally{await f.close();}});
