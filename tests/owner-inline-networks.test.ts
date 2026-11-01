@@ -442,7 +442,7 @@ for(const engine of ['json','sqlite'] as const){
    assert.equal(state.audit.filter(x=>x.reason==='OWNER_NETWORK_STALE_MEMBER_REMOVED').length,1);
    assert.equal(state.chats.find(x=>x.id===GROUP)?.approved,true);
    const history=await f.app().handle(callback(809,'nw:1:r:p:0'));
-   assert.match(history.plan?.text??'',/تنظيف ارتباط قديم/);
+   assert.ok(buttons(history).some(x=>x.text.includes('تنظيف ارتباط قديم')));
    const detail=await f.app().handle(callback(810,find(history,'تنظيف ارتباط قديم')));
    assert.match(detail.plan?.text??'',/OWNER_NETWORK_STALE_MEMBER_REMOVED/);
    assert.equal((await f.app().handle(callback(811,token))).status,'DENIED');
