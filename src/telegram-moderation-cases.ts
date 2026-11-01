@@ -14,13 +14,14 @@ export function validModerationCaseRoute(data:string):boolean{
  const m=selection.exec(data);return m?.[0]===data&&(m[1]==='g'?m[6]===undefined:m[1]==='l'?m[6]!==undefined&&m[7]===undefined:m[6]!==undefined&&m[7]!==undefined);
 }
 type Mode='b'|'w';
-type Case={member:string;reference:string;kind:'BAN'|'MUTE'|'WARNING'|'SUBSCRIPTION';active:boolean;expiresAt?:number};
+type Case={member:string;reference:string;kind:'BAN'|'MUTE'|'WARNING'|'SUBSCRIPTION'|'KICK';active:boolean;expiresAt?:number;result?:string};
 const b=(text:string,callback_data:string)=>({text,callback_data});
 const escape=(s:string)=>s.replace(/\p{Cf}/gu,'').replace(/&/gu,'&amp;').replace(/</gu,'&lt;').replace(/>/gu,'&gt;').replace(/"/gu,'&quot;');
 function cases(s:BotState,chat:string,mode:Mode):Case[]{
- return (mode==='w'?s.warnings.filter(w=>w.chatId===chat).map(w=>({member:w.memberId,reference:w.reference,kind:'WARNING' as const,active:w.active})):
-  s.moderationReasons.filter(r=>r.chatId===chat).map(r=>({member:r.memberId,reference:r.reference,kind:r.source==='SUBSCRIPTION'?'SUBSCRIPTION' as const:r.kind,active:r.active,...(r.expiresAt===undefined?{}:{expiresAt:r.expiresAt})})))
-  .sort((a,b)=>Number(b.active)-Number(a.active)||a.member.localeCompare(b.member)||a.reference.localeCompare(b.reference)||a.kind.localeCompare(b.kind));
+ const rows:Case[]=mode==='w'?s.warnings.filter(w=>w.chatId===chat).map(w=>({member:w.memberId,reference:w.reference,kind:'WARNING',active:w.active})):
+  s.moderationReasons.filter(r=>r.chatId===chat).map(r=>({member:r.memberId,reference:r.reference,kind:r.source==='SUBSCRIPTION'?'SUBSCRIPTION':r.kind,active:r.active,...(r.expiresAt===undefined?{}:{expiresAt:r.expiresAt})}));
+ if(mode==='b')for(const o of s.moderationOperations.filter(o=>o.chatId===chat&&o.action==='KICK'&&typeof o.caseReference==='string'&&/^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/u.exec(o.caseReference)?.[0]===o.caseReference))rows.push({member:o.memberId,reference:o.caseReference!,kind:'KICK',active:false,result:String(o.status).slice(0,32)+' · '+(o.attemptGateway==='SIMULATION'?'محاكاة':o.attemptGateway==='TELEGRAM_API'?'محول Telegram':'مصدر غير مؤكد')});
+ return rows.sort((a,b)=>Number(b.active)-Number(a.active)||a.member.localeCompare(b.member)||a.reference.localeCompare(b.reference)||a.kind.localeCompare(b.kind));
 }
 export class TelegramModerationCases{
  constructor(private readonly store:BotStore,private readonly policy:Policy,private readonly service:ModerationService|undefined,private readonly clock:()=>number){}
@@ -46,12 +47,12 @@ export class TelegramModerationCases{
   if(!c||this.digest(s,actor,c,mode)!==m[5])return null;
   const stem=mode+':'+page+':'+groupSlot+':'+m[5],entries=cases(s,c.id,mode),casePage=Number(m[6]??0),pages=Math.max(1,Math.ceil(entries.length/8));if(casePage>=pages)return null;
   if(kind==='g'||kind==='l'){
-   const rows=entries.slice(casePage*8,casePage*8+8).map((e,i)=>[b((e.active?'🟠 ':'⚪ ')+e.member+' · '+(e.kind==='WARNING'?'تحذير':e.kind==='SUBSCRIPTION'?'اشتراك':e.kind==='BAN'?'حظر':'كتم'),'cs:1:d:'+stem+':'+casePage+':'+(i+1))]);
+   const rows=entries.slice(casePage*8,casePage*8+8).map((e,i)=>[b((e.active?'🟠 ':'⚪ ')+e.member+' · '+(e.kind==='KICK'?'طرد':e.kind==='WARNING'?'تحذير':e.kind==='SUBSCRIPTION'?'اشتراك':e.kind==='BAN'?'حظر':'كتم'),'cs:1:d:'+stem+':'+casePage+':'+(i+1))]);
    const nav=[];if(casePage>0)nav.push(b('⬅️ السابق','cs:1:l:'+stem+':'+(casePage-1)));if(casePage+1<pages)nav.push(b('➡️ التالي','cs:1:l:'+stem+':'+(casePage+1)));if(nav.length)rows.push(nav);rows.push([b('↩️ المجموعات','cs:1:h:'+mode+':'+page)]);
-   return this.screen(s,actor,'<b>المجموعة '+c.id+'</b>\n'+entries.length+' حالة مسجلة · صفحة '+(casePage+1)+' من '+pages+'\nلبدء إجراء جديد، رد داخل المجموعة على رسالة العضو:\n<code>/'+(mode==='w'?'warn case-id':'ban case-id 1h')+'</code>\n'+(mode==='w'?'إلغاء التحذير: /unwarn case-id.':'الكتم: /mute case-id 10m؛ إزالة السبب: /unban أو /unmute case-id؛ حذف الرسالة: /del بالرد.')+'\nالحالات المحلية لا تثبت حالة Telegram الحالية، والطرد غير موصول؛ استعادة قيد قائم تحتاج قرار المالك ومصدرًا مطابقًا من المحول الرسمي.',rows);
+   return this.screen(s,actor,'<b>المجموعة '+c.id+'</b>\n'+entries.length+' حالة مسجلة · صفحة '+(casePage+1)+' من '+pages+'\nلبدء إجراء جديد، رد داخل المجموعة على رسالة العضو:\n<code>/'+(mode==='w'?'warn case-id':'ban case-id 1h')+'</code>\n'+(mode==='w'?'إلغاء التحذير: /unwarn case-id.':'الكتم: /mute case-id 10m؛ إزالة السبب: /unban أو /unmute case-id؛ حذف الرسالة: /del بالرد.')+'\nالحالات المحلية لا تثبت حالة Telegram الحالية، والطرد: /kick case-id بالرد؛ استعادة قيد قائم تحتاج قرار المالك ومصدرًا مطابقًا من المحول الرسمي.',rows);
   }
   const e=entries[casePage*8+Number(m[7])-1];if(!e)return null;
-  const removable=e.active&&e.kind!=='SUBSCRIPTION'&&/^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/u.exec(e.reference)?.[0]===e.reference;
+  const removable=e.active&&e.kind!=='SUBSCRIPTION'&&e.kind!=='KICK'&&/^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/u.exec(e.reference)?.[0]===e.reference;
   if(kind==='a'){
    if(!removable||!this.service)return null;
    const command:ReplyModerationCommand={memberId:e.member,reference:e.reference,kind:e.kind==='WARNING'?'unwarn':e.kind==='BAN'?'unban':'unmute'};
@@ -59,6 +60,6 @@ export class TelegramModerationCases{
   }
   const count=s.warnings.filter(w=>w.chatId===c.id&&w.memberId===e.member&&w.active).length;
   const rows=[];if(removable&&this.service)rows.push([b('🔍 مراجعة الإلغاء','cs:1:a:'+stem+':'+casePage+':'+m[7])]);rows.push([b('↩️ الحالات','cs:1:l:'+stem+':'+casePage)]);
-  return this.screen(s,actor,'<b>تفاصيل الحالة</b>\nالمجموعة: <code>'+c.id+'</code>\nالعضو: <code>'+escape(e.member)+'</code>\nالنوع: '+(e.kind==='WARNING'?'تحذير':e.kind==='SUBSCRIPTION'?'اشتراك':e.kind==='BAN'?'حظر':'كتم')+'\nالمرجع: <code>'+escape(e.reference)+'</code>\nالحالة: '+(e.active?'نشطة محليًا':'ملغاة محليًا')+'\nتحذيرات العضو النشطة: '+count+(e.expiresAt===undefined?'':'\nموعد انتهاء السبب: '+new Date(e.expiresAt).toISOString())+'\n'+(e.kind==='SUBSCRIPTION'?'سبب اشتراك مستقل؛ لا يلغى من العقوبات اليدوية.':'الإلغاء يزيل السبب المحدد وحده، ويحافظ على الأسباب المستقلة. لا نجاح قبل نتيجة الخدمة الحالية.')+'\nسجل الاعتراضات غير موصول بعد.',rows);
+  return this.screen(s,actor,'<b>تفاصيل الحالة</b>\nالمجموعة: <code>'+c.id+'</code>\nالعضو: <code>'+escape(e.member)+'</code>\nالنوع: '+(e.kind==='KICK'?'طرد':e.kind==='WARNING'?'تحذير':e.kind==='SUBSCRIPTION'?'اشتراك':e.kind==='BAN'?'حظر':'كتم')+'\nالمرجع: <code>'+escape(e.reference)+'</code>\nالحالة: '+(e.kind==='KICK'?escape(e.result??'غير مؤكد'):e.active?'نشطة محليًا':'ملغاة محليًا')+'\nتحذيرات العضو النشطة: '+count+(e.expiresAt===undefined?'':'\nموعد انتهاء السبب: '+new Date(e.expiresAt).toISOString())+'\n'+(e.kind==='KICK'?'سجل طرد لمرة واحدة؛ لا سبب تقييد دائمًا ولا زر استعادة تلقائي.':e.kind==='SUBSCRIPTION'?'سبب اشتراك مستقل؛ لا يلغى من العقوبات اليدوية.':'الإلغاء يزيل السبب المحدد وحده، ويحافظ على الأسباب المستقلة. لا نجاح قبل نتيجة الخدمة الحالية.')+'\nسجل الاعتراضات غير موصول بعد.',rows);
  }
 }

@@ -1,7 +1,7 @@
 import type {ModerationService} from './moderation.js';
 import type {BotState} from './store.js';
 
-export type ReplyModerationCommand={kind:'ban'|'mute'|'warn'|'unwarn'|'unban'|'unmute';reference:string;memberId:string;durationSeconds?:number};
+export type ReplyModerationCommand={kind:'ban'|'mute'|'warn'|'unwarn'|'unban'|'unmute'|'kick';reference:string;memberId:string;durationSeconds?:number};
 type Parsed={status:'NO_MATCH'|'INVALID'}|{status:'COMMAND';command:ReplyModerationCommand};
 const object=(v:unknown):v is Record<string,unknown>=>v!==null&&typeof v==='object'&&!Array.isArray(v);
 const positive=(v:unknown):v is number=>typeof v==='number'&&Number.isSafeInteger(v)&&v>0;
@@ -9,10 +9,10 @@ const positive=(v:unknown):v is number=>typeof v==='number'&&Number.isSafeIntege
  * identify a target. Names, forwarded messages and arguments never do. */
 export function parseReplyModerationCommand(text:string,botUsername:string,
  chatId:string,messageId:number|undefined,reply:unknown):Parsed{
- const first=/^\/(ban|mute|warn|unwarn|unban|unmute)(?:@([A-Za-z][A-Za-z0-9_]{4,31}))?(?=\s|$)/u.exec(text);
+ const first=/^\/(ban|mute|warn|unwarn|unban|unmute|kick)(?:@([A-Za-z][A-Za-z0-9_]{4,31}))?(?=\s|$)/u.exec(text);
  if(!first)return {status:'NO_MATCH'};
  if(first[2]&&first[2].toLowerCase()!==botUsername.toLowerCase())return {status:'NO_MATCH'};
- const syntax=/^\/(ban|mute|warn|unwarn|unban|unmute)(?:@[A-Za-z][A-Za-z0-9_]{4,31})? ([A-Za-z0-9][A-Za-z0-9_-]{0,63})(?: ([1-9][0-9]{0,6})([smhd]))?$/u.exec(text);
+ const syntax=/^\/(ban|mute|warn|unwarn|unban|unmute|kick)(?:@[A-Za-z][A-Za-z0-9_]{4,31})? ([A-Za-z0-9][A-Za-z0-9_-]{0,63})(?: ([1-9][0-9]{0,6})([smhd]))?$/u.exec(text);
  const duration=syntax?.[3]===undefined?undefined:Number(syntax[3])*({s:1,m:60,h:3600,d:86400}[syntax[4]!]??NaN);
  if(!syntax||syntax[0]!==text||!/^-[1-9][0-9]{0,15}$/u.test(chatId)||
   !Number.isSafeInteger(Number(chatId))||!positive(messageId)||!object(reply)||
@@ -37,7 +37,7 @@ export async function executeReplyModerationCommand(service:ModerationService,
     :await service.removeWarning(actorId,chatId,command.memberId,command.reference,stillCurrent);
    return {status:result.status==='DENIED'?'DENIED':result.status==='NO_CHANGE'?'IGNORED':'APPLIED',reason:'MODERATION_'+result.status};
   }
-  const result=command.kind==='unban'||command.kind==='unmute'
+  const result=command.kind==='kick'?await service.kickMember(actorId,chatId,command.memberId,command.reference,stillCurrent,reviewedUntil):command.kind==='unban'||command.kind==='unmute'
    ?await service.removeManualReason(actorId,chatId,command.memberId,command.reference,command.kind==='unban'?'BAN':'MUTE',stillCurrent,reviewedUntil)
    :await service.addManualReason(actorId,chatId,command.memberId,command.reference,command.kind==='ban'?'BAN':'MUTE',stillCurrent,command.durationSeconds);
   return {status:result.status==='APPLIED'?'APPLIED':result.status==='NO_CHANGE'?'IGNORED':(result.status==='UNKNOWN_OUTCOME'||result.status==='BLOCKED_UNKNOWN'&&result.reason!=='NO_SAFE_DISPATCH')?'UNKNOWN':'DENIED',reason:'MODERATION_'+result.status};

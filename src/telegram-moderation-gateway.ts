@@ -74,6 +74,7 @@ export class TelegramBotApiModerationGateway implements ModerationGateway{
    prototype.confirmUnrestricted===officialGatewayMethods.confirmUnrestricted&&adapter.confirmUnrestricted===officialGatewayMethods.confirmUnrestricted&&
    prototype.canRestoreReviewed===officialGatewayMethods.canRestoreReviewed&&adapter.canRestoreReviewed===officialGatewayMethods.canRestoreReviewed&&
    prototype.restoreFromReviewedDecision===officialGatewayMethods.restoreFromReviewedDecision&&adapter.restoreFromReviewedDecision===officialGatewayMethods.restoreFromReviewedDecision&&
+   prototype.kickMember===officialGatewayMethods.kickMember&&adapter.kickMember===officialGatewayMethods.kickMember&&
    !('allowed' in adapter)&&!('call' in adapter)&&
    !('getMember' in adapter);
  }
@@ -300,12 +301,34 @@ export class TelegramBotApiModerationGateway implements ModerationGateway{
   state=await this.#restorationState(chatId,memberId,expected);if(state==='DENIED')return 'FAILED_CONFIRMED';
   let current=false;try{current=await verifyCurrentAuthority()===true;}catch{/* denied */}
   if(!current||!await this.#allowed())return 'FAILED_CONFIRMED';
+  state=await this.#restorationState(chatId,memberId,expected);if(state==='DENIED')return 'FAILED_CONFIRMED';
   if(state==='CLEAR')return 'CONFIRMED';
   const reply=expected.kind==='BAN'?await this.#call('unbanChatMember',{chat_id:chatId,user_id:Number(memberId),only_if_banned:true}):
    await this.#call('restrictChatMember',{chat_id:chatId,user_id:Number(memberId),permissions:Object.fromEntries(GROUP_PERMISSION_KEYS.map(k=>[k,true])),use_independent_chat_permissions:true});
   if(reply.status==='CLIENT_DENIED')return 'FAILED_CONFIRMED';
   if(reply.status!=='HTTP_OK'||reply.value!==true)return 'UNKNOWN_OUTCOME';
   try{return await this.#restorationState(chatId,memberId,expected)==='CLEAR'&&await verifyCurrentAuthority()===true?'CONFIRMED':'UNKNOWN_OUTCOME';}catch{return 'UNKNOWN_OUTCOME';}
+ }
+ /** Explicit removal of a currently ordinary member, not an enduring ban.
+  * Telegram unbanChatMember's default removal semantics are used deliberately;
+  * a restricted/banned/protected target is refused before reaching that API. */
+ async kickMember(chatId:string,memberId:string,verifyCurrentAuthority:()=>Promise<boolean>):Promise<RestrictionOutcome>{
+  if(!validGroup(chatId)||!validUser(memberId)||typeof verifyCurrentAuthority!=='function'||!await this.#allowed()||await this.#inspectGroupKind(chatId)!=='SUPERGROUP')return 'FAILED_CONFIRMED';
+  for(let i=0;i<3;i++){
+   if(!await this.#canRestrict(chatId,memberId)||await this.#isProtected(chatId,memberId))return 'FAILED_CONFIRMED';
+   let current=false;try{current=await verifyCurrentAuthority()===true;}catch{/* denied */}
+   if(!current||!await this.#allowed())return 'FAILED_CONFIRMED';
+  }
+  // The last local authority callback awaited disk; refresh remote protection
+  // afterwards as well. No sequence of these reads is a remote transaction.
+  if(!await this.#canRestrict(chatId,memberId)||await this.#isProtected(chatId,memberId)||!await this.#allowed())return 'FAILED_CONFIRMED';
+  const reply=await this.#call('unbanChatMember',{chat_id:chatId,user_id:Number(memberId),only_if_banned:false});
+  if(reply.status==='CLIENT_DENIED')return 'FAILED_CONFIRMED';
+  if(reply.status!=='HTTP_OK'||reply.value!==true)return 'UNKNOWN_OUTCOME';
+  try{
+   if(!await this.#canRestrict(chatId,memberId))return 'UNKNOWN_OUTCOME';const after=await this.#getMember(chatId,memberId);
+   return after?.status==='left'&&after.user.is_bot===false&&await verifyCurrentAuthority()===true&&await this.#allowed()?'CONFIRMED':'UNKNOWN_OUTCOME';
+  }catch{return 'UNKNOWN_OUTCOME';}
  }
  async setRestriction(chatId:string,memberId:string,
   kind:RestrictionKind,verifyCurrentAuthority?:()=>Promise<boolean>,untilDate?:number):Promise<RestrictionOutcome>{
@@ -381,6 +404,7 @@ const officialGatewayMethods=Object.freeze({
  confirmUnrestricted:TelegramBotApiModerationGateway.prototype.confirmUnrestricted,
  canRestoreReviewed:TelegramBotApiModerationGateway.prototype.canRestoreReviewed,
  restoreFromReviewedDecision:TelegramBotApiModerationGateway.prototype.restoreFromReviewedDecision,
+ kickMember:TelegramBotApiModerationGateway.prototype.kickMember,
  inspectBotModerationRights:TelegramBotApiModerationGateway.prototype.inspectBotModerationRights,
  inspectTrialGroupKind:TelegramBotApiModerationGateway.prototype.inspectTrialGroupKind
 });
