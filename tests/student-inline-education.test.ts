@@ -104,7 +104,7 @@ for(const engine of ['json','sqlite'] as const){
     const result=await f.app().handle(msg(id++,300,label!));
     assert.equal(result.status,'APPLIED');
     assert.equal(isValidTelegramInlineKeyboard(result.plan?.inlineMarkup),true);
-    assert.ok(buttons(result).every(b=>b.callback_data==='si:2:a:h'||b.callback_data.startsWith('si:2:'+token+':')));
+    assert.ok(buttons(result).every(b=>b.callback_data==='pn:1:h'||b.callback_data==='si:2:a:h'||b.callback_data.startsWith('si:2:'+token+':')));
    }
    for(const bad of ['si:2:x:h','si:2:s:p:00','si:2:ss:h','si:2:s:h\n','si:2:s:r:0:1:abcdef012345:0:1:123456abcdef:publish'])
     assert.equal((await f.app().handle(cb(id++,300,bad))).status,'DENIED');

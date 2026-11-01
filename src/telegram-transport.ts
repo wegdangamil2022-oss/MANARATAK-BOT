@@ -51,6 +51,7 @@ import {renderOwnerModerationRateStatus} from './telegram-inline-moderation-rate
 import {renderOwnerModerationEmergencyStatus} from './telegram-inline-moderation-emergency.js';
 import {renderStudentInline,studentSectionInlineData} from './telegram-inline-student.js';
 import {groupLibraryInline} from './telegram-group-library-inline.js';
+import {readPublicNavigation,publicNavigationMarkup} from './telegram-public-navigation.js';
 import {parseSearchQuery,parseSearchPageCommand,searchPageButton,
  searchResourceButton,parseSearchResourceSelection,searchResultsBreadcrumb,
  parseSearchResultsBreadcrumb} from './telegram-search.js';
@@ -209,6 +210,9 @@ function eventFrom(value:unknown):{event?:Event;reason:string} {
 const isScope=(scope:string):boolean=>scope==='private'||/^-[1-9]\d{0,18}$/.test(scope);
 const isId=(value:string):boolean=>/^[a-zA-Z0-9_-]{1,64}$/.test(value);
 const asNumber=(value:string):number|null=>/^\d{1,8}$/.test(value)&&Number.isSafeInteger(Number(value))?Number(value):null;
+const publicMenuText=(text:string):boolean=>Object.values(menuLabels).some(label=>label===text&&label!==menuLabels.owner)||text===catalogBackToCategories||text===privateFAQBrowseLabel||text===privateFAQSearchLabel||Boolean(
+ categoryButtonId(text)||resourceButtonId(text)||parseMenuPageCommand(text)||parseCatalogBackToCategory(text)||parseSearchPageCommand(text)||parseSearchResourceSelection(text)||parseSearchResultsBreadcrumb(text)||
+ parsePrivateFAQPage(text)||parsePrivateFAQSelection(text)||parsePrivateFAQBrowseReturn(text)!==null||parsePrivateFAQSearchPage(text)||parsePrivateFAQSearchSelection(text)||parsePrivateFAQSearchReturn(text));
 function safeError(err:unknown):string {
   const message=err instanceof Error?err.message:'';
   const known=new Set(['UPLOAD_DENIED','PUBLISH_DENIED','INVALID_UPLOAD_ORIGIN','INVALID_FAQ','INVALID_FORMAT','INVALID_FILENAME','DOCUMENT_TOO_LARGE','NOT_APPROVED','CANDIDATE_NOT_FOUND','IMPORT_NOT_FOUND','CATEGORY_SCOPE_MISMATCH','NEEDS_REVIEW','DUPLICATE_CANDIDATE','RESOURCE_ARCHIVED','CATEGORY_DISABLED_OR_MISSING']);
@@ -359,6 +363,10 @@ export class TelegramUpdateApplication {
      // Reauthorize the real sender at every tap. Never dispatch a privileged
      // command from untrusted callback_data or from a group context.
      if(kind!=='private'||actorId!==chatId)return {status:'DENIED',reason:'PRIVATE_CALLBACK_ONLY'};
+     if(event.callbackData.startsWith('pn:1:')){
+      const selected=await readPublicNavigation(this.opts.store,actorId,event.callbackData,publicMenuText,this.clock);if(!selected)return {status:'DENIED',reason:'PUBLIC_NAVIGATION_STALE_OR_INVALID'};
+      const {callbackData:_,...base}=event;return this.process({...base,text:selected});
+     }
      if(this.opts.policy.isOwner(actorId)&&!event.callbackData.startsWith('ec:1:')&&event.callbackData!=='mi:1:i:10:16')await new EducationCategoryEditor(this.opts.store,this.opts.policy,this.clock).cancel(actorId);
      if(this.opts.policy.isOwner(actorId)&&!event.callbackData.startsWith('nw:1:'))await new OwnerNetworkEditor(this.opts.store,this.opts.policy,this.clock).cancelInput(actorId);
      if(this.opts.policy.isOwner(actorId)&&!event.callbackData.startsWith('od:1:'))await new OwnerDelegationEditor(this.opts.store,this.opts.policy,this.clock).cancel(actorId);
@@ -679,7 +687,7 @@ export class TelegramUpdateApplication {
       }
       const dashboardEnabled=owner&&this.opts.policy.privateFeature(await this.opts.store.snapshot(),'owner.dashboard',actorId);
       const main=()=>result('<b>أهلًا بك في بوت منارتك 🎓</b>\n'
-        +'اختر أحد الأقسام من الأزرار أسفل المحادثة. تظهر الموارد المعتمدة فقط.\n'
+        +(this.opts.studentMenuMode==='inline'?'اختر أحد الأقسام من الأزرار الشفافة أدناه. تظهر الموارد المعتمدة فقط.\n':'اختر أحد الأقسام من الأزرار أسفل المحادثة. تظهر الموارد المعتمدة فقط.\n')
         +'لتصفح المكتبة بالأزرار الشفافة استخدم /studentinline.\n'
         +(dashboardEnabled?'لفتح لوحة المالك الشفافة استخدم /ownerinline، ولأدوات الإدارة القديمة /ownerlegacy.\n':owner?'لوحة المالك معطلة؛ لاستعادتها استخدم /ownerrecover.\n':'')
         +'يمكنك أيضًا استخدام /categories private و /help.\n'
@@ -1189,14 +1197,26 @@ export class TelegramUpdateApplication {
      // this NEVER re-runs the operation or re-sends the durable reply.
      return event.callbackQueryId?{...duplicate,callbackQueryId:event.callbackQueryId}:duplicate;
     }
+    const publicText=event.kind==='private'&&event.callbackData?.startsWith('pn:1:')?await readPublicNavigation(this.opts.store,event.actorId,event.callbackData,publicMenuText,this.clock):null;
+    const effectiveText=publicText??event.text;
     const libraryInput=event.kind==='private'&&(
      event.callbackData?.startsWith('si:1:')||event.callbackData?.startsWith('si:2:')||event.text==='/studentinline'||
-     this.opts.studentMenuMode==='inline'&&([menuLabels.scholarships,menuLabels.courses,menuLabels.universities,menuLabels.exams,menuLabels.files,menuLabels.library] as string[]).includes(event.text));
+     this.opts.studentMenuMode==='inline'&&(([menuLabels.scholarships,menuLabels.courses,menuLabels.universities,menuLabels.exams,menuLabels.files,menuLabels.library] as string[]).includes(effectiveText)||effectiveText===catalogBackToCategories||isPrivateFAQBrowseText(effectiveText)||isPrivateFAQSearchText(effectiveText)||effectiveText.startsWith('/search')||Boolean(parseSearchResourceSelection(effectiveText)||parseSearchPageCommand(effectiveText)||parseSearchResultsBreadcrumb(effectiveText)||categoryButtonId(effectiveText)||resourceButtonId(effectiveText)||parseMenuPageCommand(effectiveText)||parseCatalogBackToCategory(effectiveText))));
     const beforeLibrary=libraryInput?privateLibraryEpoch(await this.opts.store.snapshot(),this.opts.policy,event.actorId):null;
     const studioInput=event.kind==='private'&&this.opts.policy.isOwner(event.actorId)&&/^(?:st:1:[vtNAKzWQ]:|st:1:e:08:)/u.test(event.callbackData??'');
     const beforeStudio=studioInput?studioPreviewSourceEpoch(await this.opts.store.snapshot()):null;
     let handled:ProcessedReply;
     try{handled=await this.process(event);}catch(err){handled={status:'DENIED',reason:safeError(err)};}
+    if(event.kind==='private'&&this.opts.studentMenuMode==='inline'&&handled.plan){
+     if(handled.plan.replyMarkup){
+      const markup=await publicNavigationMarkup(this.opts.store,event.actorId,handled.plan.replyMarkup,menuLabels.owner,publicMenuText,this.clock);
+      if(markup){const {replyMarkup:_,...plan}=handled.plan;handled={...handled,plan:{...plan,inlineMarkup:markup}};}
+     }
+     if(handled.plan?.inlineMarkup&&(libraryInput||event.callbackData?.startsWith('pn:1:'))){
+      const isHome=['/start','/help',menuLabels.home,menuLabels.back].includes(effectiveText),rows=handled.plan.inlineMarkup.inline_keyboard;
+      handled={...handled,plan:{...handled.plan,inlineMarkup:{inline_keyboard:[...rows,...(!isHome&&!rows.flat().some(b=>b.callback_data==='pn:1:h')?[[{text:menuLabels.home,callback_data:'pn:1:h'}]]:[])]},...(event.callbackMessageId!==undefined?{editMessageId:event.callbackMessageId}:{})}};
+     }
+    }
     if(event.kind==='private'&&event.callbackData&&!event.callbackData.startsWith('pr:1:')&&
      !/^mi:1:i:02:(?:0[5678]|12)$/u.test(event.callbackData)&&handled.plan){
      await new TelegramProtectionEditor(this.opts.store,this.opts.policy,this.clock).cancelNavigation(event.actorId);

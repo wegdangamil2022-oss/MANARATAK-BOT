@@ -7,5 +7,5 @@ export function privateLibraryEpoch(s:BotState,policy:Policy,actor:string):strin
  if(!/^[1-9][0-9]{0,15}$/u.test(actor)||!Number.isSafeInteger(Number(actor))||!policy.privateFeature(s,'education.navigate',actor))return null;
  const categories=s.educationCategories.filter(c=>c.scope==='private');
  const resources=s.educationResources.filter(r=>r.scope==='private');
- return createHash('sha256').update('MANARATAK:PRIVATE-LIBRARY:V1:').update(JSON.stringify([actor,s.privateSettingsRevision??0,categories,resources])).digest('hex');
+ return createHash('sha256').update('MANARATAK:PRIVATE-LIBRARY:V1:').update(JSON.stringify([actor,s.privateSettingsRevision??0,categories,resources,s.faqEntries.filter(q=>q.scope==='private')])).digest('hex');
 }
