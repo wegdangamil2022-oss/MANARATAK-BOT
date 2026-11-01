@@ -18,11 +18,11 @@ for(const engine of ['json','sqlite'] as const){
   const policy=new Policy(store,'100',()=>now),education=new EducationService(store,policy,()=>now);
   await education.createCategory('100',{id:'grants',scope:'private',title:'المنح',order:1});
   await store.transaction(s=>{for(let i=0;i<12;i++)s.importRuns.push({id:randomUUID(),scope:'private',uploadedBy:'100',origin:'TELEGRAM_ADMIN',format:'json',filename:'مصدر '+i,digest:'a'.repeat(64),createdAt:NOW+i,report:{sections:1,universities:1,opportunities:1,potentialDuplicates:0,ambiguous:0,explicitSeats:null,partial:false},candidates:[{title:'منحة موثقة '+i,university:'جامعة',cycle:'2026',degree:'بكالوريوس',seats:null,locator:'row1',evidence:'original',status:'READY'}]});});
-  let downloads=0;const bytes=new TextEncoder().encode(JSON.stringify([{title:'منحة جديدة',university:'جامعة',cycle:'2026',degree:'بكالوريوس'}]));
-  const app=new TelegramUpdateApplication({store,policy,education,admin:new EducationAdminFacade(store,policy,education,()=>now),faq:new ApprovedAnswerService(store,policy,()=>now),links:new ResourceLinkService(store,policy,()=>now),ownerMenuMode:'inline',studentMenuMode:'inline',clock:()=>now,botId:'imports',botUsername:'ManaratakBot',documentDownload:{download:async()=>{downloads++;return bytes;}},membership:async()=>{throw Error('NETWORK_FORBIDDEN');}});
+  let downloads=0,downloadError=false;const bytes=new TextEncoder().encode(JSON.stringify([{title:'منحة جديدة',university:'جامعة',cycle:'2026',degree:'بكالوريوس'}]));
+  const app=new TelegramUpdateApplication({store,policy,education,admin:new EducationAdminFacade(store,policy,education,()=>now),faq:new ApprovedAnswerService(store,policy,()=>now),links:new ResourceLinkService(store,policy,()=>now),ownerMenuMode:'inline',studentMenuMode:'inline',clock:()=>now,botId:'imports',botUsername:'ManaratakBot',documentDownload:{download:async()=>{downloads++;if(downloadError)throw Error('provider-secret');return bytes;}},membership:async()=>{throw Error('NETWORK_FORBIDDEN');}});
   const click=(data:string,actor=100,group=false)=>app.handle({update_id:++id,callback_query:{id:'import-'+id,from:{id:actor,is_bot:false},data,message:{message_id:55,from:{id:999,is_bot:true},chat:{id:group?-100123:actor,type:group?'supergroup':'private'}}}});
   const file=(actor=100,topic?:number)=>app.handle({update_id:++id,message:{message_id:id,from:{id:actor,is_bot:false},chat:{id:actor,type:'private'},...(topic!==undefined?{message_thread_id:topic}:{}),document:{file_id:'ownerUploadFile123',file_name:'new.json',file_size:bytes.length}}});
-  return {store,policy,click,file,downloads:()=>downloads,time:(n:number)=>{now=n;},close:()=>rm(dir,{recursive:true,force:true})};
+  return {store,policy,click,file,downloads:()=>downloads,failDownload:()=>{downloadError=true;},time:(n:number)=>{now=n;},close:()=>rm(dir,{recursive:true,force:true})};
  }
  type Result=Awaited<ReturnType<Awaited<ReturnType<typeof fixture>>['click']>>;
  const choose=(r:Result,label:string)=>{const b=r.plan?.inlineMarkup?.inline_keyboard.flat().find(b=>b.text.startsWith(label));assert.ok(b,label+' '+r.reason);return b.callback_data;};
@@ -31,6 +31,11 @@ for(const engine of ['json','sqlite'] as const){
    await f.store.transaction(s=>{s.privateFeatures['content.upload']=true;});
    let r=await f.click('mi:1:i:13:04');r=await f.click(choose(r,'📥 رفع ملف جديد'));const route=choose(r,'👤 المكتبة الخاصة');assert.equal((await f.click(route,300)).status,'DENIED');r=await f.click(route);assert.ok(r.plan!.text.includes('أرسل الملف'));
    r=await f.file();assert.equal(r.status,'APPLIED',r.reason);assert.equal(f.downloads(),1);assert.equal((await f.store.snapshot()).importRuns.length,13);assert.equal((await f.file()).status,'DENIED');assert.equal(f.downloads(),1);assert.equal(choose(r,'🧾 مراجعة الوارد'),'mi:1:i:13:04');
+  }finally{await f.close();}
+ });
+ test(engine+' failed wizard download offers a working restart without leaking provider errors or importing',async()=>{
+  const f=await fixture();try{
+   await f.store.transaction(s=>{s.privateFeatures['content.upload']=true;});let r=await f.click('ou:1:h');r=await f.click(choose(r,'👤 المكتبة الخاصة'));f.failDownload();r=await f.file();assert.equal(r.status,'DENIED');assert.equal(r.plan!.text.includes('provider-secret'),false);assert.equal((await f.store.snapshot()).importRuns.length,12);r=await f.click(choose(r,'📥 بدء رفع جديد'));assert.ok(choose(r,'👤 المكتبة الخاصة'));
   }finally{await f.close();}
  });
  test(engine+' upload selection expires, cancels and rechecks permission before downloading',async()=>{

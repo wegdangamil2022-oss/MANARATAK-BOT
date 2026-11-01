@@ -316,21 +316,22 @@ export class TelegramUpdateApplication {
     const wizard=document.caption===''?await claimOwnerUpload(this.opts.store,this.opts.policy,actorId,this.clock):null;
     if(!scopeMatch&&!wizard)return {status:'DENIED',reason:'INVALID_DOCUMENT_CAPTION'};
     const scope=scopeMatch?.[1]??wizard!;
+    const deny=(reason:string):ProcessedReply=>({status:'DENIED',reason,...(wizard?{plan:this.plan(chatId,'<b>تعذر فحص الملف</b>\nلم يُستورد هذا الملف عبر خطوة الرفع الحالية. يمكنك بدء رفع جديد أو الرجوع إلى الوارد.',undefined,{inline_keyboard:[[{text:'📥 بدء رفع جديد',callback_data:'ou:1:h'},{text:'🧾 مراجعة الوارد',callback_data:'mi:1:i:13:04'}]]})}:{})});
     const ctx:VerifiedAdminContext={origin:'TELEGRAM_PRIVATE',actorId,chatId,verified:true};
     const panel=await this.opts.admin.panel(ctx,scope);
     // The permission gate MUST precede any expensive or external download request.
-    if(!panel.canUpload)return {status:'DENIED',reason:'UPLOAD_DENIED'};
-    if(!this.opts.documentDownload)return {status:'DENIED',reason:'DOCUMENT_DOWNLOAD_NOT_CONFIGURED'};
+    if(!panel.canUpload)return deny('UPLOAD_DENIED');
+    if(!this.opts.documentDownload)return deny('DOCUMENT_DOWNLOAD_NOT_CONFIGURED');
     let data:Uint8Array;
     try{data=await this.opts.documentDownload.download(document.fileId,MAX_DOCUMENT_BYTES);}
-    catch{return {status:'DENIED',reason:'DOCUMENT_DOWNLOAD_UNAVAILABLE'};}
+    catch{return deny('DOCUMENT_DOWNLOAD_UNAVAILABLE');}
     if(!(data instanceof Uint8Array) || data.byteLength!==document.size || data.byteLength>MAX_DOCUMENT_BYTES)
-      return {status:'DENIED',reason:'DOCUMENT_SIZE_MISMATCH'};
+      return deny('DOCUMENT_SIZE_MISMATCH');
     let text:string;
     try{text=new TextDecoder('utf-8',{fatal:true}).decode(data);}
-    catch{return {status:'DENIED',reason:'DOCUMENT_NOT_UTF8'};}
+    catch{return deny('DOCUMENT_NOT_UTF8');}
     if(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/u.test(text))
-      return {status:'DENIED',reason:'DOCUMENT_BINARY_CONTENT'};
+      return deny('DOCUMENT_BINARY_CONTENT');
     // EducationService rechecks upload authorization under its state transaction
     // after the asynchronous download; revocation wins over a stale preflight.
     const run=await this.opts.admin.upload(ctx,scope,document.format,document.filename,text);
