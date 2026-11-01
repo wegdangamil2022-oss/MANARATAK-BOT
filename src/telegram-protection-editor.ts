@@ -11,9 +11,9 @@ import type {OwnerInlineScreen} from './telegram-inline-owner.js';
 type Button={text:string;callback_data:string};
 type Frame={chat:Chat;config:ProtectionPolicy;epoch:number;page:number;slot:number;digest:string;stale:boolean;returnToOwnerGroup:string|null};
 type Outcome={status:'APPLIED'|'DENIED';reason:string;screen:OwnerInlineScreen};
-type InputKind='WORD'|'PHRASE'|'LINK'|'TEST'|'DOMAIN'|'ALLOWPHRASE'|'FLOOD'|'EXEMPT'|'ESCALATION'|'RAID'|'NIGHT'|'LIMIT';
+type InputKind='WORD'|'PHRASE'|'LINK'|'TEST'|'DOMAIN'|'ALLOWPHRASE'|'FLOOD'|'EXEMPT'|'ESCALATION'|'RAID'|'NIGHT'|'LIMIT'|'JOINRAID';
 const TTL=300000,PREFIX='protection-ui:';
-const flow=/^protection-ui:(WORD|PHRASE|TEST|LINK|DOMAIN|ALLOWPHRASE|FLOOD|EXEMPT|ESCALATION|RAID|NIGHT|LIMIT):(-[1-9][0-9]{0,15}):([1-9][0-9]{0,15}):(0|[1-9][0-9]{0,15}):(0|[1-9][0-9]{0,15}):([A-Za-z0-9_-]{16})(?::([A-Za-z0-9][A-Za-z0-9_-]{0,47}))?$/u;
+const flow=/^protection-ui:(WORD|PHRASE|TEST|LINK|DOMAIN|ALLOWPHRASE|FLOOD|EXEMPT|ESCALATION|RAID|NIGHT|LIMIT|JOINRAID):(-[1-9][0-9]{0,15}):([1-9][0-9]{0,15}):(0|[1-9][0-9]{0,15}):(0|[1-9][0-9]{0,15}):([A-Za-z0-9_-]{16})(?::([A-Za-z0-9][A-Za-z0-9_-]{0,47}))?$/u;
 const escape=(v:string)=>v.replace(/\p{Cf}/gu,'').replace(/&/gu,'&amp;').replace(/</gu,'&lt;').replace(/>/gu,'&gt;').replace(/"/gu,'&quot;');
 const btn=(text:string,callback_data:string):Button=>({text,callback_data});
 const screen=(text:string,rows:Button[][]):OwnerInlineScreen=>({text,keyboard:{inline_keyboard:rows}});
@@ -37,6 +37,10 @@ function inputPolicy(config:ProtectionPolicy,kind:Exclude<InputKind,'TEST'>,text
   const metric=({mentions:'MENTIONS',hashtags:'HASHTAGS',length:'LENGTH'} as const)[m[1] as 'mentions'|'hashtags'|'length'];
   if(config.rules.some(r=>r.kind==='LIMIT'&&r.metric===metric&&r.maximum===Number(m[2])))return null;
   return {...config,revision:config.revision+1,rules:[...config.rules,{id,kind:'LIMIT',metric,maximum:Number(m[2]),enabled:false,action:'REVIEW'}]};
+ }
+ if(kind==='JOINRAID'){
+  const m=/^([1-9][0-9]{0,2}) ([1-9][0-9]?) ([1-9][0-9]{0,2})$/u.exec(text);if(!m||m[0]!==text)return null;
+  return {...config,revision:config.revision+1,joinRaid:{enabled:config.joinRaid?.enabled??false,minimumMembers:Number(m[1]),windowMs:Number(m[2])*1000,lockSeconds:Number(m[3])}};
  }
  if(kind==='NIGHT'){
   const m=/^([0-2][0-9]):([0-5][0-9]) ([0-2][0-9]):([0-5][0-9]) (-?(?:0|[1-9][0-9]{0,2}))$/u.exec(text);if(!m||m[0]!==text||Number(m[1])>23||Number(m[3])>23)return null;
@@ -163,7 +167,7 @@ export class TelegramProtectionEditor{
      const value:Wizard={key,userId:actor,chatId:actor,topicId:'',flow:'protection-enforce:'+f.chat.id+':'+f.digest+':'+nonce,step:0,version:(old?.version??0)+1,expiresAt:now+120000,policyVersion:f.epoch,status:'ACTIVE'};
      if(old)Object.assign(old,value);else s.wizards.push(value);return true;
     });
-    return created?screen('⚠️ تفعيل تنفيذ القواعد المفعلة لهذه المجموعة؟\nالمراجعة تُسجل فقط، والتحذير يسجل مخالفة، والكتم مدته دقيقة واحدة. تُحترم الاستثناءات وحماية المشرفين والصلاحيات. '+(this.service.deletionConnected()?'الحذف لرسالة المطابقة المفهرسة فقط؛ لا حذف عند غياب بياناتها الموثوقة.':'الحذف غير موصول.')+'\nالوضع الليلي: '+(f.config.night?.enabled?'قفل واستعادة حسب الوقت المحفوظ':'معطل')+'\nAntiRaid: '+(f.config.raid?.enabled?'قفل إرسال مؤقت '+f.config.raid.lockSeconds+' ثانية؛ استعادة اللقطة عبر العامل المفعّل':'معطل')+'\nعدد القواعد المفعلة: '+f.config.rules.filter(r=>r.enabled).length+'\nالفلود: '+(f.config.flood?.enabled?'مفعل':'متوقف')+'\nالتأكيد صالح لدقيقتين؛ الرجوع يلغيه.',[[btn('✅ تأكيد التنفيذ',key('I',f,':'+nonce))],[btn('↩️ رجوع دون تفعيل',key('g',f))]]):null;
+    return created?screen('⚠️ تفعيل تنفيذ القواعد المفعلة لهذه المجموعة؟\nالمراجعة تُسجل فقط، والتحذير يسجل مخالفة، والكتم مدته دقيقة واحدة. تُحترم الاستثناءات وحماية المشرفين والصلاحيات. '+(this.service.deletionConnected()?'الحذف لرسالة المطابقة المفهرسة فقط؛ لا حذف عند غياب بياناتها الموثوقة.':'الحذف غير موصول.')+'\nالوضع الليلي: '+(f.config.night?.enabled?'قفل واستعادة حسب الوقت المحفوظ':'معطل')+'\nAntiRaid: '+(f.config.raid?.enabled?'قفل إرسال مؤقت '+f.config.raid.lockSeconds+' ثانية؛ استعادة اللقطة عبر العامل المفعّل':'معطل')+'\nرصد الانضمام: '+(f.config.joinRaid?.enabled?'قفل مؤقت '+f.config.joinRaid.lockSeconds+' ثانية':'معطل')+'\nعدد القواعد المفعلة: '+f.config.rules.filter(r=>r.enabled).length+'\nالفلود: '+(f.config.flood?.enabled?'مفعل':'متوقف')+'\nالتأكيد صالح لدقيقتين؛ الرجوع يلغيه.',[[btn('✅ تأكيد التنفيذ',key('I',f,':'+nonce))],[btn('↩️ رجوع دون تفعيل',key('g',f))]]):null;
    }
    const claimed=await this.store.transaction(s=>{
     const rows=s.wizards.filter(w=>w.key==='protection-enforce:'+actor),w=rows[0],now=this.clock();
@@ -181,6 +185,13 @@ export class TelegramProtectionEditor{
    if(!f.config.night)return null;
    const saved=await this.service.save(actor,{...f.config,revision:f.config.revision+1,night:{...f.config.night,enabled:!f.config.night.enabled}},f.epoch,f.config.revision);
    return saved.status==='SAVED'?this.fresh(actor,f.chat.id,'حُفظ إعداد الوضع الليلي.'):null;
+  }
+  if(route.kind==='U')return this.joinRaidScreen(f);
+  if(route.kind==='V')return this.begin(actor,f,'JOINRAID');
+  if(route.kind==='W'){
+   if(!f.config.joinRaid)return null;
+   const saved=await this.service.save(actor,{...f.config,revision:f.config.revision+1,joinRaid:{...f.config.joinRaid,enabled:!f.config.joinRaid.enabled}},f.epoch,f.config.revision);
+   return saved.status==='SAVED'?this.fresh(actor,f.chat.id,'حُفظ إعداد رصد الانضمام.'):null;
   }
   if(route.kind==='J')return this.raidScreen(f);
   if(route.kind==='K')return this.begin(actor,f,'RAID');
@@ -279,9 +290,13 @@ export class TelegramProtectionEditor{
   const n=f.config.night,hhmm=(v:number)=>String(Math.floor(v/60)).padStart(2,'0')+':'+String(v%60).padStart(2,'0');
   return screen('الوضع الليلي المتكرر: قفل الإرسال ضمن الفترة اليومية ثم استعادة اللقطة الأصلية. يستخدم إزاحة UTC ثابتة بالدقائق، بلا تحويل تلقائي للتوقيت الصيفي. يتطلب وضع التنفيذ وعامل الاستعادة المفعّل.\n'+(n?'الحالة: '+(n.enabled?'مفعل':'معطل')+' · من '+hhmm(n.startMinute)+' إلى '+hhmm(n.endMinute)+' · UTC بالدقائق '+n.offsetMinutes:'لم يُضبط بعد.')+'\nلن يفتح قيدًا مستقلاً أو يستبدل معاينة بشرية. يتوقف عند تغير الأذونات أو الغموض؛ راجع السجل. إيقاف السياسة يمنع قفلاً جديدًا، ويظل موعد استعادة القفل المؤكد محفوظًا.',[[btn('⚙️ ضبط الوقت والإزاحة',key('O',f))],...(n?[[btn(n.enabled?'⏹ تعطيل الليلي':'✅ تفعيل الليلي',key('P',f))]]:[]),[btn('↩️ إعدادات المجموعة',key('g',f))]]);
  }
+ private joinRaidScreen(f:Frame):OwnerInlineScreen{
+  const r=f.config.joinRaid;
+  return screen('رصد دفعات الانضمام من رسائل الخدمة البشرية الجديدة التي تصل إلى البوت. يستبعد البوتات والمالك والمشرفين والاستثناءات، ويعد الحساب مرة واحدة في النافذة. لا يجلب سجل أعضاء ولا يرصد كل طرق الانضمام أو دعوات البوتات.\n'+(r?'الحالة: '+(r.enabled?'مفعل':'معطل')+' · أعضاء: '+r.minimumMembers+' · النافذة بالثواني: '+r.windowMs/1000+' · القفل بالثواني: '+r.lockSeconds:'لم يُضبط بعد.')+'\nفي المراقبة يسجل الرصد فقط. التنفيذ يحتاج التأكيد المستقل ومنفذ قفل وعامل استعادة مفعّل؛ لا حظر للأعضاء.',[[btn('⚙️ ضبط العدد والنافذة والمدة',key('V',f))],...(r?[[btn(r.enabled?'⏹ تعطيل رصد الانضمام':'✅ تفعيل رصد الانضمام',key('W',f))]]:[]),[btn('↩️ AntiRaid',key('J',f))]]);
+ }
  private raidScreen(f:Frame):OwnerInlineScreen{
   const r=f.config.raid;
-  return screen('AntiRaid لمعدل الإرسال الجماعي: يستخدم نافذة الفلود المرصودة فقط، ولا يدعي رصد الانضمامات. لا حظر جماعي؛ قفل إرسال مؤقت بلقطة أصلية. يشترط منفذًا موصولاً وعامل استعادة مفعلاً وتأكيد وضع التنفيذ.\n'+(r?'الحالة: '+(r.enabled?'مفعل':'معطل')+' · أعضاء: '+r.minimumMembers+' · رسائل: '+r.minimumMessages+' · القفل بالثواني: '+r.lockSeconds:'لم يُضبط بعد.')+'\nفعّل نافذة الفلود أولاً. العد محدود وقد يقل عن إجمالي الرسائل، ولا تُحتسب الرسائل المعدلة أو الأعضاء المستثنون. الاستعادة تحجب عند تغير الأذونات أو الحقوق أو غموض النتيجة.',[[btn('⚙️ ضبط الحدود والمدة',key('K',f))],...(r&&f.config.flood?.enabled?[[btn(r.enabled?'⏹ تعطيل AntiRaid':'✅ تفعيل AntiRaid',key('L',f))]]:[]),[btn('↩️ إعدادات المجموعة',key('g',f))]]);
+  return screen('AntiRaid لمعدل الإرسال الجماعي: يستخدم نافذة الفلود المرصودة فقط، ولا يدعي رصد الانضمامات. لا حظر جماعي؛ قفل إرسال مؤقت بلقطة أصلية. يشترط منفذًا موصولاً وعامل استعادة مفعلاً وتأكيد وضع التنفيذ.\n'+(r?'الحالة: '+(r.enabled?'مفعل':'معطل')+' · أعضاء: '+r.minimumMembers+' · رسائل: '+r.minimumMessages+' · القفل بالثواني: '+r.lockSeconds:'لم يُضبط بعد.')+'\nفعّل نافذة الفلود أولاً. العد محدود وقد يقل عن إجمالي الرسائل، ولا تُحتسب الرسائل المعدلة أو الأعضاء المستثنون. الاستعادة تحجب عند تغير الأذونات أو الحقوق أو غموض النتيجة.',[[btn('🚪 رصد دفعات الانضمام',key('U',f))],[btn('⚙️ ضبط الحدود والمدة',key('K',f))],...(r&&f.config.flood?.enabled?[[btn(r.enabled?'⏹ تعطيل AntiRaid':'✅ تفعيل AntiRaid',key('L',f))]]:[]),[btn('↩️ إعدادات المجموعة',key('g',f))]]);
  }
  private escalationScreen(f:Frame):OwnerInlineScreen{
   const e=f.config.escalation;
@@ -326,6 +341,7 @@ export class TelegramProtectionEditor{
   });
   return created?screen(kind==='TEST'?'أرسل عينة نصية لاختبار قواعد المحتوى، بما فيها المعطلة، دون تشغيلها أو حفظ العينة. لا يختبر هذا المسار وتيرة الفلود.':
    kind==='LIMIT'?'أرسل نوع الحد ثم العدد. الأنواع: mentions للمنشن، hashtags للوسوم، length لطول الرسالة بالحروف. مثال: mentions 5. الحد من 1 إلى 100 للمنشن والوسوم وحتى 4096 للطول. تبدأ القاعدة معطلة بإجراء مراجعة؛ لا يشمل هذا كشف تكرار النصوص أو الاحتيال.':
+   kind==='JOINRAID'?'أرسل عدد الأعضاء ثم نافذة الرصد ثم مدة القفل بالثواني، مثل 5 30 120. العدد من 3 إلى 100، النافذة من 5 إلى 60 ثانية، القفل من 60 إلى 600 ثانية. يبدأ الإعداد الجديد معطلاً.':
    kind==='NIGHT'?'أرسل البداية والنهاية بصيغة 24 ساعة ثم إزاحة UTC بالدقائق. مثال لليمن: 22:00 06:00 180. الوقتان مختلفان والإزاحة من -720 إلى 840؛ يبدأ الإعداد الجديد معطلاً.':
    kind==='RAID'?'أرسل عدد الأعضاء ثم عدد الرسائل ثم مدة القفل بالثواني؛ مثال: 5 20 120. الأعضاء من 2 إلى 100 والرسائل حتى 1000 ولا تقل عن الأعضاء، والمدة من 60 إلى 600. يبدأ الإعداد الجديد معطلاً.':
    kind==='ESCALATION'?'أرسل عدد التحذيرات السابقة من 1 إلى 20 ثم نافذة بالثواني من 60 إلى 86400؛ مثال: 3 3600. يبدأ الإعداد الجديد معطلاً. الكتم لمدة دقيقة فقط.':
@@ -418,7 +434,7 @@ export class TelegramProtectionEditor{
   const candidate=inputPolicy(f.config,claim.kind,text,claim.ruleId,claim.editing,this.clock());
   if(!candidate)return {status:'DENIED',reason:'PROTECTION_EDITOR_STALE',screen:this.failure(actor)};
   const saved=await this.service.save(actor,candidate,f.epoch,f.config.revision);
-  const view=saved.status==='SAVED'?await this.fresh(actor,f.chat.id,claim.kind==='NIGHT'?'حُفظ الوقت اليومي وإزاحة UTC.':claim.kind==='RAID'?'حُفظت حدود AntiRaid المؤقتة.':claim.kind==='ESCALATION'?'حُفظ عدد التحذيرات ونافذة التدرج.':claim.kind==='EXEMPT'?'حُفظ الاستثناء المؤقت؛ ينتهي تلقائيًا في الموعد المعروض.':claim.kind==='FLOOD'?'حُفظت حدود الفلود المحلية.':claim.kind==='DOMAIN'||claim.kind==='ALLOWPHRASE'?'حُفظ عنصر السماح المحلي.':claim.editing?'حُفظ النص البديل مع إبقاء إعدادات القاعدة.':'أُضيفت القاعدة معطلة؛ راجعها واختبرها قبل أي تفعيل.'):null;
+  const view=saved.status==='SAVED'?await this.fresh(actor,f.chat.id,claim.kind==='JOINRAID'?'حُفظت حدود رصد الانضمام؛ تفعيل التنفيذ مستقل.':claim.kind==='NIGHT'?'حُفظ الوقت اليومي وإزاحة UTC.':claim.kind==='RAID'?'حُفظت حدود AntiRaid المؤقتة.':claim.kind==='ESCALATION'?'حُفظ عدد التحذيرات ونافذة التدرج.':claim.kind==='EXEMPT'?'حُفظ الاستثناء المؤقت؛ ينتهي تلقائيًا في الموعد المعروض.':claim.kind==='FLOOD'?'حُفظت حدود الفلود المحلية.':claim.kind==='DOMAIN'||claim.kind==='ALLOWPHRASE'?'حُفظ عنصر السماح المحلي.':claim.editing?'حُفظ النص البديل مع إبقاء إعدادات القاعدة.':'أُضيفت القاعدة معطلة؛ راجعها واختبرها قبل أي تفعيل.'):null;
   return view?{status:'APPLIED',reason:'PROTECTION_RULE_SAVED',screen:view}:{status:'DENIED',reason:'PROTECTION_EDITOR_STALE',screen:this.failure(actor)};
  }
 }

@@ -15,7 +15,7 @@ export class GroupProtectionPolicyService{
  deletionConnected():boolean{return this.enforcer?.supports('DELETE')===true;}
  canEnforce(config:GroupProtectionRecord['policy']):boolean{
   return Boolean(this.enforcer&&config.rules.filter(r=>r.enabled).every(r=>this.enforcer!.supports(r.action))&&
-   (!config.flood?.enabled||this.enforcer.supports(config.flood.action))&&(!config.escalation?.enabled||this.enforcer.supports('MUTE'))&&(!config.raid?.enabled||this.enforcer.supportsRaid?.()===true)&&(!config.night?.enabled||this.enforcer.supportsRaid?.()===true));
+   (!config.flood?.enabled||this.enforcer.supports(config.flood.action))&&(!config.escalation?.enabled||this.enforcer.supports('MUTE'))&&(!config.raid?.enabled||this.enforcer.supportsRaid?.()===true)&&(!config.night?.enabled||this.enforcer.supportsRaid?.()===true)&&(!config.joinRaid?.enabled||this.enforcer.supportsRaid?.()===true));
  }
  private allowed(state:BotState,actor:string,chat:string,now:number):boolean{
   return clockValid(now)&&this.policy.canUseChat(state,chat,'moderation')&&this.policy.has(state,actor,'chat.manage',chat,now);
