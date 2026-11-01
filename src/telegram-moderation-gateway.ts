@@ -67,6 +67,7 @@ export class TelegramBotApiModerationGateway implements ModerationGateway{
    adapter.setRestriction===officialGatewayMethods.setRestriction&&
    adapter.canRestrict===officialGatewayMethods.canRestrict&&
    adapter.isProtected===officialGatewayMethods.isProtected&&
+   prototype.confirmUnrestricted===officialGatewayMethods.confirmUnrestricted&&adapter.confirmUnrestricted===officialGatewayMethods.confirmUnrestricted&&
    !('allowed' in adapter)&&!('call' in adapter)&&
    !('getMember' in adapter);
  }
@@ -113,8 +114,9 @@ export class TelegramBotApiModerationGateway implements ModerationGateway{
  readonly #request:typeof fetch;
  readonly #safetyGate:()=>Promise<boolean>;
  readonly #botId:number;
+ readonly #clock:()=>number;
  constructor(token:string,request:typeof fetch=fetch,
-  safetyGate:()=>Promise<boolean>=async()=>false){
+  safetyGate:()=>Promise<boolean>=async()=>false,clock:()=>number=Date.now){
   if(!TOKEN.test(token))throw Error('INVALID_TELEGRAM_TOKEN');
   const id=token.slice(0,token.indexOf(':'));
   if(!validUser(id))throw Error('INVALID_TELEGRAM_TOKEN');
@@ -122,6 +124,7 @@ export class TelegramBotApiModerationGateway implements ModerationGateway{
   this.#token=token;
   this.#request=request;
   this.#safetyGate=safetyGate;
+  this.#clock=clock;
  }
  async #allowed():Promise<boolean>{
   try{return await this.#safetyGate()===true;}catch{return false;}
@@ -158,6 +161,9 @@ export class TelegramBotApiModerationGateway implements ModerationGateway{
   * or makes any mutation. 'UNKNOWN' never authorizes a trial.
   */
  async inspectTrialGroupKind(chatId:string):Promise<'GROUP'|'SUPERGROUP'|'NOT_GROUP'|'UNKNOWN'>{
+  return this.#inspectGroupKind(chatId);
+ }
+ async #inspectGroupKind(chatId:string):Promise<'GROUP'|'SUPERGROUP'|'NOT_GROUP'|'UNKNOWN'>{
   if(!validGroup(chatId))return 'UNKNOWN';
   const reply=await this.#call('getChat',{chat_id:chatId});
   if(reply.status!=='HTTP_OK'||!object(reply.value))return 'UNKNOWN';
@@ -258,10 +264,11 @@ export class TelegramBotApiModerationGateway implements ModerationGateway{
   return 'UNKNOWN';
  }
  async setRestriction(chatId:string,memberId:string,
-  kind:RestrictionKind,verifyCurrentAuthority?:()=>Promise<boolean>):Promise<RestrictionOutcome>{
+  kind:RestrictionKind,verifyCurrentAuthority?:()=>Promise<boolean>,untilDate?:number):Promise<RestrictionOutcome>{
   if(!validGroup(chatId)||!validUser(memberId)||Number(memberId)===this.#botId||
     (kind!=='BAN'&&kind!=='MUTE'))return 'FAILED_CONFIRMED';
   if(!await this.#allowed())return 'FAILED_CONFIRMED';
+  if(untilDate!==undefined&&(!this.#validDeadline(untilDate)||await this.#inspectGroupKind(chatId)!=='SUPERGROUP'))return 'FAILED_CONFIRMED';
   if(!await this.#canRestrict(chatId,memberId)||await this.#isProtected(chatId,memberId))
    return 'FAILED_CONFIRMED';
   // A STOP triggered during the rights/target lookups must win before write.
@@ -287,16 +294,36 @@ export class TelegramBotApiModerationGateway implements ModerationGateway{
   // Read the independent operator gate once more at the final mutation
   // boundary; a failed/throwing gate is a definitive NO-SEND.
   if(!await this.#allowed())return 'FAILED_CONFIRMED';
+  if(untilDate!==undefined){
+   if(!this.#validDeadline(untilDate)||await this.#inspectGroupKind(chatId)!=='SUPERGROUP')return 'FAILED_CONFIRMED';
+   if(!await this.#canRestrict(chatId,memberId)||await this.#isProtected(chatId,memberId))return 'FAILED_CONFIRMED';
+   if(verifyCurrentAuthority){let current=false;try{current=await verifyCurrentAuthority()===true;}catch{/* fail closed */}if(!current)return 'FAILED_CONFIRMED';}
+   if(!await this.#allowed()||!this.#validDeadline(untilDate))return 'FAILED_CONFIRMED';
+  }
   const result=kind==='BAN'?
    await this.#call('banChatMember',{
-    chat_id:chatId,user_id:Number(memberId),revoke_messages:false
+    chat_id:chatId,user_id:Number(memberId),revoke_messages:false,...(untilDate===undefined?{}:{until_date:untilDate})
    }):
    await this.#call('restrictChatMember',{
     chat_id:chatId,user_id:Number(memberId),
-    permissions:MUTE_PERMISSIONS,use_independent_chat_permissions:true
+    permissions:MUTE_PERMISSIONS,use_independent_chat_permissions:true,...(untilDate===undefined?{}:{until_date:untilDate})
    });
   return result.status==='HTTP_OK'&&result.value===true?'CONFIRMED':
    result.status==='CLIENT_DENIED'?'FAILED_CONFIRMED':'UNKNOWN_OUTCOME';
+ }
+ #validDeadline(untilDate:number):boolean{
+  const now=this.#clock();return Number.isSafeInteger(now)&&now>=0&&Number.isSafeInteger(untilDate)&&untilDate-now/1000>=30&&untilDate-Math.ceil(now/1000)<=2592000;
+ }
+ /** Read-only acknowledgement of an already unrestricted human member.
+  * It never unbans, changes permissions, or infers who imposed a restriction. */
+ async confirmUnrestricted(chatId:string,memberId:string,verifyCurrentAuthority:()=>Promise<boolean>):Promise<RestrictionOutcome>{
+  if(!validGroup(chatId)||!validUser(memberId)||Number(memberId)===this.#botId||!await this.#allowed())return 'FAILED_CONFIRMED';
+  for(let i=0;i<2;i++){
+   if(!await this.#canRestrict(chatId,memberId))return 'FAILED_CONFIRMED';const target=await this.#getMember(chatId,memberId);
+   if(!target||target.user.is_bot!==false||target.status!=='member')return 'FAILED_CONFIRMED';
+   let current=false;try{current=await verifyCurrentAuthority()===true;}catch{/* fail closed */}if(!current)return 'FAILED_CONFIRMED';
+  }
+  return await this.#allowed()?'CONFIRMED':'FAILED_CONFIRMED';
  }
 }
 
@@ -307,6 +334,7 @@ const officialGatewayMethods=Object.freeze({
  setRestriction:TelegramBotApiModerationGateway.prototype.setRestriction,
  canRestrict:TelegramBotApiModerationGateway.prototype.canRestrict,
  isProtected:TelegramBotApiModerationGateway.prototype.isProtected,
+ confirmUnrestricted:TelegramBotApiModerationGateway.prototype.confirmUnrestricted,
  inspectBotModerationRights:TelegramBotApiModerationGateway.prototype.inspectBotModerationRights,
  inspectTrialGroupKind:TelegramBotApiModerationGateway.prototype.inspectTrialGroupKind
 });

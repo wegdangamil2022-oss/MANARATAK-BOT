@@ -47,7 +47,7 @@ const opDigest=(o:ModerationOperation,s:BotState)=>createHash('sha256')
  .update('MANARATAK:UNKNOWN:OWNER:REVIEW:V2:')
  .update(JSON.stringify([
   o.id,o.chatId,o.memberId,o.actorId,o.kind,o.reasonFingerprint,
-  o.policyVersion,o.createdAt,o.status,o.attemptGateway??null,o.review??null,
+  o.policyVersion,o.createdAt,o.status,o.attemptGateway??null,o.review??null,...(o.untilDate===undefined?[]:[{untilDate:o.untilDate}]),
   ...(()=>{
    const chat=s.chats.find(c=>c.id===o.chatId);
    return [chat?.id??null,chat?.approved??null,

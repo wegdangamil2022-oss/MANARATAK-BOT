@@ -13,7 +13,7 @@ export interface ModerationGateway {
   canRestrict(chatId: string, memberId: string): Promise<boolean>;
   isProtected(chatId: string, memberId: string): Promise<boolean>;
   setRestriction(chatId: string, memberId: string, kind: RestrictionKind,
-    verifyCurrentAuthority?:()=>Promise<boolean>): Promise<RestrictionOutcome>;
+    verifyCurrentAuthority?:()=>Promise<boolean>,untilDate?:number): Promise<RestrictionOutcome>;
 }
 export class FakeModerationGateway implements ModerationGateway {
   readonly attemptGateway='SIMULATION' as const;
@@ -44,7 +44,7 @@ function sameModerationAttempt(a:ModerationOperation,b:ModerationOperation):bool
   a.actorId===b.actorId&&a.kind===b.kind&&
   a.reasonFingerprint===b.reasonFingerprint&&
   a.policyVersion===b.policyVersion&&a.createdAt===b.createdAt&&
-  a.attemptGateway===b.attemptGateway;
+  a.attemptGateway===b.attemptGateway&&a.untilDate===b.untilDate;
 }
 /** Snapshot only the original target's OTHER durable operations.
  * This prevents an in-flight sanction from ignoring a different writer's
@@ -64,7 +64,7 @@ function targetOperationHistory(s:BotState,chatId:string,memberId:string,
  * match: never select an arbitrary tail and dispatch on that basis.
  */
 function latestConfirmedKind(operations:ModerationOperation[]):
- {status:'CLEAR';kind:RestrictionKind}|{status:'AMBIGUOUS'}{
+ {status:'CLEAR';kind:RestrictionKind;untilDate?:number}|{status:'AMBIGUOUS'}{
  const confirmed=operations.filter(o=>o.status==='CONFIRMED');
  if(!confirmed.length)return {status:'CLEAR',kind:'NONE'};
  // Avoid Math.max(...largeArray) argument overflow for restored histories
@@ -72,7 +72,7 @@ function latestConfirmedKind(operations:ModerationOperation[]):
  const lastTime=confirmed.reduce((time,o)=>Math.max(time,o.createdAt),0);
  const latest=confirmed.filter(o=>o.createdAt===lastTime);
  return latest.length===1?
-  {status:'CLEAR',kind:latest[0]!.kind}:{status:'AMBIGUOUS'};
+  {status:'CLEAR',kind:latest[0]!.kind,...(latest[0]!.untilDate===undefined?{}:{untilDate:latest[0]!.untilDate})}:{status:'AMBIGUOUS'};
 }
 
 /** Preserve BOTH conflicting evidence and an unresolved lock for the
@@ -116,7 +116,12 @@ export class ModerationService {
     return reasons.some(r => r.kind === 'BAN') ? 'BAN' : reasons.some(r => r.kind === 'MUTE') ? 'MUTE' : 'NONE';
   }
   private reasonsCurrent(s:BotState,chatId:string,memberId:string):boolean{
-    const now=this.clock();return Number.isSafeInteger(now)&&now>=0&&s.moderationReasons.filter(r=>byTarget(r,chatId,memberId)&&r.active).every(r=>r.expiresAt===undefined||this.gateway instanceof FakeModerationGateway&&r.expiresAt>now);
+    const now=this.clock();return Number.isSafeInteger(now)&&now>=0&&s.moderationReasons.filter(r=>byTarget(r,chatId,memberId)&&r.active).every(r=>r.expiresAt===undefined||(this.gateway instanceof FakeModerationGateway||TelegramBotApiModerationGateway.usesOfficialDispatch(this.gateway))&&r.expiresAt>now);
+  }
+  private untilDate(s:BotState,chatId:string,memberId:string,kind:RestrictionKind):number|undefined{
+    const reasons=s.moderationReasons.filter(r=>byTarget(r,chatId,memberId)&&r.active&&r.kind===kind);
+    if(!reasons.length||reasons.some(r=>r.expiresAt===undefined))return undefined;
+    return Math.ceil(Math.max(...reasons.map(r=>r.expiresAt!))/1000);
   }
   private authorized(s: BotState, actorId: string, chatId: string, memberId: string): boolean {
     // Locally delegated chat managers are protected targets even if Telegram
@@ -187,9 +192,9 @@ export class ModerationService {
   async addManualReason(actorId: string, chatId: string, memberId: string, reference: string, kind: 'MUTE' | 'BAN',stillCurrent?:(s:BotState)=>boolean,durationSeconds?:number): Promise<ModerationResult> {
     if (!reference || reference.length > 80 || !['MUTE', 'BAN'].includes(kind)) throw new Error('Invalid reason');
     if(durationSeconds!==undefined&&(!Number.isSafeInteger(durationSeconds)||durationSeconds<60||durationSeconds>2592000))return {status:'DENIED',reason:'INVALID_DURATION'};
-    // The current official adapter has no bounded-duration dispatch contract.
+    // An unbranded custom adapter might ignore the optional deadline argument.
     // Never silently turn a timed request into a permanent Telegram sanction.
-    if(durationSeconds!==undefined&&!(this.gateway instanceof FakeModerationGateway))return {status:'DENIED',reason:'DURATION_PROVIDER_UNSUPPORTED'};
+    if(durationSeconds!==undefined&&!(this.gateway instanceof FakeModerationGateway)&&!TelegramBotApiModerationGateway.usesOfficialDispatch(this.gateway))return {status:'DENIED',reason:'DURATION_PROVIDER_UNSUPPORTED'};
     const preflight=await this.priorPending(actorId,chatId,memberId);
     if(preflight)return preflight;
     if (!await this.check(actorId, chatId, memberId)) return { status: 'DENIED', reason: 'NOT_AUTHORIZED_OR_BOT_RIGHTS' };
@@ -326,12 +331,13 @@ export class ModerationService {
       const confirmed=latestConfirmedKind(operations);
       if(confirmed.status==='AMBIGUOUS')
        return {status:'BLOCKED_UNKNOWN' as const};
-      if(desired===confirmed.kind)return {status:'NO_CHANGE' as const};
+      const untilDate=this.untilDate(s,chatId,memberId,desired);
+      if(desired===confirmed.kind&&untilDate===confirmed.untilDate)return {status:'NO_CHANGE' as const};
       if(desired!=='NONE'){
        const limit=moderationRateFuse(s,actorId,chatId,this.clock());
        if(limit)return {status:'RATE_LIMIT' as const,reason:moderationRateDenial(limit)};
       }
-      const op: ModerationOperation = { id: randomUUID(), chatId, memberId, actorId, kind: desired, reasonFingerprint: fingerprint(s, chatId, memberId), policyVersion: this.policy.chatRevision(s, chatId), status: 'INTENT', createdAt: this.clock() };
+      const op: ModerationOperation = { id: randomUUID(), chatId, memberId, actorId, kind: desired, reasonFingerprint: fingerprint(s, chatId, memberId), policyVersion: this.policy.chatRevision(s, chatId), status: 'INTENT', createdAt: this.clock(),...(untilDate===undefined?{}:{untilDate}) };
       s.moderationOperations.push(op);
       return {status:'READY' as const,id:op.id,intent:{...op},
        targetHistory:targetOperationHistory(s,chatId,memberId,op.id)};
@@ -429,9 +435,9 @@ export class ModerationService {
     };
     let outcome: RestrictionOutcome;
     try{
-      outcome=await this.gateway.setRestriction(
+      outcome=started.receipt.kind==='NONE'&&TelegramBotApiModerationGateway.usesOfficialDispatch(this.gateway)?await (this.gateway as TelegramBotApiModerationGateway).confirmUnrestricted(started.receipt.chatId,started.receipt.memberId,verifyCurrentAuthority):await this.gateway.setRestriction(
         started.receipt.chatId,started.receipt.memberId,
-        started.receipt.kind,verifyCurrentAuthority);
+        started.receipt.kind,verifyCurrentAuthority,started.receipt.untilDate);
     }catch{outcome='UNKNOWN_OUTCOME';}
     // A structurally typed JavaScript gateway may return arbitrary strings
     // at runtime. Never write an unrecognized terminal state to the ledger.

@@ -24,7 +24,7 @@ export function groupModerationOperations(s:BotState,id:string):ModerationOperat
 export function moderationAuditDigest(ops:readonly ModerationOperation[]):string{
  return createHash('sha256').update('MANARATAK:MODERATION:STATUS:V1:')
   .update(JSON.stringify(ops.map(o=>[o.id,o.chatId,o.memberId,o.actorId,o.kind,
-   o.reasonFingerprint,o.policyVersion,o.status,o.createdAt])))
+   o.reasonFingerprint,o.policyVersion,o.status,o.createdAt,...(o.untilDate===undefined?[]:[{untilDate:o.untilDate}])])))
   .digest('hex').slice(0,12);
 }
 export const moderationAuditKey=(chat:Chat,page:number,opPage:number,digest:string)=>

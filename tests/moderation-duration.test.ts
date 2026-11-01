@@ -48,8 +48,34 @@ for(const engine of ['json','sqlite'] as const){
  });
  test(engine+' unsupported live durations cannot become permanent sanctions',async()=>{
   const f=await fixture();try{
-   let calls=0;const gateway=new TelegramBotApiModerationGateway('123456789:ABCDEFGHIJKLMNOPQRSTUVWXYZabcde',(async()=>{calls++;throw Error('NETWORK_FORBIDDEN');}) as typeof fetch,async()=>true),service=new ModerationService(f.store,f.policy,gateway,()=>NOW);
+   let calls=0;const gateway={canRestrict:async()=>true,isProtected:async()=>false,setRestriction:async()=>{calls++;return 'CONFIRMED' as const;}},service=new ModerationService(f.store,f.policy,gateway,()=>NOW);
    const result=await service.addManualReason('100',CHAT,'300','timed','MUTE',undefined,60);assert.equal(result.reason,'DURATION_PROVIDER_UNSUPPORTED');assert.equal(calls,0);assert.equal((await f.store.snapshot()).moderationReasons.length,0);
   }finally{await f.close();}
  });
+ test(engine+' official adapter serializes a bounded deadline and refuses basic groups or near-expired dates',async()=>{
+  const f=await fixture();try{
+   const writes:Record<string,unknown>[]=[];let now=NOW,kind='supergroup';
+   const request=(async(url:unknown,init:RequestInit)=>{const method=String(url).split('/').at(-1)!,body=JSON.parse(String(init.body));let result:unknown;if(method==='getChat')result={id:Number(CHAT),type:kind};else if(method==='getChatMember')result=body.user_id===123456789?{status:'administrator',user:{id:123456789,is_bot:true},can_restrict_members:true}:{status:'member',user:{id:body.user_id,is_bot:false}};else{assert.ok(['banChatMember','restrictChatMember'].includes(method));writes.push(body);result=true;}return Response.json({ok:true,result});}) as typeof fetch;
+   const gateway=new TelegramBotApiModerationGateway('123456789:ABCDEFGHIJKLMNOPQRSTUVWXYZabcde',request,async()=>true,()=>now),service=new ModerationService(f.store,f.policy,gateway,()=>now);
+   assert.equal((await service.addManualReason('100',CHAT,'300','timed','MUTE',undefined,120)).status,'APPLIED');assert.equal(writes[0]!.until_date,NOW/1000+120);
+   assert.equal((await f.store.snapshot()).moderationOperations[0]!.untilDate,NOW/1000+120);
+   now=NOW+1;assert.equal((await service.addManualReason('100',CHAT,'302','long','BAN',undefined,2592000)).status,'APPLIED');assert.equal(writes[1]!.until_date,Math.ceil((NOW+1)/1000)+2592000);
+   kind='group';gateway.inspectTrialGroupKind=async()=> 'SUPERGROUP';assert.equal(await gateway.setRestriction(CHAT,'301','BAN',undefined,NOW/1000+120),'FAILED_CONFIRMED');assert.equal(writes.length,2);
+   kind='supergroup';now=NOW+100000;assert.equal(await gateway.setRestriction(CHAT,'301','BAN',undefined,NOW/1000+120),'FAILED_CONFIRMED');assert.equal(writes.length,2);
+   now=NOW+120000;assert.equal((await service.expireManualReasons('100',CHAT,'300')).status,'APPLIED');assert.equal(writes.length,2,'already clear expiry is read-only');assert.equal((await f.store.snapshot()).moderationOperations.at(-1)!.kind,'NONE');
+  }finally{await f.close();}
+ });
+ test(engine+' changing the reserved deadline cannot rewrite the dispatched operation',async()=>{
+  const f=await fixture();try{
+   f.service.beforeDispatch=async()=>{await f.store.transaction(s=>{s.moderationOperations[0]!.untilDate!++;});};const result=await f.service.addManualReason('100',CHAT,'300','timed','MUTE',undefined,60);assert.notEqual(result.status,'APPLIED');assert.equal(f.gateway.calls.length,0);assert.ok((await f.store.snapshot()).moderationOperations.some(o=>o.status==='UNKNOWN_OUTCOME'));
+  }finally{await f.close();}
+ });
 }
+test('already-clear acknowledgement never changes Telegram permissions or trusts public method shadows',async()=>{
+ let status='member',reads=0;
+ const request=(async(url:unknown,init:RequestInit)=>{assert.ok(String(url).endsWith('/getChatMember'));reads++;const body=JSON.parse(String(init.body));return Response.json({ok:true,result:body.user_id===123456789?{status:'administrator',user:{id:123456789,is_bot:true},can_restrict_members:true}:{status,user:{id:300,is_bot:false},is_member:true}});}) as typeof fetch;
+ const gateway=new TelegramBotApiModerationGateway('123456789:ABCDEFGHIJKLMNOPQRSTUVWXYZabcde',request,async()=>true);
+ assert.equal(await gateway.confirmUnrestricted(CHAT,'300',async()=>true),'CONFIRMED');assert.equal(reads,4);
+ for(const value of ['restricted','kicked','administrator','left']){status=value;assert.equal(await gateway.confirmUnrestricted(CHAT,'300',async()=>true),'FAILED_CONFIRMED');}
+ status='member';assert.equal(await gateway.confirmUnrestricted(CHAT,'300',async()=>false),'FAILED_CONFIRMED');gateway.confirmUnrestricted=async()=> 'CONFIRMED';assert.equal(TelegramBotApiModerationGateway.usesOfficialDispatch(gateway),false);
+});

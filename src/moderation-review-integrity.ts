@@ -15,7 +15,7 @@ export function moderationReviewEvidenceDigest(op:ModerationOperation):string{
   .update(JSON.stringify([
    op.id,op.chatId,op.memberId,op.actorId,op.kind,
    op.reasonFingerprint,op.policyVersion,op.createdAt,
-   op.status,op.attemptGateway??null
+   op.status,op.attemptGateway??null,...(op.untilDate===undefined?[]:[{untilDate:op.untilDate}])
   ]))
   .digest('hex');
 }
@@ -102,6 +102,7 @@ export function inspectModerationLedgerIntegrity(
    typeof op.actorId!=='string'||!user.test(op.actorId)||
    typeof op.kind!=='string'||!kinds.has(op.kind)||
    typeof op.reasonFingerprint!=='string'||
+   (Object.hasOwn(op,'untilDate')&&(op.kind==='NONE'||!Number.isSafeInteger(op.untilDate)||Number(op.untilDate)<=0||Number(op.untilDate)>8640000000000))||
    !Number.isSafeInteger(op.policyVersion)||typeof op.policyVersion!=='number'||
    op.policyVersion<1||
    typeof op.status!=='string'||!statuses.has(op.status)||
