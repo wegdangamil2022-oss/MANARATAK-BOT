@@ -411,6 +411,18 @@ for(const engine of ['json','sqlite'] as const){
    assert.equal((await f.store.snapshot()).protectionPolicies![0]!.policy.mode,'MONITOR');
   }finally{await f.close();}
  });
+ test('monitor restoration records a new reversible change in either direction ('+engine+')',async()=>{
+  const f=await fixture(engine);try{
+   await f.approve();assert.equal((await f.save(GROUP,'MONITOR')).status,'SAVED');
+   const stop=await f.app().handle(cb(530,'gs:1:v:'+GROUP+':1:0:f'));assert.equal((await f.app().handle(cb(531,key(stop,'تأكيد')))).status,'APPLIED');
+   let history=await f.app().handle(cb(532,'gs:1:l:'+GROUP+':1:0'));assert.match(history.plan!.text,/السابق: مراقبة فقط/);
+   let review=await f.app().handle(cb(533,key(history,'استعادة وضع الحماية السابق')));assert.equal((await f.app().handle(cb(534,key(review,'تأكيد')))).status,'APPLIED');
+   assert.equal((await f.store.snapshot()).protectionPolicies![0]!.policy.mode,'MONITOR');
+   history=await f.app().handle(cb(535,'gs:1:l:'+GROUP+':1:0'));assert.match(history.plan!.text,/السابق: متوقفة/);
+   review=await f.app().handle(cb(536,key(history,'استعادة وضع الحماية السابق')));assert.equal((await f.app().handle(cb(537,key(review,'تأكيد')))).status,'APPLIED');
+   const state=await f.store.snapshot();assert.equal(state.protectionPolicies![0]!.policy.mode,'OFF');assert.equal(state.protectionPolicies![0]!.policy.revision,4);
+  }finally{await f.close();}
+ });
  test('settings history has bounded paging and no live side effects ('+engine+')',async()=>{
   const f=await fixture(engine);try{
    await f.approve();
