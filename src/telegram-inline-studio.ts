@@ -7,9 +7,10 @@ import type {StudioNativeKeyboard,StudioNativeButton} from './telegram-studio-ri
 import {renderStudentInline} from './telegram-inline-student.js';
 import {studioPresets} from './button-studio-presets.js';
 import {ownerPreviewCancelData} from './telegram-owner-preview-cancel.js';
+import {randomBytes} from 'node:crypto';
 export interface OwnerStudioScreen extends OwnerInlineScreen{nativeKeyboard?:StudioNativeKeyboard;}
 const n='(0|[1-9][0-9]{0,5})',rev='([1-9][0-9]{0,6})',id='([a-f0-9]{12})',mode='(0[1-9]|1[0-6])';
-const patterns=[new RegExp('^st:1:l:'+mode+':'+n+'$','u'),/^st:1:n$/u,/^st:1:g:(?:education|welcome)$/u,/^st:1:c:[A-Za-z0-9_-]{24}$/u,
+const patterns=[/^st:1:N:[A-Za-z0-9_-]{24}$/u,new RegExp('^st:1:l:'+mode+':'+n+'$','u'),/^st:1:n$/u,/^st:1:g:(?:education|welcome)$/u,/^st:1:c:[A-Za-z0-9_-]{24}$/u,
  new RegExp('^st:1:[dsvhj]:'+id+':'+rev+'$','u'),new RegExp('^st:1:v:'+id+':'+rev+':'+n+'$','u'),new RegExp('^st:1:e:'+mode+':'+id+':'+rev+'$','u'),
  new RegExp('^st:1:E:(?:01|02|04|06):'+id+':'+rev+':'+n+'$','u'),
  new RegExp('^st:1:i:'+id+':'+rev+':(?:NAME|TEXT|ADD_BUTTON|LAYOUT|TIMEZONE|(?:BUTTON_TITLE|TARGET|OPENS_AT|CLOSES_AT|SEATS):'+id+')$','u'),
@@ -33,6 +34,28 @@ export const studioEscape=(v:string)=>v.replace(/&/gu,'&amp;').replace(/</gu,'&l
 const root=[b('↩️ الاستوديو','mi:1:s:07:0'),b('🏠 لوحة المالك','mi:1:h')];
 const key=(action:string,t:StudioTemplate,tail='')=>'st:1:'+action+':'+t.id+':'+t.revision+(tail?':'+tail:'');
 const edit=(t:StudioTemplate,field:string)=>key('i',t,field);
+const previewRoute=(route:unknown):route is string=>typeof route==='string'&&/^st:1:[vt]:/u.test(route)&&validStudioInlineRoute(route);
+/** Context is stored server-side, bounded and actor-owned; callbacks never contain a client-supplied path. */
+async function withTrail(store:BotStore,actor:string,screen:OwnerStudioScreen,trail:string[],clock:()=>number,previous=true):Promise<OwnerStudioScreen|null>{
+ if(!trail.length)return screen;
+ if(trail.length>8)return null;
+ return store.transaction(s=>{
+  const now=clock();if(!Number.isSafeInteger(now)||now<0||now>8640000000000000-120000)return null;
+  s.callbacks=s.callbacks.filter(c=>!c.ref.startsWith('studio-nav:')||c.expiresAt>now);
+  const owned=s.callbacks.filter(c=>c.ref.startsWith('studio-nav:')&&c.actorId===actor);
+  const routes=new Map<string,string>();
+  const wrap=(route:string,path:string[])=>{
+   const identity=JSON.stringify({route,trail:path});let value=routes.get(identity);if(value)return value;
+   const nonce=randomBytes(18).toString('base64url');value='st:1:N:'+nonce;routes.set(identity,value);
+   s.callbacks.push({ref:'studio-nav:'+nonce,action:'studio.navigation:'+identity,actorId:actor,chatId:'private',policyVersion:0,expiresAt:now+120000,oneShot:false,used:false,revoked:false});return value;
+  };
+  const transform=<T extends {text:string}>(rows:readonly (readonly T[])[]):T[][]=>rows.map(row=>row.map(item=>'callback_data' in item&&typeof item.callback_data==='string'&&previewRoute(item.callback_data)?{...item,callback_data:wrap(item.callback_data,trail)}:item));
+  const back=previous?[[b('↩️ القائمة السابقة',wrap(trail.at(-1)!,trail.slice(0,-1)))]]:[];
+  const result={...screen,keyboard:{inline_keyboard:[...transform(screen.keyboard.inline_keyboard),...back]},...(screen.nativeKeyboard?{nativeKeyboard:{inline_keyboard:[...transform(screen.nativeKeyboard.inline_keyboard),...back]}}:{})};
+  const excess=owned.length+routes.size-128;if(excess>0){const remove=new Set(owned.slice(0,excess).map(c=>c.ref));s.callbacks=s.callbacks.filter(c=>!remove.has(c.ref));}
+  return result;
+ });
+}
 export function studioDraftScreen(t:StudioTemplate):OwnerInlineScreen{
  return ui('<b>مسودة القالب</b>\n'+studioEscape(t.draft.name)+'\nالنسخة الحالية: '+t.revision+'\nالأزرار: '+t.draft.buttons.length+'\nالصفوف: '+(t.draft.layout.join('-')||'فارغة')+'\nالإصدارات المحفوظة: '+t.versions.length,
  [[b('✏️ الاسم',edit(t,'NAME')),b('📝 النص',edit(t,'TEXT'))],[b('🔘 إضافة زر',edit(t,'ADD_BUTTON')),b('📐 الصفوف',edit(t,'LAYOUT'))],
@@ -54,8 +77,18 @@ function buttonScreen(t:StudioTemplate,button:StudioButton):OwnerInlineScreen{
  ...(moves.length?[moves]:[]),
  [b('نسخ الزر',key('o',t,suffix)),b('حذف الزر',key('x',t,suffix))],[b('↩️ قائمة الأزرار','st:1:E:01:'+t.id+':'+t.revision+':'+Math.floor(index/8))],[b('↩️ المسودة',key('d',t))],root]);
 }
-export async function renderOwnerInlineStudio(store:BotStore,policy:Policy,actor:string,data:string,clock:()=>number):Promise<OwnerStudioScreen|null>{
+export async function renderOwnerInlineStudio(store:BotStore,policy:Policy,actor:string,data:string,clock:()=>number,trail:string[]=[]):Promise<OwnerStudioScreen|null>{
  if(!policy.isOwner(actor))return null;
+ if(/^st:1:N:/u.test(data)){
+  if(!validStudioInlineRoute(data))return null;
+  const state=await store.snapshot(),matches=state.callbacks.filter(c=>c.ref==='studio-nav:'+data.slice(7)),c=matches[0],now=clock();
+  if(matches.length!==1||!c||c.actorId!==actor||c.chatId!=='private'||c.policyVersion!==0||c.oneShot!==false||c.used!==false||c.revoked!==false||!Number.isSafeInteger(now)||now<0||!Number.isSafeInteger(c.expiresAt)||c.expiresAt<=now||c.expiresAt>now+120000||!c.action.startsWith('studio.navigation:'))return null;
+  try{const path=JSON.parse(c.action.slice('studio.navigation:'.length)) as {route:unknown;trail:unknown};
+   if(!previewRoute(path.route)||!Array.isArray(path.trail)||path.trail.length>8||!path.trail.every(r=>previewRoute(r)&&r.startsWith('st:1:v:')))return null;
+   if(!path.trail.every(r=>{const p=r.split(':');return state.buttonStudio?.templates.some(t=>t.id===p[3]&&t.revision===Number(p[4]));}))return null;
+   return renderOwnerInlineStudio(store,policy,actor,path.route,clock,path.trail);
+  }catch{return null;}
+ }
  const svc=new ButtonStudioService(store,policy,clock);let all:StudioTemplate[];try{all=await svc.list(actor);}catch{return null;}
  const main=studioOwnerEntry(data),parts=data.split(':');
  if(!main&&!validStudioInlineRoute(data))return null;
@@ -149,16 +182,15 @@ export async function renderOwnerInlineStudio(store:BotStore,policy:Policy,actor
    const textPage=Number(parts[6]??0),buttonPage=Number(parts[7]??0),backRoute=key('v',t,textPage+':'+buttonPage);
    const preview=await renderOwnerInlineStudio(store,policy,actor,backRoute,clock);
    if(!preview?.nativeKeyboard?.inline_keyboard.some(row=>row.some(item=>'callback_data' in item&&item.callback_data===data)))return null;
+   if(button.action.kind==='MENU'&&trail.length>=8)return null;
    await svc.pressPreview(actor,id,revision,button.id);
    if(button.action.kind==='MENU'){
     const target=(await svc.list(actor)).find(x=>x.id===button.action.target);if(!target)return null;
-    const screen=await renderOwnerInlineStudio(store,policy,actor,key('v',target),clock);if(!screen)return null;
-    const back=[b('↩️ القائمة السابقة',backRoute)];
-    return {...screen,keyboard:{inline_keyboard:[...screen.keyboard.inline_keyboard,back]},...(screen.nativeKeyboard?{nativeKeyboard:{inline_keyboard:[...screen.nativeKeyboard.inline_keyboard,back]}}:{})};
+    return renderOwnerInlineStudio(store,policy,actor,key('v',target),clock,[...trail,backRoute]);
    }
-   if(button.action.kind==='SERVICE'){const screen=await renderStudentInline(store,policy,actor,button.action.target);return screen?{...screen,keyboard:{inline_keyboard:[...screen.keyboard.inline_keyboard,[b('↩️ المعاينة',backRoute)]]}}:null;}
+   if(button.action.kind==='SERVICE'){const screen=await renderStudentInline(store,policy,actor,button.action.target);return screen?withTrail(store,actor,{...screen,keyboard:{inline_keyboard:[...screen.keyboard.inline_keyboard,[b('↩️ المعاينة',backRoute)]]}},trail,clock,false):null;}
    const text=button.action.kind==='URL'?'<a href="'+studioEscape(button.action.target)+'">'+studioEscape(button.title)+'</a>':button.action.kind==='MINI_APP'?'وجهة Mini App تحتاج اعتمادًا في مرحلة ربطها قبل فتحها.':studioEscape(button.action.target);
-   return ui(text,[[b('↩️ المعاينة',backRoute)],root]);
+   return withTrail(store,actor,ui(text,[[b('↩️ المعاينة',backRoute)],root]),trail,clock,false);
   }
   if(action==='k'&&button){const kind=parts[6] as StudioAction['kind'];const target=kind==='URL'||kind==='MINI_APP'?'https://t.me/ManaratakEduBot':kind==='SERVICE'?'student:open':kind==='INLINE'?'منارتك':'نص الزر';const next=await svc.edit(actor,id,revision,{kind:'ACTION',buttonId:button.id,action:{kind,target}});return buttonScreen(next,next.draft.buttons.find(b=>b.id===button.id)!);}
   if(action==='y'&&button){const next=await svc.edit(actor,id,revision,{kind:'STYLE',buttonId:button.id,style:parts[6] as StudioButton['style']});return buttonScreen(next,next.draft.buttons.find(b=>b.id===button.id)!);}
@@ -208,7 +240,7 @@ export async function renderOwnerInlineStudio(store:BotStore,policy:Policy,actor
    const visible=rows.slice(buttonPage*rowsPerPage,(buttonPage+1)*rowsPerPage);
    const keyboard={inline_keyboard:[...(buttonNav.length?[buttonNav]:[]),...screen.keyboard.inline_keyboard]};
    visible.push(...keyboard.inline_keyboard.map(row=>row.map(bt=>({...bt}))));
-   return {...screen,text:screen.text+'\nصفحة الأزرار '+(buttonPage+1)+' من '+buttonPages,keyboard,nativeKeyboard:{inline_keyboard:visible}};
+   return withTrail(store,actor,{...screen,text:screen.text+'\nصفحة الأزرار '+(buttonPage+1)+' من '+buttonPages,keyboard,nativeKeyboard:{inline_keyboard:visible}},trail,clock);
   }
   return studioDraftScreen(t);
  }catch{return null;}

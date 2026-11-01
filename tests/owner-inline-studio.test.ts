@@ -18,6 +18,49 @@ const buttons=(r:Result)=>r.plan?.inlineMarkup?.inline_keyboard.flat()??r.plan?.
 const select=(r:Result,prefix:string)=>{const b=buttons(r).find(b=>b.callback_data.startsWith(prefix));assert.ok(b,'missing '+prefix);return b.callback_data;};
 for(const engine of ['json','sqlite'] as const){
  async function fixture(){const dir=await mkdtemp(join(tmpdir(),'studio-ui-')),store=new BotStore(join(dir,'state.'+engine),{engine}),policy=new Policy(store,'100'),education=new EducationService(store,policy);const app=()=>new TelegramUpdateApplication({store,policy,education,admin:new EducationAdminFacade(store,policy,education),faq:new ApprovedAnswerService(store,policy),links:new ResourceLinkService(store,policy),clock:()=>1700000000000,botId:'studio-local',botUsername:'ManaratakBot',membership:async()=>{throw Error('NETWORK_FORBIDDEN');}});return {store,policy,app,svc:new ButtonStudioService(store,policy,()=>1700000000000),close:()=>rm(dir,{recursive:true,force:true})};}
+ test('nested menu paging and service returns preserve ancestors without consuming another seat ('+engine+')',async()=>{
+  const f=await fixture();try{
+   let a=await f.svc.create('100','A'),b=await f.svc.create('100','B'),c=await f.svc.create('100','C');
+   c=await f.svc.edit('100',c.id,c.revision,{kind:'TEXT',value:'آخر قائمة'});
+   b=await f.svc.edit('100',b.id,b.revision,{kind:'TEXT',value:'ب'.repeat(450)});
+   for(const name of ['إلى الثالثة','الخدمة'])b=await f.svc.edit('100',b.id,b.revision,{kind:'ADD_BUTTON',value:name});
+   const next=b.draft.buttons[0]!,service=b.draft.buttons[1]!;
+   b=await f.svc.edit('100',b.id,b.revision,{kind:'ACTION',buttonId:next.id,action:{kind:'MENU',target:c.id}});
+   b=await f.svc.edit('100',b.id,b.revision,{kind:'ACTION',buttonId:service.id,action:{kind:'SERVICE',target:'student:open'}});
+   a=await f.svc.edit('100',a.id,a.revision,{kind:'ADD_BUTTON',value:'إلى الثانية'});const enter=a.draft.buttons[0]!;
+   a=await f.svc.edit('100',a.id,a.revision,{kind:'ACTION',buttonId:enter.id,action:{kind:'MENU',target:b.id}});
+   a=await f.svc.edit('100',a.id,a.revision,{kind:'CONDITION',buttonId:enter.id,condition:{...enter.condition,seats:1}});
+   let i=900,screen=await f.app().handle(event(i++,'st:1:v:'+a.id+':'+a.revision));
+   screen=await f.app().handle(event(i++,select(screen,'st:1:t:')));assert.equal(screen.status,'APPLIED');
+   const route=(text:string)=>{const item=buttons(screen).find(x=>x.text===text);assert.ok(item,text);return item.callback_data;};
+   screen=await f.app().handle(event(i++,route('➡️ بقية النص')));assert.ok(screen.plan!.text.includes('النص (2 من 3)'));
+   screen=await f.app().handle(event(i++,route('إلى الثالثة')));assert.ok(screen.plan!.text.includes('آخر قائمة'));
+   const back=route('↩️ القائمة السابقة');assert.equal((await f.app().handle(event(i++,back,300))).status,'DENIED');assert.equal((await f.app().handle(event(i++,back,100,true))).status,'DENIED');
+   screen=await f.app().handle(event(i++,back));assert.ok(screen.plan!.text.includes('النص (2 من 3)'));
+   screen=await f.app().handle(event(i++,route('الخدمة')));assert.equal(screen.status,'APPLIED');
+   screen=await f.app().handle(event(i++,route('↩️ المعاينة')));assert.ok(screen.plan!.text.includes('النص (2 من 3)'));
+   const stale=route('إلى الثالثة');screen=await f.app().handle(event(i++,route('↩️ القائمة السابقة')));assert.equal(screen.status,'APPLIED');
+   assert.equal((await f.store.snapshot()).callbacks.filter(x=>x.ref.startsWith('studio-seat:')).length,1);
+   a=await f.svc.edit('100',a.id,a.revision,{kind:'NAME',value:'A جديد'});
+   assert.equal((await f.app().handle(event(i++,stale))).status,'DENIED');
+   assert.equal((await f.store.snapshot()).callbacks.filter(x=>x.ref.startsWith('studio-seat:')).length,1);
+  }finally{await f.close();}
+ });
+ test('nested menu references reject expiration, duplicate records and revoked context ('+engine+')',async()=>{
+  const f=await fixture();try{
+   let a=await f.svc.create('100','A');const b=await f.svc.create('100','B');
+   a=await f.svc.edit('100',a.id,a.revision,{kind:'ADD_BUTTON',value:'فتح'});a=await f.svc.edit('100',a.id,a.revision,{kind:'ACTION',buttonId:a.draft.buttons[0]!.id,action:{kind:'MENU',target:b.id}});
+   const first=await f.app().handle(event(950,'st:1:v:'+a.id+':'+a.revision)),opened=await f.app().handle(event(951,select(first,'st:1:t:'))),back=select(opened,'st:1:N:');
+   const ref='studio-nav:'+back.slice(7),original=(await f.store.snapshot()).callbacks.find(x=>x.ref===ref)!;
+   await f.store.transaction(s=>{s.callbacks.push({...original});});assert.equal((await f.app().handle(event(952,back))).status,'DENIED');
+   await f.store.transaction(s=>{s.callbacks=s.callbacks.filter(x=>x.ref!==ref);s.callbacks.push({...original,expiresAt:1700000000000});});assert.equal((await f.app().handle(event(953,back))).status,'DENIED');
+   await f.store.transaction(s=>{s.callbacks=s.callbacks.filter(x=>x.ref!==ref);s.callbacks.push({...original,revoked:true});});assert.equal((await f.app().handle(event(954,back))).status,'DENIED');
+   a=await f.svc.edit('100',a.id,a.revision,{kind:'CONDITION',buttonId:a.draft.buttons[0]!.id,condition:{...a.draft.buttons[0]!.condition,seats:1}});
+   const press='st:1:t:'+a.id+':'+a.revision+':'+a.draft.buttons[0]!.id+':0:0',ancestor='st:1:v:'+a.id+':'+a.revision+':0:0';
+   await f.store.transaction(s=>{s.callbacks=s.callbacks.filter(x=>x.ref!==ref);s.callbacks.push({...original,action:'studio.navigation:'+JSON.stringify({route:press,trail:Array(8).fill(ancestor)})});});
+   assert.equal((await f.app().handle(event(955,back))).status,'DENIED');assert.equal((await f.store.snapshot()).callbacks.filter(x=>x.ref.startsWith('studio-seat:')).length,0);
+  }finally{await f.close();}
+ });
  test('studio target review shows the actual domain and complete escaped URL in bounded pages ('+engine+')',async()=>{
   const f=await fixture();try{
    let t=await f.svc.create('100','قالب');t=await f.svc.edit('100',t.id,t.revision,{kind:'ADD_BUTTON',value:'رابط'});const id=t.draft.buttons[0]!.id;
