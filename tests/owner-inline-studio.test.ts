@@ -241,4 +241,20 @@ for(const engine of ['json','sqlite'] as const){
    assert.equal((await f.store.snapshot()).callbacks.some(c=>c.action.startsWith('studio.seat:')),false);
   }finally{await f.close();}
  });
+ test('owner selects actual education destinations without entering route codes ('+engine+')',async()=>{
+  const f=await fixture();try{
+   let t=await f.svc.create('100','خدمات');t=await f.svc.edit('100',t.id,t.revision,{kind:'ADD_BUTTON',value:'خدمة'});const id=t.draft.buttons[0]!.id;
+   const detail=await f.app().handle(event(760,'st:1:b:'+t.id+':'+t.revision+':'+id));
+   const picker=await f.app().handle(event(761,buttons(detail).find(b=>b.text==='🎓 اختيار خدمة تعليمية')!.callback_data));
+   for(const title of ['مكتبة الطالب','المنح الدراسية','الجامعات والتخصصات','الدورات التعليمية','الاختبارات','الملفات والنماذج'])assert.ok(buttons(picker).some(b=>b.text.includes(title)),title);
+   const route=buttons(picker).find(b=>b.text.includes('المنح الدراسية'))!.callback_data;
+   assert.equal((await f.app().handle(event(762,route,300))).status,'DENIED');
+   assert.equal((await f.app().handle(event(763,route,100,true))).status,'DENIED');
+   const saved=await f.app().handle(event(764,route));assert.equal(saved.status,'APPLIED');
+   t=(await f.svc.list('100'))[0]!;assert.deepEqual(t.draft.buttons[0]!.action,{kind:'SERVICE',target:'si:2:s:h'});
+   assert.equal((await f.app().handle(event(765,route))).status,'DENIED');
+   const preview=await f.app().handle(event(766,'st:1:v:'+t.id+':'+t.revision));
+   const opened=await f.app().handle(event(767,select(preview,'st:1:t:')));assert.equal(opened.status,'APPLIED');assert.match(opened.plan!.text,/المنح الدراسية/);
+  }finally{await f.close();}
+ });
 }

@@ -13,6 +13,7 @@ const patterns=[new RegExp('^st:1:l:'+mode+':'+n+'$','u'),/^st:1:n$/u,/^st:1:g:(
  new RegExp('^st:1:E:(?:01|02|04|06):'+id+':'+rev+':'+n+'$','u'),
  new RegExp('^st:1:i:'+id+':'+rev+':(?:NAME|TEXT|ADD_BUTTON|LAYOUT|TIMEZONE|(?:BUTTON_TITLE|TARGET|OPENS_AT|CLOSES_AT|SEATS):'+id+')$','u'),
  new RegExp('^st:1:[boxt]:'+id+':'+rev+':'+id+'$','u'),new RegExp('^st:1:k:'+id+':'+rev+':'+id+':(?:URL|COPY|INLINE|SERVICE|MINI_APP)$','u'),
+ new RegExp('^st:1:H:'+id+':'+rev+':'+id+'$','u'),new RegExp('^st:1:J:'+id+':'+rev+':'+id+':[ascuef]$','u'),
  new RegExp('^st:1:u:'+id+':'+rev+':'+id+'$','u'),new RegExp('^st:1:w:'+id+':'+rev+':'+id+':'+n+'$','u'),new RegExp('^st:1:L:'+id+':'+rev+':'+id+':'+id+'$','u'),
  new RegExp('^st:1:y:'+id+':'+rev+':'+id+':(?:default|primary|success|danger)$','u'),new RegExp('^st:1:r:'+id+':'+rev+':'+rev+'$','u'),
  new RegExp('^st:1:f:'+id+':'+rev+':(?:12|24|gregory|islamic)$','u'),new RegExp('^st:1:a:'+id+':'+rev+':'+id+':(?:ANY|OWNER)$','u'),
@@ -44,6 +45,7 @@ function buttonScreen(t:StudioTemplate,button:StudioButton):OwnerInlineScreen{
  return ui('<b>تحرير الزر</b>\nالاسم: '+studioEscape(button.title)+'\nالنوع: '+button.action.kind+(domain?'\nالنطاق: <code>'+studioEscape(domain)+'</code>':'')+'\nالهدف: '+studioEscape(target.slice(0,160).join(''))+(target.length>160?'…':'')+'\nالنمط: '+button.style+'\nالجمهور: '+button.condition.role+'\nالفتح: '+(button.condition.opensAt?new Date(button.condition.opensAt).toISOString():'دون حد')+'\nالإغلاق: '+(button.condition.closesAt?new Date(button.condition.closesAt).toISOString():'دون حد')+'\nالمقاعد: '+(button.condition.seats||'دون حد'),
  [[b('✏️ عنوان الزر',edit(t,'BUTTON_TITLE:'+suffix)),b('🎯 تعديل الهدف',edit(t,'TARGET:'+suffix))],[b('🔎 عرض الهدف كاملًا',key('T',t,suffix+':0'))],
  ...(['URL','COPY','INLINE','SERVICE','MINI_APP'] as const).map(k=>[b('النوع: '+k,key('k',t,suffix+':'+k))]),
+ [b('🎓 اختيار خدمة تعليمية',key('H',t,suffix))],
  [b('🧭 فتح قائمة أخرى',key('u',t,suffix))],
  [b('افتراضي',key('y',t,suffix+':default')),b('🔵',key('y',t,suffix+':primary')),b('🟢',key('y',t,suffix+':success')),b('🔴',key('y',t,suffix+':danger'))],
  [b('للجميع',key('a',t,suffix+':ANY')),b('للمالك',key('a',t,suffix+':OWNER'))],
@@ -119,6 +121,15 @@ export async function renderOwnerInlineStudio(store:BotStore,policy:Policy,actor
    return ui(action==='r'?'<b>معاينة الاستعادة</b>\nالقالب الحالي: '+studioEscape(t.draft.name)+'\nاسم النسخة المختارة: '+studioEscape(v!.content.name)+'\nعدد الأزرار: '+v!.content.buttons.length+'\nسيُحفظ إصدار جديد ولن تُمسح الإصدارات القديمة.':'<b>معاينة حذف الزر</b>\nسيُحذف من المسودة: '+studioEscape(button!.title),[[b('✅ تأكيد','st:1:c:'+ref.slice(2))],[b('إلغاء',key('d',t))],root]);
   }
   if(action==='b')return button?buttonScreen(t,button):null;
+  if(action==='H'&&button){
+   const options=[['a','مكتبة الطالب'],['s','المنح الدراسية'],['u','الجامعات والتخصصات'],['c','الدورات التعليمية'],['e','الاختبارات'],['f','الملفات والنماذج']] as const;
+   return ui('<b>اختيار الخدمة التعليمية</b>\nاختر الوجهة من مكتبة الطالب المحلية. لا يُنشأ نشر ولا اتصال بمنصة الإنتاج.',[...options.map(([code,title])=>[b(title,key('J',t,button.id+':'+code))]),[b('↩️ تحرير الزر',key('b',t,button.id))],root]);
+  }
+  if(action==='J'&&button){
+   const code=parts[6]!,target=code==='a'?'student:open':'si:2:'+code+':h';
+   const next=await svc.edit(actor,id,revision,{kind:'ACTION',buttonId:button.id,action:{kind:'SERVICE',target}});
+   return buttonScreen(next,next.draft.buttons.find(item=>item.id===button.id)!);
+  }
   if(action==='T'&&button){
    const chars=Array.from(button.action.target),page=Number(parts[6]),pages=Math.max(1,Math.ceil(chars.length/160));if(page>=pages)return null;
    const nav=[];if(page)nav.push(b('السابق',key('T',t,button.id+':'+(page-1))));if(page+1<pages)nav.push(b('التالي',key('T',t,button.id+':'+(page+1))));
