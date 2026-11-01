@@ -347,6 +347,16 @@ for(const engine of ['json','sqlite'] as const){
    assert.equal(buttons(history).some(b=>b.text.includes('استعادة وضع المساعد السابق')),false);
   }finally{await f.close();}
  });
+ test('restoring assistant mode preserves the protection policy and warns about revision staleness ('+engine+')',async()=>{
+  const f=await fixture(engine);try{
+   await f.approve();assert.equal((await f.save()).status,'SAVED');const before=(await f.store.snapshot()).protectionPolicies;
+   const changed=await f.app().handle(cb(460,'gs:1:v:'+GROUP+':1:0:o'));await f.app().handle(cb(461,key(changed,'تأكيد التعديل')));
+   const history=await f.app().handle(cb(462,'gs:1:l:'+GROUP+':2:0'));const review=await f.app().handle(cb(463,key(history,'استعادة وضع المساعد السابق')));
+   assert.match(review.plan!.text,/سياسة الحماية إلى مراجعة/);assert.equal((await f.app().handle(cb(464,key(review,'تأكيد')))).status,'APPLIED');
+   const state=await f.store.snapshot();assert.equal(state.chats[0]!.groupAI,'OFF');assert.equal(state.chats[0]!.version,3);assert.deepEqual(state.protectionPolicies,before);
+   const card=await f.app().handle(cb(465,'gs:1:g:'+GROUP+':3:0'));assert.match(card.plan!.text,/تحتاج مراجعة/);
+  }finally{await f.close();}
+ });
  test('settings history has bounded paging and no live side effects ('+engine+')',async()=>{
   const f=await fixture(engine);try{
    await f.approve();
