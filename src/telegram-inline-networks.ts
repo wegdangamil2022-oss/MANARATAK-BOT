@@ -272,6 +272,45 @@ export class OwnerNetworkEditor{
      [[btn('👥 ربط المجموعات','nw:1:g:'+id+':0')],
       [btn('🌐 قائمة الشبكات','nw:1:p:0')]]);
    }
+
+   if(receipt.action.startsWith(PREFIX+'rename:')){
+    try{data=JSON.parse(receipt.action.slice((PREFIX+'rename:').length));}catch{return null;}
+    if(!Array.isArray(data)||data.length!==4||
+     typeof data[0]!=='string'||!/^[a-f0-9]{12}$/u.test(data[0])||
+     !validNetworkName(data[1])||!Number.isSafeInteger(data[2])||
+     data[2]<1||data[2]>=9_999_999_999||
+     typeof data[3]!=='string'||!/^[a-f0-9]{64}$/u.test(data[3]))return null;
+    const n=this.find(s,data[0]);
+    if(!n||n.revision!==data[2]||n.name===data[1]||
+     matchesName((s.groupNetworks??[]).filter(other=>other.id!==n.id),data[1])||
+     editProof(s,n)!==data[3])return null;
+    n.name=data[1];n.revision++;n.updatedAt=now;receipt.used=true;
+    s.audit.push({actorId:actor,updateKey:'owner-network:'+nonce,decision:'ALLOW',
+     reason:'OWNER_NETWORK_RENAMED',policyVersion:n.revision,at:now});
+    return ui('<b>✅ أُعيدت تسمية الشبكة محليًا</b>\n'+
+     'الاسم الجديد: '+escape(n.name)+'\nلم تتغير مجموعاتها ولا صلاحيات Telegram.',
+     [[btn('🌐 بطاقة الشبكة','nw:1:d:'+n.id),
+       btn('📋 قائمة الشبكات','nw:1:p:0')]]);
+   }
+   if(receipt.action.startsWith(PREFIX+'delete:')){
+    try{data=JSON.parse(receipt.action.slice((PREFIX+'delete:').length));}catch{return null;}
+    if(!Array.isArray(data)||data.length!==3||
+     typeof data[0]!=='string'||!/^[a-f0-9]{12}$/u.test(data[0])||
+     !Number.isSafeInteger(data[1])||data[1]<1||
+     typeof data[2]!=='string'||!/^[a-f0-9]{64}$/u.test(data[2]))return null;
+    const n=this.find(s,data[0]);
+    if(!n||n.revision!==data[1]||n.members.length!==0||
+     editProof(s,n)!==data[2])return null;
+    s.groupNetworks=s.groupNetworks!.filter(row=>row.id!==n.id);
+    receipt.used=true;
+    s.audit.push({actorId:actor,updateKey:'owner-network:'+nonce,decision:'ALLOW',
+     reason:'OWNER_NETWORK_DELETED',policyVersion:n.revision,at:now});
+    return ui('<b>✅ حُذفت الشبكة المحلية الفارغة</b>\n'+
+     'الشبكة المحذوفة: '+escape(n.name)+'\n'+
+     'لم تُحذف أي مجموعة أو تُنفّذ أوامر Telegram.',
+     [[btn('📋 قائمة الشبكات','nw:1:p:0'),
+       btn('🏠 لوحة المالك','mi:1:h')]]);
+   }
    if(!receipt.action.startsWith(PREFIX+'toggle:'))return null;
    try{data=JSON.parse(receipt.action.slice((PREFIX+'toggle:').length));}catch{return null;}
    if(!Array.isArray(data)||data.length!==7||
