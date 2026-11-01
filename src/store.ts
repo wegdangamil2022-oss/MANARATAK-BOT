@@ -1,5 +1,6 @@
 import {isValidFloodWindow,type FloodWindow} from './protection-flood.js';
 import {validGroupNetworks,type GroupNetwork} from './group-network-model.js';
+import {validCommunityFolders,type CommunityFolder} from './community-folder-model.js';
 import {validAdminUIAccess,type AdminUIAccess} from './protection-ui-access.js';
 import {validStudioState,type StudioState} from './button-studio-model.js';
 import {validCategoryLanguage,validTopicVisibility} from './education-category-policy.js';
@@ -112,11 +113,12 @@ export interface TelegramReplyJob {
  /** New private replies declare origin; pre-v0.7.56 private QUEUED rows
   * without either this or privateGroupAccess are quarantine-only on dispatch.
   */
- privateReplyKind?:'LOCAL'|'GROUP_SCOPED'|'ADMIN_SCOPED'|'LIBRARY_SCOPED'|'STUDIO_SCOPED';
+ privateReplyKind?:'LOCAL'|'GROUP_SCOPED'|'ADMIN_SCOPED'|'LIBRARY_SCOPED'|'STUDIO_SCOPED'|'COMMUNITY_SCOPED';
  /** Ephemeral administrative view witness, removed before any outbound attempt. */
  adminUIAccess?:AdminUIAccess;
  /** Short-lived witness for private inline library contents. */
  privateLibraryAccess?:AdminUIAccess;
+ communityAccess?:AdminUIAccess;
  /** Explicit bounded classification of a locally denied QUEUED send.
   * No actor ID, chat ID, text, evidence key or provider description.
   * Historical FAILED_CONFIRMED and network-provider failures remain untagged.
@@ -152,6 +154,7 @@ export interface B6BudgetAttempt {
   operatorReview?:{reviewedBy:string;reviewedAt:number};
 }
 export interface BotState {
+  communityFolders?:CommunityFolder[];
   buttonStudio?:StudioState;
   /** Local owner network folders; never evidence of Telegram rights. */
   groupNetworks?:GroupNetwork[];
@@ -239,6 +242,7 @@ export class BotStore {
     }
     if (previous.schemaVersion !== 8 ||
       (previous.groupNetworks!==undefined&&!validGroupNetworks(previous.groupNetworks))||
+      (previous.communityFolders!==undefined&&!validCommunityFolders(previous.communityFolders))||
       (previous.privateSettingsRevision!==undefined&&(typeof previous.privateSettingsRevision!=='number'||!Number.isSafeInteger(previous.privateSettingsRevision)||previous.privateSettingsRevision<0||previous.privateSettingsRevision>=Number.MAX_SAFE_INTEGER))||
       (previous.buttonStudio!==undefined&&!validStudioState(previous.buttonStudio))||
       (previous.protectionFloodWindows!==undefined&&(!Array.isArray(previous.protectionFloodWindows)||
@@ -384,17 +388,21 @@ export class BotStore {
             !Number.isSafeInteger(Number(plan.chatId))||
             job.groupReplyKind!==undefined||
             job.groupMenuAccess!==undefined||job.groupQuestionAccess!==undefined||
-            (job.privateReplyKind!=='LOCAL'&&job.privateReplyKind!=='GROUP_SCOPED'&&job.privateReplyKind!=='ADMIN_SCOPED'&&job.privateReplyKind!=='LIBRARY_SCOPED'&&job.privateReplyKind!=='STUDIO_SCOPED')||
+            (job.privateReplyKind!=='LOCAL'&&job.privateReplyKind!=='GROUP_SCOPED'&&job.privateReplyKind!=='ADMIN_SCOPED'&&job.privateReplyKind!=='LIBRARY_SCOPED'&&job.privateReplyKind!=='STUDIO_SCOPED'&&job.privateReplyKind!=='COMMUNITY_SCOPED')||
             (job.privateReplyKind==='LOCAL'&&(job.privateGroupAccess!==undefined||job.adminUIAccess!==undefined||job.privateLibraryAccess!==undefined))||
             (job.privateReplyKind==='GROUP_SCOPED'&&(job.privateGroupAccess===undefined||job.adminUIAccess!==undefined||job.privateLibraryAccess!==undefined))||
             ((job.privateReplyKind==='ADMIN_SCOPED'||job.privateReplyKind==='STUDIO_SCOPED')&&(job.adminUIAccess===undefined||job.privateGroupAccess!==undefined||job.privateLibraryAccess!==undefined))||
-            (job.privateReplyKind==='LIBRARY_SCOPED'&&(job.privateLibraryAccess===undefined||job.privateGroupAccess!==undefined||job.adminUIAccess!==undefined)))
+            (job.privateReplyKind==='LIBRARY_SCOPED'&&(job.privateLibraryAccess===undefined||job.privateGroupAccess!==undefined||job.adminUIAccess!==undefined))||
+            (job.privateReplyKind==='COMMUNITY_SCOPED'&&(job.communityAccess===undefined||job.privateLibraryAccess!==undefined||job.privateGroupAccess!==undefined||job.adminUIAccess!==undefined)))
           return true;
         }
         if(job.adminUIAccess!==undefined){
          if(!validAdminUIAccess(job.adminUIAccess)||job.status!=='QUEUED'||!plan||plan.chatId!==job.adminUIAccess.actorId||
           (job.privateReplyKind!=='ADMIN_SCOPED'&&job.privateReplyKind!=='STUDIO_SCOPED')||job.privateGroupAccess!==undefined||job.groupReplyKind!==undefined||
           job.groupQuestionAccess!==undefined||job.groupMenuAccess!==undefined)return true;
+        }
+        if(job.communityAccess!==undefined){
+         if(!validAdminUIAccess(job.communityAccess)||job.status!=='QUEUED'||!plan||plan.chatId!==job.communityAccess.actorId||job.privateReplyKind!=='COMMUNITY_SCOPED'||job.privateLibraryAccess!==undefined||job.privateGroupAccess!==undefined||job.adminUIAccess!==undefined||job.groupReplyKind!==undefined||job.groupQuestionAccess!==undefined||job.groupMenuAccess!==undefined)return true;
         }
         if(job.privateLibraryAccess!==undefined){
          if(!validAdminUIAccess(job.privateLibraryAccess)||job.status!=='QUEUED'||!plan||plan.chatId!==job.privateLibraryAccess.actorId||
@@ -717,7 +725,7 @@ export class BotStore {
     groupQuestionAccess?:TelegramReplyJob['groupQuestionAccess'],
     groupMenuAccess?:TelegramReplyJob['groupMenuAccess'],
     privateGroupAccess?:TelegramReplyJob['privateGroupAccess'],
-    adminUIAccess?:TelegramReplyJob['adminUIAccess'],privateLibraryAccess?:TelegramReplyJob['privateLibraryAccess'],studioScoped=false): Promise<void> {
+    adminUIAccess?:TelegramReplyJob['adminUIAccess'],privateLibraryAccess?:TelegramReplyJob['privateLibraryAccess'],studioScoped=false,communityAccess?:TelegramReplyJob['communityAccess']): Promise<void> {
     await this.transaction(s => {
       const update = s.updates.find(x => x.key === key);
       if (!update || update.status !== 'CLAIMED') throw new Error('Update not claimed');
@@ -730,11 +738,12 @@ export class BotStore {
          s.telegramReplyJobs.push({updateKey:key,plan:structuredClone(reply),status:'QUEUED',queuedAt:decision.at,
           ...(reply.chatId.startsWith('-')
            ?{groupReplyKind:groupQuestionAccess?'REVIEWED_FAQ' as const:'GENERAL' as const}
-           :{privateReplyKind:adminUIAccess?(studioScoped?'STUDIO_SCOPED' as const:'ADMIN_SCOPED' as const):privateGroupAccess?'GROUP_SCOPED' as const:privateLibraryAccess?'LIBRARY_SCOPED' as const:'LOCAL' as const}),
+           :{privateReplyKind:communityAccess?'COMMUNITY_SCOPED' as const:adminUIAccess?(studioScoped?'STUDIO_SCOPED' as const:'ADMIN_SCOPED' as const):privateGroupAccess?'GROUP_SCOPED' as const:privateLibraryAccess?'LIBRARY_SCOPED' as const:'LOCAL' as const}),
           ...(groupQuestionAccess?{groupQuestionAccess:structuredClone(groupQuestionAccess)}:{}),
           ...(groupMenuAccess?{groupMenuAccess:structuredClone(groupMenuAccess)}:{}),
           ...(privateGroupAccess?{privateGroupAccess:structuredClone(privateGroupAccess)}:{}),
           ...(adminUIAccess?{adminUIAccess:structuredClone(adminUIAccess)}:{}),
+          ...(communityAccess?{communityAccess:structuredClone(communityAccess)}:{}),
           ...(privateLibraryAccess?{privateLibraryAccess:structuredClone(privateLibraryAccess)}:{})});
       }
     });
