@@ -257,4 +257,22 @@ for(const engine of ['json','sqlite'] as const){
    const opened=await f.app().handle(event(767,select(preview,'st:1:t:')));assert.equal(opened.status,'APPLIED');assert.match(opened.plan!.text,/المنح الدراسية/);
   }finally{await f.close();}
  });
+ test('all education choices open the matching local section and honor its feature switch ('+engine+')',async()=>{
+  const f=await fixture();try{
+   let t=await f.svc.create('100','الخدمات');t=await f.svc.edit('100',t.id,t.revision,{kind:'ADD_BUTTON',value:'خدمة'});const id=t.draft.buttons[0]!.id;
+   const cases=[['مكتبة الطالب','student:open','مكتبة الطالب'],['المنح الدراسية','si:2:s:h','المنح الدراسية'],['الجامعات والتخصصات','si:2:u:h','الجامعات والتخصصات'],['الدورات التعليمية','si:2:c:h','الدورات التعليمية'],['الاختبارات','si:2:e:h','الاختبارات'],['الملفات والنماذج','si:2:f:h','الملفات والنماذج']] as const;
+   let seq=800;
+   for(const [label,target,title] of cases){
+    const picker=await f.app().handle(event(seq++,'st:1:H:'+t.id+':'+t.revision+':'+id));
+    const choice=buttons(picker).find(b=>b.text===label);assert.ok(choice);
+    assert.equal((await f.app().handle(event(seq++,choice.callback_data))).status,'APPLIED');
+    t=(await f.svc.list('100'))[0]!;assert.equal(t.draft.buttons[0]!.action.target,target);
+    const page=await f.app().handle(event(seq++,'st:1:v:'+t.id+':'+t.revision));const press=select(page,'st:1:t:');
+    const opened=await f.app().handle(event(seq++,press));assert.equal(opened.status,'APPLIED');assert.ok(opened.plan!.text.includes(title));
+    await f.store.transaction(s=>{s.privateFeatures['education.navigate']=false;});
+    assert.equal((await f.app().handle(event(seq++,press))).status,'DENIED');
+    await f.store.transaction(s=>{s.privateFeatures['education.navigate']=true;});
+   }
+  }finally{await f.close();}
+ });
 }
