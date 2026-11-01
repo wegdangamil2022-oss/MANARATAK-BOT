@@ -1,6 +1,8 @@
 import type {ModerationGateway,RestrictionOutcome} from './moderation.js';
 import type {RestrictionKind} from './store.js';
 import type {RestrictionObservation} from './moderation-reversal-preflight.js';
+import {GROUP_PERMISSION_KEYS} from './group-permission-model.js';
+export interface ReviewedRestorationSource{kind:'BAN'|'MUTE';untilDate?:number;}
 
 /**
  * A separately injectable, deliberately DISARMED BY DEFAULT Telegram Bot API
@@ -12,7 +14,9 @@ import type {RestrictionObservation} from './moderation-reversal-preflight.js';
  *
  * A 'NONE' release cannot be mapped safely using just RestrictionKind: release
  * would risk overriding unrelated Telegram restrictions or kicking a member via
- * unban. Until a separately audited, evidence-bound reversal exists, deny it.
+ * unban. Keep that raw path denied. A separate owner-reviewed restoration
+ * method requires the service's original baseline and fresh authority callback;
+ * matching remote state alone never authorizes it.
  */
 const validUser=(v:unknown):v is string=>{
  if(typeof v!=='string'||!/^[1-9][0-9]{0,15}$/u.test(v))return false;
@@ -68,6 +72,8 @@ export class TelegramBotApiModerationGateway implements ModerationGateway{
    adapter.canRestrict===officialGatewayMethods.canRestrict&&
    adapter.isProtected===officialGatewayMethods.isProtected&&
    prototype.confirmUnrestricted===officialGatewayMethods.confirmUnrestricted&&adapter.confirmUnrestricted===officialGatewayMethods.confirmUnrestricted&&
+   prototype.canRestoreReviewed===officialGatewayMethods.canRestoreReviewed&&adapter.canRestoreReviewed===officialGatewayMethods.canRestoreReviewed&&
+   prototype.restoreFromReviewedDecision===officialGatewayMethods.restoreFromReviewedDecision&&adapter.restoreFromReviewedDecision===officialGatewayMethods.restoreFromReviewedDecision&&
    !('allowed' in adapter)&&!('call' in adapter)&&
    !('getMember' in adapter);
  }
@@ -263,6 +269,44 @@ export class TelegramBotApiModerationGateway implements ModerationGateway{
   }
   return 'UNKNOWN';
  }
+ /** Matching state is a conflict check, never Telegram authorship evidence.
+  * Only the separate owner-reviewed service decision can authorize this path. */
+ async #restorationState(chatId:string,memberId:string,source:ReviewedRestorationSource):Promise<'MATCH'|'CLEAR'|'DENIED'>{
+  if(!validGroup(chatId)||!validUser(memberId)||Number(memberId)===this.#botId||!source||!['BAN','MUTE'].includes(source.kind)||
+   source.untilDate!==undefined&&(!Number.isSafeInteger(source.untilDate)||source.untilDate<=0)||!await this.#allowed()||
+   await this.#inspectGroupKind(chatId)!=='SUPERGROUP'||!await this.#canRestrict(chatId,memberId))return 'DENIED';
+  const member=await this.#getMember(chatId,memberId);
+  if(!member||member.user.is_bot!==false||!await this.#canRestrict(chatId,memberId)||!await this.#allowed())return 'DENIED';
+  if(member.status==='member'||source.kind==='BAN'&&member.status==='left')return 'CLEAR';
+  const raw=member as unknown as ObjectValue;
+  if(raw.until_date!==(source.untilDate??0))return 'DENIED';
+  if(source.kind==='BAN')return member.status==='kicked'?'MATCH':'DENIED';
+  if(member.status!=='restricted'||member.is_member!==true||Object.keys(raw).some(k=>k.startsWith('can_')&&!GROUP_PERMISSION_KEYS.includes(k as typeof GROUP_PERMISSION_KEYS[number])))return 'DENIED';
+  return GROUP_PERMISSION_KEYS.every(k=>raw[k]===false)?'MATCH':'DENIED';
+ }
+ async canRestoreReviewed(chatId:string,memberId:string,source:ReviewedRestorationSource):Promise<boolean>{
+  return await this.#restorationState(chatId,memberId,source)!=='DENIED';
+ }
+ async restoreFromReviewedDecision(chatId:string,memberId:string,source:ReviewedRestorationSource,verifyCurrentAuthority:()=>Promise<boolean>):Promise<RestrictionOutcome>{
+  if(typeof verifyCurrentAuthority!=='function')return 'FAILED_CONFIRMED';
+  const expected=structuredClone(source);let state:'MATCH'|'CLEAR'|'DENIED'='DENIED';
+  for(let i=0;i<2;i++){
+   state=await this.#restorationState(chatId,memberId,expected);if(state==='DENIED')return 'FAILED_CONFIRMED';
+   let current=false;try{current=await verifyCurrentAuthority()===true;}catch{/* denied */}
+   if(!current||!await this.#allowed())return 'FAILED_CONFIRMED';
+  }
+  // Re-read after the awaited local decision. There is no Telegram compare-
+  // and-set API; an identical outside restriction remains a human review risk.
+  state=await this.#restorationState(chatId,memberId,expected);if(state==='DENIED')return 'FAILED_CONFIRMED';
+  let current=false;try{current=await verifyCurrentAuthority()===true;}catch{/* denied */}
+  if(!current||!await this.#allowed())return 'FAILED_CONFIRMED';
+  if(state==='CLEAR')return 'CONFIRMED';
+  const reply=expected.kind==='BAN'?await this.#call('unbanChatMember',{chat_id:chatId,user_id:Number(memberId),only_if_banned:true}):
+   await this.#call('restrictChatMember',{chat_id:chatId,user_id:Number(memberId),permissions:Object.fromEntries(GROUP_PERMISSION_KEYS.map(k=>[k,true])),use_independent_chat_permissions:true});
+  if(reply.status==='CLIENT_DENIED')return 'FAILED_CONFIRMED';
+  if(reply.status!=='HTTP_OK'||reply.value!==true)return 'UNKNOWN_OUTCOME';
+  try{return await this.#restorationState(chatId,memberId,expected)==='CLEAR'&&await verifyCurrentAuthority()===true?'CONFIRMED':'UNKNOWN_OUTCOME';}catch{return 'UNKNOWN_OUTCOME';}
+ }
  async setRestriction(chatId:string,memberId:string,
   kind:RestrictionKind,verifyCurrentAuthority?:()=>Promise<boolean>,untilDate?:number):Promise<RestrictionOutcome>{
   if(!validGroup(chatId)||!validUser(memberId)||Number(memberId)===this.#botId||
@@ -335,6 +379,8 @@ const officialGatewayMethods=Object.freeze({
  canRestrict:TelegramBotApiModerationGateway.prototype.canRestrict,
  isProtected:TelegramBotApiModerationGateway.prototype.isProtected,
  confirmUnrestricted:TelegramBotApiModerationGateway.prototype.confirmUnrestricted,
+ canRestoreReviewed:TelegramBotApiModerationGateway.prototype.canRestoreReviewed,
+ restoreFromReviewedDecision:TelegramBotApiModerationGateway.prototype.restoreFromReviewedDecision,
  inspectBotModerationRights:TelegramBotApiModerationGateway.prototype.inspectBotModerationRights,
  inspectTrialGroupKind:TelegramBotApiModerationGateway.prototype.inspectTrialGroupKind
 });

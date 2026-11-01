@@ -28,7 +28,7 @@ export function parseReplyModerationCommand(text:string,botUsername:string,
  * quarantine and durable sanction intents. This adapter never calls Bot API
  * itself and never emits target identities or reasons into a group. */
 export async function executeReplyModerationCommand(service:ModerationService,
- actorId:string,chatId:string,command:ReplyModerationCommand,stillCurrent?:(s:BotState)=>boolean):Promise<{
+ actorId:string,chatId:string,command:ReplyModerationCommand,stillCurrent?:(s:BotState)=>boolean,reviewedUntil?:number):Promise<{
  status:'APPLIED'|'DENIED'|'IGNORED'|'UNKNOWN';reason:string}> {
  try{
   if(command.kind==='warn'||command.kind==='unwarn'){
@@ -38,9 +38,9 @@ export async function executeReplyModerationCommand(service:ModerationService,
    return {status:result.status==='DENIED'?'DENIED':result.status==='NO_CHANGE'?'IGNORED':'APPLIED',reason:'MODERATION_'+result.status};
   }
   const result=command.kind==='unban'||command.kind==='unmute'
-   ?await service.removeManualReason(actorId,chatId,command.memberId,command.reference,command.kind==='unban'?'BAN':'MUTE',stillCurrent)
+   ?await service.removeManualReason(actorId,chatId,command.memberId,command.reference,command.kind==='unban'?'BAN':'MUTE',stillCurrent,reviewedUntil)
    :await service.addManualReason(actorId,chatId,command.memberId,command.reference,command.kind==='ban'?'BAN':'MUTE',stillCurrent,command.durationSeconds);
-  return {status:result.status==='APPLIED'?'APPLIED':result.status==='NO_CHANGE'?'IGNORED':result.status==='UNKNOWN_OUTCOME'?'UNKNOWN':'DENIED',reason:'MODERATION_'+result.status};
+  return {status:result.status==='APPLIED'?'APPLIED':result.status==='NO_CHANGE'?'IGNORED':(result.status==='UNKNOWN_OUTCOME'||result.status==='BLOCKED_UNKNOWN'&&result.reason!=='NO_SAFE_DISPATCH')?'UNKNOWN':'DENIED',reason:'MODERATION_'+result.status};
  }catch{
   // A storage error can follow an attempted external effect. Never turn an
   // exception into a successful/no-send result or an automatic retry.

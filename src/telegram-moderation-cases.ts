@@ -48,7 +48,7 @@ export class TelegramModerationCases{
   if(kind==='g'||kind==='l'){
    const rows=entries.slice(casePage*8,casePage*8+8).map((e,i)=>[b((e.active?'🟠 ':'⚪ ')+e.member+' · '+(e.kind==='WARNING'?'تحذير':e.kind==='SUBSCRIPTION'?'اشتراك':e.kind==='BAN'?'حظر':'كتم'),'cs:1:d:'+stem+':'+casePage+':'+(i+1))]);
    const nav=[];if(casePage>0)nav.push(b('⬅️ السابق','cs:1:l:'+stem+':'+(casePage-1)));if(casePage+1<pages)nav.push(b('➡️ التالي','cs:1:l:'+stem+':'+(casePage+1)));if(nav.length)rows.push(nav);rows.push([b('↩️ المجموعات','cs:1:h:'+mode+':'+page)]);
-   return this.screen(s,actor,'<b>المجموعة '+c.id+'</b>\n'+entries.length+' حالة مسجلة · صفحة '+(casePage+1)+' من '+pages+'\nلبدء إجراء جديد، رد داخل المجموعة على رسالة العضو:\n<code>/'+(mode==='w'?'warn case-id':'ban case-id 1h')+'</code>\n'+(mode==='w'?'إلغاء التحذير: /unwarn case-id.':'الكتم: /mute case-id 10m؛ إزالة السبب: /unban أو /unmute case-id؛ حذف الرسالة: /del بالرد.')+'\nالحالات المحلية لا تثبت حالة Telegram الحالية، والطرد والاستعادة الفعلية لقيد قائم ما زالا غير موصولين.',rows);
+   return this.screen(s,actor,'<b>المجموعة '+c.id+'</b>\n'+entries.length+' حالة مسجلة · صفحة '+(casePage+1)+' من '+pages+'\nلبدء إجراء جديد، رد داخل المجموعة على رسالة العضو:\n<code>/'+(mode==='w'?'warn case-id':'ban case-id 1h')+'</code>\n'+(mode==='w'?'إلغاء التحذير: /unwarn case-id.':'الكتم: /mute case-id 10m؛ إزالة السبب: /unban أو /unmute case-id؛ حذف الرسالة: /del بالرد.')+'\nالحالات المحلية لا تثبت حالة Telegram الحالية، والطرد غير موصول؛ استعادة قيد قائم تحتاج قرار المالك ومصدرًا مطابقًا من المحول الرسمي.',rows);
   }
   const e=entries[casePage*8+Number(m[7])-1];if(!e)return null;
   const removable=e.active&&e.kind!=='SUBSCRIPTION'&&/^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/u.exec(e.reference)?.[0]===e.reference;

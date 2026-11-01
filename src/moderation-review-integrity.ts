@@ -15,7 +15,7 @@ export function moderationReviewEvidenceDigest(op:ModerationOperation):string{
   .update(JSON.stringify([
    op.id,op.chatId,op.memberId,op.actorId,op.kind,
    op.reasonFingerprint,op.policyVersion,op.createdAt,
-   op.status,op.attemptGateway??null,...(op.untilDate===undefined?[]:[{untilDate:op.untilDate}])
+   op.status,op.attemptGateway??null,...(op.untilDate===undefined?[]:[{untilDate:op.untilDate}]),...(op.baselineMode===undefined?[]:[{baselineMode:op.baselineMode}]),...(op.reverses===undefined?[]:[{reverses:op.reverses}])
   ]))
   .digest('hex');
 }
@@ -103,6 +103,8 @@ export function inspectModerationLedgerIntegrity(
    typeof op.kind!=='string'||!kinds.has(op.kind)||
    typeof op.reasonFingerprint!=='string'||
    (Object.hasOwn(op,'untilDate')&&(op.kind==='NONE'||!Number.isSafeInteger(op.untilDate)||Number(op.untilDate)<=0||Number(op.untilDate)>8640000000000))||
+   (Object.hasOwn(op,'baselineMode')&&(op.kind==='NONE'||op.baselineMode!=='INHERIT_GROUP_DEFAULTS'||op.attemptGateway!==undefined&&op.attemptGateway!=='TELEGRAM_API'))||
+   (Object.hasOwn(op,'reverses')&&(op.kind!=='NONE'||typeof op.reverses!=='string'||op.reverses.length<1||op.reverses.length>128||op.reverses===op.id))||
    !Number.isSafeInteger(op.policyVersion)||typeof op.policyVersion!=='number'||
    op.policyVersion<1||
    typeof op.status!=='string'||!statuses.has(op.status)||
