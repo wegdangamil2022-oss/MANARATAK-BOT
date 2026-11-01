@@ -47,6 +47,7 @@ export async function renderOwnerInlineImports(store:BotStore,policy:Policy,menu
   }));
   const remove=new Set(previous.slice(0,Math.max(0,previous.length+created-128)).map(c=>c.ref));s.callbacks=s.callbacks.filter(c=>!remove.has(c.ref));
   rows.push([{text:'↩️ الوارد / إلغاء المعاينة',callback_data:'mi:1:i:13:04'},{text:'↩️ التكاملات والبيانات',callback_data:'mi:1:s:13:0'}]);
+  if(data==='mi:1:i:13:04')rows.unshift([{text:'📥 رفع ملف جديد',callback_data:'ou:1:h'}]);
   // Leaving the preview also revokes outstanding confirmations, including siblings.
   if(data==='mi:1:i:13:04')for(const c of s.callbacks)if(c.ref.startsWith(PREFIX)&&c.actorId===actor&&previous.some(p=>p.ref===c.ref))c.revoked=true;
   return {text:screen.text,keyboard:{inline_keyboard:rows}};

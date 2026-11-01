@@ -22,6 +22,7 @@ import {menuLabels,mainMenuKeyboard,backMenuKeyboard,categoryButton,
 import {OwnerTelegramMenu,isOwnerMenuText} from './telegram-owner-menu.js';
 import {ownerInlineHome,ownerInlineRender,ownerInlineLinkedReadOnly,type TelegramInlineKeyboard} from './telegram-inline-owner.js';
 import {renderOwnerInlineImports} from './telegram-inline-imports.js';
+import {renderOwnerUpload,claimOwnerUpload,cancelOwnerUpload} from './telegram-owner-upload.js';
 import {renderOwnerInlineFAQ} from './telegram-inline-faq.js';
 import {renderOwnerInlineLibrary} from './telegram-inline-library.js';
 import {renderOwnerInlineStudio,studioOwnerEntry,studioDraftScreen} from './telegram-inline-studio.js';
@@ -193,7 +194,7 @@ function eventFrom(value:unknown):{event?:Event;reason:string} {
       return {reason:'INVALID_DOCUMENT'};
     if(msg.caption!==undefined&&(typeof msg.caption!=='string'||msg.caption.length>100))return {reason:'INVALID_DOCUMENT_CAPTION'};
     const document:IncomingDocument={fileId:d.file_id,filename:d.file_name,size:d.file_size,format,caption:typeof msg.caption==='string'?msg.caption:''};
-    return {event:{updateId:value.update_id as number,actorId:String(msg.from.id),chatId:String(msg.chat.id),kind,text:'',document},reason:'VALID'};
+    return {event:{updateId:value.update_id as number,actorId:String(msg.from.id),chatId:String(msg.chat.id),kind,text:'',document,...(msg.message_thread_id!==undefined?{topicId:msg.message_thread_id as number}:{})},reason:'VALID'};
   }
   if(typeof msg.text!=='string'||msg.text.length<1||msg.text.length>4096)return {reason:'UNSUPPORTED_MESSAGE'};
   if(/\u0000/u.test(msg.text))return {reason:'INVALID_TEXT'};
@@ -309,10 +310,12 @@ export class TelegramUpdateApplication {
     const {actorId,chatId,kind,document}=event;
     if(!document)throw Error('MISSING_DOCUMENT');
     // Even approved groups must not download documents or process them as admin commands.
-    if(kind!=='private')return {status:'DENIED',reason:'PRIVATE_ADMIN_UPLOAD_ONLY'};
+    if(kind!=='private'||event.topicId!==undefined)return {status:'DENIED',reason:'PRIVATE_ADMIN_UPLOAD_ONLY'};
     const scopeMatch=/^\/upload\s+(private|-[1-9]\d{0,18})$/u.exec(document.caption);
-    if(!scopeMatch)return {status:'DENIED',reason:'INVALID_DOCUMENT_CAPTION'};
-    const scope=scopeMatch[1]!;
+    if(scopeMatch&&this.opts.policy.isOwner(actorId))await cancelOwnerUpload(this.opts.store,actorId);
+    const wizard=document.caption===''?await claimOwnerUpload(this.opts.store,this.opts.policy,actorId,this.clock):null;
+    if(!scopeMatch&&!wizard)return {status:'DENIED',reason:'INVALID_DOCUMENT_CAPTION'};
+    const scope=scopeMatch?.[1]??wizard!;
     const ctx:VerifiedAdminContext={origin:'TELEGRAM_PRIVATE',actorId,chatId,verified:true};
     const panel=await this.opts.admin.panel(ctx,scope);
     // The permission gate MUST precede any expensive or external download request.
@@ -333,7 +336,7 @@ export class TelegramUpdateApplication {
     const run=await this.opts.admin.upload(ctx,scope,document.format,document.filename,text);
     const report=run.report;
     return {status:'APPLIED',reason:'RESPONSE_PLANNED_ONLY',plan:this.plan(chatId,
-      `<b>تقرير استيراد ملف Telegram تجريبي</b>\nالمعرف: <code>${escapeTelegramHtml(run.id)}</code>\nالأقسام: ${report.sections}\nالجامعات: ${report.universities}\nفرص مرشحة: ${report.opportunities}\nيتطلب المراجعة قبل الاعتماد والنشر المحلي.`)};
+      `<b>تقرير استيراد ملف Telegram تجريبي</b>\nالمعرف: <code>${escapeTelegramHtml(run.id)}</code>\nالأقسام: ${report.sections}\nالجامعات: ${report.universities}\nفرص مرشحة: ${report.opportunities}\nيتطلب المراجعة قبل الاعتماد والنشر المحلي.`,undefined,wizard?{inline_keyboard:[[{text:'🧾 مراجعة الوارد',callback_data:'mi:1:i:13:04'}]]}:undefined)};
   }
   private async groupLibrary(event:Event,categoryId?:string):Promise<ProcessedReply>{
    const view=await groupLibraryInline(this.opts.store,this.opts.policy,{actor:event.actorId,chat:event.chatId,...(event.topicId!==undefined?{topic:event.topicId}:{})},event.callbackData!==undefined?{callback:event.callbackData}:{...(categoryId!==undefined?{categoryId}:{})},this.clock,this.opts.subscription?(chat,actor)=>this.opts.subscription!.verify(chat,actor):undefined);
@@ -359,6 +362,7 @@ export class TelegramUpdateApplication {
     }
     if(event.document)return this.handleDocument(event);
     const {actorId,chatId,kind,text}=event;
+    if(kind==='private'&&this.opts.policy.isOwner(actorId)&&!event.callbackData?.startsWith('ou:1:'))await cancelOwnerUpload(this.opts.store,actorId);
     if(kind==='private'&&event.topicId!==undefined)return {status:'DENIED',reason:'PRIVATE_TOPIC_NOT_SUPPORTED'};
     if(event.callbackData!==undefined){
      if(kind==='group'&&event.callbackData.startsWith('gl:1:'))return this.groupLibrary(event);
@@ -450,6 +454,11 @@ export class TelegramUpdateApplication {
       const planned=this.plan(chatId,screen.text,undefined,screen.keyboard,event.callbackMessageId);
       if(screen.nativeKeyboard){const {inlineMarkup:_,...base}=planned;return {status:'APPLIED',reason:'RESPONSE_PLANNED_ONLY',plan:{...base,studioMarkup:screen.nativeKeyboard}};}
       return {status:'APPLIED',reason:'RESPONSE_PLANNED_ONLY',plan:planned};
+     }
+     if(event.callbackData.startsWith('ou:1:')){
+      const screen=await renderOwnerUpload(this.opts.store,this.opts.policy,actorId,event.callbackData,this.clock);
+      if(!screen)return {status:'DENIED',reason:'INVALID_OR_STALE_UPLOAD_CALLBACK'};
+      return {status:'APPLIED',reason:'RESPONSE_PLANNED_ONLY',plan:this.plan(chatId,screen.text,undefined,screen.keyboard,event.callbackMessageId)};
      }
      if(event.callbackData==='mi:1:i:13:04'||event.callbackData.startsWith('oi:1:')){
       const menu=new OwnerTelegramMenu(this.opts.store,this.opts.policy,this.opts.education,this.opts.admin,this.opts.platformCatalog,this.clock);
@@ -1241,8 +1250,8 @@ export class TelegramUpdateApplication {
     }
     const callback=event.callbackData??'';
     const ownerScreen=event.kind==='private'&&this.opts.policy.isOwner(event.actorId)&&(
-     /^(?:mi:1:|oi:1:|ec:1:|oc:1:|od:1:|gw:1:|gt:1:|gs:1:|gb:1:|nw:1:|gp:1:|of:1:|ol:1:|st:1:|ps:1:|pr:1:|pd:1:|pq:1:|mr:1:|mp:1:|c_)/u.test(callback)||
-     event.text==='/ownerinline'||event.text==='/ownerlegacy'||event.text==='/ownerrecover'||isOwnerMenuText(event.text)||
+     /^(?:mi:1:|oi:1:|ou:1:|ec:1:|oc:1:|od:1:|gw:1:|gt:1:|gs:1:|gb:1:|nw:1:|gp:1:|of:1:|ol:1:|st:1:|ps:1:|pr:1:|pd:1:|pq:1:|mr:1:|mp:1:|c_)/u.test(callback)||
+     event.text==='/ownerinline'||event.text==='/ownerlegacy'||event.text==='/ownerrecover'||isOwnerMenuText(event.text)||(event.document!==undefined&&handled.plan?.inlineMarkup!==undefined)||
      handled.reason==='CATEGORY_TEXT_PREVIEW'||handled.reason==='NETWORK_TEXT_PREVIEW'||handled.reason==='DELEGATION_TEXT_PREVIEW'||handled.reason==='STUDIO_DRAFT_SAVED');
     if(ownerScreen&&handled.plan&&!handled.adminUIAccess){
      const state=await this.opts.store.snapshot(),now=this.clock(),epoch=studioInput?studioPreviewEpoch(state,this.opts.policy,event.actorId,now):protectionUIEpoch(state,this.opts.policy,event.actorId,now);
