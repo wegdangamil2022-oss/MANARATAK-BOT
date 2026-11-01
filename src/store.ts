@@ -1,6 +1,7 @@
 import {isValidFloodWindow,type FloodWindow} from './protection-flood.js';
 import {validGroupNetworks,type GroupNetwork} from './group-network-model.js';
 import {validCommunityFolders,type CommunityFolder} from './community-folder-model.js';
+import {validGroupPermissionJobs,type GroupPermissionJob} from './group-permission-model.js';
 import {validCommunityMessageMetadata,type CommunityMessageReceipt} from './community-message-receipt.js';
 import {validAdminUIAccess,type AdminUIAccess} from './protection-ui-access.js';
 import {validStudioState,type StudioState} from './button-studio-model.js';
@@ -158,6 +159,7 @@ export interface B6BudgetAttempt {
   operatorReview?:{reviewedBy:string;reviewedAt:number};
 }
 export interface BotState {
+  groupPermissionJobs?:GroupPermissionJob[];
   communityFolders?:CommunityFolder[];
   buttonStudio?:StudioState;
   /** Local owner network folders; never evidence of Telegram rights. */
@@ -247,6 +249,7 @@ export class BotStore {
     if (previous.schemaVersion !== 8 ||
       (previous.groupNetworks!==undefined&&!validGroupNetworks(previous.groupNetworks))||
       (previous.communityFolders!==undefined&&!validCommunityFolders(previous.communityFolders))||
+      (previous.groupPermissionJobs!==undefined&&!validGroupPermissionJobs(previous.groupPermissionJobs))||
       (Array.isArray(previous.moderationReasons)&&previous.moderationReasons.some((r:Record<string,unknown>)=>r&&typeof r==='object'&&Object.hasOwn(r,'expiresAt')&&(r.source!=='MANUAL'||!Number.isSafeInteger(r.expiresAt)||Number(r.expiresAt)<=0||Number(r.expiresAt)>8640000000000000)))||
       (previous.privateSettingsRevision!==undefined&&(typeof previous.privateSettingsRevision!=='number'||!Number.isSafeInteger(previous.privateSettingsRevision)||previous.privateSettingsRevision<0||previous.privateSettingsRevision>=Number.MAX_SAFE_INTEGER))||
       (previous.buttonStudio!==undefined&&!validStudioState(previous.buttonStudio))||

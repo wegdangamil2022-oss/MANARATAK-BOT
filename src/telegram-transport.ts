@@ -1,6 +1,8 @@
 import {protectionMediaFromMessage,type ProtectionMedia} from './telegram-protection-media.js';
 import { timingSafeEqual,createHash } from 'node:crypto';
 import {ModerationCommandReview,cancelModerationCommandReview} from './telegram-moderation-command-review.js';
+import {TelegramGroupPermissionLock} from './telegram-group-permission-lock.js';
+import type {GroupPermissionLockService} from './group-permission-lock.js';
 import {staleCommunityMessage,COMMUNITY_CLOSED_TEXT} from './community-message-receipt.js';
 import type { IncomingMessage, RequestListener, ServerResponse } from 'node:http';
 import { BotStore, type AuditRecord, type BotState, type TelegramReplyJob } from './store.js';
@@ -122,6 +124,7 @@ export interface TelegramApplicationOptions {
   moderation?:ModerationService;
   /** Explicit compatibility path for isolated command-adapter rehearsals. */
   moderationCommandMode?:'reviewed'|'direct';
+  groupPermissions?:GroupPermissionLockService;
   /** Explicit reviewed-deletion service; no automatic metadata collection. */
   purge?:ModerationPurgeService;
 }
@@ -358,6 +361,7 @@ export class TelegramUpdateApplication {
    return {status:'APPLIED',reason:'RESPONSE_PLANNED_ONLY',plan:plain?planned:{...base,studioMarkup:screen.keyboard},...(screen.public?{communityAccess:screen.access}:{adminUIAccess:screen.access})};
   }
   private async process(event:Event):Promise<ProcessedReply> {
+    if(this.opts.groupPermissions&&event.kind==='private'&&(event.callbackData!==undefined?!event.callbackData.startsWith('lk:1:')&&event.callbackData!=='mi:1:i:02:04':event.text.startsWith('/')||(Object.values(menuLabels) as string[]).includes(event.text)))await this.opts.groupPermissions.cancelForActor(event.actorId);
     if(this.opts.moderation&&event.kind==='private'&&(event.callbackData!==undefined?!event.callbackData.startsWith('mc:1:'):event.text.startsWith('/')||(Object.values(menuLabels) as string[]).includes(event.text)))await cancelModerationCommandReview(this.opts.store,event.actorId);
     if(event.protectionMedia){
      const media=event.protectionMedia;
@@ -388,6 +392,11 @@ export class TelegramUpdateApplication {
      // Reauthorize the real sender at every tap. Never dispatch a privileged
      // command from untrusted callback_data or from a group context.
      if(kind!=='private'||actorId!==chatId)return {status:'DENIED',reason:'PRIVATE_CALLBACK_ONLY'};
+     if(event.callbackData==='mi:1:i:02:04'||event.callbackData.startsWith('lk:1:')){
+      if(event.callbackData==='mi:1:i:02:04'&&!this.opts.policy.isOwner(actorId))return {status:'DENIED',reason:'OWNER_ONLY'};
+      const view=await new TelegramGroupPermissionLock(this.opts.store,this.opts.policy,this.opts.groupPermissions,this.clock).handle(actorId,event.callbackData);
+      return view?{status:view.status,reason:view.reason,adminUIAccess:view.access,plan:this.plan(actorId,view.text,undefined,view.keyboard,event.callbackMessageId)}:{status:'DENIED',reason:'GROUP_PERMISSIONS_STALE_OR_UNAVAILABLE'};
+     }
      if(event.callbackData.startsWith('mc:1:')){
       if(!this.opts.moderation)return {status:'DENIED',reason:'MODERATION_NOT_CONFIGURED'};
       const view=await new ModerationCommandReview(this.opts.store,this.opts.policy,this.opts.moderation,this.clock).handle(actorId,event.callbackData);
@@ -438,9 +447,10 @@ export class TelegramUpdateApplication {
        plan:this.plan(chatId,screen.text,undefined,screen.keyboard,event.callbackMessageId)};
      }
      if(event.callbackData.startsWith('ms:1:')){
-      const screen=await renderStaffInline(this.opts.store,this.opts.policy,
+      let screen=await renderStaffInline(this.opts.store,this.opts.policy,
        actorId,event.callbackData,this.clock());
       if(!screen)return {status:'DENIED',reason:'STAFF_SCOPE_OR_CALLBACK_INVALID'};
+      if(this.opts.groupPermissions)screen={...screen,keyboard:{inline_keyboard:[...screen.keyboard.inline_keyboard,[{text:'🔐 قفل وفتح مجموعاتي',callback_data:'lk:1:h'}]]}};
       return {status:'APPLIED',reason:'RESPONSE_PLANNED_ONLY',
        plan:this.plan(chatId,screen.text,undefined,screen.keyboard,event.callbackMessageId)};
      }
@@ -612,6 +622,12 @@ export class TelegramUpdateApplication {
      const result=await previewReplyDelete(this.opts.store,this.opts.policy,this.opts.purge,actorId,chatId,event.messageId,text,event.replyTo,this.clock());
      const {screen,...outcome}=result;
      return {...outcome,...(screen?{plan:this.plan(actorId,screen.text,undefined,screen.keyboard)}:{})};
+    }
+    if(kind==='group'&&/^\/(?:lock|unlock)(?:@[A-Za-z][A-Za-z0-9_]{4,31})?(?=\s|$)/u.test(text)){
+     const m=/^\/(lock|unlock)(?:@([A-Za-z][A-Za-z0-9_]{4,31}))?(?: (messages|media|previews))?$/u.exec(text);
+     if(!m||m[0]!==text||m[2]&&m[2].toLowerCase()!==this.opts.botUsername.toLowerCase()||m[1]==='unlock'&&m[3])return {status:'DENIED',reason:'INVALID_GROUP_LOCK_COMMAND'};
+     const view=await new TelegramGroupPermissionLock(this.opts.store,this.opts.policy,this.opts.groupPermissions,this.clock).command(actorId,chatId,m[1]==='unlock'?'RESTORE':'LOCK',m[3]==='media'?'MEDIA':m[3]==='previews'?'LINKS':'MESSAGES');
+     return view?{status:view.status,reason:view.reason,adminUIAccess:view.access,plan:this.plan(actorId,view.text,undefined,view.keyboard)}:{status:'DENIED',reason:'GROUP_PERMISSIONS_STALE_OR_UNAVAILABLE'};
     }
     if(kind==='group'){
      const command=parseReplyModerationCommand(text,this.opts.botUsername,chatId,event.messageId,event.replyTo);

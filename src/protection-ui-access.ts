@@ -22,6 +22,7 @@ export function protectionUIEpoch(state:BotState,policy:Policy,actor:string,now:
  return createHash('sha256').update('MANARATAK:PROTECTION-UI:V1:').update(JSON.stringify([
   actor,policy.ownerId,chats.map(c=>[c,state.protectionPolicies?.find(r=>r.policy.chatId===c.id)??null]),sessions,
   state.warnings.filter(w=>chats.some(c=>c.id===w.chatId)),state.moderationReasons.filter(r=>chats.some(c=>c.id===r.chatId)),state.moderationOperations.filter(o=>chats.some(c=>c.id===o.chatId)),
+  ...(state.groupPermissionJobs===undefined?[]:[state.groupPermissionJobs]),
   ...(policy.isOwner(actor)&&state.privateSettingsRevision!==undefined?[state.privateSettingsRevision]:[]),
   ...(policy.isOwner(actor)?[state.importRuns,state.educationCategories,state.educationResources,subscriptionConfigEpoch(state),...(state.communityFolders!==undefined?[state.communityFolders]:[])]:[])
  ])).digest('hex');
