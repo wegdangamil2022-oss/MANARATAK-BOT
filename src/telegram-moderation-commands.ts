@@ -1,6 +1,6 @@
 import type {ModerationService} from './moderation.js';
 
-export type ReplyModerationCommand={kind:'ban'|'mute'|'warn'|'unwarn';reference:string;memberId:string};
+export type ReplyModerationCommand={kind:'ban'|'mute'|'warn'|'unwarn'|'unban'|'unmute';reference:string;memberId:string};
 type Parsed={status:'NO_MATCH'|'INVALID'}|{status:'COMMAND';command:ReplyModerationCommand};
 const object=(v:unknown):v is Record<string,unknown>=>v!==null&&typeof v==='object'&&!Array.isArray(v);
 const positive=(v:unknown):v is number=>typeof v==='number'&&Number.isSafeInteger(v)&&v>0;
@@ -8,10 +8,10 @@ const positive=(v:unknown):v is number=>typeof v==='number'&&Number.isSafeIntege
  * identify a target. Names, forwarded messages and arguments never do. */
 export function parseReplyModerationCommand(text:string,botUsername:string,
  chatId:string,messageId:number|undefined,reply:unknown):Parsed{
- const first=/^\/(ban|mute|warn|unwarn)(?:@([A-Za-z][A-Za-z0-9_]{4,31}))?(?=\s|$)/u.exec(text);
+ const first=/^\/(ban|mute|warn|unwarn|unban|unmute)(?:@([A-Za-z][A-Za-z0-9_]{4,31}))?(?=\s|$)/u.exec(text);
  if(!first)return {status:'NO_MATCH'};
  if(first[2]&&first[2].toLowerCase()!==botUsername.toLowerCase())return {status:'NO_MATCH'};
- const syntax=/^\/(ban|mute|warn|unwarn)(?:@[A-Za-z][A-Za-z0-9_]{4,31})? ([A-Za-z0-9][A-Za-z0-9_-]{0,63})$/u.exec(text);
+ const syntax=/^\/(ban|mute|warn|unwarn|unban|unmute)(?:@[A-Za-z][A-Za-z0-9_]{4,31})? ([A-Za-z0-9][A-Za-z0-9_-]{0,63})$/u.exec(text);
  if(!syntax||syntax[0]!==text||!/^-[1-9][0-9]{0,15}$/u.test(chatId)||
   !Number.isSafeInteger(Number(chatId))||!positive(messageId)||!object(reply)||
   !positive(reply.message_id)||reply.message_id>=messageId||!object(reply.chat)||
@@ -35,7 +35,9 @@ export async function executeReplyModerationCommand(service:ModerationService,
     :await service.removeWarning(actorId,chatId,command.memberId,command.reference);
    return {status:result.status==='DENIED'?'DENIED':result.status==='NO_CHANGE'?'IGNORED':'APPLIED',reason:'MODERATION_'+result.status};
   }
-  const result=await service.addManualReason(actorId,chatId,command.memberId,command.reference,command.kind==='ban'?'BAN':'MUTE');
+  const result=command.kind==='unban'||command.kind==='unmute'
+   ?await service.removeManualReason(actorId,chatId,command.memberId,command.reference,command.kind==='unban'?'BAN':'MUTE')
+   :await service.addManualReason(actorId,chatId,command.memberId,command.reference,command.kind==='ban'?'BAN':'MUTE');
   return {status:result.status==='APPLIED'?'APPLIED':result.status==='NO_CHANGE'?'IGNORED':result.status==='UNKNOWN_OUTCOME'?'UNKNOWN':'DENIED',reason:'MODERATION_'+result.status};
  }catch{
   // A storage error can follow an attempted external effect. Never turn an

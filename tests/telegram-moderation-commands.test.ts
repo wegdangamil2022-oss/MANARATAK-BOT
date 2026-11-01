@@ -18,16 +18,65 @@ const update=(id:number,text:string,actor=100,reply:unknown={message_id:10,chat:
 async function fixture(engine:'json'|'sqlite'){
  const dir=await mkdtemp(join(tmpdir(),'moderation-command-'));
  const store=new BotStore(join(dir,'state.'+engine),{engine});
- const policy=new Policy(store,OWNER,()=>1000),education=new EducationService(store,policy);
+ let now=1000;
+ const policy=new Policy(store,OWNER,()=>now),education=new EducationService(store,policy);
  await policy.approveChat(OWNER,CHAT,['moderation']);
- const gateway=new FakeModerationGateway(),moderation=new ModerationService(store,policy,gateway,()=>1000);
+ const gateway=new FakeModerationGateway(),moderation=new ModerationService(store,policy,gateway,()=>now);
  const app=(configured=true,service=moderation)=>new TelegramUpdateApplication({store,policy,education,
   admin:new EducationAdminFacade(store,policy,education),faq:new ApprovedAnswerService(store,policy),links:new ResourceLinkService(store,policy),
-  botId:'commands-test',botUsername:'ManaratakBot',clock:()=>1000,membership:async()=>{throw Error('unexpected membership request');},
+  botId:'commands-test',botUsername:'ManaratakBot',clock:()=>now,membership:async()=>{throw Error('unexpected membership request');},
   ...(configured?{moderation:service}:{})});
- return {dir,store,policy,gateway,app,close:()=>rm(dir,{recursive:true,force:true})};
+ return {dir,store,policy,gateway,moderation,app,advance:()=>{now++;},close:()=>rm(dir,{recursive:true,force:true})};
 }
 for(const engine of ['json','sqlite'] as const){
+ test('typed release commands remove only the matching manual reason and deduplicate ('+engine+')',async()=>{
+  const f=await fixture(engine);try{
+   assert.equal((await f.app().handle(update(101,'/ban case-ban'))).status,'APPLIED');
+   const mismatch=await f.app().handle(update(102,'/unmute case-ban'));assert.equal(mismatch.status,'DENIED');assert.equal(f.gateway.calls.length,1);assert.equal((await f.store.snapshot()).moderationReasons[0]!.active,true);
+   const release=update(103,'/unban@ManaratakBot case-ban');assert.equal((await f.app().handle(release)).status,'APPLIED');assert.equal(f.gateway.calls.at(-1)!.kind,'NONE');assert.equal((await f.app().handle(release)).status,'DUPLICATE');
+   const count=f.gateway.calls.length;assert.equal((await f.app().handle(update(104,'/unban case-ban'))).status,'IGNORED');assert.equal(f.gateway.calls.length,count);
+  }finally{await f.close();}
+ });
+ test('release preserves independent manual and subscription reasons ('+engine+')',async()=>{
+  const f=await fixture(engine);try{
+   await f.app().handle(update(111,'/mute case-mute'));f.advance();await f.app().handle(update(112,'/ban case-ban'));f.advance();
+   assert.equal((await f.app().handle(update(113,'/unban case-ban'))).status,'APPLIED');assert.equal(f.gateway.calls.at(-1)!.kind,'MUTE');
+   f.advance();
+   await f.store.transaction(s=>{s.moderationReasons.push({chatId:CHAT,memberId:TARGET,source:'SUBSCRIPTION',reference:'channel-rule',kind:'MUTE',createdBy:'SYSTEM_SUBSCRIPTION',active:true});});
+   assert.equal((await f.app().handle(update(114,'/unmute case-mute'))).status,'IGNORED');const s=await f.store.snapshot();assert.equal(s.moderationReasons.find(r=>r.source==='SUBSCRIPTION')!.active,true);assert.equal(f.gateway.calls.at(-1)!.kind,'MUTE');
+  }finally{await f.close();}
+ });
+ test('release kind is checked again after awaited authorization reads ('+engine+')',async()=>{
+  const f=await fixture(engine);try{
+   await f.app().handle(update(131,'/ban case'));const sent=f.gateway.calls.length;
+   f.gateway.canRestrict=async()=>{await f.store.transaction(s=>{s.moderationReasons[0]!.kind='MUTE';});return true;};
+   const result=await f.moderation.removeManualReason(OWNER,CHAT,TARGET,'case','BAN');assert.equal(result.status,'DENIED');assert.equal(result.reason,'REASON_KIND_MISMATCH');assert.equal((await f.store.snapshot()).moderationReasons[0]!.active,true);assert.equal(f.gateway.calls.length,sent);
+  }finally{await f.close();}
+ });
+ test('release rejects malformed and forwarded targets without modifying reasons ('+engine+')',async()=>{
+  const f=await fixture(engine);try{
+   await f.app().handle(update(141,'/ban case'));let id=142;
+   for(const command of ['unban','unmute'])for(const reply of [null,{message_id:10,chat:{id:Number(CHAT),type:'supergroup'},from:{id:300,is_bot:true}},{message_id:10,chat:{id:Number(CHAT),type:'supergroup'},from:{id:300,is_bot:false},forward_origin:{type:'user'}}])assert.equal((await f.app().handle(update(id++,'/'+command+' case',100,reply))).status,'DENIED');
+   assert.equal((await f.store.snapshot()).moderationReasons[0]!.active,true);assert.equal(f.gateway.calls.length,1);
+  }finally{await f.close();}
+ });
+ test('release never bypasses the official adapter protection of an existing Telegram ban ('+engine+')',async()=>{
+  const f=await fixture(engine);try{
+   await f.app().handle(update(151,'/ban case'));const methods:string[]=[];
+   const request=(async(url:unknown,init:RequestInit)=>{const method=String(url).split('/').at(-1)!;methods.push(method);assert.equal(method,'getChatMember');const body=JSON.parse(String(init.body));return Response.json({ok:true,result:body.user_id===123456789?{status:'administrator',user:{id:123456789,is_bot:true},can_restrict_members:true}:{status:'kicked',user:{id:300,is_bot:false},until_date:0}});}) as typeof fetch;
+   const realAdapter=new TelegramBotApiModerationGateway('123456789:ABCDEFGHIJKLMNOPQRSTUVWXYZabcde',request,async()=>true);
+   const service=new ModerationService(f.store,f.policy,realAdapter,()=>1001);
+   assert.equal((await f.app(true,service).handle(update(152,'/unban case'))).status,'DENIED');assert.ok(methods.length>0);assert.ok(methods.every(m=>m==='getChatMember'));assert.equal((await f.store.snapshot()).moderationReasons[0]!.active,true);
+  }finally{await f.close();}
+ });
+ test('release refuses untrusted actors, protected targets and unknown prior attempts ('+engine+')',async()=>{
+  const f=await fixture(engine);try{
+   await f.app().handle(update(121,'/mute case'));assert.equal((await f.app().handle(update(122,'/unmute case',301))).status,'DENIED');
+   f.gateway.protectedMembers.add(CHAT+':'+TARGET);assert.equal((await f.app().handle(update(123,'/unmute case'))).status,'DENIED');assert.equal((await f.store.snapshot()).moderationReasons[0]!.active,true);f.gateway.protectedMembers.clear();
+   f.gateway.outcome='UNKNOWN_OUTCOME';assert.equal((await f.app().handle(update(124,'/unmute case'))).status,'UNKNOWN');const sent=f.gateway.calls.length;
+   assert.equal((await f.app().handle(update(125,'/unmute case'))).status,'DENIED');assert.equal(f.gateway.calls.length,sent);
+  }finally{await f.close();}
+ });
  test('reply moderation commands use approved moderation scope and durable dedup ('+engine+')',async()=>{
   const f=await fixture(engine);try{
    const msg=update(1,'/ban@ManaratakBot case-A');

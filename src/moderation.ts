@@ -202,7 +202,8 @@ export class ModerationService {
     if (!added) return { status: 'NO_CHANGE', reason: 'DUPLICATE_OR_REVOKED' };
     return this.reconcile(actorId, chatId, memberId);
   }
-  async removeManualReason(actorId: string, chatId: string, memberId: string, reference: string): Promise<ModerationResult> {
+  async removeManualReason(actorId: string, chatId: string, memberId: string, reference: string,expectedKind?:'BAN'|'MUTE'): Promise<ModerationResult> {
+    if(expectedKind!==undefined&&expectedKind!=='BAN'&&expectedKind!=='MUTE')return {status:'DENIED',reason:'INVALID_REASON_KIND'};
     const preflight=await this.priorPending(actorId,chatId,memberId);
     if(preflight)return preflight;
     if (!await this.check(actorId, chatId, memberId)) return { status: 'DENIED', reason: 'NOT_AUTHORIZED_OR_BOT_RIGHTS' };
@@ -213,11 +214,15 @@ export class ModerationService {
       if(pending)return pending.status;
       const found = s.moderationReasons.find(x => byTarget(x, chatId, memberId) && x.source === 'MANUAL' && x.reference === reference && x.active);
       if (!found) return false;
+      // Check the requested release kind in the same transaction as removal.
+      // An unmute must never deactivate a ban that happens to share its case ID.
+      if(expectedKind!==undefined&&found.kind!==expectedKind)return 'KIND_MISMATCH' as const;
       found.active = false; return true;
     });
     if(changed==='BLOCKED_UNKNOWN'||changed==='BLOCKED_PENDING')
       return {status:changed,reason:'NO_SAFE_DISPATCH'};
     if(changed==='DENIED')return {status:'DENIED',reason:'NOT_AUTHORIZED_OR_BOT_RIGHTS'};
+    if(changed==='KIND_MISMATCH')return {status:'DENIED',reason:'REASON_KIND_MISMATCH'};
     return changed ? this.reconcile(actorId, chatId, memberId) : { status: 'NO_CHANGE', reason: 'NOT_ACTIVE' };
   }
   /** Invoked only by SubscriptionGate's trusted membership reconciliation; never expose as a user command. */
