@@ -350,7 +350,7 @@ for(const engine of ['json','sqlite'] as const){
 }
 
 for(const engine of ['json','sqlite'] as const){
- test('network rename input is invalidated if network membership changes before new name is entered ('+engine+')',async()=>{
+ test('navigating from rename entry to group membership revokes input intent ('+engine+')',async()=>{
   const f=await setup(engine);try{
    await f.approve(GROUP);
    const n=await f.create();
@@ -359,7 +359,8 @@ for(const engine of ['json','sqlite'] as const){
    assert.equal(connect.status,'APPLIED');
    assert.equal((await f.app().handle(callback(362,find(connect,'تأكيد')))).status,'APPLIED');
    const stale=await f.app().handle(textMsg(363,'شبكة قديمة'));
-   assert.equal(stale.status,'DENIED');
+   assert.equal(stale.status,'IGNORED');
+   assert.equal((await f.store.snapshot()).callbacks.filter(c=>c.action.startsWith('owner-network-input:rename:')&&!c.revoked&&!c.used).length,0);
    assert.equal((await f.store.snapshot()).groupNetworks?.[0]?.name,'شبكة الطب');
    assert.equal((await f.store.snapshot()).groupNetworks?.[0]?.revision,2);
    assert.equal((await f.app().handle(callback(364,'nw:1:e:'+n.id))).status,'APPLIED');
@@ -367,6 +368,33 @@ for(const engine of ['json','sqlite'] as const){
    assert.equal(fresh.status,'APPLIED');
    assert.equal((await f.app().handle(callback(366,find(fresh,'تأكيد')))).status,'APPLIED');
    assert.equal((await f.store.snapshot()).groupNetworks?.[0]?.name,'شبكة حديثة');
+  }finally{await f.close();}
+ });
+}
+
+for(const engine of ['json','sqlite'] as const){
+ test('rename input fails closed on an external concurrent membership revision update ('+engine+')',async()=>{
+  const f=await setup(engine);try{
+   await f.approve(GROUP);
+   const n=await f.create();
+   assert.equal((await f.app().handle(callback(370,'nw:1:e:'+n.id))).status,'APPLIED');
+   // Simulate a second authorized process updating the same DB directly
+   // without causing callback navigation to cancel the pending name entry.
+   await f.store.transaction(s=>{
+    const network=s.groupNetworks!.find(x=>x.id===n.id)!;
+    network.members.push({chatId:GROUP,version:1});
+    network.revision++;
+    network.updatedAt=NOW;
+   });
+   const stale=await f.app().handle(textMsg(371,'شبكة جديدة'));
+   assert.equal(stale.status,'DENIED');
+   assert.equal((await f.store.snapshot()).groupNetworks?.[0]?.name,'شبكة الطب');
+   assert.equal((await f.store.snapshot()).groupNetworks?.[0]?.revision,2);
+   assert.equal((await f.app().handle(callback(372,'nw:1:e:'+n.id))).status,'APPLIED');
+   const fresh=await f.app().handle(textMsg(373,'شبكة محدثة'));
+   assert.equal(fresh.status,'APPLIED');
+   assert.equal((await f.app().handle(callback(374,find(fresh,'تأكيد')))).status,'APPLIED');
+   assert.equal((await f.store.snapshot()).groupNetworks?.[0]?.name,'شبكة محدثة');
   }finally{await f.close();}
  });
 }
