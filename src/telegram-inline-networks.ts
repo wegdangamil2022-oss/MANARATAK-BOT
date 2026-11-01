@@ -18,6 +18,8 @@ const remove=new RegExp('^nw:1:x:'+net+'$','u');
 const pick=new RegExp('^nw:1:g:'+net+':'+page+'$','u');
 const toggle=new RegExp('^nw:1:t:'+net+':'+revision+':'+group+':'+revision+':'+page+'$','u');
 const confirm=/^nw:1:c:([A-Za-z0-9_-]{24})$/u,cancel=/^nw:1:k:([A-Za-z0-9_-]{24})$/u;
+const historyPage=new RegExp('^nw:1:r:p:'+page+'$','u');
+const historyView=/^nw:1:r:v:([A-Za-z0-9_-]{24})$/u;
 const btn=(text:string,callback_data:string)=>({text,callback_data});
 const ui=(text:string,rows:{text:string;callback_data:string}[][]):OwnerInlineScreen=>
  ({text,keyboard:{inline_keyboard:rows}});
@@ -28,7 +30,7 @@ const validClock=(value:number)=>Number.isSafeInteger(value)&&value>=0&&value<=8
 export function validOwnerNetworkRoute(data:unknown):boolean{
  if(typeof data!=='string'||Buffer.byteLength(data,'utf8')>64)return false;
  return data==='mi:1:i:01:03'||home.test(data)||begin.test(data)||
-  [list,detail,rename,remove,pick,toggle,confirm,cancel].some(re=>re.test(data));
+  [list,detail,rename,remove,pick,toggle,confirm,cancel,historyPage,historyView].some(re=>re.test(data));
 }
 function approved(s:BotState,policy:Policy,actor:string,now:number):Chat[]{
  const counts=new Map<string,number>();
@@ -70,6 +72,7 @@ export class OwnerNetworkEditor{
    'عضوية الشبكة محلية ولا تمنح إذن النشر أو الإشراف، ولا تُنشئ اتحاد Telegram تلقائيًا.',
    [[btn('➕ إنشاء شبكة محلية','nw:1:n')],
     [btn('📋 شبكاتي المحفوظة','nw:1:p:0')],
+    [btn('🕘 سجل تغييرات الشبكات','nw:1:r:p:0')],
     [btn('↩️ المجموعات والشبكات','mi:1:s:01:0'),btn('🏠 لوحة المالك','mi:1:h')]]);
  }
  private networkList(s:BotState,p:number):OwnerInlineScreen|null{
@@ -370,6 +373,105 @@ export class OwnerNetworkEditor{
     !c.revoked&&!c.used)c.revoked=true;
   });
  }
+
+ /** Local audit history is never reconstructed from an audit label alone.
+  * An unambiguous committed audit and a one-shot consumed callback receipt
+  * with a matching operation and well-formed payload must both be present. */
+ private historyEntries(s:BotState,actor:string,now:number):{
+  nonce:string;reason:string;at:number;description:string
+ }[]{
+  const reasons=new Set(['OWNER_NETWORK_CREATED','OWNER_NETWORK_RENAMED',
+   'OWNER_NETWORK_DELETED','OWNER_NETWORK_MEMBER_ADDED','OWNER_NETWORK_MEMBER_REMOVED']);
+  const entries:{nonce:string;reason:string;at:number;description:string}[]=[];
+  for(const a of s.audit){
+   if(!reasons.has(a.reason))continue;
+   const matched=/^owner-network:([A-Za-z0-9_-]{24})$/u.exec(a.updateKey);
+   if(!matched||a.actorId!==actor||a.decision!=='ALLOW'||
+    !Number.isSafeInteger(a.at)||a.at<0||a.at>now||
+    s.audit.filter(x=>x.updateKey===a.updateKey).length!==1)continue;
+   const receipts=s.callbacks.filter(x=>x.ref==='c_'+matched[1]);
+   const c=receipts[0];
+   if(receipts.length!==1||!c||c.actorId!==actor||c.chatId!=='private'||
+    c.policyVersion!==0||c.oneShot!==true||c.used!==true||
+    c.revoked!==false||!Number.isSafeInteger(c.expiresAt)||
+    c.expiresAt<=a.at||c.expiresAt>a.at+TTL)continue;
+   let prefix:string,values:unknown;
+   if(c.action.startsWith(PREFIX+'create:'))prefix=PREFIX+'create:';
+   else if(c.action.startsWith(PREFIX+'rename:'))prefix=PREFIX+'rename:';
+   else if(c.action.startsWith(PREFIX+'delete:'))prefix=PREFIX+'delete:';
+   else if(c.action.startsWith(PREFIX+'toggle:'))prefix=PREFIX+'toggle:';
+   else continue;
+   try{values=JSON.parse(c.action.slice(prefix.length));}catch{continue;}
+   if(!Array.isArray(values))continue;
+   let description:string|null=null;
+   if(prefix===PREFIX+'create:'&&a.reason==='OWNER_NETWORK_CREATED'&&
+    a.policyVersion===1&&values.length===2&&validNetworkName(values[0])&&
+    typeof values[1]==='string'&&/^[a-f0-9]{64}$/u.test(values[1])){
+    description='الاسم: '+values[0];
+   }else if(prefix===PREFIX+'rename:'&&a.reason==='OWNER_NETWORK_RENAMED'&&
+    values.length===4&&typeof values[0]==='string'&&/^[a-f0-9]{12}$/u.test(values[0])&&
+    validNetworkName(values[1])&&Number.isSafeInteger(values[2])&&
+    values[2]>=1&&values[2]<9_999_999_999&&a.policyVersion===values[2]+1&&
+    typeof values[3]==='string'&&/^[a-f0-9]{64}$/u.test(values[3])){
+    description='الشبكة: '+values[0]+' · الاسم الجديد: '+values[1];
+   }else if(prefix===PREFIX+'delete:'&&a.reason==='OWNER_NETWORK_DELETED'&&
+    values.length===3&&typeof values[0]==='string'&&/^[a-f0-9]{12}$/u.test(values[0])&&
+    Number.isSafeInteger(values[1])&&values[1]>=1&&
+    a.policyVersion===values[1]&&typeof values[2]==='string'&&
+    /^[a-f0-9]{64}$/u.test(values[2])){
+    description='الشبكة المحلية المحذوفة: '+values[0];
+   }else if(prefix===PREFIX+'toggle:'&&values.length===7&&
+    typeof values[0]==='string'&&/^[a-f0-9]{12}$/u.test(values[0])&&
+    Number.isSafeInteger(values[1])&&values[1]>=1&&
+    a.policyVersion===values[1]+1&&typeof values[2]==='string'&&validId(values[2])&&
+    Number.isSafeInteger(values[3])&&values[3]>=1&&
+    Number.isSafeInteger(values[4])&&values[4]>=0&&values[4]<=999&&
+    ['ADD','REMOVE'].includes(values[5])&&typeof values[6]==='string'&&
+    /^[a-f0-9]{64}$/u.test(values[6])&&
+    a.reason===(values[5]==='ADD'?'OWNER_NETWORK_MEMBER_ADDED':'OWNER_NETWORK_MEMBER_REMOVED')){
+    description='الشبكة: '+values[0]+' · المجموعة: '+values[2];
+   }
+   if(description!==null)entries.push({nonce:matched[1]!,reason:a.reason,at:a.at,description});
+  }
+  entries.sort((a,b)=>b.at-a.at||b.nonce.localeCompare(a.nonce));
+  return entries;
+ }
+ private history(s:BotState,actor:string,now:number,p:number):OwnerInlineScreen|null{
+  if(!Number.isSafeInteger(p)||p<0||p>999)return null;
+  const events=this.historyEntries(s,actor,now),
+   maxPage=Math.max(1,Math.ceil(events.length/SIZE));
+  if(p>=maxPage)return null;
+  const rows=events.slice(p*SIZE,(p+1)*SIZE).map(e=>
+   [btn('🌐 '+(e.reason==='OWNER_NETWORK_CREATED'?'إنشاء':
+    e.reason==='OWNER_NETWORK_RENAMED'?'إعادة تسمية':
+    e.reason==='OWNER_NETWORK_DELETED'?'حذف':
+    e.reason==='OWNER_NETWORK_MEMBER_ADDED'?'ربط مجموعة':'فصل مجموعة')+
+    ' · '+new Date(e.at).toISOString().slice(0,16).replace('T',' '),
+    'nw:1:r:v:'+e.nonce)]);
+  const nav:{text:string;callback_data:string}[]=[];
+  if(p>0)nav.push(btn('⬅️ السابق','nw:1:r:p:'+(p-1)));
+  if(p+1<maxPage)nav.push(btn('➡️ التالي','nw:1:r:p:'+(p+1)));
+  if(nav.length)rows.push(nav);
+  rows.push([btn('↩️ الشبكات المحلية','nw:1:h'),btn('🏠 لوحة المالك','mi:1:h')]);
+  return ui('<b>🕘 سجل تغييرات الشبكات المحلية</b>\n'+
+   'العمليات الموثقة: '+(events.length===1?'عملية واحدة':events.length+' عمليات')+
+   '\nصفحة '+(p+1)+' من '+maxPage+'\n'+
+   (events.length?'اختر عملية لعرض تفاصيلها.':'لا توجد عمليات موثقة حاليًا.')+
+   '\nالسجل للقراءة فقط، ولا يمنح أي حق Telegram.',
+   rows);
+ }
+ private historyDetail(s:BotState,actor:string,now:number,nonce:string):OwnerInlineScreen|null{
+  const entries=this.historyEntries(s,actor,now).filter(e=>e.nonce===nonce);
+  if(entries.length!==1)return null;
+  const entry=entries[0]!;
+  return ui('<b>🕘 تفاصيل تغيير الشبكة المحلية</b>\n'+
+   'النوع: '+entry.reason+'\n'+
+   escape(entry.description)+'\n'+
+   'الوقت (UTC): '+new Date(entry.at).toISOString().slice(0,19).replace('T',' ')+
+   '\nهذا بيان محفوظ محليًا، ولا ينفذ أوامر Telegram أو يؤكد إيصالها.',
+   [[btn('↩️ سجل تغييرات الشبكات','nw:1:r:p:0'),btn('🏠 لوحة المالك','mi:1:h')]]);
+ }
+
  async handle(actor:string,data:string):Promise<OwnerInlineScreen|null>{
   if(!this.policy.isOwner(actor)||!validOwnerNetworkRoute(data))return null;
   const c=confirm.exec(data);if(c)return this.commit(actor,c[1]!);
@@ -382,6 +484,8 @@ export class OwnerNetworkEditor{
   if(data==='mi:1:i:01:03'||home.test(data))
    return this.root(await this.store.snapshot());
   if(begin.test(data))return this.start(actor);
+  const hp=historyPage.exec(data);if(hp)return this.history(state,actor,now,Number(hp[1]));
+  const hv=historyView.exec(data);if(hv)return this.historyDetail(state,actor,now,hv[1]!);
   const e=rename.exec(data);if(e)return this.startRename(actor,e[1]!);
   const x=remove.exec(data);if(x)return this.previewDelete(actor,x[1]!);
   const l=list.exec(data);if(l)return this.networkList(state,Number(l[1]));
