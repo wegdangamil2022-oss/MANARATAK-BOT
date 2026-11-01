@@ -7,6 +7,10 @@ import {validPrivateSettingsRoute} from './telegram-inline-private-settings.js';
 import {validDelegationEditRoute} from './telegram-inline-delegation-edit.js';
 import {delegationOwnerEntry} from './telegram-inline-delegations.js';
 import {validGroupSetupRoute} from './telegram-inline-group-setup.js';
+import {validGroupPolicyStudioRoute} from './telegram-inline-group-templates.js';
+import {validOwnerGroupSettingsRoute} from './telegram-inline-group-settings.js';
+import {validOwnerGroupBulkRestrictRoute} from './telegram-inline-group-bulk-restrict.js';
+import {validOwnerNetworkRoute} from './telegram-inline-networks.js';
 /** The approved 2026-10-23 owner catalogue from docs/أزرار_منارتك.md.
  * READ-ONLY navigation: do NOT treat a visible catalogue item as a permission
  * or operationally implemented action. Existing owner actions remain available
@@ -681,6 +685,7 @@ export function isValidTelegramInlineKeyboard(input:unknown):input is TelegramIn
     /[\u0000-\u001f\u007f]/u.test(button.callback_data)||
     !/^mi:1:(?:h|p:[01]|s:(?:0[1-9]|1[0-6]):[0-2]|i:(?:0[1-9]|1[0-6]):(?:0[1-9]|1[0-7])|g:(?:p:(?:0|[1-9][0-9]{0,2})|[dua]:-[1-9][0-9]{0,18}:[1-9][0-9]{0,9}:(?:0|[1-9][0-9]{0,2})|v:-[1-9][0-9]{0,18}:[1-9][0-9]{0,9}:(?:0|[1-9][0-9]{0,2}):[xapsr])|d:(?:p:(?:0|[1-9][0-9]{0,2})|i:(?:0|[1-9][0-9]{0,2}):[1-8]:[a-f0-9]{12}))$/u.test(button.callback_data)&&
      !/^mi:1:g:r:-[1-9][0-9]{0,18}:[1-9][0-9]{0,9}:(?:0|[1-9][0-9]{0,2}):[a-f0-9]{12}$/u.test(button.callback_data)&&
+     !/^mi:1:g:[sno]:(?:0|[1-9][0-9]{0,2})$/u.test(button.callback_data)&&
      !/^gp:1:p:-[1-9][0-9]{0,15}:[1-9][0-9]{0,9}$/u.test(button.callback_data)&&
      !/^c_[A-Za-z0-9_-]{24}$/u.test(button.callback_data)&&
      !/^ms:1:(?:h|p:(?:0|[1-9][0-9]{0,2})|g:-[1-9][0-9]{0,18}:[1-9][0-9]{0,9}:(?:0|[1-9][0-9]{0,2}))$/u.test(button.callback_data)&&
@@ -689,7 +694,7 @@ export function isValidTelegramInlineKeyboard(input:unknown):input is TelegramIn
      !/^mp:1:(?:h|p:(?:0|[1-9][0-9]{0,2})|d:(?:0|[1-9][0-9]{0,2}):[1-8]:[a-f0-9]{12})$/u.test(button.callback_data)&&
      !/^si:1:(?:h|p:(?:0|[1-9][0-9]{0,2})|c:(?:0|[1-9][0-9]{0,2}):[1-8]:[a-f0-9]{12}|l:(?:0|[1-9][0-9]{0,2}):[1-8]:[a-f0-9]{12}:(?:0|[1-9][0-9]{0,2})|r:(?:0|[1-9][0-9]{0,2}):[1-8]:[a-f0-9]{12}:(?:0|[1-9][0-9]{0,2}):[1-8]:[a-f0-9]{12})$/u.test(button.callback_data)&&
      !/^pq:1:(?:h|p:(?:0|[1-9][0-9]{0,2})|v:(?:0|[1-9][0-9]{0,2}):[1-8]:[a-f0-9]{16})$/u.test(button.callback_data)&&
-     protectionInlineRoute(button.callback_data)===null&&!validOwnerFAQInlineRoute(button.callback_data)&&!validOwnerLibraryInlineRoute(button.callback_data)&&!validStudioInlineRoute(button.callback_data)&&!validOwnerCategoryInlineRoute(button.callback_data)&&!validPrivateSettingsRoute(button.callback_data)&&!validDelegationEditRoute(button.callback_data)&&!validGroupSetupRoute(button.callback_data)&&
+     protectionInlineRoute(button.callback_data)===null&&!validOwnerFAQInlineRoute(button.callback_data)&&!validOwnerLibraryInlineRoute(button.callback_data)&&!validStudioInlineRoute(button.callback_data)&&!validOwnerCategoryInlineRoute(button.callback_data)&&!validPrivateSettingsRoute(button.callback_data)&&!validDelegationEditRoute(button.callback_data)&&!validGroupSetupRoute(button.callback_data)&&!validGroupPolicyStudioRoute(button.callback_data)&&!validOwnerGroupSettingsRoute(button.callback_data)&&!validOwnerGroupBulkRestrictRoute(button.callback_data)&&!validOwnerNetworkRoute(button.callback_data)&&
      !/^pd:1:[cx]:[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}:[a-f0-9]{16}$/u.test(button.callback_data)&&
      !/^si:2:[ascuef]:(?:h|p:(?:0|[1-9][0-9]{0,2})|c:(?:0|[1-9][0-9]{0,2}):[1-8]:[a-f0-9]{12}|l:(?:0|[1-9][0-9]{0,2}):[1-8]:[a-f0-9]{12}:(?:0|[1-9][0-9]{0,2})|r:(?:0|[1-9][0-9]{0,2}):[1-8]:[a-f0-9]{12}:(?:0|[1-9][0-9]{0,2}):[1-8]:[a-f0-9]{12})$/u.test(button.callback_data))
     return false;
@@ -729,9 +734,9 @@ function sectionScreen(sectionIndex:number,page:number):OwnerInlineScreen|null{
   rows.push(Array.from({length:Math.min(2,end-i)},(_,j)=>{
    const itemIndex=i+j;
    const selector='mi:1:i:'+number(sectionIndex+1)+':'+number(itemIndex+1);
-   const browsable=ownerInlineLinkedReadOnly(selector)!==null||selector==='mi:1:i:03:01'||selector==='mi:1:i:02:01'||selector==='mi:1:i:02:15'||selector==='mi:1:i:02:16'||selector==='mi:1:i:02:13'||/^mi:1:i:02:(?:0[5678]|12)$/u.test(selector);
+   const browsable=ownerInlineLinkedReadOnly(selector)!==null||/^mi:1:i:01:(?:09|10|11)$/u.test(selector)||selector==='mi:1:i:03:01'||selector==='mi:1:i:02:01'||selector==='mi:1:i:02:15'||selector==='mi:1:i:02:16'||selector==='mi:1:i:02:13'||/^mi:1:i:02:(?:0[5678]|12)$/u.test(selector);
    // Read-only connected views are different from design-only placeholders.
-   const editing=delegationOwnerEntry(selector)||selector==='mi:1:i:10:16'||selector==='mi:1:i:11:03'||studioOwnerEntry(selector);
+   const editing=delegationOwnerEntry(selector)||/^mi:1:i:01:(?:03|06|07|08|12)$/u.test(selector)||selector==='mi:1:i:10:16'||selector==='mi:1:i:11:03'||studioOwnerEntry(selector);
    return callback((editing?'🛠️ ':browsable?'👁️ ':'⌛ ')+section.items[itemIndex],selector);
   }));
  }

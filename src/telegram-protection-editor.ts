@@ -5,9 +5,10 @@ import type {Policy} from './policy.js';
 import {GroupProtectionPolicyService} from './group-protection-policy.js';
 import {isValidProtectionPolicy,evaluateProtectionRules,type ProtectionPolicy,type ProtectionRule,type ProtectionMessageType} from './protection-rules.js';
 import {protectionInlineRoute} from './protection-inline-route.js';
+import {ownerGroupCardLink} from './telegram-inline-groups.js';
 import type {OwnerInlineScreen} from './telegram-inline-owner.js';
 type Button={text:string;callback_data:string};
-type Frame={chat:Chat;config:ProtectionPolicy;epoch:number;page:number;slot:number;digest:string;stale:boolean};
+type Frame={chat:Chat;config:ProtectionPolicy;epoch:number;page:number;slot:number;digest:string;stale:boolean;returnToOwnerGroup:string|null};
 type Outcome={status:'APPLIED'|'DENIED';reason:string;screen:OwnerInlineScreen};
 type InputKind='WORD'|'PHRASE'|'LINK'|'TEST'|'DOMAIN'|'ALLOWPHRASE'|'FLOOD';
 const TTL=300000,PREFIX='protection-ui:';
@@ -57,9 +58,12 @@ export class TelegramProtectionEditor{
   const saved=state.protectionPolicies?.find(r=>r.policy.chatId===chat.id);
   const config=saved?.policy??{chatId:chat.id,revision:0,mode:'OFF' as const,rules:[],allowedDomains:[],allowedPhrases:[],exemptMemberIds:[]};
   return {chat,config,epoch:chat.version,page,slot,digest:createHash('sha256').update(JSON.stringify([chat,saved??null])).digest('hex').slice(0,16),
-   stale:Boolean(saved&&(saved.chatPolicyVersion!==chat.version||saved.updatedAt>this.clock()))};
+   stale:Boolean(saved&&(saved.chatPolicyVersion!==chat.version||saved.updatedAt>this.clock())),
+   returnToOwnerGroup:this.policy.isOwner(actor)?ownerGroupCardLink(state,chat.id):null};
  }
- private back(actor:string):Button[]{return [btn('↩️ المجموعات','pr:1:h'),btn(this.policy.isOwner(actor)?'🏠 لوحة المالك':'🏠 مجموعاتي الإشرافية',this.policy.isOwner(actor)?'mi:1:h':'ms:1:h')];}
+ private back(actor:string,frame?:Frame):Button[]{return [btn('↩️ المجموعات','pr:1:h'),
+  ...(frame?.returnToOwnerGroup?[btn('👥 بطاقة المجموعة',frame.returnToOwnerGroup)]:[]),
+  btn(this.policy.isOwner(actor)?'🏠 لوحة المالك':'🏠 مجموعاتي الإشرافية',this.policy.isOwner(actor)?'mi:1:h':'ms:1:h')];}
  private groupScreen(actor:string,f:Frame,notice=''):OwnerInlineScreen{
   const rows:Button[][]=[];
   if(!f.stale){
@@ -72,7 +76,7 @@ export class TelegramProtectionEditor{
    rows.push([btn('📋 القواعد',key('l',f,':0')),btn('🧪 اختبار القواعد',key('t',f))]);
    rows.push([btn('👁️ تشغيل المراقبة',key('m',f)),btn('⏹ إيقاف الفحص',key('o',f))]);
   }
-  rows.push(this.back(actor));
+  rows.push(this.back(actor,f));
   return screen('<b>🚫 الكلمات والعبارات والروابط والأنواع</b>\nالمجموعة: <code>'+escape(f.chat.id)+'</code>\n'
    +(notice?escape(notice)+'\n':'')+(f.stale?'السياسة قديمة أو وقتها غير موثوق؛ التعديل محجوب.':
     'الحالة: '+(f.config.mode==='OFF'?'متوقفة':f.config.mode==='MONITOR'?'مراقبة فقط':'تحتاج مراجعة؛ التنفيذ غير موصول')+'\nالقواعد: '+f.config.rules.length+' · النسخة: '+f.config.revision)+'\n'
