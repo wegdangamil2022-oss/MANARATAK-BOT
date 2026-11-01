@@ -72,6 +72,12 @@ for(const engine of ['json','sqlite'] as const){
    const remove=await review.preview('301',CHAT,{...command,kind:'unwarn'});assert.ok(remove);await review.handle('301',route(remove,'mc:1:c:'));assert.equal((await f.store.snapshot()).warnings[0]!.active,false);
   }finally{await f.close();}
  });
+ test(engine+' repeated navigation never creates cancellation records for cancellation records',async()=>{
+  const f=await fixture();try{
+   const preview=await f.ui.preview('301','/setrules -100\nفقرة');assert.ok(preview);await f.ui.cancel('301');const before=(await f.store.snapshot()).audit.filter(a=>a.updateKey.startsWith('moderation:rules:preview:'));assert.equal(before.length,2);
+   for(let i=0;i<5;i++)await f.ui.cancel('301');const after=(await f.store.snapshot()).audit.filter(a=>a.updateKey.startsWith('moderation:rules:preview:'));assert.deepEqual(after,before);assert.equal(after.some(a=>a.updateKey.endsWith(':done:done')),false);
+  }finally{await f.close();}
+ });
  test(engine+' rules private picker and input bounds preserve usable return buttons',async()=>{
   const f=await fixture();try{
    const home=await f.ui.handle('100','mi:1:i:02:11'),detail=await f.ui.handle('100',route(home,'rl:1:g:'));assert.match(detail!.text,/setrules/u);assert.ok(await f.ui.handle('100',route(detail,'rl:1:h:')));assert.equal(await f.ui.handle('300','mi:1:i:02:11'),null);
