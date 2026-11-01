@@ -19,7 +19,7 @@ const btn=(text:string,callback_data:string):Button=>({text,callback_data});
 const screen=(text:string,rows:Button[][]):OwnerInlineScreen=>({text,keyboard:{inline_keyboard:rows}});
 const types:Record<ProtectionMessageType,string>={TEXT:'نصوص',PHOTO:'صور',VIDEO:'فيديو',ANIMATION:'GIF',STICKER:'ملصقات',DOCUMENT:'مستندات',AUDIO:'صوتيات',VOICE:'رسائل صوتية',VIDEO_NOTE:'دوائر مرئية',CONTACT:'جهات اتصال',LOCATION:'مواقع',POLL:'استطلاعات'};
 function ruleName(r:ProtectionRule):string{
- switch(r.kind){case 'WORD':case 'PHRASE':return r.value;case 'TYPE':return types[r.type];case 'LIMIT':return ({MENTIONS:'حد المنشن',HASHTAGS:'حد الوسوم',LENGTH:'حد طول الرسالة'} as const)[r.metric]+': '+r.maximum;case 'FORWARD':return 'رسالة معاد توجيهها';case 'LINK':return r.hosts==='*'?'جميع الروابط':r.hosts.slice(0,3).join('، ')+(r.hosts.length>3?' …':'');}
+ switch(r.kind){case 'WORD':case 'PHRASE':return r.value;case 'TYPE':return types[r.type];case 'LIMIT':return ({MENTIONS:'حد المنشن',HASHTAGS:'حد الوسوم',LENGTH:'حد طول الرسالة',QUOTES:'حد كتل الاقتباس'} as const)[r.metric]+': '+r.maximum;case 'FORWARD':return 'رسالة معاد توجيهها';case 'LINK':return r.hosts==='*'?'جميع الروابط':r.hosts.slice(0,3).join('، ')+(r.hosts.length>3?' …':'');}
 }
 const newRuleId=(config:ProtectionPolicy)=>{let id:string;do{id='r_'+randomBytes(8).toString('hex');}while(config.rules.some(r=>r.id===id));return id;};
 const actions={REVIEW:'مراجعة',WARN:'تحذير',DELETE:'حذف',MUTE:'كتم'} as const;
@@ -33,8 +33,8 @@ function rulesWithInput(config:ProtectionPolicy,kind:'WORD'|'PHRASE'|'LINK',valu
 }
 function inputPolicy(config:ProtectionPolicy,kind:Exclude<InputKind,'TEST'>,text:string,id:string,editing:boolean,now:number):ProtectionPolicy|null{
  if(kind==='LIMIT'){
-  const m=/^(mentions|hashtags|length) ([1-9][0-9]{0,3})$/u.exec(text);if(!m||m[0]!==text)return null;
-  const metric=({mentions:'MENTIONS',hashtags:'HASHTAGS',length:'LENGTH'} as const)[m[1] as 'mentions'|'hashtags'|'length'];
+  const m=/^(mentions|hashtags|length|quotes) ([1-9][0-9]{0,3})$/u.exec(text);if(!m||m[0]!==text)return null;
+  const metric=({mentions:'MENTIONS',hashtags:'HASHTAGS',length:'LENGTH',quotes:'QUOTES'} as const)[m[1] as 'mentions'|'hashtags'|'length'|'quotes'];
   if(config.rules.some(r=>r.kind==='LIMIT'&&r.metric===metric&&r.maximum===Number(m[2])))return null;
   return {...config,revision:config.revision+1,rules:[...config.rules,{id,kind:'LIMIT',metric,maximum:Number(m[2]),enabled:false,action:'REVIEW'}]};
  }
@@ -340,7 +340,7 @@ export class TelegramProtectionEditor{
    return true;
   });
   return created?screen(kind==='TEST'?'أرسل عينة نصية لاختبار قواعد المحتوى، بما فيها المعطلة، دون تشغيلها أو حفظ العينة. لا يختبر هذا المسار وتيرة الفلود.':
-   kind==='LIMIT'?'أرسل نوع الحد ثم العدد. الأنواع: mentions للمنشن، hashtags للوسوم، length لطول الرسالة بالحروف. مثال: mentions 5. الحد من 1 إلى 100 للمنشن والوسوم وحتى 4096 للطول. تبدأ القاعدة معطلة بإجراء مراجعة؛ لا يشمل هذا كشف تكرار النصوص أو الاحتيال.':
+   kind==='LIMIT'?'أرسل نوع الحد ثم العدد. الأنواع: mentions للمنشن، hashtags للوسوم، length لطول الرسالة بالحروف، quotes لعدد كتل الاقتباس المنسقة. مثال: mentions 5. الحد من 1 إلى 100 للمنشن والوسوم وكتل الاقتباس وحتى 4096 للطول. تبدأ القاعدة معطلة بإجراء مراجعة؛ لا يشمل هذا كشف تكرار النصوص أو الاحتيال.':
    kind==='JOINRAID'?'أرسل عدد الأعضاء ثم نافذة الرصد ثم مدة القفل بالثواني، مثل 5 30 120. العدد من 3 إلى 100، النافذة من 5 إلى 60 ثانية، القفل من 60 إلى 600 ثانية. يبدأ الإعداد الجديد معطلاً.':
    kind==='NIGHT'?'أرسل البداية والنهاية بصيغة 24 ساعة ثم إزاحة UTC بالدقائق. مثال لليمن: 22:00 06:00 180. الوقتان مختلفان والإزاحة من -720 إلى 840؛ يبدأ الإعداد الجديد معطلاً.':
    kind==='RAID'?'أرسل عدد الأعضاء ثم عدد الرسائل ثم مدة القفل بالثواني؛ مثال: 5 20 120. الأعضاء من 2 إلى 100 والرسائل حتى 1000 ولا تقل عن الأعضاء، والمدة من 60 إلى 600. يبدأ الإعداد الجديد معطلاً.':

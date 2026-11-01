@@ -117,7 +117,7 @@ export class GroupProtectionPolicyService{
    if(state.audit.some(a=>a.updateKey===key))return 'DUPLICATE';
    const body=message.text??message.caption??'';
    const links=typeof body==='string'&&body.length<=4096?protectionEntityLinks(body,entities):null;
-   const result=links===null?null:evaluateProtectionRules(record.policy,{...message,links,mentionCount:Array.isArray(entities)?new Set(entities.filter(e=>e&&typeof e==='object'&&['mention','text_mention'].includes(e.type)).map(e=>e.offset+':'+e.length)).size:0},now);
+   const result=links===null?null:evaluateProtectionRules(record.policy,{...message,links,quoteCount:Array.isArray(entities)?new Set(entities.filter(e=>e&&typeof e==='object'&&['blockquote','expandable_blockquote'].includes(e.type)).map(e=>e.offset+':'+e.length)).size:0,mentionCount:Array.isArray(entities)?new Set(entities.filter(e=>e&&typeof e==='object'&&['mention','text_mention'].includes(e.type)).map(e=>e.offset+':'+e.length)).size:0},now);
    if(!result||result.status==='INVALID_MESSAGE'||result.status==='INVALID_POLICY'){
     state.audit.push({updateKey:key,decision:'NOOP',reason:'PROTECTION_MONITOR_INPUT_UNAVAILABLE',policyVersion:record.chatPolicyVersion,at:now});
     return 'UNAVAILABLE';
