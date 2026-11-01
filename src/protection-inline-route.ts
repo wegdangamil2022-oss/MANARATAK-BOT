@@ -1,7 +1,7 @@
 export type ProtectionUIRoute={kind:'home';page:number}|{kind:'cancel';nonce:string}|
- {kind:'g'|'w'|'f'|'t'|'m'|'o'|'l'|'r'|'e'|'d'|'x'|'a'|'v'|'b'|'j'|'y'|'n'|'c'|'u'|'s'|'q'|'k'|'S'|'F'|'T'|'A';page:number;slot:number;digest:string;rulePage?:number;ruleSlot?:number;listKind?:'d'|'p';action?:'REVIEW'|'WARN'|'DELETE'|'MUTE'};
+ {kind:'g'|'w'|'f'|'t'|'m'|'o'|'l'|'r'|'e'|'d'|'x'|'a'|'v'|'b'|'j'|'y'|'n'|'c'|'u'|'s'|'q'|'k'|'S'|'F'|'T'|'A'|'H'|'I';page:number;slot:number;digest:string;nonce?:string;rulePage?:number;ruleSlot?:number;listKind?:'d'|'p';action?:'REVIEW'|'WARN'|'DELETE'|'MUTE'};
 const p='(0|[1-9][0-9]{0,2})',s='([1-8])',d='([a-f0-9]{16})';
-const simple=new RegExp('^pr:1:([gwftmobjcuSFT]):'+p+':'+s+':'+d+'$','u');
+const simple=new RegExp('^pr:1:([gwftmobjcuSFTH]):'+p+':'+s+':'+d+'$','u');
 const list=new RegExp('^pr:1:([ly]):'+p+':'+s+':'+d+':'+p+'$','u');
 const rule=new RegExp('^pr:1:([redxvns]):'+p+':'+s+':'+d+':'+p+':'+s+'$','u');
 const action=new RegExp('^pr:1:(a):'+p+':'+s+':'+d+':'+p+':'+s+':([rwdm])$','u');
@@ -9,6 +9,8 @@ const allow=new RegExp('^pr:1:([qk]):'+p+':'+s+':'+d+':'+p+':'+s+':([dp])$','u')
 export function protectionInlineRoute(data:string):ProtectionUIRoute|null{
  if(typeof data!=='string'||Buffer.byteLength(data,'utf8')>64)return null;
  if(data==='pr:1:h')return {kind:'home',page:0};
+ const enforce=new RegExp('^pr:1:I:'+p+':'+s+':'+d+':([A-Za-z0-9_-]{16})$','u').exec(data);
+ if(enforce?.[0]===data)return {kind:'I',page:Number(enforce[1]),slot:Number(enforce[2]),digest:enforce[3]!,nonce:enforce[4]!};
  const page=new RegExp('^pr:1:p:'+p+'$','u').exec(data);
  if(page?.[0]===data)return {kind:'home',page:Number(page[1])};
  const cancel=/^pr:1:z:([A-Za-z0-9_-]{16})$/u.exec(data);

@@ -3,6 +3,7 @@ import {createHash,randomBytes} from 'node:crypto';
 import type {BotStore,BotState,Chat,Wizard} from './store.js';
 import type {Policy} from './policy.js';
 import {GroupProtectionPolicyService} from './group-protection-policy.js';
+import type {ProtectionEnforcer} from './protection-enforcement.js';
 import {isValidProtectionPolicy,evaluateProtectionRules,type ProtectionPolicy,type ProtectionRule,type ProtectionMessageType} from './protection-rules.js';
 import {protectionInlineRoute} from './protection-inline-route.js';
 import {ownerGroupCardLink} from './telegram-inline-groups.js';
@@ -47,7 +48,7 @@ function inputPolicy(config:ProtectionPolicy,kind:Exclude<InputKind,'TEST'>,text
  * only policy rules explicitly entered by an operator are persisted. */
 export class TelegramProtectionEditor{
  private readonly service:GroupProtectionPolicyService;
- constructor(private readonly store:BotStore,private readonly policy:Policy,private readonly clock:()=>number=Date.now){this.service=new GroupProtectionPolicyService(store,policy,clock);}
+ constructor(private readonly store:BotStore,private readonly policy:Policy,private readonly clock:()=>number=Date.now,enforcer?:ProtectionEnforcer){this.service=new GroupProtectionPolicyService(store,policy,clock,enforcer);}
  private groups(state:BotState,actor:string):Chat[]{
   return state.chats.filter(c=>Number.isSafeInteger(c.version)&&c.version>=1&&/^-[1-9][0-9]{0,15}$/u.test(c.id)&&Number.isSafeInteger(Number(c.id))&&
    this.policy.canUseChat(state,c.id,'moderation')&&this.policy.has(state,actor,'chat.manage',c.id,this.clock()))
@@ -75,12 +76,13 @@ export class TelegramProtectionEditor{
    rows.push([btn('🔒 أنواع الرسائل',key('y',f,':0'))]);
    rows.push([btn('📋 القواعد',key('l',f,':0')),btn('🧪 اختبار القواعد',key('t',f))]);
    rows.push([btn('👁️ تشغيل المراقبة',key('m',f)),btn('⏹ إيقاف الفحص',key('o',f))]);
+   if(this.service.canEnforce({...f.config,revision:Math.max(1,f.config.revision)}))rows.push([btn('⚠️ مراجعة تفعيل التنفيذ',key('H',f))]);
   }
   rows.push(this.back(actor,f));
   return screen('<b>🚫 الكلمات والعبارات والروابط والأنواع</b>\nالمجموعة: <code>'+escape(f.chat.id)+'</code>\n'
    +(notice?escape(notice)+'\n':'')+(f.stale?'السياسة قديمة أو وقتها غير موثوق؛ التعديل محجوب.':
-    'الحالة: '+(f.config.mode==='OFF'?'متوقفة':f.config.mode==='MONITOR'?'مراقبة فقط':'تحتاج مراجعة؛ التنفيذ غير موصول')+'\nالقواعد: '+f.config.rules.length+' · النسخة: '+f.config.revision)+'\n'
-   +'هذه إعدادات محلية؛ لا تُفعّل حذفًا أو كتمًا تلقائيًا.',rows);
+    'الحالة: '+(f.config.mode==='OFF'?'متوقفة':f.config.mode==='MONITOR'?'مراقبة فقط':'تنفيذ القواعد المفعلة')+'\nالقواعد: '+f.config.rules.length+' · النسخة: '+f.config.revision)+'\n'
+   +'التنفيذ يتطلب خدمة موصولة وتأكيدًا مستقلًا. الكتم التلقائي مدته دقيقة واحدة؛ الحذف غير موصول.',rows);
  }
  private async fresh(actor:string,chat:string,notice=''):Promise<OwnerInlineScreen|null>{
   const state=await this.store.snapshot(),index=this.groups(state,actor).findIndex(c=>c.id===chat);
@@ -102,6 +104,7 @@ export class TelegramProtectionEditor{
  async handle(data:string,actor:string):Promise<OwnerInlineScreen|null>{
   if(!validTime(this.clock()))return null;
   const route=protectionInlineRoute(/^mi:1:i:02:(?:0[5678]|12)$/u.test(data)?'pr:1:h':data);if(!route)return null;
+  if(route.kind!=='I')await this.cancelEnforcement(actor);
   if(route.kind==='cancel')return this.cancel(actor,route.nonce);
   await this.cancel(actor);
   const state=await this.store.snapshot();
@@ -121,6 +124,27 @@ export class TelegramProtectionEditor{
   const f=this.frame(state,actor,route.page,route.slot);if(!f||f.digest!==route.digest)return null;
   if(route.kind==='g')return this.groupScreen(actor,f);
   if(f.stale)return null;
+  if(route.kind==='H'||route.kind==='I'){
+   if(!this.service.canEnforce({...f.config,revision:Math.max(1,f.config.revision)}))return null;
+   if(route.kind==='H'){
+    const nonce=randomBytes(12).toString('base64url'),now=this.clock();
+    const created=await this.store.transaction(s=>{
+     const live=this.frame(s,actor,f.page,f.slot);if(!live||live.digest!==f.digest||live.stale)return false;
+     const key='protection-enforce:'+actor;const old=s.wizards.find(w=>w.key===key);
+     const value:Wizard={key,userId:actor,chatId:actor,topicId:'',flow:'protection-enforce:'+f.chat.id+':'+f.digest+':'+nonce,step:0,version:(old?.version??0)+1,expiresAt:now+120000,policyVersion:f.epoch,status:'ACTIVE'};
+     if(old)Object.assign(old,value);else s.wizards.push(value);return true;
+    });
+    return created?screen('⚠️ تفعيل تنفيذ القواعد المفعلة لهذه المجموعة؟\nالمراجعة تُسجل فقط، والتحذير يسجل مخالفة، والكتم مدته دقيقة واحدة. تُحترم الاستثناءات وحماية المشرفين والصلاحيات. الحذف غير موصول.\nعدد القواعد المفعلة: '+f.config.rules.filter(r=>r.enabled).length+'\nالفلود: '+(f.config.flood?.enabled?'مفعل':'متوقف')+'\nالتأكيد صالح لدقيقتين؛ الرجوع يلغيه.',[[btn('✅ تأكيد التنفيذ',key('I',f,':'+nonce))],[btn('↩️ رجوع دون تفعيل',key('g',f))]]):null;
+   }
+   const claimed=await this.store.transaction(s=>{
+    const rows=s.wizards.filter(w=>w.key==='protection-enforce:'+actor),w=rows[0],now=this.clock();
+    if(rows.length!==1||!w||w.status!=='ACTIVE'||w.userId!==actor||w.chatId!==actor||w.policyVersion!==f.epoch||w.expiresAt<=now||w.expiresAt>now+120000||w.flow!=='protection-enforce:'+f.chat.id+':'+f.digest+':'+route.nonce)return false;
+    w.status='CANCELLED';w.version++;return true;
+   });
+   if(!claimed)return null;
+   const saved=await this.service.save(actor,{...f.config,revision:f.config.revision+1,mode:'ENFORCE'},f.epoch,f.config.revision);
+   return saved.status==='SAVED'?this.fresh(actor,f.chat.id,'فُعّل تنفيذ القواعد المدعومة.'):null;
+  }
   if(route.kind==='F')return this.begin(actor,f,'FLOOD');
   if(route.kind==='S')return this.floodScreen(f);
   if(route.kind==='T'||route.kind==='A'){
@@ -250,7 +274,12 @@ export class TelegramProtectionEditor{
   });
   return cancelled?this.failure(actor,'أُلغيت خطوة إدخال القاعدة أو الاختبار.'):null;
  }
- async cancelNavigation(actor:string):Promise<void>{await this.cancel(actor);}
+ private async cancelEnforcement(actor:string):Promise<void>{
+  if(!(await this.store.snapshot()).wizards.some(w=>w.key==='protection-enforce:'+actor&&w.status==='ACTIVE'))return;
+  await this.store.transaction(s=>{
+  for(const w of s.wizards.filter(w=>w.key==='protection-enforce:'+actor&&w.status==='ACTIVE')){w.status='CANCELLED';w.version++;}
+ });}
+ async cancelNavigation(actor:string):Promise<void>{await this.cancel(actor);await this.cancelEnforcement(actor);}
  async link(actor:string,chat:string):Promise<string|null>{
   const state=await this.store.snapshot(),index=this.groups(state,actor).findIndex(c=>c.id===chat);
   if(index<0)return null;const f=this.frame(state,actor,Math.floor(index/8),index%8+1);return f?key('g',f):null;
@@ -269,11 +298,16 @@ export class TelegramProtectionEditor{
     if(!f||f.stale||f.epoch!==Number(m[3])||f.config.revision!==Number(m[4]))return null;
    }else{
     const f=this.frame(state,actor,route.page,route.slot);if(!f||f.digest!==route.digest)return null;
+    if(route.kind==='I'){
+     const rows=state.wizards.filter(w=>w.key==='protection-enforce:'+actor),w=rows[0];
+     if(rows.length!==1||!w||w.status!=='ACTIVE'||w.userId!==actor||w.chatId!==actor||w.policyVersion!==f.epoch||w.expiresAt<=now||w.expiresAt>now+120000||w.flow!=='protection-enforce:'+f.chat.id+':'+f.digest+':'+route.nonce)return null;
+    }
    }
   }
   return {actorId:actor,epoch,expiresAt:now+ADMIN_UI_TTL_MS};
  }
  async handleText(actor:string,text:string,navigation:boolean):Promise<Outcome|null>{
+  await this.cancelEnforcement(actor);
   if(navigation||text.startsWith('/')){
    const cancelled=await this.cancel(actor);
    return text==='/cancel'&&cancelled?{status:'APPLIED',reason:'PROTECTION_EDITOR_CANCELLED',screen:cancelled}:null;

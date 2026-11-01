@@ -189,7 +189,7 @@ export class ModerationService {
     if(await this.priorPending(actorId,chatId,memberId))return false;
     return this.check(actorId,chatId,memberId);
   }
-  async addManualReason(actorId: string, chatId: string, memberId: string, reference: string, kind: 'MUTE' | 'BAN',stillCurrent?:(s:BotState)=>boolean,durationSeconds?:number): Promise<ModerationResult> {
+  async addManualReason(actorId: string, chatId: string, memberId: string, reference: string, kind: 'MUTE' | 'BAN',stillCurrent?:(s:BotState)=>boolean,durationSeconds?:number,dispatchCurrent?:(s:BotState)=>boolean): Promise<ModerationResult> {
     if (!reference || reference.length > 80 || !['MUTE', 'BAN'].includes(kind)) throw new Error('Invalid reason');
     if(durationSeconds!==undefined&&(!Number.isSafeInteger(durationSeconds)||durationSeconds<60||durationSeconds>2592000))return {status:'DENIED',reason:'INVALID_DURATION'};
     // An unbranded custom adapter might ignore the optional deadline argument.
@@ -219,7 +219,7 @@ export class ModerationService {
     if(added==='DENIED')return {status:'DENIED',reason:'NOT_AUTHORIZED_OR_BOT_RIGHTS'};
     if(typeof added==='string')return {status:'DENIED',reason:moderationRateDenial(added)};
     if (!added) return { status: 'NO_CHANGE', reason: 'DUPLICATE_OR_REVOKED' };
-    return this.reconcile(actorId, chatId, memberId);
+    return this.reconcile(actorId, chatId, memberId,dispatchCurrent);
   }
   async removeManualReason(actorId: string, chatId: string, memberId: string, reference: string,expectedKind?:'BAN'|'MUTE',stillCurrent?:(s:BotState)=>boolean): Promise<ModerationResult> {
     if(expectedKind!==undefined&&expectedKind!=='BAN'&&expectedKind!=='MUTE')return {status:'DENIED',reason:'INVALID_REASON_KIND'};

@@ -2,13 +2,19 @@ import {advanceFloodWindow} from './protection-flood.js';
 import {protectionEntityLinks} from './protection-message-entities.js';
 import {BotStore,type BotState} from './store.js';
 import type {Policy} from './policy.js';
+import type {ProtectionEnforcer} from './protection-enforcement.js';
+import type {ProtectionAction} from './protection-rules.js';
 import {isValidProtectionPolicy,evaluateProtectionRules,type GroupProtectionRecord,type ProtectionEvaluation,type ProtectionMessage} from './protection-rules.js';
-type Inspection={status:'DENIED'|'UNCONFIGURED'|'STALE'}|{status:'CONFIGURED';record:GroupProtectionRecord;enforcementConnected:false};
+type Inspection={status:'DENIED'|'UNCONFIGURED'|'STALE'}|{status:'CONFIGURED';record:GroupProtectionRecord;enforcementConnected:boolean};
 const clockValid=(n:number)=>Number.isSafeInteger(n)&&n>=0&&n<=8640000000000000;
 /** Owner/delegated operator control of one group's local rules. Saving a
  * monitor configuration is not permission to issue Telegram mutations. */
 export class GroupProtectionPolicyService{
- constructor(private readonly store:BotStore,private readonly policy:Policy,private readonly clock:()=>number=Date.now){}
+ constructor(private readonly store:BotStore,private readonly policy:Policy,private readonly clock:()=>number=Date.now,private readonly enforcer?:ProtectionEnforcer){}
+ canEnforce(config:GroupProtectionRecord['policy']):boolean{
+  return Boolean(this.enforcer&&config.rules.filter(r=>r.enabled).every(r=>this.enforcer!.supports(r.action))&&
+   (!config.flood?.enabled||this.enforcer.supports(config.flood.action)));
+ }
  private allowed(state:BotState,actor:string,chat:string,now:number):boolean{
   return clockValid(now)&&this.policy.canUseChat(state,chat,'moderation')&&this.policy.has(state,actor,'chat.manage',chat,now);
  }
@@ -18,7 +24,7 @@ export class GroupProtectionPolicyService{
   const rows=(state.protectionPolicies??[]).filter(r=>r.policy.chatId===chat);
   if(!rows.length)return {status:'UNCONFIGURED'};
   if(rows.length!==1||rows[0]!.updatedAt>now||rows[0]!.chatPolicyVersion!==this.policy.chatRevision(state,chat))return {status:'STALE'};
-  return {status:'CONFIGURED',record:structuredClone(rows[0]!),enforcementConnected:false};
+  return {status:'CONFIGURED',record:structuredClone(rows[0]!),enforcementConnected:this.canEnforce(rows[0]!.policy)};
  }
  async save(actor:string,proposed:unknown,expectedChatRevision:number,expectedRevision:number):Promise<{
   status:'SAVED'|'DENIED'|'INVALID'|'STALE'|'ENFORCEMENT_NOT_CONNECTED';revision?:number
@@ -29,7 +35,7 @@ export class GroupProtectionPolicyService{
   return this.store.transaction(state=>{
    const now=this.clock();
    if(!this.allowed(state,actor,candidate.chatId,now))return {status:'DENIED' as const};
-   if(candidate.mode==='ENFORCE')return {status:'ENFORCEMENT_NOT_CONNECTED' as const};
+   if(candidate.mode==='ENFORCE'&&!this.canEnforce(candidate))return {status:'ENFORCEMENT_NOT_CONNECTED' as const};
    if(this.policy.chatRevision(state,candidate.chatId)!==expectedChatRevision)return {status:'STALE' as const};
    const rows=(state.protectionPolicies??[]).filter(r=>r.policy.chatId===candidate.chatId),old=rows[0];
    if(rows.length>1||(old?.policy.revision??0)!==expectedRevision||old&&(old.updatedAt>now||old.chatPolicyVersion!==expectedChatRevision))return {status:'STALE' as const};
@@ -47,7 +53,7 @@ export class GroupProtectionPolicyService{
   const previous=state.protectionFloodWindows??[];let removedEvents=0,clockUntrusted=false;
   const windows=previous.flatMap(w=>{
    const record=state.protectionPolicies?.find(r=>r.policy.chatId===w.chatId),config=record?.policy.flood;
-   if(!record||record.policy.mode!=='MONITOR'||!config?.enabled||record.policy.revision!==w.policyRevision||
+   if(!record||record.policy.mode==='OFF'||!config?.enabled||record.policy.revision!==w.policyRevision||
     record.chatPolicyVersion!==w.chatPolicyVersion||record.chatPolicyVersion!==this.policy.chatRevision(state,w.chatId)||!this.policy.canUseChat(state,w.chatId,'moderation')){removedEvents+=w.events.length;return [];}
    if(w.updatedAt>now||record.updatedAt>now){clockUntrusted=true;return [w];}
    const events=w.events.filter(e=>e.at>now-config.windowMs);removedEvents+=w.events.length-events.length;
@@ -85,11 +91,13 @@ export class GroupProtectionPolicyService{
  async observeIncomingMessage(message:ProtectionMessage,entities:unknown,updateKey:string,countTraffic=true):Promise<string>{
   const {chatId:chat,memberId:member}=message;
   if(!/^b3-webhook:[A-Za-z0-9_-]{1,80}:[0-9]+$/u.test(updateKey))return 'DENIED';
-  return this.store.transaction(state=>{
+  const prepared=await this.store.transaction(state=>{
    const now=this.clock();
    if(!clockValid(now)||!this.policy.canUseChat(state,chat,'moderation'))return 'DENIED';
    const record=state.protectionPolicies?.find(r=>r.policy.chatId===chat);
-   if(!record||record.policy.mode!=='MONITOR')return 'DISABLED';
+   if(!record||record.policy.mode==='OFF')return 'DISABLED';
+   if(record.policy.mode==='ENFORCE'&&!this.canEnforce(record.policy))return 'ENFORCEMENT_NOT_CONNECTED';
+   if(record.policy.mode==='ENFORCE'&&!this.allowed(state,record.updatedBy,chat,now))return 'DENIED';
    if(record.updatedAt>now||record.chatPolicyVersion!==this.policy.chatRevision(state,chat))return 'STALE';
    if(this.policy.isOwner(member)||this.policy.has(state,member,'chat.manage',chat,now)||record.policy.exemptMemberIds.includes(member))return 'EXEMPT';
    const key=updateKey+':protection:'+chat;
@@ -112,10 +120,28 @@ export class GroupProtectionPolicyService{
    const floodAction=flood==='EXCEEDED'?record.policy.flood!.action:null;
    const action=floodAction&&choices.indexOf(floodAction)>choices.indexOf(result.proposedAction??'')?floodAction:result.proposedAction;
    if(matches)state.audit.push({updateKey:key,decision:'NOOP',
-    reason:'PROTECTION_MONITOR_MATCH:revision='+record.policy.revision+';action='+action+';rules='+matches,
+    reason:(record.policy.mode==='ENFORCE'?'PROTECTION_ENFORCEMENT_CLAIM:':'PROTECTION_MONITOR_MATCH:')+'revision='+record.policy.revision+';action='+action+';rules='+matches,
     policyVersion:record.chatPolicyVersion,at:now});
+   if(matches&&action&&record.policy.mode==='ENFORCE')return {record:structuredClone(record),action,key,at:now};
    return 'OBSERVED';
   });
+  if(typeof prepared==='string')return prepared;
+  const current=(state:BotState)=>{
+   const now=this.clock(),rows=state.protectionPolicies?.filter(r=>r.policy.chatId===chat)??[];
+   return clockValid(now)&&now>=prepared.at&&now<prepared.at+5000&&rows.length===1&&
+    JSON.stringify(rows[0])===JSON.stringify(prepared.record)&&this.allowed(state,prepared.record.updatedBy,chat,now)&&
+    prepared.record.chatPolicyVersion===this.policy.chatRevision(state,chat)&&
+    !this.policy.isOwner(member)&&!this.policy.has(state,member,'chat.manage',chat,now)&&!prepared.record.policy.exemptMemberIds.includes(member);
+  };
+  // The durable claim precedes the external authority reads. A lost/failed
+  // attempt is not replayed by redelivery, even after a process restart.
+  let status:string;
+  try{status=await this.enforcer!.execute(prepared.record.updatedBy,chat,member,prepared.action as ProtectionAction,prepared.key,current);}
+  catch{status='UNAVAILABLE';}
+  await this.store.transaction(state=>{state.audit.push({updateKey:prepared.key+':result',decision:'NOOP',
+   reason:'PROTECTION_ENFORCEMENT_RESULT:'+(['ADDED','NO_CHANGE','APPLIED','DENIED','BLOCKED_PENDING','BLOCKED_UNKNOWN','FAILED_CONFIRMED','UNKNOWN_OUTCOME','REVIEW'].includes(status)?status:'UNAVAILABLE'),
+   policyVersion:prepared.record.chatPolicyVersion,at:this.clock()});});
+  return 'ENFORCEMENT_ATTEMPTED';
  }
  async preview(actor:string,chat:string,message:unknown):Promise<{status:'DENIED'|'UNCONFIGURED'|'STALE'}|{status:'EVALUATED';result:ProtectionEvaluation}>{
   const inspection=await this.inspect(actor,chat);
