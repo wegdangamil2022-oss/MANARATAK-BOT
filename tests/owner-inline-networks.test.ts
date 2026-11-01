@@ -183,3 +183,106 @@ for(const engine of ['json','sqlite'] as const){
   }finally{await f.close();}
  });
 }
+
+
+test('network rename and delete callbacks only accept canonical network IDs',()=>{
+ const id='abcdef123456';
+ assert.equal(validOwnerNetworkRoute('nw:1:e:'+id),true);
+ assert.equal(validOwnerNetworkRoute('nw:1:x:'+id),true);
+ for(const bad of ['nw:1:e:ABCDEF123456','nw:1:x:abcdef12345',
+  'nw:1:x:abcdef123456\n','nw:1:e:abcdef123456:1','nw:1:x:abcdef123456:0'])
+  assert.equal(validOwnerNetworkRoute(bad),false,bad);
+});
+for(const engine of ['json','sqlite'] as const){
+ test('owner renames a local network through private text and confirmed preview ('+engine+')',async()=>{
+  const f=await setup(engine);try{
+   await f.approve(GROUP);
+   const n=await f.create();
+   const start=await f.app().handle(callback(200,'nw:1:e:'+n.id));
+   assert.equal(start.status,'APPLIED');
+   assert.match(start.plan?.text??'',/الاسم الجديد/);
+   const typed=await f.app().handle(textMsg(201,'شبكة الهندسة'));
+   assert.equal(typed.status,'APPLIED');
+   assert.match(typed.plan?.text??'',/معاينة إعادة تسمية/);
+   assert.equal((await f.store.snapshot()).groupNetworks?.[0]?.name,'شبكة الطب');
+   const token=find(typed,'تأكيد');
+   assert.equal((await f.app().handle(callback(202,token,200))).status,'DENIED');
+   assert.equal((await f.app().handle(callback(203,token))).status,'APPLIED');
+   const state=await f.store.snapshot();
+   assert.equal(state.groupNetworks?.[0]?.name,'شبكة الهندسة');
+   assert.equal(state.groupNetworks?.[0]?.revision,2);
+   assert.deepEqual(state.groupNetworks?.[0]?.members,[]);
+   assert.equal(state.audit.filter(x=>x.reason==='OWNER_NETWORK_RENAMED').length,1);
+   assert.equal((await f.app().handle(callback(204,token))).status,'DENIED');
+   const details=await f.app().handle(callback(205,'nw:1:d:'+n.id));
+   assert.match(details.plan?.text??'',/شبكة الهندسة/);
+  }finally{await f.close();}
+ });
+ test('network rename fails on duplicate names and concurrent membership edits ('+engine+')',async()=>{
+  const f=await setup(engine);try{
+   const n=await f.create();
+   const second=await f.create('شبكة العلوم');
+   assert.notEqual(n.id,second.id);
+   assert.equal((await f.app().handle(callback(210,'nw:1:e:'+n.id))).status,'APPLIED');
+   const duplicate=await f.app().handle(textMsg(211,'شبكة العلوم'));
+   assert.equal(duplicate.status,'DENIED');
+   assert.equal((await f.store.snapshot()).groupNetworks?.[0]?.name,'شبكة الطب');
+   const input=await f.app().handle(textMsg(212,'شبكة الطب الجديدة'));
+   const token=find(input,'تأكيد');
+   await f.approve(GROUP);
+   const preview=await f.app().handle(callback(213,'nw:1:t:'+n.id+':1:'+GROUP+':1:0'));
+   assert.equal(preview.status,'APPLIED');
+   assert.equal((await f.app().handle(callback(214,find(preview,'تأكيد')))).status,'APPLIED');
+   assert.equal((await f.app().handle(callback(215,token))).status,'DENIED');
+   assert.equal((await f.store.snapshot()).groupNetworks?.find(x=>x.id===n.id)?.name,'شبكة الطب');
+  }finally{await f.close();}
+ });
+ test('owner can delete an empty network only after fresh one-shot confirmation ('+engine+')',async()=>{
+  const f=await setup(engine);try{
+   const n=await f.create();
+   const card=await f.app().handle(callback(220,'nw:1:d:'+n.id));
+   const review=await f.app().handle(callback(221,find(card,'حذف الشبكة')));
+   assert.equal(review.status,'APPLIED');
+   assert.match(review.plan?.text??'',/معاينة حذف/);
+   assert.equal((await f.store.snapshot()).groupNetworks?.length,1);
+   const token=find(review,'تأكيد الحذف');
+   assert.equal((await f.app().handle(callback(222,token,200))).status,'DENIED');
+   const result=await Promise.all([
+    f.app().handle(callback(223,token)),f.app().handle(callback(224,token))
+   ]);
+   assert.deepEqual(result.map(x=>x.status).sort(),['APPLIED','DENIED']);
+   const state=await f.store.snapshot();
+   assert.equal(state.groupNetworks?.length,0);
+   assert.equal(state.audit.filter(x=>x.reason==='OWNER_NETWORK_DELETED').length,1);
+   assert.equal((await f.app().handle(callback(225,token))).status,'DENIED');
+  }finally{await f.close();}
+ });
+ test('network deletion is blocked while membership exists, or network changes after preview ('+engine+')',async()=>{
+  const f=await setup(engine);try{
+   await f.approve(GROUP);
+   const n=await f.create();
+   const preview=await f.app().handle(callback(230,'nw:1:x:'+n.id));
+   assert.equal(preview.status,'APPLIED');
+   const token=find(preview,'تأكيد الحذف');
+   const associate=await f.app().handle(callback(231,'nw:1:t:'+n.id+':1:'+GROUP+':1:0'));
+   assert.equal((await f.app().handle(callback(232,find(associate,'تأكيد')))).status,'APPLIED');
+   assert.equal((await f.app().handle(callback(233,token))).status,'DENIED');
+   assert.equal((await f.app().handle(callback(234,'nw:1:x:'+n.id))).status,'DENIED');
+   assert.equal((await f.store.snapshot()).groupNetworks?.[0]?.members.length,1);
+  }finally{await f.close();}
+ });
+ test('rename pending input cancels on navigation and delete preview cancellation is durable ('+engine+')',async()=>{
+  const f=await setup(engine);try{
+   const n=await f.create();
+   assert.equal((await f.app().handle(callback(240,'nw:1:e:'+n.id))).status,'APPLIED');
+   assert.equal((await f.app().handle(callback(241,'nw:1:h'))).status,'APPLIED');
+   const stray=await f.app().handle(textMsg(242,'اسم لم يُطلب'));
+   assert.notEqual(stray.reason,'NETWORK_TEXT_PREVIEW');
+   const review=await f.app().handle(callback(243,'nw:1:x:'+n.id));
+   const token=find(review,'تأكيد الحذف'),cancel=find(review,'إلغاء');
+   assert.equal((await f.app().handle(callback(244,cancel))).status,'APPLIED');
+   assert.equal((await f.app().handle(callback(245,token))).status,'DENIED');
+   assert.equal((await f.store.snapshot()).groupNetworks?.length,1);
+  }finally{await f.close();}
+ });
+}
