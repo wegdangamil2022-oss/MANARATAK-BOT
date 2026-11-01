@@ -1,3 +1,6 @@
+import {ModerationService,FakeModerationGateway} from '../src/moderation.js';
+import {ModerationCommandReview} from '../src/telegram-moderation-command-review.js';
+import {groupRuleDescription} from '../src/telegram-group-rules.js';
 import {TelegramUpdateApplication} from '../src/telegram-transport.js';
 import {TelegramReplyDispatcher} from '../src/telegram-replies.js';
 import {EducationService} from '../src/education.js';
@@ -42,7 +45,7 @@ for(const engine of ['json','sqlite'] as const){
  });
  test(engine+' transport cancels navigated previews and dispatches only the still-current published version',async()=>{
   const f=await fixture();try{
-   const education=new EducationService(f.store,f.policy,()=>NOW),app=new TelegramUpdateApplication({store:f.store,policy:f.policy,education,admin:new EducationAdminFacade(f.store,f.policy,education,()=>NOW),faq:new ApprovedAnswerService(f.store,f.policy,()=>NOW),links:new ResourceLinkService(f.store,f.policy,()=>NOW),clock:()=>NOW,botId:'rules',botUsername:'ManaratakBot',ownerMenuMode:'inline',studentMenuMode:'inline',membership:async()=>{throw Error('NETWORK_FORBIDDEN');}});
+   const education=new EducationService(f.store,f.policy,()=>NOW),app=new TelegramUpdateApplication({store:f.store,policy:f.policy,education,admin:new EducationAdminFacade(f.store,f.policy,education,()=>NOW),faq:new ApprovedAnswerService(f.store,f.policy,()=>NOW),links:new ResourceLinkService(f.store,f.policy,()=>NOW),moderation:new ModerationService(f.store,f.policy,new FakeModerationGateway(),()=>NOW),moderationCommandMode:'direct',clock:()=>NOW,botId:'rules',botUsername:'ManaratakBot',ownerMenuMode:'inline',studentMenuMode:'inline',membership:async()=>{throw Error('NETWORK_FORBIDDEN');}});
    const privateText=(id:number,text:string)=>app.handle({update_id:id,message:{message_id:id,chat:{id:301,type:'private'},from:{id:301,is_bot:false},text}});
    const preview=await privateText(1,'/setrules -100\nفقرة أولى');assert.ok(preview.plan);const confirm=preview.plan.inlineMarkup!.inline_keyboard.flat().find(b=>b.callback_data.startsWith('rl:1:c:'))!.callback_data;
    await privateText(2,'/grouprules');const stale=await app.handle({update_id:3,callback_query:{id:'rules-stale',from:{id:301,is_bot:false},data:confirm,message:{message_id:9,from:{id:999,is_bot:true},chat:{id:301,type:'private'}}}});assert.equal(stale.status,'DENIED');
@@ -50,6 +53,22 @@ for(const engine of ['json','sqlite'] as const){
    const group=()=>app.handle({update_id:4,message:{message_id:10,chat:{id:-100,type:'supergroup'},from:{id:300,is_bot:false},text:'/rules'}});const plan=await group();assert.equal(plan.reason,'GROUP_RULES_VIEW');assert.ok(plan.plan);
    const next=await f.ui.preview('301','/setrules -100\nفقرة معدلة');await f.ui.handle('301',route(next,'rl:1:c:'));let calls=0;const dispatcher=new TelegramReplyDispatcher(f.store,f.policy,{send:async()=>{calls++;return {status:'CONFIRMED',messageId:91};}},()=>NOW);assert.equal((await dispatcher.dispatch(plan.deliveryKey!)).status,'FAILED_CONFIRMED');assert.equal(calls,0);
    const fresh=await app.handle({update_id:5,message:{message_id:11,chat:{id:-100,type:'supergroup'},from:{id:300,is_bot:false},text:'/rules'}});assert.equal((await dispatcher.dispatch(fresh.deliveryKey!)).status,'CONFIRMED');assert.equal(calls,1);
+   const warning=await app.handle({update_id:6,message:{message_id:100,chat:{id:-100,type:'supergroup'},from:{id:301,is_bot:false},text:'/warnrule 1',reply_to_message:{message_id:42,chat:{id:-100,type:'supergroup'},from:{id:400,is_bot:false}}}});assert.equal(warning.reason,'MODERATION_PREVIEW_ONLY');assert.equal(warning.plan!.chatId,'301');assert.match(warning.plan!.text,/فقرة معدلة/u);assert.equal((await f.store.snapshot()).warnings.length,0);
+   const approve=warning.plan!.inlineMarkup!.inline_keyboard.flat().find(b=>b.callback_data.startsWith('mc:1:c:'))!.callback_data;const confirmed=await app.handle({update_id:7,callback_query:{id:'rule-warning',from:{id:301,is_bot:false},data:approve,message:{message_id:9,from:{id:999,is_bot:true},chat:{id:301,type:'private'}}}});assert.equal(confirmed.status,'APPLIED');assert.equal((await f.store.snapshot()).warnings[0]!.reference,'law_v2_p1_m42');
+  }finally{await f.close();}
+ });
+ test(engine+' warnings bind one message to the approved paragraph version and preserve old explanations after edits',async()=>{
+  const f=await fixture();try{
+   const draft=await f.ui.preview('301','/setrules -100\nلا إعلان <مدفوع>');await f.ui.handle('301',route(draft,'rl:1:c:'));
+   const service=new ModerationService(f.store,f.policy,new FakeModerationGateway(),()=>NOW),review=new ModerationCommandReview(f.store,f.policy,service,()=>NOW);
+   const reference=await f.ui.warningReference(CHAT,1,42);assert.equal(reference,'law_v1_p1_m42');assert.equal(await f.ui.warningReference(CHAT,2,42),null);
+   const command={kind:'warn' as const,reference:reference!,memberId:'400'},preview=await review.preview('301',CHAT,command);assert.ok(preview);assert.match(preview.text,/&lt;مدفوع&gt;/u);assert.equal((await f.store.snapshot()).warnings.length,0);
+   await review.handle('301',route(preview,'mc:1:c:'));assert.equal((await f.store.snapshot()).warnings[0]!.reference,reference);
+   const secondPreview=await review.preview('301',CHAT,{...command,reference:'law_v1_p1_m43'});assert.ok(secondPreview);
+   const next=await f.ui.preview('301','/setrules -100\nقانون جديد');await f.ui.handle('301',route(next,'rl:1:c:'));
+   assert.equal(await review.handle('301',route(secondPreview,'mc:1:c:')),null);assert.equal(await review.preview('301',CHAT,{...command,reference:'law_v1_p1_m44'}),null);
+   assert.match(groupRuleDescription(await f.store.snapshot(),CHAT,reference!)!,/لا إعلان/u);assert.equal((await f.store.snapshot()).warnings.length,1);
+   const remove=await review.preview('301',CHAT,{...command,kind:'unwarn'});assert.ok(remove);await review.handle('301',route(remove,'mc:1:c:'));assert.equal((await f.store.snapshot()).warnings[0]!.active,false);
   }finally{await f.close();}
  });
  test(engine+' rules private picker and input bounds preserve usable return buttons',async()=>{

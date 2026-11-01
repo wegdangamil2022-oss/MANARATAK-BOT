@@ -682,11 +682,18 @@ export class TelegramUpdateApplication {
      return view?{status:view.status,reason:view.reason,adminUIAccess:view.access,plan:this.plan(actorId,view.text,undefined,view.keyboard)}:{status:'DENIED',reason:'GROUP_PERMISSIONS_STALE_OR_UNAVAILABLE'};
     }
     if(kind==='group'){
-     const command=parseReplyModerationCommand(text,this.opts.botUsername,chatId,event.messageId,event.replyTo);
+     let moderationText=text;
+     const lawStart=/^\/warnrule(?:@([A-Za-z][A-Za-z0-9_]{4,31}))?(?=\s|$)/u.exec(text);
+     if(lawStart&&(!lawStart[1]||lawStart[1].toLowerCase()===this.opts.botUsername.toLowerCase())){
+      const syntax=/^\/warnrule(?:@[A-Za-z][A-Za-z0-9_]{4,31})? ([1-9][0-9]?)$/u.exec(text),replyId=event.replyTo&&typeof event.replyTo==='object'?(event.replyTo as Record<string,unknown>).message_id:undefined;
+      const reference=syntax&&typeof replyId==='number'?await new TelegramGroupRules(this.opts.store,this.opts.policy,this.clock).warningReference(chatId,Number(syntax[1]),replyId):null;
+      if(!reference)return {status:'DENIED',reason:'GROUP_RULE_PARAGRAPH_UNAVAILABLE'};moderationText='/warn '+reference;
+     }
+     const command=parseReplyModerationCommand(moderationText,this.opts.botUsername,chatId,event.messageId,event.replyTo);
      if(command.status==='INVALID')return {status:'DENIED',reason:'INVALID_MODERATION_COMMAND'};
      if(command.status==='COMMAND'){
       if(!this.opts.moderation)return {status:'DENIED',reason:'MODERATION_NOT_CONFIGURED'};
-      if(this.opts.moderationCommandMode!=='direct'){
+      if(this.opts.moderationCommandMode!=='direct'||command.command.kind==='warn'&&command.command.reference.startsWith('law_')){
        const view=await new ModerationCommandReview(this.opts.store,this.opts.policy,this.opts.moderation,this.clock).preview(actorId,chatId,command.command);
        return view?{status:view.status,reason:view.reason,adminUIAccess:view.access,plan:this.plan(actorId,view.text,undefined,view.keyboard)}:{status:'DENIED',reason:'MODERATION_PREVIEW_NOT_AUTHORIZED'};
       }

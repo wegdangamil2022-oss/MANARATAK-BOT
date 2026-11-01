@@ -1,3 +1,4 @@
+import {groupRuleDescription} from './telegram-group-rules.js';
 import {createHash,randomBytes} from 'node:crypto';
 import type {BotState,BotStore} from './store.js';
 import type {Policy} from './policy.js';
@@ -67,7 +68,7 @@ export class TelegramModerationAppeals{
    const selected=entries[page*8+slot-1];if(!selected)return null;
    if(journal){const a=selected as Appeal;return build('طلبك الخاص\nالمجموعة: '+a.chat+'\nالنوع: '+names[a.kind]+'\nالمرجع: '+escape(a.reference)+'\nالحالة: '+names[a.status]+'\nالقبول يسجل المراجعة ولا يرفع عقوبة تلقائيًا.',[[b('↩️ سجل طلباتي','ap:1:j:'+page)]]);}
    if(!review){const c=selected as Case;
-    if(kind==='d')return build('طلب مراجعة الحالة؟\nالمجموعة: '+c.chat+'\nالنوع: '+names[c.kind]+'\nالمرجع: '+escape(c.reference)+'\nعند التأكيد يُحفظ رقم حسابك ومرجع الحالة وموعد الطلب في سجل خاص للمشرف المخول. لا يرفع الطلب العقوبة ولا يغير أسباب الاشتراك.',[[b('✅ تأكيد طلب المراجعة','ap:1:c:'+page+':'+slot+':'+proof)],[ownHome()]]);
+    if(kind==='d')return build('طلب مراجعة الحالة؟\nالمجموعة: '+c.chat+'\nالنوع: '+names[c.kind]+'\nالمرجع: '+escape(c.reference)+(c.kind==='WARNING'&&groupRuleDescription(s,c.chat,c.reference)?'\n'+escape(groupRuleDescription(s,c.chat,c.reference)!):'')+'\nعند التأكيد يُحفظ رقم حسابك ومرجع الحالة وموعد الطلب في سجل خاص للمشرف المخول. لا يرفع الطلب العقوبة ولا يغير أسباب الاشتراك.',[[b('✅ تأكيد طلب المراجعة','ap:1:c:'+page+':'+slot+':'+proof)],[ownHome()]]);
     if(kind!=='c')return null;
     if(appeals.some(a=>a.member===actor&&a.chat===c.chat&&a.source===c.source&&a.version===this.policy.chatRevision(s,c.chat)))return build('يوجد طلب مسجل لهذه النسخة من الحالة؛ راجع حالته من قائمة حالاتك.',[[ownHome()]]);
     if(appeals.filter(a=>a.member===actor&&a.at>now-86400000).length>=3||appeals.filter(a=>a.chat===c.chat&&a.status==='OPEN').length>=200)return build('بلغت حد طلبات المراجعة الحالي. حاول لاحقًا.',[[ownHome()]]);

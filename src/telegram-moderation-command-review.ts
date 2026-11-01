@@ -1,3 +1,4 @@
+import {groupRuleDescription} from './telegram-group-rules.js';
 import {randomBytes} from 'node:crypto';
 import type {BotState,BotStore} from './store.js';
 import type {Policy} from './policy.js';
@@ -26,6 +27,7 @@ export class ModerationCommandReview{
  async preview(actor:string,chat:string,command:ReplyModerationCommand):Promise<ModerationCommandScreen|null>{
   const now=this.clock();if(!Number.isSafeInteger(now)||now<0||now>8640000000000000-TTL)return null;
   const before=await this.store.snapshot(),epoch=moderationCommandReviewEpoch(before,this.policy,actor,chat,command.memberId,now);
+  const law=command.kind==='warn'&&command.reference.startsWith('law_')?groupRuleDescription(before,chat,command.reference,true):null;if(command.kind==='warn'&&command.reference.startsWith('law_')&&!law)return null;
   if(!epoch||!valid({chat,command,epoch,createdAt:now,expiresAt:now+TTL})||!(command.kind==='kick'?await this.service.canReviewKick(actor,chat,command.memberId):await this.service.canReviewCommand(actor,chat,command.memberId,releaseFor(command))))return null;
   return this.store.transaction(s=>{
    const at=this.clock();if(at<now||at>=now+TTL||moderationCommandReviewEpoch(s,this.policy,actor,chat,command.memberId,at)!==epoch)return null;
@@ -33,7 +35,7 @@ export class ModerationCommandReview{
    s.callbacks=s.callbacks.filter(c=>!c.ref.startsWith(PREFIX)||c.expiresAt>at);const old=s.callbacks.filter(c=>c.ref.startsWith(PREFIX)&&c.actorId===actor);const remove=new Set(old.slice(0,Math.max(0,old.length-127)).map(c=>c.ref));s.callbacks=s.callbacks.filter(c=>!remove.has(c.ref));
    s.callbacks.push({ref:PREFIX+nonce,actorId:actor,chatId:'private',policyVersion:this.policy.chatRevision(s,chat),expiresAt:now+TTL,oneShot:true,used:false,revoked:false,action:PREFIX+JSON.stringify({chat,command,epoch,createdAt:now,expiresAt:now+TTL})});
    s.wizards=s.wizards.filter(w=>w.key!==VIEW+actor);s.wizards.push({key:VIEW+actor,userId:actor,chatId:actor,topicId:'',flow:VIEW+nonce,step:0,version:1,policyVersion:0,expiresAt:now+TTL,status:'ACTIVE'});
-   return screen(s,this.policy,actor,at,'<b>معاينة '+names[command.kind]+'</b>\nالمجموعة: <code>'+chat+'</code>\nالعضو: <code>'+command.memberId+'</code>\nمرجع الحالة: <code>'+command.reference+'</code>\nالمدة: '+(command.kind==='kick'?'إخراج العضو دون حظر دائم؛ يمكنه العودة برابط.':command.durationSeconds===undefined?'دون انتهاء تلقائي':command.durationSeconds+' ثانية من وقت التأكيد')+((command.kind==='unban'||command.kind==='unmute')?'\nاستعادة قيد قائم في Telegram تحتاج قرار المالك. يعود العضو إلى أذونات المجموعة العامة؛ رفع الحظر لا يعيده تلقائيًا. تطابق الحالة لا يثبت عدم تدخل مشرف آخر؛ راجع ذلك قبل التأكيد.':'')+'\nلم تُنفذ العملية. التأكيد صالح لدقيقتين ويراجع الصلاحيات والقيود من جديد. إزالة سبب لا تلغي أسباب التقييد المستقلة.',{inline_keyboard:[[{text:'✅ تأكيد '+names[command.kind],callback_data:'mc:1:c:'+nonce},{text:'↩️ إلغاء',callback_data:'mc:1:x:'+nonce}]]});
+   return screen(s,this.policy,actor,at,'<b>معاينة '+names[command.kind]+'</b>\nالمجموعة: <code>'+chat+'</code>\nالعضو: <code>'+command.memberId+'</code>\nمرجع الحالة: <code>'+command.reference+'</code>'+(law?'\n'+law.replace(/[&<>]/gu,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]!)):'')+'\nالمدة: '+(command.kind==='kick'?'إخراج العضو دون حظر دائم؛ يمكنه العودة برابط.':command.durationSeconds===undefined?'دون انتهاء تلقائي':command.durationSeconds+' ثانية من وقت التأكيد')+((command.kind==='unban'||command.kind==='unmute')?'\nاستعادة قيد قائم في Telegram تحتاج قرار المالك. يعود العضو إلى أذونات المجموعة العامة؛ رفع الحظر لا يعيده تلقائيًا. تطابق الحالة لا يثبت عدم تدخل مشرف آخر؛ راجع ذلك قبل التأكيد.':'')+'\nلم تُنفذ العملية. التأكيد صالح لدقيقتين ويراجع الصلاحيات والقيود من جديد. إزالة سبب لا تلغي أسباب التقييد المستقلة.',{inline_keyboard:[[{text:'✅ تأكيد '+names[command.kind],callback_data:'mc:1:c:'+nonce},{text:'↩️ إلغاء',callback_data:'mc:1:x:'+nonce}]]});
   });
  }
  async handle(actor:string,data:string):Promise<ModerationCommandScreen|null>{

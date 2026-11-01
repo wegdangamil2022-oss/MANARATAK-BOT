@@ -1,3 +1,4 @@
+import {groupRuleDescription} from './telegram-group-rules.js';
 import {createHash} from 'node:crypto';
 import type {BotState,BotStore,Chat} from './store.js';
 import type {Policy} from './policy.js';
@@ -62,6 +63,6 @@ export class TelegramModerationCases{
   }
   const count=s.warnings.filter(w=>w.chatId===c.id&&w.memberId===e.member&&w.active).length;
   const rows=[];if(removable&&this.service)rows.push([b('🔍 مراجعة الإلغاء','cs:1:a:'+stem+':'+casePage+':'+m[7])]);rows.push([b('↩️ الحالات','cs:1:l:'+stem+':'+casePage)]);
-  return this.screen(s,actor,'<b>تفاصيل الحالة</b>\nالمجموعة: <code>'+c.id+'</code>\nالعضو: <code>'+escape(e.member)+'</code>\nالنوع: '+(e.kind==='KICK'?'طرد':e.kind==='WARNING'?'تحذير':e.kind==='SUBSCRIPTION'?'اشتراك':e.kind==='BAN'?'حظر':'كتم')+'\nالمرجع: <code>'+escape(e.reference)+'</code>\nالحالة: '+(e.kind==='KICK'?escape(e.result??'غير مؤكد'):e.active?'نشطة محليًا':'ملغاة محليًا')+'\nتحذيرات العضو النشطة: '+count+(e.expiresAt===undefined?'':'\nموعد انتهاء السبب: '+new Date(e.expiresAt).toISOString())+'\n'+(e.kind==='KICK'?'سجل طرد لمرة واحدة؛ لا سبب تقييد دائمًا ولا زر استعادة تلقائي.':e.kind==='SUBSCRIPTION'?'سبب اشتراك مستقل؛ لا يلغى من العقوبات اليدوية.':'الإلغاء يزيل السبب المحدد وحده، ويحافظ على الأسباب المستقلة. لا نجاح قبل نتيجة الخدمة الحالية.')+'\nلصاحب الحالة: /appeals في الخاص. المراجعة الخاصة متاحة من قائمة التحذيرات؛ قبولها لا يرفع عقوبة تلقائيًا.',rows);
+  return this.screen(s,actor,'<b>تفاصيل الحالة</b>\nالمجموعة: <code>'+c.id+'</code>\nالعضو: <code>'+escape(e.member)+'</code>\nالنوع: '+(e.kind==='KICK'?'طرد':e.kind==='WARNING'?'تحذير':e.kind==='SUBSCRIPTION'?'اشتراك':e.kind==='BAN'?'حظر':'كتم')+'\nالمرجع: <code>'+escape(e.reference)+'</code>\nالحالة: '+(e.kind==='KICK'?escape(e.result??'غير مؤكد'):e.active?'نشطة محليًا':'ملغاة محليًا')+(e.kind==='WARNING'&&groupRuleDescription(s,c.id,e.reference)?'\n'+escape(groupRuleDescription(s,c.id,e.reference)!):'')+'\nتحذيرات العضو النشطة: '+count+(e.expiresAt===undefined?'':'\nموعد انتهاء السبب: '+new Date(e.expiresAt).toISOString())+'\n'+(e.kind==='KICK'?'سجل طرد لمرة واحدة؛ لا سبب تقييد دائمًا ولا زر استعادة تلقائي.':e.kind==='SUBSCRIPTION'?'سبب اشتراك مستقل؛ لا يلغى من العقوبات اليدوية.':'الإلغاء يزيل السبب المحدد وحده، ويحافظ على الأسباب المستقلة. لا نجاح قبل نتيجة الخدمة الحالية.')+'\nلصاحب الحالة: /appeals في الخاص. المراجعة الخاصة متاحة من قائمة التحذيرات؛ قبولها لا يرفع عقوبة تلقائيًا.',rows);
  }
 }

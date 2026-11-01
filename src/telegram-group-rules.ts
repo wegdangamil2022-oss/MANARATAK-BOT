@@ -24,6 +24,11 @@ function versions(s:BotState,chat:string):Version[]{
  }
  return result.sort((a,b)=>a.version-b.version);
 }
+export function groupRuleDescription(s:BotState,chat:string,reference:string,current=false):string|null{
+ const m=/^law_v([1-9][0-9]{0,14})_p([1-9][0-9]?)_m([1-9][0-9]{0,15})$/u.exec(reference);if(!m||m[0]!==reference)return null;
+ const history=versions(s,chat),v=history.find(v=>v.version===Number(m[1])),line=v?.lines[Number(m[2])-1];if(!v||!line||current&&(history.at(-1)?.version!==v.version||s.chats.filter(c=>c.id===chat).length!==1||s.chats.find(c=>c.id===chat)?.version!==v.scope))return null;
+ return 'القانون '+m[2]+' · الإصدار '+m[1]+': '+line;
+}
 export class TelegramGroupRules{
  constructor(private readonly store:BotStore,private readonly policy:Policy,private readonly clock:()=>number){}
  private manager(s:BotState,actor:string,chat:string):boolean{return this.policy.canUseChat(s,chat,'moderation')&&this.policy.has(s,actor,'chat.manage',chat,this.clock())&&(!this.policy.isOwner(actor)||this.policy.privateFeature(s,'owner.dashboard',actor));}
@@ -32,6 +37,7 @@ export class TelegramGroupRules{
   const now=this.clock(),epoch=protectionUIEpoch(s,this.policy,actor,now);return epoch&&Number.isSafeInteger(now)&&now>=0&&now<=8640000000000000-120000?{text,keyboard:{inline_keyboard:rows},access:{actorId:actor,epoch,expiresAt:now+120000}}:null;
  }
  async cancel(actor:string):Promise<void>{const snap=await this.store.snapshot(),done=new Set(snap.audit.map(a=>a.updateKey));if(!snap.audit.some(a=>a.actorId===actor&&a.updateKey.startsWith(ROOT+'preview:')&&!done.has(a.updateKey+':done')))return;await this.store.transaction(s=>{for(const a of s.audit.filter(a=>a.actorId===actor&&a.updateKey.startsWith(ROOT+'preview:'))){if(!s.audit.some(x=>x.updateKey===a.updateKey+':done'))s.audit.push({actorId:actor,updateKey:a.updateKey+':done',decision:'DENY',reason:'GROUP_RULES_PREVIEW_CANCELLED',policyVersion:a.policyVersion,at:this.clock()});}});}
+ async warningReference(chat:string,paragraph:number,message:number):Promise<string|null>{const s=await this.store.snapshot(),v=versions(s,chat).at(-1);if(!v||v.scope!==this.policy.chatRevision(s,chat)||!this.policy.canUseChat(s,chat,'moderation')||!Number.isSafeInteger(paragraph)||paragraph<1||paragraph>v.lines.length||!Number.isSafeInteger(message)||message<=0)return null;return 'law_v'+v.version+'_p'+paragraph+'_m'+message;}
  async published(chat:string):Promise<string|null>{return (await this.publishedView(chat))?.text??null;}
  async publishedView(chat:string,topicId?:number):Promise<{text:string;epoch:string}|null>{const s=await this.store.snapshot(),v=versions(s,chat).at(-1);return this.policy.canUseChat(s,chat,'moderation')&&v&&v.scope===this.policy.chatRevision(s,chat)?{text:this.format(v),epoch:groupMenuEpochDigest(s,chat,topicId)}:null;}
  private format(v:Version):string{return '<b>قوانين المجموعة — الإصدار '+v.version+'</b>\n'+v.lines.map((line,i)=>(i+1)+'. '+escape(line)).join('\n')+'\nاعتماد: '+new Date(v.at).toISOString().slice(0,10);}
@@ -59,7 +65,7 @@ export class TelegramGroupRules{
     s.audit.push({actorId:actor,updateKey:ROOT+'published:'+draft.chat+':'+version,decision:'ALLOW',reason:PUBLISH+Buffer.from(JSON.stringify({chat:draft.chat,version,lines:draft.lines})).toString('base64url'),policyVersion:a.policyVersion,at:now});return this.view(s,actor,'اعتُمد الإصدار '+version+'. يستطيع الأعضاء عرضه بأمر /rules. بقي سجل الإصدارات القديمة دون تغيير.',[[b('↩️ القوانين','rl:1:h:0')]]);
    }
    const groups=s.chats.filter(c=>this.manager(s,actor,c.id)).sort((a,b)=>a.id.localeCompare(b.id)),page=Number(m[1]??m[2]),proof=hash([actor,groups,s.grants,s.privateFeatures,s.privateSettingsRevision,s.audit.filter(a=>a.updateKey.startsWith(ROOT))]).slice(0,16);if(page>=Math.max(1,Math.ceil(groups.length/8))||m[4]!==undefined&&m[4]!==proof)return null;
-   if(m[3]){const chat=groups[page*8+Number(m[3])-1];if(!chat)return null;const v=versions(s,chat.id).at(-1);return this.view(s,actor,(v&&v.scope===chat.version?this.format(v):'لا توجد قوانين معتمدة لنطاق المجموعة الحالي.')+'\n\nلإضافة أو تعديل الإصدار، أرسل في الخاص:\n<code>/setrules '+chat.id+'\nالفقرة الأولى\nالفقرة الثانية</code>\nمن 1 إلى 20 فقرة، كل فقرة حتى 120 حرفًا، دون ترقيم يدوي. تظهر معاينة قبل الاعتماد. لا يرتبط هذا الإصدار بتحذير تلقائي.',[[b('↩️ المجموعات','rl:1:h:'+page)]]);}
+   if(m[3]){const chat=groups[page*8+Number(m[3])-1];if(!chat)return null;const v=versions(s,chat.id).at(-1);return this.view(s,actor,(v&&v.scope===chat.version?this.format(v):'لا توجد قوانين معتمدة لنطاق المجموعة الحالي.')+'\n\nلإضافة أو تعديل الإصدار، أرسل في الخاص:\n<code>/setrules '+chat.id+'\nالفقرة الأولى\nالفقرة الثانية</code>\nمن 1 إلى 20 فقرة، كل فقرة حتى 120 حرفًا، دون ترقيم يدوي. تظهر معاينة قبل الاعتماد. لإنذار مرتبط بفقرة استخدم /warnrule 3 بالرد على رسالة العضو؛ تعرض معاينة خاصة قبل التحذير.',[[b('↩️ المجموعات','rl:1:h:'+page)]]);}
    const rows=groups.slice(page*8,page*8+8).map((c,i)=>[b('📜 '+c.id,'rl:1:g:'+page+':'+(i+1)+':'+proof)]);if(page>0)rows.push([b('⬅️ السابق','rl:1:h:'+(page-1))]);if((page+1)*8<groups.length)rows.push([b('➡️ التالي','rl:1:h:'+(page+1))]);rows.push([b('↩️ قسم الحماية',this.policy.isOwner(actor)?'mi:1:s:02:0':'pn:1:h')]);return this.view(s,actor,'قوانين المجموعات المخولة — صفحة '+(page+1)+'\nاختر المجموعة لعرض الإصدار المعتمد وطريقة تعديله.',rows);
   });
  }
