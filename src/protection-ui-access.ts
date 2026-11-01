@@ -1,6 +1,7 @@
 import {createHash} from 'node:crypto';
 import type {BotState} from './store.js';
 import type {Policy} from './policy.js';
+import {subscriptionConfigEpoch} from './subscription-config-epoch.js';
 export interface AdminUIAccess{actorId:string;epoch:string;expiresAt:number;}
 export const ADMIN_UI_TTL_MS=120000;
 export function validAdminUIAccess(v:unknown):v is AdminUIAccess{
@@ -22,7 +23,7 @@ export function protectionUIEpoch(state:BotState,policy:Policy,actor:string,now:
   actor,policy.ownerId,chats.map(c=>[c,state.protectionPolicies?.find(r=>r.policy.chatId===c.id)??null]),sessions,
   state.warnings.filter(w=>chats.some(c=>c.id===w.chatId)),state.moderationReasons.filter(r=>chats.some(c=>c.id===r.chatId)),state.moderationOperations.filter(o=>chats.some(c=>c.id===o.chatId)),
   ...(policy.isOwner(actor)&&state.privateSettingsRevision!==undefined?[state.privateSettingsRevision]:[]),
-  ...(policy.isOwner(actor)?[state.importRuns,state.educationCategories,state.educationResources]:[])
+  ...(policy.isOwner(actor)?[state.importRuns,state.educationCategories,state.educationResources,subscriptionConfigEpoch(state)]:[])
  ])).digest('hex');
 }
 /** Navigation can cancel an input session without changing the displayed staff sources. */

@@ -23,6 +23,7 @@ import {OwnerTelegramMenu,isOwnerMenuText} from './telegram-owner-menu.js';
 import {ownerInlineHome,ownerInlineRender,ownerInlineLinkedReadOnly,type TelegramInlineKeyboard} from './telegram-inline-owner.js';
 import {renderOwnerInlineImports} from './telegram-inline-imports.js';
 import {renderOwnerUpload,claimOwnerUpload,cancelOwnerUpload} from './telegram-owner-upload.js';
+import {renderSubscriptionConfig} from './telegram-inline-subscription-config.js';
 import {renderOwnerInlineFAQ} from './telegram-inline-faq.js';
 import {renderOwnerInlineLibrary} from './telegram-inline-library.js';
 import {renderOwnerInlineStudio,studioOwnerEntry,studioDraftScreen} from './telegram-inline-studio.js';
@@ -455,6 +456,11 @@ export class TelegramUpdateApplication {
       const planned=this.plan(chatId,screen.text,undefined,screen.keyboard,event.callbackMessageId);
       if(screen.nativeKeyboard){const {inlineMarkup:_,...base}=planned;return {status:'APPLIED',reason:'RESPONSE_PLANNED_ONLY',plan:{...base,studioMarkup:screen.nativeKeyboard}};}
       return {status:'APPLIED',reason:'RESPONSE_PLANNED_ONLY',plan:planned};
+     }
+     if(event.callbackData==='mi:1:i:04:02'||event.callbackData==='mi:1:i:04:04'||event.callbackData.startsWith('sc:1:')){
+      const screen=await renderSubscriptionConfig(this.opts.store,this.opts.policy,this.opts.subscription,actorId,event.callbackData,this.clock);
+      if(!screen)return {status:'DENIED',reason:'INVALID_OR_STALE_SUBSCRIPTION_CONFIG'};
+      return {status:'APPLIED',reason:'RESPONSE_PLANNED_ONLY',adminUIAccess:screen.access,plan:this.plan(chatId,screen.text,undefined,screen.keyboard,event.callbackMessageId)};
      }
      if(event.callbackData.startsWith('ou:1:')){
       const screen=await renderOwnerUpload(this.opts.store,this.opts.policy,actorId,event.callbackData,this.clock);
@@ -1251,7 +1257,7 @@ export class TelegramUpdateApplication {
     }
     const callback=event.callbackData??'';
     const ownerScreen=event.kind==='private'&&this.opts.policy.isOwner(event.actorId)&&(
-     /^(?:mi:1:|oi:1:|ou:1:|ec:1:|oc:1:|od:1:|gw:1:|gt:1:|gs:1:|gb:1:|nw:1:|gp:1:|of:1:|ol:1:|st:1:|ps:1:|pr:1:|pd:1:|pq:1:|mr:1:|mp:1:|c_)/u.test(callback)||
+     /^(?:mi:1:|oi:1:|ou:1:|sc:1:|ec:1:|oc:1:|od:1:|gw:1:|gt:1:|gs:1:|gb:1:|nw:1:|gp:1:|of:1:|ol:1:|st:1:|ps:1:|pr:1:|pd:1:|pq:1:|mr:1:|mp:1:|c_)/u.test(callback)||
      event.text==='/ownerinline'||event.text==='/ownerlegacy'||event.text==='/ownerrecover'||isOwnerMenuText(event.text)||(event.document!==undefined&&handled.plan?.inlineMarkup!==undefined)||
      handled.reason==='CATEGORY_TEXT_PREVIEW'||handled.reason==='NETWORK_TEXT_PREVIEW'||handled.reason==='DELEGATION_TEXT_PREVIEW'||handled.reason==='STUDIO_DRAFT_SAVED');
     if(ownerScreen&&handled.plan&&!handled.adminUIAccess){
