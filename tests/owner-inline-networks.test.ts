@@ -288,3 +288,63 @@ for(const engine of ['json','sqlite'] as const){
   }finally{await f.close();}
  });
 }
+
+
+test('network audit routes only accept canonical bounded payloads',()=>{
+ for(const good of ['nw:1:r:p:0','nw:1:r:p:999','nw:1:r:v:'+'A'.repeat(24)]){
+  assert.equal(validOwnerNetworkRoute(good),true,good);
+ }
+ for(const bad of ['nw:1:r:p:00','nw:1:r:p:1000','nw:1:r:p:-1',
+  'nw:1:r:v:short','nw:1:r:v:'+'A'.repeat(25),'nw:1:r:v:'+'A'.repeat(24)+'\n']){
+  assert.equal(validOwnerNetworkRoute(bad),false,bad);
+ }
+});
+for(const engine of ['json','sqlite'] as const){
+ test('verified network history retains create rename and delete even after network removal ('+engine+')',async()=>{
+  const f=await setup(engine);try{
+   const network=await f.create();
+   assert.equal((await f.app().handle(callback(280,'nw:1:e:'+network.id))).status,'APPLIED');
+   const rename=await f.app().handle(textMsg(281,'شبكة جديدة'));
+   assert.equal((await f.app().handle(callback(282,find(rename,'تأكيد')))).status,'APPLIED');
+   const deletePreview=await f.app().handle(callback(283,'nw:1:x:'+network.id));
+   assert.equal((await f.app().handle(callback(284,find(deletePreview,'تأكيد الحذف')))).status,'APPLIED');
+   const before=await f.store.snapshot();
+   assert.equal(before.groupNetworks?.length,0);
+   const home=await f.app().handle(callback(285,'nw:1:h'));
+   assert.ok(buttons(home).some(x=>x.callback_data==='nw:1:r:p:0'));
+   const history=await f.app().handle(callback(286,'nw:1:r:p:0'));
+   assert.equal(history.status,'APPLIED');
+   assert.match(history.plan?.text??'',/سجل تغييرات الشبكات/);
+   assert.match(history.plan?.text??'',/3 عمليات/);
+   const rows=buttons(history).filter(x=>x.callback_data.startsWith('nw:1:r:v:'));
+   assert.equal(rows.length,3);
+   const details=await Promise.all(rows.map((x,i)=>f.app().handle(callback(287+i,x.callback_data))));
+   assert.equal(details.every(x=>x.status==='APPLIED'),true);
+   assert.ok(details.some(x=>(x.plan?.text??'').includes('OWNER_NETWORK_RENAMED')));
+   assert.ok(details.some(x=>(x.plan?.text??'').includes('OWNER_NETWORK_DELETED')));
+   assert.ok(details.some(x=>(x.plan?.text??'').includes('OWNER_NETWORK_CREATED')));
+   assert.equal(details.every(x=>!buttons(x).some(b=>b.text.includes('تأكيد'))),true);
+   assert.equal((await f.app().handle(callback(295,'nw:1:r:p:1'))).status,'DENIED');
+   assert.equal((await f.app().handle(callback(296,'nw:1:r:p:0',200))).status,'DENIED');
+   assert.equal((await f.app().handle(callback(297,'nw:1:r:p:0',100,true))).status,'DENIED');
+   const after=await f.store.snapshot();
+   assert.deepEqual(after.groupNetworks,before.groupNetworks);
+   assert.equal(after.audit.filter(x=>x.reason==='OWNER_NETWORK_DELETED').length,1);
+  }finally{await f.close();}
+ });
+ test('network history refuses to trust duplicate or orphaned mutation evidence ('+engine+')',async()=>{
+  const f=await setup(engine);try{
+   await f.create();
+   const list=await f.app().handle(callback(310,'nw:1:r:p:0'));
+   const action=find(list,'🌐');
+   const state=await f.store.snapshot();
+   const audit=state.audit.find(a=>a.reason==='OWNER_NETWORK_CREATED')!;
+   await f.store.transaction(s=>{s.audit.push({...audit});});
+   const after=await f.app().handle(callback(311,'nw:1:r:p:0'));
+   assert.equal(after.status,'APPLIED');
+   assert.match(after.plan?.text??'',/لا توجد عمليات موثقة/);
+   assert.equal((await f.app().handle(callback(312,action))).status,'DENIED');
+   assert.equal((await f.store.snapshot()).groupNetworks?.length,1);
+  }finally{await f.close();}
+ });
+}
