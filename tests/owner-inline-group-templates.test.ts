@@ -493,12 +493,13 @@ for(const engine of ['json','sqlite'] as const){
  });
  test('copied template rollback requires unchanged source and destination ('+engine+')',async()=>{
   const f=await fixture(engine);try{
-   await f.approve(SOURCE);await f.approve(TARGET);await f.save(SOURCE);
+   await f.approve(SOURCE);await f.approve(TARGET);await f.save(SOURCE,{mode:'OFF',allow:true});
+   const original=(await f.store.snapshot()).protectionPolicies![0]!;
    const draft=await f.app().handle(cb(810,'gt:1:x:'+SOURCE+':'+TARGET));await f.app().handle(cb(811,click(draft,'تأكيد')));
    const list=await f.app().handle(cb(812,'gt:1:r:h')),detail=await f.app().handle(cb(813,click(list,'📑')));
    const preview=await f.app().handle(cb(814,click(detail,'معاينة الاسترجاع')));assert.equal(preview.status,'APPLIED');
    assert.equal((await f.app().handle(cb(815,click(preview,'تأكيد الاسترجاع')))).status,'APPLIED');
-   const state=await f.store.snapshot();assert.equal(state.protectionPolicies!.length,1);assert.equal(state.protectionPolicies![0]!.policy.chatId,SOURCE);
+   const state=await f.store.snapshot();assert.deepEqual(state.protectionPolicies,[original]);assert.equal(state.protectionPolicies![0]!.policy.mode,'OFF');
   }finally{await f.close();}
  });
  test('single rollback rejects cancellation, expiry and edited destination ('+engine+')',async()=>{
