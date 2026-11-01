@@ -1,6 +1,7 @@
 import {isValidFloodWindow,type FloodWindow} from './protection-flood.js';
 import {validGroupNetworks,type GroupNetwork} from './group-network-model.js';
 import {validCommunityFolders,type CommunityFolder} from './community-folder-model.js';
+import {validCommunityMessageMetadata,type CommunityMessageReceipt} from './community-message-receipt.js';
 import {validAdminUIAccess,type AdminUIAccess} from './protection-ui-access.js';
 import {validStudioState,type StudioState} from './button-studio-model.js';
 import {validCategoryLanguage,validTopicVisibility} from './education-category-policy.js';
@@ -89,6 +90,9 @@ export interface PurgeJob {
 }
 /** Durable Telegram text reply intent; no automatic retry after unknown sends. */
 export interface TelegramReplyJob {
+ communityMessage?:CommunityMessageReceipt;
+ communityClose?:CommunityMessageReceipt;
+ communityEditTarget?:{chatId:string;messageId:number};
  updateKey:string;plan?:{chatId:string;parseMode:'HTML';text:string;
   replyMarkup?:import('./telegram-menu.js').TelegramReplyKeyboard;
   inlineMarkup?:import('./telegram-inline-owner.js').TelegramInlineKeyboard;
@@ -354,6 +358,7 @@ export class BotStore {
        previous.telegramReplyJobs.some((raw:unknown)=>{
         if(!raw||typeof raw!=='object'||Array.isArray(raw))return true;
         const job=raw as Record<string,unknown>;
+        if(!validCommunityMessageMetadata(raw as TelegramReplyJob))return true;
         const plan=job.plan as Record<string,unknown>|undefined;
         if(plan?.messageThreadId!==undefined&&(!Number.isSafeInteger(plan.messageThreadId)||Number(plan.messageThreadId)<1||Number(plan.messageThreadId)>2147483647||typeof plan.chatId!=='string'||!plan.chatId.startsWith('-')||job.groupMenuAccess===undefined))return true;
         if(job.accessDenialCode!==undefined&&(
@@ -725,7 +730,7 @@ export class BotStore {
     groupQuestionAccess?:TelegramReplyJob['groupQuestionAccess'],
     groupMenuAccess?:TelegramReplyJob['groupMenuAccess'],
     privateGroupAccess?:TelegramReplyJob['privateGroupAccess'],
-    adminUIAccess?:TelegramReplyJob['adminUIAccess'],privateLibraryAccess?:TelegramReplyJob['privateLibraryAccess'],studioScoped=false,communityAccess?:TelegramReplyJob['communityAccess']): Promise<void> {
+    adminUIAccess?:TelegramReplyJob['adminUIAccess'],privateLibraryAccess?:TelegramReplyJob['privateLibraryAccess'],studioScoped=false,communityAccess?:TelegramReplyJob['communityAccess'],communityClose?:CommunityMessageReceipt): Promise<void> {
     await this.transaction(s => {
       const update = s.updates.find(x => x.key === key);
       if (!update || update.status !== 'CLAIMED') throw new Error('Update not claimed');
@@ -744,6 +749,7 @@ export class BotStore {
           ...(privateGroupAccess?{privateGroupAccess:structuredClone(privateGroupAccess)}:{}),
           ...(adminUIAccess?{adminUIAccess:structuredClone(adminUIAccess)}:{}),
           ...(communityAccess?{communityAccess:structuredClone(communityAccess)}:{}),
+          ...(communityClose?{communityClose:structuredClone(communityClose)}:{}),
           ...(privateLibraryAccess?{privateLibraryAccess:structuredClone(privateLibraryAccess)}:{})});
       }
     });

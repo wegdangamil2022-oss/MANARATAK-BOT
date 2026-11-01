@@ -9,6 +9,7 @@ import {validStudioNativeKeyboard} from './telegram-studio-rich.js';
 import {groupQuestionEpochDigest,groupMenuEpochDigest,privateGroupEpochDigest} from './telegram-group-access.js';
 import {privateLibraryEpoch} from './private-library-access.js';
 import {communityFolderEpoch} from './community-folder-access.js';
+import {validCommunityMessageMetadata,matchesCommunityClose} from './community-message-receipt.js';
 import {studioPreviewEpoch} from './studio-preview-access.js';
 import {subscriptionRequirementMode,acceptsActiveSubscriptionEvidence} from './subscription-integrity.js';
 import type {SubscriptionGate} from './subscription.js';
@@ -147,6 +148,7 @@ export function validTelegramReplyJob(v:unknown):v is TelegramReplyJob{
  const j=v as Record<string,unknown>;
  return typeof j.updateKey==='string'&&/^b3-webhook:[a-zA-Z0-9_-]{1,80}:\d+$/.test(j.updateKey)&&
   knownStatus(j.status)&&
+  validCommunityMessageMetadata(v as TelegramReplyJob)&&
   ((j.plan as TelegramReplyPlan|undefined)?.messageThreadId===undefined||j.groupReplyKind==='GENERAL'&&validGroupReplyAccess(j.groupMenuAccess))&&
   (j.status==='QUEUED'?validPlan(j.plan):(j.plan===undefined||validPlan(j.plan)))&&
   (j.queuedAt===undefined||(typeof j.queuedAt==='number'&&Number.isSafeInteger(j.queuedAt)&&j.queuedAt>=0))&&
@@ -300,6 +302,9 @@ export class TelegramReplyDispatcher {
     if(!allowed)return {status:'PAUSED' as const};
    }
    const plan=structuredClone(job.plan!);
+   // Serialize edits to a tracked message. An ambiguous earlier edit is
+   // quarantine evidence, not permission to try editing the same message again.
+   if(plan.editMessageId!==undefined&&(s.telegramReplyJobs??[]).some(other=>other!==job&&other.communityEditTarget?.chatId===plan.chatId&&other.communityEditTarget.messageId===plan.editMessageId))return {status:'UNKNOWN_OUTCOME' as const};
    const faq=job.groupQuestionAccess,menu=job.groupMenuAccess,dm=job.privateGroupAccess;
    const access=faq??menu??dm;
    const accessKind=faq?'FAQ':menu?'MENU':dm?'PRIVATE_GROUP':null;
@@ -322,7 +327,8 @@ export class TelegramReplyDispatcher {
     privateLibraryEpoch(s,this.policy,library.actorId)!==library.epoch));
    const community=job.communityAccess;
    const communityDenied=Boolean(community&&(community.actorId!==plan.chatId||!Number.isSafeInteger(job.queuedAt)||now<job.queuedAt!||now>=community.expiresAt||community.expiresAt>job.queuedAt!+ADMIN_UI_TTL_MS||communityFolderEpoch(s,this.policy,community.actorId)!==community.epoch));
-   const forbidden=noGroupProof||noPrivateProvenance||adminDenied||libraryDenied||communityDenied||(!!access&&(
+   const closeDenied=Boolean(job.communityClose&&!matchesCommunityClose(s,this.policy,job.communityClose,now));
+   const forbidden=closeDenied||noGroupProof||noPrivateProvenance||adminDenied||libraryDenied||communityDenied||(!!access&&(
     !groupPrecheck?.allowed||
     groupPrecheck.kind!==accessKind||
     groupPrecheck.access.actorId!==access.actorId||
@@ -342,17 +348,23 @@ export class TelegramReplyDispatcher {
     // the owner report MUST NOT claim which external event occurred.
     job.accessDenialCode=noGroupProof||noPrivateProvenance?
      'LEGACY_UNVERIFIABLE':groupUnavailable?'GROUP_UNAVAILABLE':'ACCESS_RECHECK_FAILED';
-    job.status='FAILED_CONFIRMED';
+    job.status='FAILED_CONFIRMED';delete job.communityClose;
     delete job.plan;delete job.adminUIAccess;delete job.privateLibraryAccess;delete job.communityAccess;delete job.groupQuestionAccess;delete job.groupMenuAccess;delete job.privateGroupAccess;delete job.privateReplyKind;delete job.groupReplyKind;job.redactedAt=this.clock();
     return {status:'FAILED_CONFIRMED' as const};
    }
    const attemptId=randomUUID();
+   const communityReceipt=community&&plan.studioMarkup?.inline_keyboard.some(row=>row.some(b=>'url' in b))?{chatId:plan.chatId,epoch:community.epoch,expiresAt:community.expiresAt}:undefined;
+   if(plan.editMessageId!==undefined&&(community||job.communityClose||(s.telegramReplyJobs??[]).some(old=>old.communityMessage?.chatId===plan.chatId&&old.communityMessage.messageId===plan.editMessageId)))job.communityEditTarget={chatId:plan.chatId,messageId:plan.editMessageId};
+   // An attempted edit makes the old contents uncertain, even if its outcome
+   // is unknown. Retire its receipt before the call; never replay an edit.
+   if(plan.editMessageId!==undefined)for(const old of s.telegramReplyJobs??[])if(old.communityMessage?.chatId===plan.chatId&&old.communityMessage.messageId===plan.editMessageId)delete old.communityMessage;
    const at=this.clock();
    job.status='SENDING';job.attemptId=attemptId;job.startedAt=at;
    // Remove the durable body *before* the external call. The immediate local
    // copy goes to the sender, but a crash leaves no replayable payload.
    delete job.plan;delete job.adminUIAccess;delete job.privateLibraryAccess;delete job.communityAccess;delete job.groupQuestionAccess;delete job.groupMenuAccess;delete job.privateGroupAccess;delete job.privateReplyKind;delete job.groupReplyKind;job.redactedAt=at;
-   return {status:'SEND' as const,attemptId,plan};
+   delete job.communityClose;
+   return {status:'SEND' as const,attemptId,plan,communityReceipt};
   });
   if(claim.status!=='SEND')return {status:claim.status};
   let result:TelegramSendResult;
@@ -368,7 +380,12 @@ export class TelegramReplyDispatcher {
    if(!job||job.status!=='SENDING'||job.attemptId!==claim.attemptId)
     throw new Error('REPLY_ATTEMPT_FENCED');
    job.status=terminal;
+   if(terminal!=='UNKNOWN_OUTCOME')delete job.communityEditTarget;
    if(result.status==='CONFIRMED')job.messageId=result.messageId;
+   if(result.status==='CONFIRMED'&&claim.communityReceipt){
+    for(const old of s.telegramReplyJobs??[])if(old.communityMessage?.chatId===claim.plan.chatId&&old.communityMessage.messageId===result.messageId)delete old.communityMessage;
+    job.communityMessage={...claim.communityReceipt,messageId:result.messageId};
+   }
   });
   return {status:result.status};
  }

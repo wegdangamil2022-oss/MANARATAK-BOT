@@ -89,4 +89,40 @@ for(const engine of ['json','sqlite'] as const){
    await save(f);await assert.rejects(f.store.transaction(s=>{s.communityFolders!.push({...s.communityFolders![0]!});}));await assert.rejects(f.store.transaction(s=>{s.communityFolders![0]!.url='https://evil.com/addlist/a';}));assert.equal((await f.store.snapshot()).communityFolders!.length,1);assert.equal((await f.store.snapshot()).communityFolders![0]!.url,URL);
   }finally{await f.close();}
  });
+ test(engine+' confirmed folder messages close on an expired tap, without retaining a link or retrying the edit',async()=>{
+  const f=await fixture();try{
+   await save(f);let r=await f.click('fj:1:h',300);r=await f.click(choose(r,'📁 '+GROUP),300);const tap=choose(r,'✅ تحقق');let calls=0;
+   const sender={send:async()=>{calls++;return {status:'CONFIRMED' as const,messageId:55};}};
+   const delivery=new TelegramReplyDispatcher(f.store,f.policy,sender,()=>NOW);
+   await delivery.dispatch(r.deliveryKey!);const saved=(await f.store.snapshot()).telegramReplyJobs!.find(j=>j.updateKey===r.deliveryKey)!;
+   assert.ok(saved.communityMessage);assert.equal(JSON.stringify(saved).includes(URL),false);assert.equal(validTelegramReplyJob({...saved,status:'QUEUED'}),false);
+   f.time(NOW+120000);r=await f.click(tap,300);assert.equal(r.reason,'COMMUNITY_MESSAGE_CLOSURE_PLANNED');assert.equal(r.plan!.editMessageId,55);assert.equal(r.plan!.studioMarkup,undefined);assert.equal(r.plan!.inlineMarkup!.inline_keyboard.flat().some(b=>b.callback_data.startsWith('fj:')),false);
+   const closer=new TelegramReplyDispatcher(f.store,f.policy,sender,()=>NOW+120000);assert.equal((await closer.dispatch(r.deliveryKey!)).status,'CONFIRMED');assert.equal((await closer.dispatch(r.deliveryKey!)).status,'SENT');assert.equal(calls,2);assert.equal((await f.store.snapshot()).telegramReplyJobs!.some(j=>j.communityMessage),false);
+   assert.equal((await f.click(tap,300)).status,'DENIED');
+  }finally{await f.close();}
+ });
+ test(engine+' closure cannot target copied or unconfirmed messages; fresh delivery fences a queued closure',async()=>{
+  const f=await fixture();try{
+   await save(f);let r=await f.click('fj:1:h',300);r=await f.click(choose(r,'📁 '+GROUP),300);const tap=choose(r,'✅ تحقق');f.time(NOW+120000);assert.equal((await f.click(tap,300)).status,'DENIED');
+   f.time(NOW);const sender={send:async()=>({status:'CONFIRMED' as const,messageId:55})};const d=new TelegramReplyDispatcher(f.store,f.policy,sender,()=>NOW);await d.dispatch(r.deliveryKey!);
+   assert.equal((await f.click(tap,301)).status,'DENIED');await f.store.transaction(s=>{s.communityFolders![0]!.enabled=false;s.communityFolders![0]!.revision++;});r=await f.click(tap,300);assert.equal(r.reason,'COMMUNITY_MESSAGE_CLOSURE_PLANNED');const closure=r;
+   await f.store.transaction(s=>{s.communityFolders![0]!.enabled=true;s.communityFolders![0]!.revision++;});r=await f.click('fj:1:h',300);r=await f.click(choose(r,'📁 '+GROUP),300);await d.dispatch(r.deliveryKey!);assert.equal((await d.dispatch(closure.deliveryKey!)).status,'FAILED_CONFIRMED');
+  }finally{await f.close();}
+ });
+ test(engine+' unknown folder sends establish no closure authority',async()=>{
+  const f=await fixture();try{
+   await save(f);let r=await f.click('fj:1:h',300);r=await f.click(choose(r,'📁 '+GROUP),300);const tap=choose(r,'✅ تحقق');const d=new TelegramReplyDispatcher(f.store,f.policy,{send:async()=>({status:'UNKNOWN_OUTCOME'})},()=>NOW);await d.dispatch(r.deliveryKey!);f.time(NOW+120000);assert.equal((await f.click(tap,300)).status,'DENIED');assert.equal((await f.store.snapshot()).telegramReplyJobs!.some(j=>j.communityMessage),false);
+  }finally{await f.close();}
+ });
+ test(engine+' an in-flight or ambiguous folder edit fences other edits to the same message',async()=>{
+  const f=await fixture();try{
+   await save(f);let r=await f.click('fj:1:h',300);r=await f.click(choose(r,'📁 '+GROUP),300);const first=r;
+   let release!:(v:{status:'UNKNOWN_OUTCOME'})=>void,entered!:()=>void;const started=new Promise<void>(resolve=>{entered=resolve;});let calls=0;
+   const d=new TelegramReplyDispatcher(f.store,f.policy,{send:async()=>{calls++;entered();return new Promise(resolve=>{release=resolve;});}},()=>NOW);
+   const pending=d.dispatch(first.deliveryKey!);await started;
+   r=await f.click('fj:1:h',300);assert.equal((await d.dispatch(r.deliveryKey!)).status,'UNKNOWN_OUTCOME');assert.equal(calls,1);
+   release({status:'UNKNOWN_OUTCOME'});await pending;assert.equal((await d.dispatch(r.deliveryKey!)).status,'UNKNOWN_OUTCOME');assert.equal(calls,1);
+   const job=(await f.store.snapshot()).telegramReplyJobs!.find(j=>j.updateKey===first.deliveryKey)!;assert.deepEqual(job.communityEditTarget,{chatId:'300',messageId:55});assert.ok(validTelegramReplyJob(job));assert.equal(validTelegramReplyJob({...job,status:'SENT'}),false);
+  }finally{await f.close();}
+ });
 }

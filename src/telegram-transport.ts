@@ -1,5 +1,6 @@
 import {protectionMediaFromMessage,type ProtectionMedia} from './telegram-protection-media.js';
 import { timingSafeEqual,createHash } from 'node:crypto';
+import {staleCommunityMessage,COMMUNITY_CLOSED_TEXT} from './community-message-receipt.js';
 import type { IncomingMessage, RequestListener, ServerResponse } from 'node:http';
 import { BotStore, type AuditRecord, type BotState, type TelegramReplyJob } from './store.js';
 import {groupQuestionSubscriptionEpoch,groupMenuEpochDigest,privateGroupEpochDigest} from './telegram-group-access.js';
@@ -101,7 +102,7 @@ type ProcessedReply={status:TelegramResult['status'];reason:string;plan?:Telegra
  groupMenuAccess?:TelegramReplyJob['groupMenuAccess'];
  privateGroupAccess?:TelegramReplyJob['privateGroupAccess'];
  adminUIAccess?:TelegramReplyJob['adminUIAccess'];
- privateLibraryAccess?:TelegramReplyJob['privateLibraryAccess'];communityAccess?:TelegramReplyJob['communityAccess']};
+ privateLibraryAccess?:TelegramReplyJob['privateLibraryAccess'];communityAccess?:TelegramReplyJob['communityAccess'];communityClose?:TelegramReplyJob['communityClose']};
 export interface TelegramApplicationOptions {
   store: BotStore; policy: Policy; education: EducationService; admin: EducationAdminFacade;
   faq: ApprovedAnswerService; links: ResourceLinkService; membership: MembershipPort;
@@ -392,7 +393,14 @@ export class TelegramUpdateApplication {
      if(this.opts.policy.isOwner(actorId)&&!event.callbackData.startsWith('od:1:'))await new OwnerDelegationEditor(this.opts.store,this.opts.policy,this.clock).cancel(actorId);
      if(this.opts.policy.isOwner(actorId)&&!event.callbackData.startsWith('st:1:')&&!studioOwnerEntry(event.callbackData))await new ButtonStudioService(this.opts.store,this.opts.policy,this.clock).cancelInput(actorId);
      if(this.opts.policy.isOwner(actorId)&&!event.callbackData.startsWith('ps:1:')&&event.callbackData!=='mi:1:i:11:03'&&!event.callbackData.startsWith('si:1:')&&!event.callbackData.startsWith('si:2:')&&!event.callbackData.startsWith('ms:1:')&&!event.callbackData.startsWith('fj:1:')&&!this.opts.policy.privateFeature(await this.opts.store.snapshot(),'owner.dashboard',actorId))return {status:'DENIED',reason:'OWNER_DASHBOARD_DISABLED'};
-     if(event.callbackData==='mi:1:i:04:03'||event.callbackData.startsWith('cf:1:')||event.callbackData.startsWith('fj:1:'))return this.folderReply(event,await new CommunityFolderUI(this.opts.store,this.opts.policy,this.opts.subscription,this.clock).handle(actorId,event.callbackData));
+     if(event.callbackData==='mi:1:i:04:03'||event.callbackData.startsWith('cf:1:')||event.callbackData.startsWith('fj:1:')){
+      const screen=await new CommunityFolderUI(this.opts.store,this.opts.policy,this.opts.subscription,this.clock).handle(actorId,event.callbackData);
+      if(!screen&&/^fj:1:[A-Za-z0-9_-]{24}$/u.exec(event.callbackData)?.[0]===event.callbackData&&event.callbackMessageId!==undefined){
+       const receipt=staleCommunityMessage(await this.opts.store.snapshot(),this.opts.policy,actorId,event.callbackMessageId,this.clock());
+       if(receipt)return {status:'APPLIED',reason:'COMMUNITY_MESSAGE_CLOSURE_PLANNED',communityClose:receipt,plan:this.plan(chatId,COMMUNITY_CLOSED_TEXT,undefined,{inline_keyboard:[[{text:'🏠 الرئيسية',callback_data:'pn:1:h'}]]},event.callbackMessageId)};
+      }
+      return this.folderReply(event,screen);
+     }
      if(event.callbackData==='mi:1:i:11:03'||event.callbackData.startsWith('ps:1:')){
       const view=await renderPrivateSettings(this.opts.store,this.opts.policy,actorId,event.callbackData,this.clock);
       return view?{status:'APPLIED',reason:'RESPONSE_PLANNED_ONLY',plan:this.plan(chatId,view.text,undefined,view.keyboard,event.callbackMessageId)}:{status:'DENIED',reason:'PRIVATE_SETTINGS_STALE_OR_UNAUTHORIZED'};
@@ -1297,9 +1305,9 @@ export class TelegramUpdateApplication {
     // Commit the decision and outbound reply intent in one durable transaction.
     // No external call occurs before the outbox row exists.
     await this.opts.store.finish(key,audit,handled.plan,handled.groupQuestionAccess,
-     handled.groupMenuAccess,handled.privateGroupAccess,handled.adminUIAccess,handled.privateLibraryAccess,studioInput&&!!handled.adminUIAccess,handled.communityAccess);
+     handled.groupMenuAccess,handled.privateGroupAccess,handled.adminUIAccess,handled.privateLibraryAccess,studioInput&&!!handled.adminUIAccess,handled.communityAccess,handled.communityClose);
     // Temporary actor IDs are only stored in the guarded queue, never returned.
-    const {groupQuestionAccess:_,groupMenuAccess:__,privateGroupAccess:___,adminUIAccess:____,privateLibraryAccess:_____,communityAccess:______,...publicResult}=handled;
+    const {groupQuestionAccess:_,groupMenuAccess:__,privateGroupAccess:___,adminUIAccess:____,privateLibraryAccess:_____,communityAccess:______,communityClose:_______,...publicResult}=handled;
     const visible=publicResult.plan?{...publicResult,deliveryKey:key}:publicResult;
     return event.callbackQueryId?{...visible,callbackQueryId:event.callbackQueryId}:visible;
   }
