@@ -1,7 +1,7 @@
 import type {ModerationService} from './moderation.js';
 import type {BotState} from './store.js';
 
-export type ReplyModerationCommand={kind:'ban'|'mute'|'warn'|'unwarn'|'unban'|'unmute';reference:string;memberId:string};
+export type ReplyModerationCommand={kind:'ban'|'mute'|'warn'|'unwarn'|'unban'|'unmute';reference:string;memberId:string;durationSeconds?:number};
 type Parsed={status:'NO_MATCH'|'INVALID'}|{status:'COMMAND';command:ReplyModerationCommand};
 const object=(v:unknown):v is Record<string,unknown>=>v!==null&&typeof v==='object'&&!Array.isArray(v);
 const positive=(v:unknown):v is number=>typeof v==='number'&&Number.isSafeInteger(v)&&v>0;
@@ -12,7 +12,8 @@ export function parseReplyModerationCommand(text:string,botUsername:string,
  const first=/^\/(ban|mute|warn|unwarn|unban|unmute)(?:@([A-Za-z][A-Za-z0-9_]{4,31}))?(?=\s|$)/u.exec(text);
  if(!first)return {status:'NO_MATCH'};
  if(first[2]&&first[2].toLowerCase()!==botUsername.toLowerCase())return {status:'NO_MATCH'};
- const syntax=/^\/(ban|mute|warn|unwarn|unban|unmute)(?:@[A-Za-z][A-Za-z0-9_]{4,31})? ([A-Za-z0-9][A-Za-z0-9_-]{0,63})$/u.exec(text);
+ const syntax=/^\/(ban|mute|warn|unwarn|unban|unmute)(?:@[A-Za-z][A-Za-z0-9_]{4,31})? ([A-Za-z0-9][A-Za-z0-9_-]{0,63})(?: ([1-9][0-9]{0,6})([smhd]))?$/u.exec(text);
+ const duration=syntax?.[3]===undefined?undefined:Number(syntax[3])*({s:1,m:60,h:3600,d:86400}[syntax[4]!]??NaN);
  if(!syntax||syntax[0]!==text||!/^-[1-9][0-9]{0,15}$/u.test(chatId)||
   !Number.isSafeInteger(Number(chatId))||!positive(messageId)||!object(reply)||
   !positive(reply.message_id)||reply.message_id>=messageId||!object(reply.chat)||
@@ -20,8 +21,8 @@ export function parseReplyModerationCommand(text:string,botUsername:string,
   !['group','supergroup'].includes(String(reply.chat.type))||!object(reply.from)||
   !positive(reply.from.id)||reply.from.is_bot!==false||reply.sender_chat!==undefined||
   reply.via_bot!==undefined||reply.forward_origin!==undefined||reply.forward_date!==undefined||
-  reply.is_automatic_forward===true)return {status:'INVALID'};
- return {status:'COMMAND',command:{kind:syntax[1] as ReplyModerationCommand['kind'],reference:syntax[2]!,memberId:String(reply.from.id)}};
+  reply.is_automatic_forward===true||duration!==undefined&&(!['ban','mute'].includes(syntax[1]!)||!Number.isSafeInteger(duration)||duration<60||duration>2592000))return {status:'INVALID'};
+ return {status:'COMMAND',command:{kind:syntax[1] as ReplyModerationCommand['kind'],reference:syntax[2]!,memberId:String(reply.from.id),...(duration===undefined?{}:{durationSeconds:duration})}};
 }
 /** Shared domain service owns grants, target protection, pending/unknown
  * quarantine and durable sanction intents. This adapter never calls Bot API
@@ -38,7 +39,7 @@ export async function executeReplyModerationCommand(service:ModerationService,
   }
   const result=command.kind==='unban'||command.kind==='unmute'
    ?await service.removeManualReason(actorId,chatId,command.memberId,command.reference,command.kind==='unban'?'BAN':'MUTE',stillCurrent)
-   :await service.addManualReason(actorId,chatId,command.memberId,command.reference,command.kind==='ban'?'BAN':'MUTE',stillCurrent);
+   :await service.addManualReason(actorId,chatId,command.memberId,command.reference,command.kind==='ban'?'BAN':'MUTE',stillCurrent,command.durationSeconds);
   return {status:result.status==='APPLIED'?'APPLIED':result.status==='NO_CHANGE'?'IGNORED':result.status==='UNKNOWN_OUTCOME'?'UNKNOWN':'DENIED',reason:'MODERATION_'+result.status};
  }catch{
   // A storage error can follow an attempted external effect. Never turn an

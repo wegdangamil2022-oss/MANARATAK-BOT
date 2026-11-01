@@ -53,4 +53,9 @@ for(const engine of ['json','sqlite'] as const){
    p=await f.command('/mute mute');await f.click(choose(p));p=await f.command('/unmute mute');assert.equal((await f.store.snapshot()).moderationReasons[0]!.active,true);f.gateway.outcome='UNKNOWN_OUTCOME';const r=await f.click(choose(p));assert.equal(r.status,'UNKNOWN');const sent=f.gateway.calls.length;assert.equal((await f.command('/unmute mute')).status,'DENIED');assert.equal(f.gateway.calls.length,sent);
   }finally{await f.close();}
  });
+ test(engine+' timed preview shows the duration and starts its deadline at confirmation',async()=>{
+  const f=await fixture();try{
+   const p=await f.command('/mute timed 2m');assert.ok(p.plan!.text.includes('120 ثانية من وقت التأكيد'));assert.equal((await f.store.snapshot()).moderationReasons.length,0);f.time(NOW+30000);assert.equal((await f.click(choose(p))).status,'APPLIED');assert.equal((await f.store.snapshot()).moderationReasons[0]!.expiresAt,NOW+150000);
+  }finally{await f.close();}
+ });
 }

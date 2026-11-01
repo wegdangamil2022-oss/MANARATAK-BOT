@@ -33,7 +33,7 @@ export class FakeModerationGateway implements ModerationGateway {
 const byTarget = (r: {chatId: string; memberId: string}, chatId: string, memberId: string): boolean => r.chatId === chatId && r.memberId === memberId;
 const fingerprint = (s: BotState, chatId: string, memberId: string): string =>
   JSON.stringify(s.moderationReasons.filter(x => byTarget(x, chatId, memberId) && x.active)
-    .map(x => [x.source, x.reference, x.kind]).sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b))));
+    .map(x => [x.source, x.reference, x.kind,...(x.expiresAt===undefined?[]:[{expiresAt:x.expiresAt}])]).sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b))));
 
 /** Match a durable operation's immutable dispatch identity. Terminal status
  * or owner review metadata is not evidence that a different payload may be
@@ -115,6 +115,9 @@ export class ModerationService {
     const reasons = s.moderationReasons.filter(r => byTarget(r, chatId, memberId) && r.active);
     return reasons.some(r => r.kind === 'BAN') ? 'BAN' : reasons.some(r => r.kind === 'MUTE') ? 'MUTE' : 'NONE';
   }
+  private reasonsCurrent(s:BotState,chatId:string,memberId:string):boolean{
+    const now=this.clock();return Number.isSafeInteger(now)&&now>=0&&s.moderationReasons.filter(r=>byTarget(r,chatId,memberId)&&r.active).every(r=>r.expiresAt===undefined||this.gateway instanceof FakeModerationGateway&&r.expiresAt>now);
+  }
   private authorized(s: BotState, actorId: string, chatId: string, memberId: string): boolean {
     // Locally delegated chat managers are protected targets even if Telegram
     // currently reports them as ordinary members. Expired/revoked grants do
@@ -181,13 +184,19 @@ export class ModerationService {
     if(await this.priorPending(actorId,chatId,memberId))return false;
     return this.check(actorId,chatId,memberId);
   }
-  async addManualReason(actorId: string, chatId: string, memberId: string, reference: string, kind: 'MUTE' | 'BAN',stillCurrent?:(s:BotState)=>boolean): Promise<ModerationResult> {
+  async addManualReason(actorId: string, chatId: string, memberId: string, reference: string, kind: 'MUTE' | 'BAN',stillCurrent?:(s:BotState)=>boolean,durationSeconds?:number): Promise<ModerationResult> {
     if (!reference || reference.length > 80 || !['MUTE', 'BAN'].includes(kind)) throw new Error('Invalid reason');
+    if(durationSeconds!==undefined&&(!Number.isSafeInteger(durationSeconds)||durationSeconds<60||durationSeconds>2592000))return {status:'DENIED',reason:'INVALID_DURATION'};
+    // The current official adapter has no bounded-duration dispatch contract.
+    // Never silently turn a timed request into a permanent Telegram sanction.
+    if(durationSeconds!==undefined&&!(this.gateway instanceof FakeModerationGateway))return {status:'DENIED',reason:'DURATION_PROVIDER_UNSUPPORTED'};
     const preflight=await this.priorPending(actorId,chatId,memberId);
     if(preflight)return preflight;
     if (!await this.check(actorId, chatId, memberId)) return { status: 'DENIED', reason: 'NOT_AUTHORIZED_OR_BOT_RIGHTS' };
     const added = await this.store.transaction(s => {
       if(stillCurrent&&!stillCurrent(s))return 'DENIED' as const;
+      const deadline=durationSeconds===undefined?undefined:this.clock()+durationSeconds*1000;
+      if(deadline!==undefined&&(!Number.isSafeInteger(this.clock())||this.clock()<0||!Number.isSafeInteger(deadline)||deadline>8640000000000000))return 'DENIED' as const;
       if (!this.authorized(s, actorId, chatId, memberId))
         return ambiguousModerationChatIds(s).has(chatId)?'DENIED' as const:false;
       const pending=this.unresolved(s,chatId,memberId);
@@ -196,8 +205,8 @@ export class ModerationService {
       if (existing?.active) { if (existing.kind !== kind) throw new Error('REASON_CONFLICT'); return false; }
       const limit=moderationRateFuse(s,actorId,chatId,this.clock());
       if(limit)return limit;
-      if (existing) { existing.kind = kind; existing.active = true; existing.createdBy = actorId; }
-      else s.moderationReasons.push({ chatId, memberId, source: 'MANUAL', reference, kind, createdBy: actorId, active: true });
+      if (existing) { existing.kind = kind; existing.active = true; existing.createdBy = actorId;delete existing.expiresAt;if(deadline!==undefined)existing.expiresAt=deadline; }
+      else s.moderationReasons.push({ chatId, memberId, source: 'MANUAL', reference, kind, createdBy: actorId, active: true,...(deadline===undefined?{}:{expiresAt:deadline}) });
       return true;
     });
     if(added==='BLOCKED_UNKNOWN'||added==='BLOCKED_PENDING')
@@ -230,6 +239,20 @@ export class ModerationService {
     if(changed==='DENIED')return {status:'DENIED',reason:'NOT_AUTHORIZED_OR_BOT_RIGHTS'};
     if(changed==='KIND_MISMATCH')return {status:'DENIED',reason:'REASON_KIND_MISMATCH'};
     return changed ? this.reconcile(actorId, chatId, memberId) : { status: 'NO_CHANGE', reason: 'NOT_ACTIVE' };
+  }
+  async expireManualReasons(actorId:string,chatId:string,memberId:string):Promise<ModerationResult>{
+    const pending=await this.priorPending(actorId,chatId,memberId);if(pending)return pending;
+    if(!await this.check(actorId,chatId,memberId))return {status:'DENIED',reason:'NOT_AUTHORIZED_OR_BOT_RIGHTS'};
+    const changed=await this.store.transaction(s=>{
+      const now=this.clock();if(!Number.isSafeInteger(now)||now<0||!this.authorized(s,actorId,chatId,memberId))return 'DENIED' as const;
+      const blocked=this.unresolved(s,chatId,memberId);if(blocked)return blocked.status;
+      const expired=s.moderationReasons.filter(r=>byTarget(r,chatId,memberId)&&r.source==='MANUAL'&&r.active&&r.expiresAt!==undefined&&r.expiresAt<=now);
+      if(!expired.length)return false;for(const r of expired)r.active=false;
+      s.audit.push({actorId,updateKey:'moderation-expiry:'+randomUUID(),decision:'ALLOW',reason:'MODERATION_REASONS_EXPIRED',policyVersion:this.policy.chatRevision(s,chatId),at:now});return true;
+    });
+    if(changed==='DENIED')return {status:'DENIED',reason:'NOT_AUTHORIZED_OR_BOT_RIGHTS'};
+    if(changed==='BLOCKED_UNKNOWN'||changed==='BLOCKED_PENDING')return {status:changed,reason:'NO_SAFE_DISPATCH'};
+    return changed?this.reconcile(actorId,chatId,memberId):{status:'NO_CHANGE',reason:'NO_EXPIRED_REASON'};
   }
   /** Invoked only by SubscriptionGate's trusted membership reconciliation; never expose as a user command. */
   async setSubscriptionReason(chatId: string, memberId: string, reference: string, active: boolean,
@@ -295,6 +318,7 @@ export class ModerationService {
     const candidate = await this.store.transaction(s => {
       if (!this.authorized(s, actorId, chatId, memberId) ||
           (stillCurrent && !stillCurrent(s)))return {status:'DENIED' as const};
+      if(!this.reasonsCurrent(s,chatId,memberId))return {status:'DENIED' as const};
       const pending=this.unresolved(s,chatId,memberId);
       if(pending)return {status:pending.status};
       const operations = s.moderationOperations.filter(x => byTarget(x, chatId, memberId));
@@ -360,7 +384,7 @@ export class ModerationService {
         quarantineModerationAttempt(s,candidate.intent);
         return {status:'BLOCKED_UNKNOWN' as const};
       }
-      const valid = rights && this.authorized(s, actorId, chatId, memberId) &&
+      const valid = rights && this.reasonsCurrent(s,chatId,memberId) && this.authorized(s, actorId, chatId, memberId) &&
         (!stillCurrent||stillCurrent(s)) &&
         this.policy.chatRevision(s, chatId) === op.policyVersion &&
         fingerprint(s, chatId, memberId) === op.reasonFingerprint;
@@ -397,7 +421,7 @@ export class ModerationService {
           targetOperationHistory(s,chatId,memberId,candidate.id)===
             candidate.targetHistory&&
           op?.status==='STARTED'&&sameModerationAttempt(op,started.receipt)&&
-          this.authorized(s,actorId,chatId,memberId)&&
+          this.reasonsCurrent(s,chatId,memberId)&&this.authorized(s,actorId,chatId,memberId)&&
           (!stillCurrent||stillCurrent(s))&&
           this.policy.chatRevision(s,chatId)===op.policyVersion&&
           fingerprint(s,chatId,memberId)===op.reasonFingerprint;
@@ -446,7 +470,7 @@ export class ModerationService {
       if(outcome!=='FAILED_CONFIRMED'){
         let stillAuthorized=false;
         try{
-          stillAuthorized=this.authorized(s,actorId,chatId,memberId)&&
+          stillAuthorized=this.reasonsCurrent(s,chatId,memberId)&&this.authorized(s,actorId,chatId,memberId)&&
             (!stillCurrent||stillCurrent(s))&&
             this.policy.chatRevision(s,chatId)===started.receipt.policyVersion&&
             fingerprint(s,chatId,memberId)===started.receipt.reasonFingerprint;

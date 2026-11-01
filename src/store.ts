@@ -30,7 +30,7 @@ export interface ImportRun { id: string; scope: string; uploadedBy: string; orig
 export type RestrictionKind = 'NONE' | 'MUTE' | 'BAN';
 /** Local adapter classification, not proof of remote sanction authorship. */
 export type ModerationDispatchGateway='SIMULATION'|'TELEGRAM_API'|'UNSPECIFIED';
-export interface ModerationReason { chatId: string; memberId: string; source: 'MANUAL' | 'SUBSCRIPTION'; reference: string; kind: 'MUTE' | 'BAN'; createdBy: string; active: boolean; }
+export interface ModerationReason { chatId: string; memberId: string; source: 'MANUAL' | 'SUBSCRIPTION'; reference: string; kind: 'MUTE' | 'BAN'; createdBy: string; active: boolean; expiresAt?:number; }
 export interface ModerationOperation { id: string; chatId: string; memberId: string; actorId: string; kind: RestrictionKind; reasonFingerprint: string; policyVersion: number; status: OperationStatus; createdAt: number; /** Gateway used when the attempt entered STARTED. Absent on legacy/undispatched rows. */ attemptGateway?:ModerationDispatchGateway; /** Owner triage never alters status or authorizes retry. */ review?:{decision:'ACKNOWLEDGED_UNRESOLVED'|'ESCALATED';reviewedBy:string;reviewedAt:number;/** Approval epoch at review time; optional for legacy records. */policyVersion?:number;/** Immutable local attempt evidence binding; absent on legacy reviews. */evidenceDigest?:string}; }
 export interface Warning { chatId: string; memberId: string; reference: string; actorId: string; at: number; active: boolean; }
 export interface SubscriptionRequirement { chatId: string; channelIds: string[]; mode: 'ALL' | 'ANY' | 'AT_LEAST'; minimumCount?:number; version: number; }
@@ -247,6 +247,7 @@ export class BotStore {
     if (previous.schemaVersion !== 8 ||
       (previous.groupNetworks!==undefined&&!validGroupNetworks(previous.groupNetworks))||
       (previous.communityFolders!==undefined&&!validCommunityFolders(previous.communityFolders))||
+      (Array.isArray(previous.moderationReasons)&&previous.moderationReasons.some((r:Record<string,unknown>)=>r&&typeof r==='object'&&Object.hasOwn(r,'expiresAt')&&(r.source!=='MANUAL'||!Number.isSafeInteger(r.expiresAt)||Number(r.expiresAt)<=0||Number(r.expiresAt)>8640000000000000)))||
       (previous.privateSettingsRevision!==undefined&&(typeof previous.privateSettingsRevision!=='number'||!Number.isSafeInteger(previous.privateSettingsRevision)||previous.privateSettingsRevision<0||previous.privateSettingsRevision>=Number.MAX_SAFE_INTEGER))||
       (previous.buttonStudio!==undefined&&!validStudioState(previous.buttonStudio))||
       (previous.protectionFloodWindows!==undefined&&(!Array.isArray(previous.protectionFloodWindows)||
