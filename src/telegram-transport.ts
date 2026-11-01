@@ -632,9 +632,10 @@ export class TelegramUpdateApplication {
      return {...outcome,...(screen?{plan:this.plan(actorId,screen.text,undefined,screen.keyboard)}:{})};
     }
     if(kind==='group'&&/^\/(?:lock|unlock)(?:@[A-Za-z][A-Za-z0-9_]{4,31})?(?=\s|$)/u.test(text)){
-     const m=/^\/(lock|unlock)(?:@([A-Za-z][A-Za-z0-9_]{4,31}))?(?: (messages|media|previews))?$/u.exec(text);
-     if(!m||m[0]!==text||m[2]&&m[2].toLowerCase()!==this.opts.botUsername.toLowerCase()||m[1]==='unlock'&&m[3])return {status:'DENIED',reason:'INVALID_GROUP_LOCK_COMMAND'};
-     const view=await new TelegramGroupPermissionLock(this.opts.store,this.opts.policy,this.opts.groupPermissions,this.clock).command(actorId,chatId,m[1]==='unlock'?'RESTORE':'LOCK',m[3]==='media'?'MEDIA':m[3]==='previews'?'LINKS':'MESSAGES');
+     const m=/^\/(lock|unlock)(?:@([A-Za-z][A-Za-z0-9_]{4,31}))?(?: (messages|media|previews))?(?: ([1-9][0-9]{0,6})([smhd]))?$/u.exec(text);
+     const seconds=m?.[4]===undefined?undefined:Number(m[4])*({s:1,m:60,h:3600,d:86400}[m[5]!]??NaN);
+     if(!m||m[0]!==text||m[2]&&m[2].toLowerCase()!==this.opts.botUsername.toLowerCase()||m[1]==='unlock'&&(m[3]||seconds!==undefined)||seconds!==undefined&&(!Number.isSafeInteger(seconds)||seconds<60||seconds>86400))return {status:'DENIED',reason:'INVALID_GROUP_LOCK_COMMAND'};
+     const view=await new TelegramGroupPermissionLock(this.opts.store,this.opts.policy,this.opts.groupPermissions,this.clock).command(actorId,chatId,m[1]==='unlock'?'RESTORE':'LOCK',m[3]==='media'?'MEDIA':m[3]==='previews'?'LINKS':'MESSAGES',seconds);
      return view?{status:view.status,reason:view.reason,adminUIAccess:view.access,plan:this.plan(actorId,view.text,undefined,view.keyboard)}:{status:'DENIED',reason:'GROUP_PERMISSIONS_STALE_OR_UNAVAILABLE'};
     }
     if(kind==='group'){

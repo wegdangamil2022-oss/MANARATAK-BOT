@@ -13,6 +13,7 @@ import {GROUP_PERMISSION_KEYS,GROUP_LOCK_SINGLE_PERMISSION,readGroupPermissions,
 import {telegramGroupPermissionGateway,type GroupPermissionPort} from '../src/telegram-group-permission-gateway.js';
 import {TelegramUpdateApplication} from '../src/telegram-transport.js';
 import {TelegramReplyDispatcher} from '../src/telegram-replies.js';
+import {tickGroupPermissionRestores} from '../src/group-permission-timers.js';
 const NOW=1700000000000,CHAT='-100123',BASE={...Object.fromEntries(GROUP_PERMISSION_KEYS.map(k=>[k,true])),can_invite_users:false,can_change_info:false,can_pin_messages:false,can_manage_topics:false,can_edit_tag:false} as GroupPermissions;
 test('permission snapshots preserve default dependencies and refuse unknown future fields',()=>{
  const p=readGroupPermissions({can_send_messages:true,can_pin_messages:true})!;assert.equal(p.can_react_to_messages,true);assert.equal(p.can_manage_topics,true);assert.equal(p.can_edit_tag,true);assert.equal(readGroupPermissions({can_send_messages:'true'}),null);assert.equal(readGroupPermissions({can_send_future:true}),null);assert.equal(lockedGroupPermissions(BASE,'LINKS').can_send_messages,true);
@@ -29,6 +30,48 @@ for(const engine of ['json','sqlite'] as const){
  }
  type Result=Awaited<ReturnType<Awaited<ReturnType<typeof fixture>>['command']>>;
  const choose=(r:Result,starts:string)=>{const b=r.plan?.inlineMarkup?.inline_keyboard.flat().find(b=>b.text.startsWith(starts));assert.ok(b,JSON.stringify(r));return b.callback_data;};
+ test(engine+' timed lock persists its approved deadline and restores only once through an explicit enabled tick',async()=>{
+  const f=await fixture();try{
+   await f.store.transaction(s=>{s.grants[0]!.expiresAt=NOW+1200000;});
+   const r=await f.command('/lock messages 10m');assert.match(r.plan!.text,/موعد الاستعادة الأصلية/u);assert.equal(f.calls(),0);
+   assert.equal((await f.click(choose(r,'✅'))).status,'APPLIED');assert.equal(f.calls(),1);
+   const job=(await f.store.snapshot()).groupPermissionJobs![0]!;assert.equal(job.restoreAt,NOW+600000);
+   f.time(NOW+600000);assert.equal((await tickGroupPermissionRestores(f.store,f.service,f.now())).status,'DISABLED');assert.equal(f.calls(),1);
+   const reopened=new GroupPermissionLockService(f.store,f.policy,f.port,f.now);
+   const result=await tickGroupPermissionRestores(f.store,reopened,f.now(),true);assert.equal(result.confirmed,1);assert.deepEqual(f.current(),BASE);assert.equal(f.calls(),2);
+   assert.equal((await tickGroupPermissionRestores(f.store,reopened,f.now(),true)).attempted,0);assert.equal(f.calls(),2);
+   assert.equal((await tickGroupPermissionRestores(f.store,reopened,NaN,true)).status,'INVALID');
+   assert.equal((await tickGroupPermissionRestores(f.store,reopened,f.now(),true,51)).status,'INVALID');
+  }finally{await f.close();}
+ });
+ test(engine+' timed restore refuses remote drift, revoked authority and unknown attempts without retry',async()=>{
+  for(const reason of ['drift','grant','unknown'] as const){
+   const f=await fixture();try{
+    await f.store.transaction(s=>{s.grants[0]!.expiresAt=NOW+1200000;});
+    const job=await f.service.preview('301',CHAT,'LOCK','PHOTOS',600);assert.ok(job);assert.equal(await f.service.confirm('301',job.id),'CONFIRMED');
+    f.time(NOW+600000);
+    if(reason==='drift')f.change({...f.current(),can_send_documents:false});
+    if(reason==='grant')await f.store.transaction(s=>{s.grants[0]!.revoked=true;});
+    if(reason==='unknown')f.setUnknown();
+    const result=await tickGroupPermissionRestores(f.store,f.service,f.now(),true);
+    assert.equal(result.confirmed,0);assert.equal(f.calls(),reason==='unknown'?2:1);
+    if(reason==='unknown')assert.equal(result.unknown,1);
+    assert.equal((await tickGroupPermissionRestores(f.store,f.service,f.now(),true)).attempted,0);assert.equal(f.calls(),reason==='unknown'?2:1);
+   }finally{await f.close();}
+  }
+ });
+ test(engine+' overdue timer cannot restore a newer lock and late confirmation cannot create an already due lock',async()=>{
+  const f=await fixture();try{
+   let job=await f.service.preview('100',CHAT,'LOCK','PHOTOS',600);assert.ok(job);assert.equal(await f.service.confirm('100',job.id),'CONFIRMED');
+   f.time(NOW+1);job=await f.service.preview('100',CHAT,'LOCK','VIDEOS');assert.ok(job);assert.equal(await f.service.confirm('100',job.id),'CONFIRMED');
+   f.time(NOW+600000);assert.equal((await tickGroupPermissionRestores(f.store,f.service,f.now(),true)).attempted,0);assert.equal(f.calls(),2);
+  }finally{await f.close();}
+  const late=await fixture();try{
+   const job=await late.service.preview('301',CHAT,'LOCK','PHOTOS',60);assert.ok(job);late.time(NOW+30000);assert.equal(await late.service.confirm('301',job.id),'DENIED');assert.equal(late.calls(),0);
+   for(const command of ['/lock 01m','/lock 1s','/lock 2d','/unlock 10m'])assert.equal((await late.command(command)).status,'DENIED');
+   await assert.rejects(late.store.transaction(s=>{s.groupPermissionJobs![0]!.restoreAt=NOW;}),/Unsupported state schema/u);
+  }finally{await late.close();}
+ });
  test(engine+' every individual media lock changes exactly one permission and restores its original snapshot',async()=>{
   const f=await fixture();try{
    for(const [mode,key] of Object.entries(GROUP_LOCK_SINGLE_PERMISSION)){

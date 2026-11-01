@@ -10,7 +10,7 @@ export function groupPermissionEpoch(s:BotState,p:Policy,actor:string,chat:strin
 }
 const epoch=groupPermissionEpoch;
 const blocked=(s:BotState,chat:string,except='')=>(s.groupPermissionJobs??[]).some(j=>j.chatId===chat&&j.id!==except&&['INTENT','STARTED','UNKNOWN_OUTCOME'].includes(j.status));
-const identity=(j:GroupPermissionJob)=>JSON.stringify([j.id,j.chatId,j.actorId,j.scopeVersion,j.kind,j.mode,j.before,j.after,j.sourceEpoch,j.createdAt,j.expiresAt,j.restores]);
+const identity=(j:GroupPermissionJob)=>JSON.stringify([j.id,j.chatId,j.actorId,j.scopeVersion,j.kind,j.mode,j.before,j.after,j.sourceEpoch,j.createdAt,j.expiresAt,j.restores,...(j.restoreAt===undefined?[]:[{restoreAt:j.restoreAt}])]);
 function lastLock(s:BotState,chat:string):GroupPermissionJob|null{
  const jobs=s.groupPermissionJobs??[],restored=new Set(jobs.filter(j=>j.chatId===chat&&j.status==='CONFIRMED'&&j.kind==='RESTORE').map(j=>j.restores));
  const active=jobs.filter(j=>j.chatId===chat&&j.kind==='LOCK'&&j.status==='CONFIRMED'&&!restored.has(j.id));if(!active.length)return null;
@@ -19,34 +19,41 @@ function lastLock(s:BotState,chat:string):GroupPermissionJob|null{
 export class GroupPermissionLockService{
  constructor(private readonly store:BotStore,private readonly policy:Policy,private readonly gateway:GroupPermissionPort,private readonly clock:()=>number){}
  async cancelForActor(actor:string):Promise<void>{await this.store.transaction(s=>{for(const j of s.groupPermissionJobs??[])if(j.actorId===actor&&j.status==='PREVIEW')j.status='CANCELLED';});}
- async preview(actor:string,chat:string,kind:'LOCK'|'RESTORE',mode:GroupLockMode='MESSAGES'):Promise<GroupPermissionJob|null>{
-  if(!['LOCK','RESTORE'].includes(kind)||!GROUP_LOCK_MODES.includes(mode))return null;
+ async preview(actor:string,chat:string,kind:'LOCK'|'RESTORE',mode:GroupLockMode='MESSAGES',restoreAfterSeconds?:number,scheduledSourceId?:string):Promise<GroupPermissionJob|null>{
+  if(!['LOCK','RESTORE'].includes(kind)||!GROUP_LOCK_MODES.includes(mode)||restoreAfterSeconds!==undefined&&(kind!=='LOCK'||!Number.isSafeInteger(restoreAfterSeconds)||restoreAfterSeconds<60||restoreAfterSeconds>86400)||scheduledSourceId!==undefined&&(kind!=='RESTORE'||restoreAfterSeconds!==undefined))return null;
   const before=await this.store.snapshot(),now=this.clock(),source=epoch(before,this.policy,actor,chat,now);if(!source||blocked(before,chat)||(before.groupPermissionJobs?.length??0)>=1000)return null;
+  const scheduledCurrent=(s:BotState,at:number)=>{
+   if(scheduledSourceId===undefined)return true;
+   const lock=lastLock(s,chat);return !!lock&&lock.id===scheduledSourceId&&lock.actorId===actor&&lock.restoreAt!==undefined&&lock.restoreAt<=at&&
+    !(s.groupPermissionJobs??[]).some(j=>j.restores===scheduledSourceId||j.actorId===actor&&j.status==='PREVIEW'&&j.expiresAt>at);
+  };
+  if(!scheduledCurrent(before,now))return null;
   const permissions=await this.gateway.read(chat);if(!permissions||!validGroupPermissions(permissions))return null;
   return this.store.transaction(s=>{
-   const at=this.clock();if(at<now||at>=now+TTL||epoch(s,this.policy,actor,chat,at)!==source||blocked(s,chat)||(s.groupPermissionJobs?.length??0)>=1000)return null;
+   const at=this.clock();if(at<now||at>=now+TTL||epoch(s,this.policy,actor,chat,at)!==source||blocked(s,chat)||(s.groupPermissionJobs?.length??0)>=1000||!scheduledCurrent(s,at))return null;
+   const restoreAt=restoreAfterSeconds===undefined?undefined:at+restoreAfterSeconds*1000;if(restoreAt!==undefined&&(!Number.isSafeInteger(restoreAt)||restoreAt>8640000000000000||!this.policy.has(s,actor,'chat.manage',chat,restoreAt)))return null;
    const old=kind==='RESTORE'?lastLock(s,chat):null;if(kind==='RESTORE'&&(!old||old.scopeVersion!==this.policy.chatRevision(s,chat)||!equalGroupPermissions(permissions,old.after)))return null;
    const desired=kind==='RESTORE'?old!.before:lockedGroupPermissions(permissions,mode);if(equalGroupPermissions(permissions,desired))return null;
    for(const j of s.groupPermissionJobs??[])if(j.actorId===actor&&j.status==='PREVIEW')j.status='CANCELLED';
-   const job:GroupPermissionJob={id:randomBytes(18).toString('base64url'),chatId:chat,actorId:actor,scopeVersion:this.policy.chatRevision(s,chat),kind,mode:old?.mode??mode,before:structuredClone(permissions),after:structuredClone(desired),sourceEpoch:epoch(s,this.policy,actor,chat,at)!,createdAt:at,expiresAt:at+TTL,status:'PREVIEW',...(old?{restores:old.id}:{})};
+   const job:GroupPermissionJob={id:randomBytes(18).toString('base64url'),chatId:chat,actorId:actor,scopeVersion:this.policy.chatRevision(s,chat),kind,mode:old?.mode??mode,before:structuredClone(permissions),after:structuredClone(desired),sourceEpoch:epoch(s,this.policy,actor,chat,at)!,createdAt:at,expiresAt:at+TTL,status:'PREVIEW',...(old?{restores:old.id}:{}),...(restoreAt===undefined?{}:{restoreAt})};
    s.groupPermissionJobs??=[];s.groupPermissionJobs.push(job);return structuredClone(job);
   });
  }
  async cancel(actor:string,id:string):Promise<boolean>{return this.store.transaction(s=>{const j=s.groupPermissionJobs?.find(j=>j.id===id);if(!j||j.actorId!==actor||j.status!=='PREVIEW'||!epoch(s,this.policy,actor,j.chatId,this.clock(),j.id))return false;j.status='CANCELLED';return true;});}
  async confirm(actor:string,id:string):Promise<'CONFIRMED'|'FAILED_CONFIRMED'|'UNKNOWN_OUTCOME'|'DENIED'>{
   const reserved=await this.store.transaction(s=>{
-   const j=s.groupPermissionJobs?.find(j=>j.id===id),now=this.clock();if(!j||j.actorId!==actor||j.status!=='PREVIEW'||j.attemptId!==undefined||now<j.createdAt||now>=j.expiresAt||epoch(s,this.policy,actor,j.chatId,now,j.id)!==j.sourceEpoch||blocked(s,j.chatId,j.id))return null;
+   const j=s.groupPermissionJobs?.find(j=>j.id===id),now=this.clock();if(!j||j.actorId!==actor||j.status!=='PREVIEW'||j.attemptId!==undefined||now<j.createdAt||now>=j.expiresAt||j.restoreAt!==undefined&&j.restoreAt<=now+30000||epoch(s,this.policy,actor,j.chatId,now,j.id)!==j.sourceEpoch||blocked(s,j.chatId,j.id))return null;
    if(j.kind==='RESTORE'&&lastLock(s,j.chatId)?.id!==j.restores)return null;
    j.status='INTENT';return structuredClone(j);
   });
   if(!reserved)return 'DENIED';
-  const still=async(status:'INTENT'|'STARTED',attemptId?:string)=>{const s=await this.store.snapshot(),j=s.groupPermissionJobs?.find(j=>j.id===id),now=this.clock();return !!j&&j.status===status&&j.attemptId===attemptId&&identity(j)===identity(reserved)&&now>=j.createdAt&&now<j.expiresAt&&epoch(s,this.policy,actor,j.chatId,now,j.id)===j.sourceEpoch&&!blocked(s,j.chatId,j.id);};
+  const still=async(status:'INTENT'|'STARTED',attemptId?:string)=>{const s=await this.store.snapshot(),j=s.groupPermissionJobs?.find(j=>j.id===id),now=this.clock();return !!j&&j.status===status&&j.attemptId===attemptId&&identity(j)===identity(reserved)&&now>=j.createdAt&&now<j.expiresAt&&(j.restoreAt===undefined||j.restoreAt>now+30000)&&epoch(s,this.policy,actor,j.chatId,now,j.id)===j.sourceEpoch&&!blocked(s,j.chatId,j.id);};
   let observed;try{observed=await this.gateway.read(reserved.chatId);}catch{observed=null;}
   if(!observed||!validGroupPermissions(observed)||!equalGroupPermissions(observed,reserved.before)||!await still('INTENT')){
    await this.store.transaction(s=>{const j=s.groupPermissionJobs?.find(j=>j.id===id);if(j?.status==='INTENT'&&identity(j)===identity(reserved))j.status='CANCELLED';});return 'DENIED';
   }
   const attemptId=randomBytes(18).toString('base64url');
-  const started=await this.store.transaction(s=>{const j=s.groupPermissionJobs?.find(j=>j.id===id),now=this.clock();if(!j||j.status!=='INTENT'||identity(j)!==identity(reserved)||now<j.createdAt||now>=j.expiresAt||epoch(s,this.policy,actor,j.chatId,now,j.id)!==j.sourceEpoch||blocked(s,j.chatId,j.id))return false;j.status='STARTED';j.attemptId=attemptId;return true;});
+  const started=await this.store.transaction(s=>{const j=s.groupPermissionJobs?.find(j=>j.id===id),now=this.clock();if(!j||j.status!=='INTENT'||identity(j)!==identity(reserved)||now<j.createdAt||now>=j.expiresAt||j.restoreAt!==undefined&&j.restoreAt<=now+30000||epoch(s,this.policy,actor,j.chatId,now,j.id)!==j.sourceEpoch||blocked(s,j.chatId,j.id))return false;j.status='STARTED';j.attemptId=attemptId;return true;});
   if(!started)return 'DENIED';let outcome:'CONFIRMED'|'FAILED_CONFIRMED'|'UNKNOWN_OUTCOME';
   try{outcome=await this.gateway.apply(reserved.chatId,reserved.before,reserved.after,()=>still('STARTED',attemptId));}catch{outcome='UNKNOWN_OUTCOME';}
   if(!['CONFIRMED','FAILED_CONFIRMED','UNKNOWN_OUTCOME'].includes(outcome))outcome='UNKNOWN_OUTCOME';
