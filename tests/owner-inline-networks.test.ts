@@ -348,3 +348,25 @@ for(const engine of ['json','sqlite'] as const){
   }finally{await f.close();}
  });
 }
+
+for(const engine of ['json','sqlite'] as const){
+ test('network rename input is invalidated if network membership changes before new name is entered ('+engine+')',async()=>{
+  const f=await setup(engine);try{
+   await f.approve(GROUP);
+   const n=await f.create();
+   assert.equal((await f.app().handle(callback(360,'nw:1:e:'+n.id))).status,'APPLIED');
+   const connect=await f.app().handle(callback(361,'nw:1:t:'+n.id+':1:'+GROUP+':1:0'));
+   assert.equal(connect.status,'APPLIED');
+   assert.equal((await f.app().handle(callback(362,find(connect,'تأكيد')))).status,'APPLIED');
+   const stale=await f.app().handle(textMsg(363,'شبكة قديمة'));
+   assert.equal(stale.status,'DENIED');
+   assert.equal((await f.store.snapshot()).groupNetworks?.[0]?.name,'شبكة الطب');
+   assert.equal((await f.store.snapshot()).groupNetworks?.[0]?.revision,2);
+   assert.equal((await f.app().handle(callback(364,'nw:1:e:'+n.id))).status,'APPLIED');
+   const fresh=await f.app().handle(textMsg(365,'شبكة حديثة'));
+   assert.equal(fresh.status,'APPLIED');
+   assert.equal((await f.app().handle(callback(366,find(fresh,'تأكيد')))).status,'APPLIED');
+   assert.equal((await f.store.snapshot()).groupNetworks?.[0]?.name,'شبكة حديثة');
+  }finally{await f.close();}
+ });
+}
