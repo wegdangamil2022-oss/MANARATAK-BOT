@@ -58,8 +58,8 @@ function inputPolicy(config:ProtectionPolicy,kind:Exclude<InputKind,'TEST'>,text
   return {...config,revision:config.revision+1,temporaryExemptions:[...rows,{memberId:m[1]!,createdAt:now,expiresAt:now+Number(m[2])*1000}]};
  }
  if(kind==='FLOOD'){
-  const m=/^([1-9][0-9]{0,2}) ([1-9][0-9]?)$/u.exec(text);if(!m||m[0]!==text)return null;
-  return {...config,revision:config.revision+1,flood:{enabled:config.flood?.enabled??false,limit:Number(m[1]),windowMs:Number(m[2])*1000,action:config.flood?.action??'REVIEW'}};
+  const m=/^([1-9][0-9]{0,2}) ([1-9][0-9]?)(?: ([1-9][0-9]?))?$/u.exec(text);if(!m||m[0]!==text)return null;
+  return {...config,revision:config.revision+1,flood:{enabled:config.flood?.enabled??false,limit:Number(m[1]),windowMs:Number(m[2])*1000,action:config.flood?.action??'REVIEW',...(m[3]===undefined?{}:{repeatLimit:Number(m[3])})}};
  }
  if(kind==='DOMAIN'||kind==='ALLOWPHRASE'){
   const field=kind==='DOMAIN'?'allowedDomains':'allowedPhrases';
@@ -330,7 +330,7 @@ export class TelegramProtectionEditor{
    kind==='RAID'?'أرسل عدد الأعضاء ثم عدد الرسائل ثم مدة القفل بالثواني؛ مثال: 5 20 120. الأعضاء من 2 إلى 100 والرسائل حتى 1000 ولا تقل عن الأعضاء، والمدة من 60 إلى 600. يبدأ الإعداد الجديد معطلاً.':
    kind==='ESCALATION'?'أرسل عدد التحذيرات السابقة من 1 إلى 20 ثم نافذة بالثواني من 60 إلى 86400؛ مثال: 3 3600. يبدأ الإعداد الجديد معطلاً. الكتم لمدة دقيقة فقط.':
    kind==='EXEMPT'?'أرسل رقم العضو ثم المدة بالثواني، مفصولين بمسافة؛ المدة من 60 إلى 86400. مثال: 300 600. الاستثناء لفحص المحتوى والفلود فقط، ولا يرفع عقوبة قائمة. الرجوع يلغي الإدخال.':
-   kind==='FLOOD'?'أرسل عدد الرسائل ثم المدة بالثواني، مفصولين بمسافة. العدد من 1 إلى 100 والمدة من 1 إلى 60. مثال إدخال فقط: 5 3. تبدأ السياسة الجديدة معطلة بإجراء مراجعة.':
+   kind==='FLOOD'?'أرسل عدد الرسائل ثم المدة بالثواني، مفصولين بمسافة. العدد من 1 إلى 100 والمدة من 1 إلى 60. مثال: 10 30؛ ويمكن إضافة حد تكرار من 2 إلى عدد الرسائل: 10 30 3. يرصد النص المتطابق بعد التطبيع لنفس العضو من 8 محارف، دون حفظ النص؛ لا يربط المجموعات. حذف الرقم الثالث يعطل هذا الفحص. تبدأ السياسة الجديدة معطلة بإجراء مراجعة.':
    kind==='DOMAIN'?'أرسل اسم نطاق مسموح واحدًا بحروف صغيرة دون رابط أو مسار، مثل school.edu. السماح للمضيف نفسه فقط ولا يعفي أنواع الرسائل.':
    kind==='ALLOWPHRASE'?'أرسل عبارة تعليمية مسموحة حتى 120 حرفًا. تعفى في موضعها فقط ولا تعفي بقية الرسالة أو نوعها.':
    kind==='LINK'?'أرسل اسم نطاق واحدًا بحروف صغيرة، مثل example.org، دون رابط أو مسار أو بيانات دخول. ستُضاف قاعدة معطلة تشمل النطاق ونطاقاته الفرعية.':

@@ -1,10 +1,11 @@
+import {createHash} from 'node:crypto';
 import {advanceFloodWindow} from './protection-flood.js';
 import {protectionEntityLinks} from './protection-message-entities.js';
 import {BotStore,type BotState} from './store.js';
 import type {Policy} from './policy.js';
 import type {ProtectionEnforcer,ProtectionDelivery} from './protection-enforcement.js';
 import type {ProtectionAction} from './protection-rules.js';
-import {isValidProtectionPolicy,protectionMemberExempt,evaluateProtectionRules,type GroupProtectionRecord,type ProtectionEvaluation,type ProtectionMessage} from './protection-rules.js';
+import {normalizeProtectionText,isValidProtectionPolicy,protectionMemberExempt,evaluateProtectionRules,type GroupProtectionRecord,type ProtectionEvaluation,type ProtectionMessage} from './protection-rules.js';
 type Inspection={status:'DENIED'|'UNCONFIGURED'|'STALE'}|{status:'CONFIGURED';record:GroupProtectionRecord;enforcementConnected:boolean};
 const clockValid=(n:number)=>Number.isSafeInteger(n)&&n>=0&&n<=8640000000000000;
 /** Owner/delegated operator control of one group's local rules. Saving a
@@ -77,13 +78,18 @@ export class GroupProtectionPolicyService{
   const counts=windows.map(w=>w.events.filter(e=>e.at<=now&&e.at>now-flood.windowMs).length).filter(n=>n>0);
   return counts.length>=raid.minimumMembers&&counts.reduce((a,b)=>a+b,0)>=raid.minimumMessages;
  }
- private observeFlood(state:BotState,record:GroupProtectionRecord,member:string,key:string,now:number):'CLEAR'|'EXCEEDED'|'DUPLICATE'|'INVALID'{
+ private floodThreshold(state:BotState,record:GroupProtectionRecord,member:string,now:number):boolean{
+  const config=record.policy.flood,w=state.protectionFloodWindows?.find(w=>w.chatId===record.policy.chatId&&w.memberId===member);if(!config?.enabled||!w||w.policyRevision!==record.policy.revision||w.chatPolicyVersion!==record.chatPolicyVersion||w.updatedAt>now)return false;
+  const events=w.events.filter(e=>e.at<=now&&e.at>now-config.windowMs);return events.length>config.limit||config.repeatLimit!==undefined&&events.some(e=>e.digest!==undefined&&events.filter(other=>other.digest===e.digest).length>config.repeatLimit!);
+ }
+ private observeFlood(state:BotState,record:GroupProtectionRecord,member:string,key:string,now:number,body:string):'CLEAR'|'EXCEEDED'|'DUPLICATE'|'INVALID'{
   const config=record.policy.flood;if(!config?.enabled)return 'CLEAR';
   state.protectionFloodWindows??=[];
   this.pruneFloodWindows(state,now);
   const windows=state.protectionFloodWindows,index=windows.findIndex(w=>w.chatId===record.policy.chatId&&w.memberId===member),old=windows[index];
   if(!old&&windows.length>=1000)return 'INVALID';
-  const result=advanceFloodWindow(config,old?.events??[],key,now);
+  const normalized=normalizeProtectionText(body),digest=config.repeatLimit!==undefined&&Array.from(normalized).length>=8?createHash('sha256').update(record.policy.chatId+':'+record.policy.revision+':'+normalized).digest('hex'):undefined;
+  const result=advanceFloodWindow(config,old?.events??[],key,now,digest);
   if(result.status==='INVALID'||result.status==='DUPLICATE')return result.status;
   if(result.status==='DISABLED')return 'CLEAR';
   const value={chatId:record.policy.chatId,memberId:member,chatPolicyVersion:record.chatPolicyVersion,policyRevision:record.policy.revision,events:result.events,updatedAt:now};
@@ -116,7 +122,7 @@ export class GroupProtectionPolicyService{
     state.audit.push({updateKey:key,decision:'NOOP',reason:'PROTECTION_MONITOR_INPUT_UNAVAILABLE',policyVersion:record.chatPolicyVersion,at:now});
     return 'UNAVAILABLE';
    }
-   const flood=countTraffic?this.observeFlood(state,record,member,updateKey,now):'CLEAR';
+   const flood=countTraffic?this.observeFlood(state,record,member,updateKey,now,body):'CLEAR';
    if(flood==='DUPLICATE')return 'DUPLICATE';
    if(flood==='INVALID'){
     state.audit.push({updateKey:key,decision:'NOOP',reason:'PROTECTION_MONITOR_INPUT_UNAVAILABLE',policyVersion:record.chatPolicyVersion,at:now});
@@ -136,14 +142,14 @@ export class GroupProtectionPolicyService{
    if(matches||raid)state.audit.push({updateKey:key,decision:'NOOP',
     reason:(record.policy.mode==='ENFORCE'?'PROTECTION_ENFORCEMENT_CLAIM:':'PROTECTION_MONITOR_MATCH:')+'revision='+record.policy.revision+';action='+action+';rules='+matches,
     policyVersion:record.chatPolicyVersion,at:now});
-   if((matches||raid)&&action&&record.policy.mode==='ENFORCE')return {record:structuredClone(record),action,key,at:now,warningSource,escalated:previousAction==='WARN'&&action==='MUTE',raid};
+   if((matches||raid)&&action&&record.policy.mode==='ENFORCE')return {record:structuredClone(record),action,key,at:now,warningSource,floodSource:JSON.stringify(state.protectionFloodWindows?.find(w=>w.chatId===chat&&w.memberId===member)??null),floodExceeded:flood==='EXCEEDED',escalated:previousAction==='WARN'&&action==='MUTE',raid};
    return 'OBSERVED';
   });
   if(typeof prepared==='string')return prepared;
   const current=(state:BotState)=>{
    const now=this.clock(),rows=state.protectionPolicies?.filter(r=>r.policy.chatId===chat)??[];
    return clockValid(now)&&now>=prepared.at&&now<prepared.at+5000&&rows.length===1&&
-    JSON.stringify(rows[0])===JSON.stringify(prepared.record)&&(!prepared.raid||this.raidThreshold(state,prepared.record,now))&&(!prepared.escalated||state.warnings.filter(w=>w.chatId===chat&&w.memberId===member&&w.active&&w.at<=now&&w.at>now-prepared.record.policy.escalation!.windowMs).length>=prepared.record.policy.escalation!.afterWarnings)&&(prepared.warningSource===null||prepared.warningSource===JSON.stringify(state.warnings.filter(w=>w.chatId===chat&&w.memberId===member)))&&this.allowed(state,prepared.record.updatedBy,chat,now)&&
+    JSON.stringify(rows[0])===JSON.stringify(prepared.record)&&(!prepared.floodExceeded||prepared.floodSource===JSON.stringify(state.protectionFloodWindows?.find(w=>w.chatId===chat&&w.memberId===member)??null)&&this.floodThreshold(state,prepared.record,member,now))&&(!prepared.raid||this.raidThreshold(state,prepared.record,now))&&(!prepared.escalated||state.warnings.filter(w=>w.chatId===chat&&w.memberId===member&&w.active&&w.at<=now&&w.at>now-prepared.record.policy.escalation!.windowMs).length>=prepared.record.policy.escalation!.afterWarnings)&&(prepared.warningSource===null||prepared.warningSource===JSON.stringify(state.warnings.filter(w=>w.chatId===chat&&w.memberId===member)))&&this.allowed(state,prepared.record.updatedBy,chat,now)&&
     prepared.record.chatPolicyVersion===this.policy.chatRevision(state,chat)&&
     !this.policy.isOwner(member)&&!this.policy.has(state,member,'chat.manage',chat,now)&&!protectionMemberExempt(prepared.record.policy,member,now);
   };
