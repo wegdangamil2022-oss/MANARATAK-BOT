@@ -13,6 +13,8 @@ const net='([a-f0-9]{12})',page='(0|[1-9][0-9]{0,2})',
 const home=/^nw:1:h$/u,begin=/^nw:1:n$/u;
 const list=new RegExp('^nw:1:p:'+page+'$','u');
 const detail=new RegExp('^nw:1:d:'+net+'$','u');
+const rename=new RegExp('^nw:1:e:'+net+'$','u');
+const remove=new RegExp('^nw:1:x:'+net+'$','u');
 const pick=new RegExp('^nw:1:g:'+net+':'+page+'$','u');
 const toggle=new RegExp('^nw:1:t:'+net+':'+revision+':'+group+':'+revision+':'+page+'$','u');
 const confirm=/^nw:1:c:([A-Za-z0-9_-]{24})$/u,cancel=/^nw:1:k:([A-Za-z0-9_-]{24})$/u;
@@ -26,7 +28,7 @@ const validClock=(value:number)=>Number.isSafeInteger(value)&&value>=0&&value<=8
 export function validOwnerNetworkRoute(data:unknown):boolean{
  if(typeof data!=='string'||Buffer.byteLength(data,'utf8')>64)return false;
  return data==='mi:1:i:01:03'||home.test(data)||begin.test(data)||
-  [list,detail,pick,toggle,confirm,cancel].some(re=>re.test(data));
+  [list,detail,rename,remove,pick,toggle,confirm,cancel].some(re=>re.test(data));
 }
 function approved(s:BotState,policy:Policy,actor:string,now:number):Chat[]{
  const counts=new Map<string,number>();
@@ -41,6 +43,9 @@ function namesProof(s:BotState):string{
   (s.groupNetworks??[]).map(n=>[n.id,n.name,n.revision]),s.privateSettingsRevision??0,
   s.privateFeatures['owner.dashboard']
  ])).digest('hex');
+}
+function editProof(s:BotState,n:GroupNetwork):string{
+ return createHash('sha256').update(JSON.stringify([namesProof(s),n])).digest('hex');
 }
 function groupProof(s:BotState,n:GroupNetwork,items:Chat[]):string{
  return createHash('sha256').update(JSON.stringify([
@@ -97,6 +102,8 @@ export class OwnerNetworkEditor{
    'مجموعات فعالة: '+active+' · ارتباطات تحتاج مراجعة: '+stale+'\n'+
    'المجموعات الفعالة هي المعتمدة بنفس إصدار ارتباطها فقط؛ لا تُنقل إليها حقوق البوت.',
    [[btn('👥 إدارة المجموعات','nw:1:g:'+n.id+':0')],
+    [btn('✏️ إعادة تسمية الشبكة','nw:1:e:'+n.id)],
+    ...(n.members.length===0?[[btn('🗑️ حذف الشبكة','nw:1:x:'+n.id)]]:[]),
     [btn('📋 الشبكات','nw:1:p:0'),btn('🏠 لوحة المالك','mi:1:h')]]);
  }
  private members(s:BotState,actor:string,now:number,id:string,p:number):OwnerInlineScreen|null{
@@ -117,11 +124,52 @@ export class OwnerNetworkEditor{
    'لا يتيح الربط أي مشاركة آلية للمحتوى أو صلاحيات إدارة.',
    rows);
  }
+
+ /** Start a scoped rename prompt without allowing older name-input intents
+  * to remain active. The source network is rechecked at text preview. */
+ private async startRename(actor:string,id:string):Promise<OwnerInlineScreen|null>{
+  return this.store.transaction(s=>{
+   const now=this.clock(),n=this.find(s,id);
+   if(!this.auth(s,actor,now)||!n||n.revision>=9_999_999_999)return null;
+   for(const c of s.callbacks)if(c.actorId===actor&&c.action.startsWith(PREFIX+'input:')&&
+    !c.used&&!c.revoked)c.revoked=true;
+   const ref='c_'+randomBytes(18).toString('base64url');
+   if(s.callbacks.some(c=>c.ref===ref))return null;
+   s.callbacks.push({ref,action:PREFIX+'input:rename:'+id,actorId:actor,
+    chatId:'private',policyVersion:0,expiresAt:now+INPUT_TTL,
+    oneShot:true,used:false,revoked:false});
+   return ui('<b>✏️ الاسم الجديد للشبكة</b>\n'+
+    'الاسم الحالي: '+escape(n.name)+'\n'+
+    'أرسل اسمًا مختلفًا من 2 إلى 48 حرفًا. الحفظ يتطلب معاينة وتأكيدًا.\n'+
+    'لن تُعدل عضوية الشبكة ولا صلاحيات Telegram.',
+    [[btn('↩️ إلغاء إعادة التسمية','nw:1:d:'+id)]]);
+  });
+ }
+ /** Only empty network folders can be deleted; all group associations must
+  * first be removed explicitly by the owner. */
+ private async previewDelete(actor:string,id:string):Promise<OwnerInlineScreen|null>{
+  return this.store.transaction(s=>{
+   const now=this.clock(),n=this.find(s,id);
+   if(!this.auth(s,actor,now)||!n||n.members.length!==0)return null;
+   const ref='c_'+randomBytes(18).toString('base64url');
+   if(s.callbacks.some(c=>c.ref===ref))return null;
+   s.callbacks.push({ref,action:PREFIX+'delete:'+JSON.stringify([id,n.revision,editProof(s,n)]),
+    actorId:actor,chatId:'private',policyVersion:0,oneShot:true,
+    used:false,revoked:false,expiresAt:now+TTL});
+   return ui('<b>🗑️ معاينة حذف الشبكة المحلية</b>\n'+
+    'الشبكة: '+escape(n.name)+'\n'+
+    'العضوية: 0 مجموعات. لن تُحذف المجموعات أو إعداداتها.\n'+
+    'يرفض الحذف إذا تغيرت الشبكة. التأكيد لمرة واحدة خلال دقيقتين.',
+    [[btn('✅ تأكيد الحذف','nw:1:c:'+ref.slice(2))],
+     [btn('✖ إلغاء المعاينة','nw:1:k:'+ref.slice(2))]]);
+  });
+ }
+
  private async start(actor:string):Promise<OwnerInlineScreen|null>{
   return this.store.transaction(s=>{
    const now=this.clock();
    if(!this.auth(s,actor,now)||(s.groupNetworks??[]).length>=32)return null;
-   for(const c of s.callbacks)if(c.actorId===actor&&c.action===PREFIX+'input:'&&
+   for(const c of s.callbacks)if(c.actorId===actor&&c.action.startsWith(PREFIX+'input:')&&
     !c.used&&!c.revoked)c.revoked=true;
    const ref='c_'+randomBytes(18).toString('base64url');
    s.callbacks.push({ref,action:PREFIX+'input:',actorId:actor,chatId:'private',
@@ -138,29 +186,38 @@ export class OwnerNetworkEditor{
  async previewName(actor:string,name:string):Promise<OwnerInlineScreen|null>{
   if(!this.policy.isOwner(actor))return null;
   const snapshot=await this.store.snapshot();
-  if(!snapshot.callbacks.some(c=>c.actorId===actor&&c.action===PREFIX+'input:'&&
+  if(!snapshot.callbacks.some(c=>c.actorId===actor&&c.action.startsWith(PREFIX+'input:')&&
    !c.used&&!c.revoked))return null;
   if(!validNetworkName(name))throw Error('NETWORK_INVALID_NAME');
   return this.store.transaction(s=>{
    const now=this.clock();
    if(!this.auth(s,actor,now))throw Error('NETWORK_DISABLED');
-   const pend=s.callbacks.filter(c=>c.actorId===actor&&c.action===PREFIX+'input:'&&
+   const pend=s.callbacks.filter(c=>c.actorId===actor&&c.action.startsWith(PREFIX+'input:')&&
     !c.used&&!c.revoked),intent=pend[0];
    if(pend.length!==1||!intent||intent.chatId!=='private'||intent.policyVersion!==0||
     intent.oneShot!==true||!Number.isSafeInteger(intent.expiresAt)||
     intent.expiresAt<=now||intent.expiresAt>now+INPUT_TTL)throw Error('NETWORK_INPUT_EXPIRED');
-   if((s.groupNetworks??[]).length>=32||matchesName(s.groupNetworks??[],name))
-    throw Error('NETWORK_DUPLICATE_OR_LIMIT');
+   if(matchesName(s.groupNetworks??[],name))throw Error('NETWORK_DUPLICATE_OR_LIMIT');
+   const isRename=intent.action.startsWith(PREFIX+'input:rename:');
+   const targetId=isRename?intent.action.slice((PREFIX+'input:rename:').length):'';
+   const target=isRename?this.find(s,targetId):null;
+   if(isRename&&(!target||!(/^[a-f0-9]{12}$/u).test(targetId)||target.name===name||
+    target.revision>=9_999_999_999))throw Error('NETWORK_RENAME_STALE');
+   if(!isRename&&(intent.action!==PREFIX+'input:'||(s.groupNetworks??[]).length>=32))
+    throw Error('NETWORK_INPUT_INVALID');
    const ref='c_'+randomBytes(18).toString('base64url');
-   s.callbacks.push({ref,action:PREFIX+'create:'+JSON.stringify([name,namesProof(s)]),
+   s.callbacks.push({ref,action:isRename?
+    PREFIX+'rename:'+JSON.stringify([targetId,name,target!.revision,editProof(s,target!)]):
+    PREFIX+'create:'+JSON.stringify([name,namesProof(s)]),
     actorId:actor,chatId:'private',policyVersion:0,oneShot:true,used:false,revoked:false,
     expiresAt:now+TTL});
    intent.used=true;
-   return ui('<b>🔎 معاينة إنشاء شبكة</b>\n'+
+   return ui('<b>🔎 '+(isRename?'معاينة إعادة تسمية شبكة':'معاينة إنشاء شبكة')+'</b>\n'+
     'الاسم: <b>'+escape(name)+'</b>\n'+
-    'لا توجد مجموعات مرتبطة بعد، وستضيفها لاحقًا بعد اعتمادها.\n'+
-    'الحفظ في قاعدة البيانات المحلية فقط، وليس إنشاء شبكة أو اتحاد داخل Telegram.',
-    [[btn('✅ تأكيد إنشاء الشبكة','nw:1:c:'+ref.slice(2))],
+    (isRename?'اسم الشبكة الحالي: '+escape(target!.name)+'، والارتباطات ستبقى كما هي.\n':
+    'لا توجد مجموعات مرتبطة بعد، وستضيفها لاحقًا بعد اعتمادها.\n')+
+    'الحفظ في قاعدة البيانات المحلية فقط، وليس تغيير شبكة أو اتحاد داخل Telegram.',
+    [[btn(isRename?'✅ تأكيد إعادة التسمية':'✅ تأكيد إنشاء الشبكة','nw:1:c:'+ref.slice(2))],
      [btn('✖ إلغاء المعاينة','nw:1:k:'+ref.slice(2))]]);
   });
  }
@@ -267,10 +324,10 @@ export class OwnerNetworkEditor{
  async cancelInput(actor:string):Promise<void>{
   if(!this.policy.isOwner(actor))return;
   const snapshot=await this.store.snapshot();
-  if(!snapshot.callbacks.some(c=>c.actorId===actor&&c.action===PREFIX+'input:'&&
+  if(!snapshot.callbacks.some(c=>c.actorId===actor&&c.action.startsWith(PREFIX+'input:')&&
    !c.revoked&&!c.used))return;
   await this.store.transaction(s=>{
-   for(const c of s.callbacks)if(c.actorId===actor&&c.action===PREFIX+'input:'&&
+   for(const c of s.callbacks)if(c.actorId===actor&&c.action.startsWith(PREFIX+'input:')&&
     !c.revoked&&!c.used)c.revoked=true;
   });
  }
@@ -286,6 +343,8 @@ export class OwnerNetworkEditor{
   if(data==='mi:1:i:01:03'||home.test(data))
    return this.root(await this.store.snapshot());
   if(begin.test(data))return this.start(actor);
+  const e=rename.exec(data);if(e)return this.startRename(actor,e[1]!);
+  const x=remove.exec(data);if(x)return this.previewDelete(actor,x[1]!);
   const l=list.exec(data);if(l)return this.networkList(state,Number(l[1]));
   const d=detail.exec(data);if(d)return this.networkCard(state,actor,now,d[1]!);
   const p=pick.exec(data);if(p)return this.members(state,actor,now,p[1]!,Number(p[2]));
