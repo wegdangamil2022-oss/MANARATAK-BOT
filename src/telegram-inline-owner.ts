@@ -723,6 +723,12 @@ export function ownerInlineConnection(data:string):'EDITOR'|'VIEW'|'SPECIFICATIO
  if(ownerInlineLinkedReadOnly(data)!==null||/^mi:1:i:01:(?:09|10|11)$/u.test(data)||data==='mi:1:i:03:01'||data==='mi:1:i:02:01'||data==='mi:1:i:02:15'||data==='mi:1:i:02:16'||data==='mi:1:i:02:13'||/^mi:1:i:02:(?:0[5678]|12)$/u.test(data))return 'VIEW';
  return 'SPECIFICATION';
 }
+/** Catalogue origin only; never an authorization token or a mutable action. */
+export function ownerInlineReturnRoute(data:string):string|null{
+ if(ownerInlineConnection(data)===null)return null;
+ const section=data.slice(7,9),item=Number(data.slice(10))-1;
+ return 'mi:1:s:'+section+':'+(section==='06'?(item<9?0:1):Math.floor(item/8));
+}
 function home(page:0|1):OwnerInlineScreen{
  const start=page*8;
  const rows=[] as {text:string;callback_data:string}[][];
@@ -782,9 +788,9 @@ export function ownerInlineRender(data:string):OwnerInlineScreen|null{
  if(data==='mi:1:h'||data==='mi:1:p:0')return home(0);
  if(data==='mi:1:p:1')return home(1);
  let m=/^mi:1:s:(0[1-9]|1[0-6]):([0-2])$/u.exec(data);
- if(m)return sectionScreen(Number(m[1])-1,Number(m[2]));
+ if(m&&m[0]===data)return sectionScreen(Number(m[1])-1,Number(m[2]));
  m=/^mi:1:i:(0[1-9]|1[0-6]):(0[1-9]|1[0-7])$/u.exec(data);
- if(m){
+ if(m&&m[0]===data){
   const sectionIndex=Number(m[1])-1,itemIndex=Number(m[2])-1;
   if(itemIndex>=ownerInlineSections[sectionIndex]!.items.length)return null;
   return itemScreen(sectionIndex,itemIndex);

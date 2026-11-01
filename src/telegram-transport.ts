@@ -21,14 +21,14 @@ import {menuLabels,mainMenuKeyboard,backMenuKeyboard,categoryButton,
  catalogBackToCategories,catalogBackToCategory,parseCatalogBackToCategory,
  type TelegramReplyKeyboard} from './telegram-menu.js';
 import {OwnerTelegramMenu,isOwnerMenuText} from './telegram-owner-menu.js';
-import {ownerInlineHome,ownerInlineRender,ownerInlineLinkedReadOnly,type TelegramInlineKeyboard} from './telegram-inline-owner.js';
+import {ownerInlineHome,ownerInlineRender,ownerInlineLinkedReadOnly,ownerInlineReturnRoute,type TelegramInlineKeyboard} from './telegram-inline-owner.js';
 import {renderOwnerInlineImports} from './telegram-inline-imports.js';
 import {renderOwnerUpload,claimOwnerUpload,cancelOwnerUpload} from './telegram-owner-upload.js';
 import {renderSubscriptionConfig,cancelSubscriptionConfig} from './telegram-inline-subscription-config.js';
 import {CommunityFolderUI,cancelCommunityFolder,publicFolderGroups,type FolderScreen} from './telegram-community-folders.js';
 import {renderOwnerInlineFAQ} from './telegram-inline-faq.js';
 import {renderOwnerInlineLibrary} from './telegram-inline-library.js';
-import {renderOwnerInlineStudio,studioOwnerEntry,studioDraftScreen} from './telegram-inline-studio.js';
+import {renderOwnerInlineStudio,studioOwnerEntry,studioDraftScreen,studioCatalogueReturn} from './telegram-inline-studio.js';
 import {ButtonStudioService} from './button-studio.js';
 import {renderOwnerInlineCategories} from './telegram-inline-categories.js';
 import {EducationCategoryEditor} from './education-category-editor.js';
@@ -1255,6 +1255,18 @@ export class TelegramUpdateApplication {
     const beforeStudio=studioInput?studioPreviewSourceEpoch(await this.opts.store.snapshot()):null;
     let handled:ProcessedReply;
     try{handled=await this.process(event);}catch(err){handled={status:'DENIED',reason:safeError(err)};}
+    // Migrated root screens must retain the page of the official entry.
+    // This changes navigation only, after normal service authorization.
+    const catalogueBack=event.kind==='private'&&this.opts.policy.isOwner(event.actorId)?ownerInlineReturnRoute(event.callbackData??'')??studioCatalogueReturn(event.callbackData??''):null;
+    if(catalogueBack&&handled.plan){
+     const prefix=catalogueBack.slice(0,-1);
+     const inline=handled.plan.inlineMarkup,native=handled.plan.studioMarkup,rows=(inline??native)?.inline_keyboard;
+     if(rows){
+      const mapped=rows.map(row=>row.map(b=>'callback_data' in b&&b.callback_data.startsWith(prefix)?{...b,callback_data:catalogueBack}:b));
+      if(!mapped.flat().some(b=>'callback_data' in b&&b.callback_data===catalogueBack))mapped.push([{text:'↩️ رجوع للقسم',callback_data:catalogueBack}]);
+      handled={...handled,plan:{...handled.plan,...(inline?{inlineMarkup:{inline_keyboard:mapped as TelegramInlineKeyboard['inline_keyboard']}}:{studioMarkup:{inline_keyboard:mapped}})}};
+     }
+    }
     if(event.kind==='private'&&this.opts.studentMenuMode==='inline'&&handled.plan){
      if(handled.plan.replyMarkup){
       const markup=await publicNavigationMarkup(this.opts.store,event.actorId,handled.plan.replyMarkup,menuLabels.owner,publicMenuText,this.clock);

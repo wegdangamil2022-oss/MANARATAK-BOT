@@ -1,12 +1,13 @@
 {
   "schemaVersion": 1,
-  "sourceCommit": "f6d05b8599d73d7826c1c8c4aa3a6bb14ab12668",
+  "sourceCommit": "97a1a12a0783f70e711880eb70af7cf5aeab4eb5",
   "sourceDirty": true,
   "officialPlan": "docs/MANARATAK_BOT_MASTER_v1.2.1_AR.md",
   "officialButtons": "docs/أزرار_منارتك.md",
   "navigationAcceptance": "LOCAL_RUNTIME_PASS",
-  "fullPhaseClosure": "OPEN",
-  "liveTelegram": "NOT_TESTED",
+  "phase2NavigationClosure": "CLOSED_LOCALLY",
+  "remainingFeatureBacklog": "OPEN",
+  "liveTelegram": "DEFERRED_UNTIL_AFTER_PHASE_3_BY_OWNER",
   "ownerSections": 16,
   "ownerButtons": 253,
   "engines": [
@@ -16,7 +17,9 @@
       "duplicateProtectionPassed": 253,
       "unauthorizedDenied": 253,
       "groupContextDenied": 253,
-      "businessStateUnchanged": true
+      "businessStateUnchanged": true,
+      "exactReturnPathsPassed": 253,
+      "homeReturnPathsPassed": 253
     },
     {
       "engine": "sqlite",
@@ -24,7 +27,9 @@
       "duplicateProtectionPassed": 253,
       "unauthorizedDenied": 253,
       "groupContextDenied": 253,
-      "businessStateUnchanged": true
+      "businessStateUnchanged": true,
+      "exactReturnPathsPassed": 253,
+      "homeReturnPathsPassed": 253
     }
   ],
   "connectedCatalogueEntries": 47,

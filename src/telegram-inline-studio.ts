@@ -31,7 +31,15 @@ const patterns=[/^st:1:N:[A-Za-z0-9_-]{24}$/u,new RegExp('^st:1:l:'+mode+':'+n+'
  new RegExp('^st:1:T:'+id+':'+rev+':'+id+':'+n+'$','u'),
  new RegExp('^st:1:D:'+rev+':'+n+'$','u'),new RegExp('^st:1:S:'+rev+':(?:defaultTemplateId:(?:none|'+id+')|(?:buttonLimit|rowsPerPage|inputSeconds|confirmationSeconds):'+n+'|colorsByFunction:[01])$','u')];
 export function validStudioInlineRoute(data:string):boolean{return typeof data==='string'&&Buffer.byteLength(data)<=64&&patterns.some(re=>{const m=re.exec(data);return m?.[0]===data;});}
-export const studioOwnerEntry=(data:string)=>/^mi:1:i:07:(?:0[1-9]|1[1256])$/u.test(data);
+export const studioOwnerEntry=(data:string)=>/^mi:1:i:07:(?:0[1-9]|1[1256])$/u.exec(data)?.[0]===data;
+/** These selectors explicitly retain their catalogue mode. No actor or
+ * permissions are inferred from it; the transport still authorizes first. */
+export function studioCatalogueReturn(data:string):string|null{
+ if(!validStudioInlineRoute(data))return null;const parts=data.split(':');
+ if(['C','S','D','A','K','F'].includes(parts[2]!))return 'mi:1:s:07:1';
+ if(['l','e','E'].includes(parts[2]!))return 'mi:1:s:07:'+(Number(parts[3])<=8?0:1);
+ return null;
+}
 const b=(text:string,callback_data:string)=>({text,callback_data});
 const ui=(text:string,rows:{text:string;callback_data:string}[][]):OwnerInlineScreen=>({text,keyboard:{inline_keyboard:rows}});
 export const studioEscape=(v:string)=>v.replace(/&/gu,'&amp;').replace(/</gu,'&lt;').replace(/>/gu,'&gt;').replace(/"/gu,'&quot;').replace(/'/gu,'&#39;');

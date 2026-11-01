@@ -3,7 +3,7 @@ import {readFile,writeFile,mkdtemp,rm} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {execFileSync} from 'node:child_process';
-import {ownerInlineSections,ownerInlineRender,isValidTelegramInlineKeyboard,ownerInlineConnection} from '../dist/src/telegram-inline-owner.js';
+import {ownerInlineSections,ownerInlineRender,isValidTelegramInlineKeyboard,ownerInlineConnection,ownerInlineReturnRoute} from '../dist/src/telegram-inline-owner.js';
 import {BotStore} from '../dist/src/store.js';
 import {Policy} from '../dist/src/policy.js';
 import {EducationService} from '../dist/src/education.js';
@@ -17,6 +17,7 @@ import {delegationOwnerEntry} from '../dist/src/telegram-inline-delegations.js';
 const doc=(await readFile(new URL('../docs/أزرار_منارتك.md',import.meta.url),'utf8')).replace(/\r\n/g,'\n');
 const code=(n)=>String(n).padStart(2,'0');
 const rows=[];
+const checkNavigation=process.argv.includes('--navigation');
 for(let s=0;s<ownerInlineSections.length;s++){
  const section=ownerInlineSections[s],key=code(s+1);
  // A simpler bounded slice avoids treating intermediate headings as sections.
@@ -67,6 +68,17 @@ try{
     assert.equal(owner.status,'APPLIED',engine+' '+row.callback);
     assert.equal(owner.plan?.editMessageId,55);
     assert.ok(isValidTelegramInlineKeyboard(owner.plan?.inlineMarkup),row.callback);
+    if(checkNavigation){
+     const back=ownerInlineReturnRoute(row.callback);
+     assert.ok(back&&owner.plan.inlineMarkup.inline_keyboard.flat().some(b=>b.callback_data===back),row.callback+' exact return');
+     const returned=await app.handle(callbacks(100,back));
+     assert.equal(returned.status,'APPLIED',row.callback+' back');assert.equal(returned.plan?.editMessageId,55);
+     assert.ok(returned.plan?.inlineMarkup?.inline_keyboard.flat().some(b=>b.callback_data===row.callback),row.callback+' retained page');
+     const home='mi:1:p:'+(Number(row.section)<=8?0:1);
+     assert.ok(returned.plan.inlineMarkup.inline_keyboard.flat().some(b=>b.callback_data===home));
+     const main=await app.handle(callbacks(100,home));assert.equal(main.status,'APPLIED');assert.equal(main.plan?.editMessageId,55);
+     assert.ok(main.plan?.inlineMarkup?.inline_keyboard.flat().some(b=>b.callback_data==='mi:1:s:'+row.section+':0'));
+    }
     assert.equal((await app.handle(ownerEvent)).status,'DUPLICATE');
     assert.equal((await app.handle(callbacks(300,row.callback))).status,'DENIED');
     assert.equal((await app.handle(callbacks(100,row.callback,true))).status,'DENIED');
@@ -74,7 +86,7 @@ try{
    const final=await store.snapshot();
    for(const key of Object.keys(initial))if(!['updates','audit','telegramReplyJobs'].includes(key))
     assert.deepEqual(final[key],initial[key],'navigation changed '+key);
-   engines.push({engine,buttonsPassed:253,duplicateProtectionPassed:253,unauthorizedDenied:253,groupContextDenied:253,businessStateUnchanged:true});
+   engines.push({engine,buttonsPassed:253,duplicateProtectionPassed:253,unauthorizedDenied:253,groupContextDenied:253,businessStateUnchanged:true,...(checkNavigation?{exactReturnPathsPassed:253,homeReturnPathsPassed:253}:{})});
   }finally{await rm(dir,{recursive:true,force:true});}
  }
 }finally{globalThis.fetch=originalFetch;}
