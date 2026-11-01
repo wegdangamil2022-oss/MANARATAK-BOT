@@ -14,6 +14,7 @@ const pages=new RegExp('^gs:1:p:'+page+'$','u');
 const group=new RegExp('^gs:1:g:'+id+':'+version+':'+page+'$','u');
 const preview=new RegExp('^gs:1:v:'+id+':'+version+':'+page+':([xosamf])$','u');
 const history=new RegExp('^gs:1:l:'+id+':'+version+':'+page+'$','u');
+const restore=/^gs:1:r:([A-Za-z0-9_-]{24})$/u;
 const confirm=/^gs:1:c:([A-Za-z0-9_-]{24})$/u;
 const cancel=/^gs:1:k:([A-Za-z0-9_-]{24})$/u;
 type Change='x'|'o'|'s'|'a'|'m'|'f';
@@ -30,7 +31,7 @@ const targetAI:Record<'x'|'o'|'s'|'a',GroupAIMode>={
 };
 export function validOwnerGroupSettingsRoute(data:unknown):boolean{
  if(typeof data!=='string'||Buffer.byteLength(data,'utf8')>64)return false;
- return data==='mi:1:i:01:12'||home.test(data)||[pages,group,preview,history,confirm,cancel].some(re=>re.test(data));
+ return data==='mi:1:i:01:12'||home.test(data)||[pages,group,preview,history,restore,confirm,cancel].some(re=>re.test(data));
 }
 /** Restore-safe approved group list. Reject duplicates instead of selecting
  * the first copy of an approval with conflicting rights. */
@@ -159,10 +160,8 @@ export class OwnerGroupSettings{
  /** An audit row is shown only when paired with its unique, consumed preview
   * receipt. Duplicate audit keys, ambiguous callback refs and malformed
   * restored evidence are quarantined rather than treated as genuine changes. */
- private auditHistory(s:BotState,actor:string,now:number,id:string,version:number,p:number):OwnerInlineScreen|null{
-  const selected=this.details(s,actor,now,id,version,Math.floor(approved(s).findIndex(c=>c.id===id)/PAGE_SIZE));
-  if(!selected||p<0||p>999)return null;
-  type Entry={at:number;actor:string;change:Change};
+ private verifiedChanges(s:BotState,actor:string,now:number,id:string):{at:number;actor:string;change:Change;nonce:string;version:number;previous?:GroupAIMode}[]{
+  type Entry={at:number;actor:string;change:Change;nonce:string;version:number;previous?:GroupAIMode};
   const changes:Entry[]=[];
   const candidate=s.audit.filter(a=>a.reason==='GROUP_SETTINGS_AI_MODE_SAVED'||
    a.reason==='GROUP_SETTINGS_MONITOR_ENABLED'||a.reason==='GROUP_SETTINGS_MONITOR_DISABLED');
@@ -179,28 +178,43 @@ export class OwnerGroupSettings{
     receipt.expiresAt>a.at+TTL)continue;
    let payload:unknown;
    try{payload=JSON.parse(receipt.action.slice(PREFIX.length));}catch{continue;}
-   if(!Array.isArray(payload)||payload.length!==5||payload[0]!==id||
+   if(!Array.isArray(payload)||![5,6,7].includes(payload.length)||payload[0]!==id||
     !validVersion(payload[1])||!Number.isSafeInteger(payload[2])||
     payload[2]<0||payload[2]>999||!['x','o','s','a','m','f'].includes(payload[3])||
     typeof payload[4]!=='string'||!/^[a-f0-9]{64}$/u.test(payload[4]))continue;
    const change=payload[3] as Change,isAI=!['m','f'].includes(change);
+   if(payload.length>=6&&(!isAI||!Object.values(targetAI).includes(payload[5])||payload[5]===targetAI[change as keyof typeof targetAI]))continue;
+   if(payload.length===7&&(typeof payload[6]!=='string'||!/^[A-Za-z0-9_-]{24}$/u.test(payload[6])))continue;
+   if(payload.length>=6){
+    const proof=createHash('sha256').update(JSON.stringify(payload)).digest('hex');
+    const seal=s.audit.filter(row=>row.updateKey==='owner-group-settings-prior:'+m[1]);
+    if(seal.length!==1||seal[0]!.reason!=='GROUP_SETTINGS_PREVIOUS_'+proof||seal[0]!.actorId!==actor||seal[0]!.decision!=='ALLOW'||seal[0]!.at!==a.at||seal[0]!.policyVersion!==a.policyVersion)continue;
+   }
    if(a.reason!==(isAI?'GROUP_SETTINGS_AI_MODE_SAVED':
     change==='m'?'GROUP_SETTINGS_MONITOR_ENABLED':'GROUP_SETTINGS_MONITOR_DISABLED')||
     a.policyVersion!==payload[1]+(isAI?1:0))continue;
-   changes.push({at:a.at,actor:a.actorId,change});
+   changes.push({at:a.at,actor:a.actorId,change,nonce:m[1]!,version:payload[1],...(payload.length>=6?{previous:payload[5] as GroupAIMode}:{})});
   }
   changes.reverse();
+  return changes;
+ }
+ private auditHistory(s:BotState,actor:string,now:number,id:string,version:number,p:number):OwnerInlineScreen|null{
+  const selected=this.details(s,actor,now,id,version,Math.floor(approved(s).findIndex(c=>c.id===id)/PAGE_SIZE));
+  if(!selected||p<0||p>999)return null;
+  const changes=this.verifiedChanges(s,actor,now,id);
   const count=changes.length,pagesTotal=Math.max(1,Math.ceil(count/PAGE_SIZE));
   if(p>=pagesTotal)return null;
   const current=changes.slice(p*PAGE_SIZE,(p+1)*PAGE_SIZE);
   const descriptions:Record<Change,string>={x:'المساعد: متوقف',o:'المساعد: يجيب للمالك عند الإشارة',s:'المساعد: يجيب للمشرفين عند الإشارة',a:'المساعد: يجيب للجميع عند الإشارة',m:'الحماية: مراقبة فقط',f:'الحماية: متوقفة'};
   const lines=current.map(item=>'• '+new Date(item.at).toISOString().slice(0,16).replace('T',' ')+
-   ' UTC — '+descriptions[item.change]+' · المعدّل: <code>'+escape(item.actor)+'</code>').join('\n');
+   ' UTC — '+descriptions[item.change]+(item.previous?' · السابق: '+({OFF:'متوقف',OWNER_MENTION:'المالك عند الإشارة',STAFF_MENTION:'المشرفون عند الإشارة',ALL_MENTION:'الجميع عند الإشارة'} as const)[item.previous]:'')+' · المعدّل: <code>'+escape(item.actor)+'</code>').join('\n');
   const rows:{text:string;callback_data:string}[][]=[];
   const nav:{text:string;callback_data:string}[]=[];
   if(p>0)nav.push(button('⬅️ السابق','gs:1:l:'+id+':'+version+':'+(p-1)));
   if(p+1<pagesTotal)nav.push(button('➡️ التالي','gs:1:l:'+id+':'+version+':'+(p+1)));
   if(nav.length)rows.push(nav);
+  const latest=changes.find(item=>!['m','f'].includes(item.change));
+  if(p===0&&latest?.previous&&latest.version+1===version&&selected.chat.groupAI===targetAI[latest.change as keyof typeof targetAI])rows.push([button('↩️ استعادة وضع المساعد السابق','gs:1:r:'+latest.nonce)]);
   const index=approved(s).findIndex(c=>c.id===id);
   rows.push([button('↩️ إعدادات المجموعة','gs:1:g:'+id+':'+version+':'+Math.floor(index/PAGE_SIZE)),
    button('🏠 لوحة المالك','mi:1:h')]);
@@ -208,7 +222,7 @@ export class OwnerGroupSettings{
    'المجموعة: <code>'+escape(id)+'</code>\n'+
    'العمليات الموثقة: '+count+' · صفحة '+(p+1)+' من '+pagesTotal+'\n'+
    (lines?lines:'لا توجد تغييرات موثقة لهذه المجموعة.')+'\n'+
-   'هذا سجل محلي للقراءة فقط، لا يثبت تنفيذ إجراءات Telegram.',rows);
+   'لا يثبت السجل تنفيذ إجراءات Telegram؛ استعادة وضع المساعد تتطلب معاينة وتأكيدًا.',rows);
  }
 
  private async preview(actor:string,id:string,version:number,p:number,mode:Change):Promise<OwnerInlineScreen|null>{
@@ -218,10 +232,10 @@ export class OwnerGroupSettings{
     !c.used&&!c.revoked&&c.expiresAt>now).length>=100)return null;
    const ref='c_'+randomBytes(18).toString('base64url');
    if(s.callbacks.some(c=>c.ref===ref))return null;
-   s.callbacks.push({ref,action:PREFIX+JSON.stringify([id,version,p,mode,ctx.evidence]),
+   const isAI=mode!=='m'&&mode!=='f';
+   s.callbacks.push({ref,action:PREFIX+JSON.stringify([id,version,p,mode,ctx.evidence,...(isAI?[ctx.chat.groupAI]:[])]),
     chatId:'private',actorId:actor,policyVersion:0,expiresAt:now+TTL,
     oneShot:true,used:false,revoked:false});
-   const isAI=mode!=='m'&&mode!=='f';
    const stale=Boolean(isAI&&(s.protectionPolicies??[]).some(r=>r.policy.chatId===id));
    return ui('<b>🔎 معاينة تغيير إعداد المجموعة</b>\n'+
     'المجموعة: <code>'+escape(id)+'</code>\n'+
@@ -233,6 +247,23 @@ export class OwnerGroupSettings{
     [[button('✅ تأكيد التعديل المحلي','gs:1:c:'+ref.slice(2))],
      [button('✖ إلغاء المعاينة','gs:1:k:'+ref.slice(2)),
       button('↩️ العودة للإعدادات','gs:1:g:'+id+':'+version+':'+p)]]);
+  });
+ }
+ private async previewRestore(actor:string,nonce:string):Promise<OwnerInlineScreen|null>{
+  return this.store.transaction(s=>{
+   const now=this.clock();if(!this.access(s,actor,now))return null;
+   const receipt=s.callbacks.filter(c=>c.ref==='c_'+nonce);if(receipt.length!==1)return null;
+   let payload:unknown;try{if(!receipt[0]!.action.startsWith(PREFIX))return null;payload=JSON.parse(receipt[0]!.action.slice(PREFIX.length));}catch{return null;}
+   if(!Array.isArray(payload)||typeof payload[0]!=='string'||!groupId(payload[0]))return null;
+   const id=payload[0],events=this.verifiedChanges(s,actor,now,id),source=events.find(e=>e.nonce===nonce),latest=events.find(e=>!['m','f'].includes(e.change));
+   if(!source||latest?.nonce!==nonce||!source.previous||['m','f'].includes(source.change))return null;
+   const items=approved(s),index=items.findIndex(c=>c.id===id),chat=items[index];if(index<0||!chat||chat.version!==source.version+1||chat.groupAI!==targetAI[source.change as keyof typeof targetAI])return null;
+   const mode=(Object.entries(targetAI).find(([,value])=>value===source.previous)?.[0]) as Change|undefined;
+   const p=Math.floor(index/PAGE_SIZE),ctx=mode?this.context(s,actor,now,id,chat.version,p,mode):null;
+   if(!mode||!ctx||s.callbacks.filter(c=>c.action.startsWith(PREFIX)&&c.actorId===actor&&!c.used&&!c.revoked&&c.expiresAt>now).length>=100)return null;
+   const ref='c_'+randomBytes(18).toString('base64url');if(s.callbacks.some(c=>c.ref===ref))return null;
+   s.callbacks.push({ref,action:PREFIX+JSON.stringify([id,chat.version,p,mode,ctx.evidence,chat.groupAI,nonce]),chatId:'private',actorId:actor,policyVersion:0,expiresAt:now+TTL,oneShot:true,used:false,revoked:false});
+   return ui('<b>🔎 معاينة استعادة وضع المساعد</b>\nالمجموعة: <code>'+escape(id)+'</code>\nالوضع الحالي: '+chat.groupAI+'\nالوضع السابق: '+ctx.target+'\nقد تحتاج سياسة الحماية إلى مراجعة بعد تغيير إصدار المجموعة. لا تُنفذ إجراءات Telegram.',[[button('✅ تأكيد استعادة الوضع','gs:1:c:'+ref.slice(2))],[button('✖ إلغاء المعاينة','gs:1:k:'+ref.slice(2))]]);
   });
  }
  private async confirm(actor:string,nonce:string):Promise<OwnerInlineScreen|null>{
@@ -247,7 +278,7 @@ export class OwnerGroupSettings{
     receipt.expiresAt>now+TTL)return null;
    let data:unknown;
    try{data=JSON.parse(receipt.action.slice(PREFIX.length));}catch{return null;}
-   if(!Array.isArray(data)||data.length!==5||
+   if(!Array.isArray(data)||![5,6,7].includes(data.length)||
     typeof data[0]!=='string'||!groupId(data[0])||
     !validVersion(data[1])||!Number.isSafeInteger(data[2])||
     data[2]<0||data[2]>999||!['x','o','s','a','m','f'].includes(data[3])||
@@ -255,6 +286,12 @@ export class OwnerGroupSettings{
    const [id,version,p,change,fingerprintValue]=data as [string,number,number,Change,string];
    const ctx=this.context(s,actor,now,id,version,p,change);
    if(!ctx||ctx.evidence!==fingerprintValue)return null;
+   if(data.length>=6&&(['m','f'].includes(change)||!Object.values(targetAI).includes(data[5])||data[5]!==ctx.chat.groupAI))return null;
+   if(data.length===7){
+    if(typeof data[6]!=='string'||!/^[A-Za-z0-9_-]{24}$/u.test(data[6]))return null;
+    const events=this.verifiedChanges(s,actor,now,id),source=events.find(e=>e.nonce===data[6]),latest=events.find(e=>!['m','f'].includes(e.change));
+    if(!source||latest?.nonce!==data[6]||source.version+1!==version||source.previous!==ctx.target||targetAI[source.change as keyof typeof targetAI]!==ctx.chat.groupAI)return null;
+   }
    if(change==='m'||change==='f'){
     const old=ctx.record!;
     s.protectionPolicies??=[];
@@ -273,6 +310,8 @@ export class OwnerGroupSettings{
     reason:change==='m'?'GROUP_SETTINGS_MONITOR_ENABLED':
      change==='f'?'GROUP_SETTINGS_MONITOR_DISABLED':'GROUP_SETTINGS_AI_MODE_SAVED',
     policyVersion:ctx.chat.version,at:now});
+   if(data.length>=6)s.audit.push({actorId:actor,updateKey:'owner-group-settings-prior:'+nonce,decision:'ALLOW',
+    reason:'GROUP_SETTINGS_PREVIOUS_'+createHash('sha256').update(JSON.stringify(data)).digest('hex'),policyVersion:ctx.chat.version,at:now});
    return ui('<b>✅ تم حفظ الإعداد المحلي</b>\n'+
     'المجموعة: <code>'+escape(id)+'</code>\n'+
     'القيمة المحفوظة: '+ctx.target+'\n'+
@@ -306,6 +345,8 @@ export class OwnerGroupSettings{
   if(c)return this.confirm(actor,c[1]!);
   const k=cancel.exec(data);
   if(k)return this.cancel(actor,k[1]!);
+  const r=restore.exec(data);
+  if(r)return this.previewRestore(actor,r[1]!);
   const state=await this.store.snapshot(),now=this.clock();
   if(!this.access(state,actor,now))return null;
   if(data==='mi:1:i:01:12'||home.test(data))return this.homeScreen();
