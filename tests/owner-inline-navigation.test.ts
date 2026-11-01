@@ -10,7 +10,7 @@ import {EducationAdminFacade} from '../src/education-admin.js';
 import {ApprovedAnswerService,ResourceLinkService} from '../src/education-interactions.js';
 import {TelegramUpdateApplication} from '../src/telegram-transport.js';
 import {TelegramBotApiTextSender,TelegramBotApiCallbackAcker} from '../src/telegram-replies.js';
-import {ownerInlineHome,ownerInlineRender,ownerInlineSections,isValidTelegramInlineKeyboard,ownerInlineLinkedReadOnly} from '../src/telegram-inline-owner.js';
+import {ownerInlineHome,ownerInlineRender,ownerInlineSections,isValidTelegramInlineKeyboard,ownerInlineLinkedReadOnly,ownerInlineConnection} from '../src/telegram-inline-owner.js';
 
 import {ownerMenuLabels} from '../src/telegram-owner-menu.js';
 const TOKEN='123456789:ABCDEFGHIJKLMNOPQRSTUVWXYZabcde';
@@ -173,6 +173,25 @@ test('callback acknowledgement validates IDs and never reports false success',as
  await acker.answer('unsafe\nquery');
  assert.equal(requests.length,1);
  assert.match(requests[0]??'',/answerCallbackQuery$/);
+});
+test('catalogue connection classification matches every displayed availability marker',()=>{
+ for(let s=0;s<ownerInlineSections.length;s++){
+  const code=String(s+1).padStart(2,'0'),count=ownerInlineSections[s]!.items.length,pages=s===5?2:Math.ceil(count/8);
+  for(let p=0;p<pages;p++)for(const b of ownerInlineRender('mi:1:s:'+code+':'+p)!.keyboard.inline_keyboard.flat().filter(b=>b.callback_data.startsWith('mi:1:i:'))){
+   const kind=ownerInlineConnection(b.callback_data);assert.equal(b.text.startsWith(kind==='EDITOR'?'🛠️ ':kind==='VIEW'?'👁️ ':'⌛ '),true);
+  }
+ }
+ for(const route of ['mi:1:i:01:03','mi:1:i:01:06','mi:1:i:01:07','mi:1:i:01:08','mi:1:i:01:12'])assert.equal(ownerInlineConnection(route),'EDITOR');
+ for(const bad of ['mi:1:i:00:01','mi:1:i:17:01','mi:1:i:01:00','mi:1:i:01:99','mi:1:i:01:03\n','mi:1:h'])assert.equal(ownerInlineConnection(bad),null);
+});
+
+test('callback acknowledgement explains denial, replay and unresolved outcomes without echoing commands or provider errors',async()=>{
+ const bodies:Record<string,unknown>[]=[];
+ const acker=new TelegramBotApiCallbackAcker(TOKEN,async(_url,init)=>{bodies.push(JSON.parse(String(init?.body)));return Response.json({ok:true,result:true});});
+ for(const outcome of ['DENIED','DUPLICATE','UNKNOWN','APPLIED','IGNORED'] as const)await acker.answer('cb_77',outcome);
+ assert.deepEqual(bodies.map(b=>b.text),['هذا الزر غير متاح أو انتهت صلاحيته. افتح القائمة مجددًا وتحقق من صلاحيتك.','عولج هذا الطلب سابقًا؛ لم تُكرر العملية.','نتيجة الطلب غير مؤكدة؛ لن تُعاد العملية تلقائيًا.',undefined,undefined]);
+ assert.deepEqual(bodies.map(b=>b.show_alert),[true,false,true,undefined,undefined]);
+ assert.ok(bodies.every(b=>b.cache_time===0));
 });
 
 test('linked owner inline read-only actions are exact documented selectors',()=>{

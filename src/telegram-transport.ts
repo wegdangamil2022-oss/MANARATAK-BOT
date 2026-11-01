@@ -1330,7 +1330,7 @@ function respond(res:ServerResponse,status:number,body:Record<string,unknown>):v
 export function telegramWebhookListener(app:TelegramUpdateApplication,secretToken:string,
  outbound?:TelegramReplyDispatcher,ingressOptions:IngressOptions={},
  safetyGate?:()=>Promise<boolean>,
- callbackAcker?:{answer(callbackQueryId:string):Promise<void>}):RequestListener {
+ callbackAcker?:{answer(callbackQueryId:string,outcome?:TelegramResult['status']):Promise<void>}):RequestListener {
   if(!/^[A-Za-z0-9_-]{32,256}$/.test(secretToken))throw Error('INVALID_WEBHOOK_SECRET');
   const guard=new BoundedIngress(ingressOptions);
   return (req,res)=>{
@@ -1365,7 +1365,7 @@ export function telegramWebhookListener(app:TelegramUpdateApplication,secretToke
       // This is a bounded ephemeral Bot API operation, never a state change
       // or proof of message delivery. Failure does not replay a queued send.
       if(callbackAcker&&result.callbackQueryId)
-       await callbackAcker.answer(result.callbackQueryId);
+       await callbackAcker.answer(result.callbackQueryId,result.status);
       if(outbound&&result.plan&&result.deliveryKey)await outbound.dispatch(result.deliveryKey);
       // Keep the reply body minimal: no user text, provider errors or Bot API secret.
       respond(res,result.status==='DENIED'&&result.reason==='INVALID_UPDATE_ID'?422:200,{ok:true,status:result.status});

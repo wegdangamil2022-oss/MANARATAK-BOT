@@ -3,7 +3,7 @@ import {readFile,writeFile,mkdtemp,rm} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {execFileSync} from 'node:child_process';
-import {ownerInlineSections,ownerInlineRender,isValidTelegramInlineKeyboard,ownerInlineLinkedReadOnly} from '../dist/src/telegram-inline-owner.js';
+import {ownerInlineSections,ownerInlineRender,isValidTelegramInlineKeyboard,ownerInlineConnection} from '../dist/src/telegram-inline-owner.js';
 import {BotStore} from '../dist/src/store.js';
 import {Policy} from '../dist/src/policy.js';
 import {EducationService} from '../dist/src/education.js';
@@ -39,9 +39,8 @@ for(let s=0;s<ownerInlineSections.length;s++){
   const screen=ownerInlineRender(route);
   assert.ok(screen&&isValidTelegramInlineKeyboard(screen.keyboard),route);
   assert.ok(screen.keyboard.inline_keyboard.flat().some(b=>b.callback_data==='mi:1:s:'+key+':'+(s===5?(i<9?0:1):Math.floor(i/8))),route+' back');
-  const special=new Set(['mi:1:i:04:03','mi:1:i:04:02','mi:1:i:04:04','mi:1:i:13:04','mi:1:i:03:01','mi:1:i:02:01','mi:1:i:02:15','mi:1:i:02:16','mi:1:i:02:13','mi:1:i:02:05','mi:1:i:02:06','mi:1:i:02:07','mi:1:i:02:08','mi:1:i:02:12']);
   rows.push({section:key,sectionTitle:section.title,button:code(i+1),label:labels[i],callback:route,
-   status:delegationOwnerEntry(route)?'LOCAL_DELEGATION_EDITOR':route==='mi:1:i:10:16'?'LOCAL_CATEGORY_EDITOR':route==='mi:1:i:11:03'?'LOCAL_PRIVATE_SETTINGS':studioOwnerEntry(route)?'LOCAL_STUDIO_DRAFT':ownerInlineLinkedReadOnly(route)!==null||special.has(route)?'LOCAL_VIEW':'DESIGN_ONLY'});
+   status:delegationOwnerEntry(route)?'LOCAL_DELEGATION_EDITOR':route==='mi:1:i:10:16'?'LOCAL_CATEGORY_EDITOR':route==='mi:1:i:11:03'?'LOCAL_PRIVATE_SETTINGS':studioOwnerEntry(route)?'LOCAL_STUDIO_DRAFT':ownerInlineConnection(route)==='EDITOR'?'LOCAL_EDITOR':ownerInlineConnection(route)==='VIEW'?'LOCAL_VIEW':'DESIGN_ONLY'});
  }
 }
 assert.equal(rows.length,253);
@@ -89,6 +88,7 @@ const report={schemaVersion:1,sourceCommit:execFileSync('git',['rev-parse','HEAD
  localCategoryEditors:rows.filter(r=>r.status==='LOCAL_CATEGORY_EDITOR').length,
  localPrivateSettings:rows.filter(r=>r.status==='LOCAL_PRIVATE_SETTINGS').length,
  localDelegationEditors:rows.filter(r=>r.status==='LOCAL_DELEGATION_EDITOR').length,
+ localOtherEditors:rows.filter(r=>r.status==='LOCAL_EDITOR').length,
  designOnly:rows.filter(r=>r.status==='DESIGN_ONLY').length,engines,buttons:rows};
 if(process.argv.includes('--write')){
  await writeFile(new URL('../docs/PHASE1_BUTTON_INVENTORY.json',import.meta.url),JSON.stringify(report,null,2)+'\n');

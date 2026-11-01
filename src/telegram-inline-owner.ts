@@ -714,6 +714,15 @@ const navigation=(back:string,home=true)=>{
  if(home)row.push(callback('🏠 لوحة المالك','mi:1:h'));
  return row;
 };
+/** Catalogue availability, not evidence of live Telegram acceptance. Shared
+ * with the inventory so connected editors cannot silently become placeholders. */
+export function ownerInlineConnection(data:string):'EDITOR'|'VIEW'|'SPECIFICATION'|null{
+ const m=/^mi:1:i:([0-9]{2}):([0-9]{2})$/u.exec(data);if(!m||m[0]!==data)return null;
+ const section=ownerInlineSections[Number(m[1])-1];if(!section||Number(m[2])<1||Number(m[2])>section.items.length)return null;
+ if(/^mi:1:i:04:0[234]$/u.test(data)||data==='mi:1:i:13:04'||delegationOwnerEntry(data)||/^mi:1:i:01:(?:03|06|07|08|12)$/u.test(data)||data==='mi:1:i:10:16'||data==='mi:1:i:11:03'||studioOwnerEntry(data))return 'EDITOR';
+ if(ownerInlineLinkedReadOnly(data)!==null||/^mi:1:i:01:(?:09|10|11)$/u.test(data)||data==='mi:1:i:03:01'||data==='mi:1:i:02:01'||data==='mi:1:i:02:15'||data==='mi:1:i:02:16'||data==='mi:1:i:02:13'||/^mi:1:i:02:(?:0[5678]|12)$/u.test(data))return 'VIEW';
+ return 'SPECIFICATION';
+}
 function home(page:0|1):OwnerInlineScreen{
  const start=page*8;
  const rows=[] as {text:string;callback_data:string}[][];
@@ -741,10 +750,8 @@ function sectionScreen(sectionIndex:number,page:number):OwnerInlineScreen|null{
   rows.push(Array.from({length:Math.min(2,end-i)},(_,j)=>{
    const itemIndex=i+j;
    const selector='mi:1:i:'+number(sectionIndex+1)+':'+number(itemIndex+1);
-   const browsable=ownerInlineLinkedReadOnly(selector)!==null||/^mi:1:i:01:(?:09|10|11)$/u.test(selector)||selector==='mi:1:i:03:01'||selector==='mi:1:i:02:01'||selector==='mi:1:i:02:15'||selector==='mi:1:i:02:16'||selector==='mi:1:i:02:13'||/^mi:1:i:02:(?:0[5678]|12)$/u.test(selector);
-   // Read-only connected views are different from design-only placeholders.
-   const editing=/^mi:1:i:04:0[234]$/u.test(selector)||selector==='mi:1:i:13:04'||delegationOwnerEntry(selector)||/^mi:1:i:01:(?:03|06|07|08|12)$/u.test(selector)||selector==='mi:1:i:10:16'||selector==='mi:1:i:11:03'||studioOwnerEntry(selector);
-   return callback((editing?'🛠️ ':browsable?'👁️ ':'⌛ ')+section.items[itemIndex],selector);
+   const connection=ownerInlineConnection(selector);
+   return callback((connection==='EDITOR'?'🛠️ ':connection==='VIEW'?'👁️ ':'⌛ ')+section.items[itemIndex],selector);
   }));
  }
  const controls=[] as {text:string;callback_data:string}[];

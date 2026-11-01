@@ -97,12 +97,15 @@ export class TelegramBotApiCallbackAcker {
   if(!/^[1-9]\d{4,12}:[A-Za-z0-9_-]{30,90}$/.test(token))
    throw new Error('INVALID_TELEGRAM_TOKEN');
  }
- async answer(callbackQueryId:string):Promise<void>{
+ async answer(callbackQueryId:string,outcome?:'APPLIED'|'DUPLICATE'|'DENIED'|'IGNORED'|'UNKNOWN'):Promise<void>{
   if(typeof callbackQueryId!=='string'||!(/^[A-Za-z0-9_-]{1,128}$/u.test(callbackQueryId)))return;
   try{
    await this.request('https://api.telegram.org/bot'+this.token+'/answerCallbackQuery',{
     method:'POST',headers:{'content-type':'application/json'},
-    body:JSON.stringify({callback_query_id:callbackQueryId}),
+    body:JSON.stringify({callback_query_id:callbackQueryId,cache_time:0,
+     ...(outcome==='DENIED'?{text:'هذا الزر غير متاح أو انتهت صلاحيته. افتح القائمة مجددًا وتحقق من صلاحيتك.',show_alert:true}:
+      outcome==='DUPLICATE'?{text:'عولج هذا الطلب سابقًا؛ لم تُكرر العملية.',show_alert:false}:
+      outcome==='UNKNOWN'?{text:'نتيجة الطلب غير مؤكدة؛ لن تُعاد العملية تلقائيًا.',show_alert:true}:{})}),
     redirect:'error',signal:AbortSignal.timeout(4000)
    });
   }catch{/* Callback acknowledgement is best effort and never retried. */}
