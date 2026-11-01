@@ -177,12 +177,17 @@ export class ModerationService {
     return this.authorized(await this.store.snapshot(), actorId, chatId, memberId) &&
       await this.gateway.canRestrict(chatId, memberId) && !await this.gateway.isProtected(chatId, memberId);
   }
-  async addManualReason(actorId: string, chatId: string, memberId: string, reference: string, kind: 'MUTE' | 'BAN'): Promise<ModerationResult> {
+  async canReviewCommand(actorId:string,chatId:string,memberId:string):Promise<boolean>{
+    if(await this.priorPending(actorId,chatId,memberId))return false;
+    return this.check(actorId,chatId,memberId);
+  }
+  async addManualReason(actorId: string, chatId: string, memberId: string, reference: string, kind: 'MUTE' | 'BAN',stillCurrent?:(s:BotState)=>boolean): Promise<ModerationResult> {
     if (!reference || reference.length > 80 || !['MUTE', 'BAN'].includes(kind)) throw new Error('Invalid reason');
     const preflight=await this.priorPending(actorId,chatId,memberId);
     if(preflight)return preflight;
     if (!await this.check(actorId, chatId, memberId)) return { status: 'DENIED', reason: 'NOT_AUTHORIZED_OR_BOT_RIGHTS' };
     const added = await this.store.transaction(s => {
+      if(stillCurrent&&!stillCurrent(s))return 'DENIED' as const;
       if (!this.authorized(s, actorId, chatId, memberId))
         return ambiguousModerationChatIds(s).has(chatId)?'DENIED' as const:false;
       const pending=this.unresolved(s,chatId,memberId);
@@ -202,12 +207,13 @@ export class ModerationService {
     if (!added) return { status: 'NO_CHANGE', reason: 'DUPLICATE_OR_REVOKED' };
     return this.reconcile(actorId, chatId, memberId);
   }
-  async removeManualReason(actorId: string, chatId: string, memberId: string, reference: string,expectedKind?:'BAN'|'MUTE'): Promise<ModerationResult> {
+  async removeManualReason(actorId: string, chatId: string, memberId: string, reference: string,expectedKind?:'BAN'|'MUTE',stillCurrent?:(s:BotState)=>boolean): Promise<ModerationResult> {
     if(expectedKind!==undefined&&expectedKind!=='BAN'&&expectedKind!=='MUTE')return {status:'DENIED',reason:'INVALID_REASON_KIND'};
     const preflight=await this.priorPending(actorId,chatId,memberId);
     if(preflight)return preflight;
     if (!await this.check(actorId, chatId, memberId)) return { status: 'DENIED', reason: 'NOT_AUTHORIZED_OR_BOT_RIGHTS' };
     const changed = await this.store.transaction(s => {
+      if(stillCurrent&&!stillCurrent(s))return 'DENIED' as const;
       if (!this.authorized(s, actorId, chatId, memberId))
         return ambiguousModerationChatIds(s).has(chatId)?'DENIED' as const:false;
       const pending=this.unresolved(s,chatId,memberId);
@@ -254,13 +260,14 @@ export class ModerationService {
       ?this.reconcile(this.policy.ownerId,chatId,memberId,stillCurrent)
       :{status:'NO_CHANGE',reason:'REASON_UNCHANGED'};
   }
-  async issueWarning(actorId: string, chatId: string, memberId: string, reference: string): Promise<{ status: 'ADDED' | 'NO_CHANGE'; count: number } | { status: 'DENIED'; count: null }> {
+  async issueWarning(actorId: string, chatId: string, memberId: string, reference: string,stillCurrent?:(s:BotState)=>boolean): Promise<{ status: 'ADDED' | 'NO_CHANGE'; count: number } | { status: 'DENIED'; count: null }> {
     if (!reference || reference.length > 80) throw new Error('Invalid warning reference');
     // A local warning must not target a Telegram administrator or bypass
     // missing bot authority. Recheck internal authorization in the transaction
     // after these awaited external reads, just as sanction reason writes do.
     if (!await this.check(actorId,chatId,memberId))return {status:'DENIED',count:null};
     return this.store.transaction(s => {
+      if(stillCurrent&&!stillCurrent(s))return {status:'DENIED' as const,count:null};
       const count = () => s.warnings.filter(w => byTarget(w, chatId, memberId) && w.active).length;
       if (!this.authorized(s, actorId, chatId, memberId)) return { status: 'DENIED' as const, count: null };
       const existing = s.warnings.find(w => byTarget(w, chatId, memberId) && w.reference === reference);
@@ -269,8 +276,9 @@ export class ModerationService {
       return { status: 'ADDED' as const, count: count() };
     });
   }
-  async removeWarning(actorId: string, chatId: string, memberId: string, reference: string): Promise<{ status: 'REVOKED' | 'NO_CHANGE'; count: number } | { status: 'DENIED'; count: null }> {
+  async removeWarning(actorId: string, chatId: string, memberId: string, reference: string,stillCurrent?:(s:BotState)=>boolean): Promise<{ status: 'REVOKED' | 'NO_CHANGE'; count: number } | { status: 'DENIED'; count: null }> {
     return this.store.transaction(s => {
+      if(stillCurrent&&!stillCurrent(s))return {status:'DENIED' as const,count:null};
       const count = () => s.warnings.filter(w => byTarget(w, chatId, memberId) && w.active).length;
       if (!this.authorized(s, actorId, chatId, memberId)) return { status: 'DENIED' as const, count: null };
       const existing = s.warnings.find(w => byTarget(w, chatId, memberId) && w.reference === reference && w.active);

@@ -1,4 +1,5 @@
 import type {ModerationService} from './moderation.js';
+import type {BotState} from './store.js';
 
 export type ReplyModerationCommand={kind:'ban'|'mute'|'warn'|'unwarn'|'unban'|'unmute';reference:string;memberId:string};
 type Parsed={status:'NO_MATCH'|'INVALID'}|{status:'COMMAND';command:ReplyModerationCommand};
@@ -26,18 +27,18 @@ export function parseReplyModerationCommand(text:string,botUsername:string,
  * quarantine and durable sanction intents. This adapter never calls Bot API
  * itself and never emits target identities or reasons into a group. */
 export async function executeReplyModerationCommand(service:ModerationService,
- actorId:string,chatId:string,command:ReplyModerationCommand):Promise<{
+ actorId:string,chatId:string,command:ReplyModerationCommand,stillCurrent?:(s:BotState)=>boolean):Promise<{
  status:'APPLIED'|'DENIED'|'IGNORED'|'UNKNOWN';reason:string}> {
  try{
   if(command.kind==='warn'||command.kind==='unwarn'){
    const result=command.kind==='warn'
-    ?await service.issueWarning(actorId,chatId,command.memberId,command.reference)
-    :await service.removeWarning(actorId,chatId,command.memberId,command.reference);
+    ?await service.issueWarning(actorId,chatId,command.memberId,command.reference,stillCurrent)
+    :await service.removeWarning(actorId,chatId,command.memberId,command.reference,stillCurrent);
    return {status:result.status==='DENIED'?'DENIED':result.status==='NO_CHANGE'?'IGNORED':'APPLIED',reason:'MODERATION_'+result.status};
   }
   const result=command.kind==='unban'||command.kind==='unmute'
-   ?await service.removeManualReason(actorId,chatId,command.memberId,command.reference,command.kind==='unban'?'BAN':'MUTE')
-   :await service.addManualReason(actorId,chatId,command.memberId,command.reference,command.kind==='ban'?'BAN':'MUTE');
+   ?await service.removeManualReason(actorId,chatId,command.memberId,command.reference,command.kind==='unban'?'BAN':'MUTE',stillCurrent)
+   :await service.addManualReason(actorId,chatId,command.memberId,command.reference,command.kind==='ban'?'BAN':'MUTE',stillCurrent);
   return {status:result.status==='APPLIED'?'APPLIED':result.status==='NO_CHANGE'?'IGNORED':result.status==='UNKNOWN_OUTCOME'?'UNKNOWN':'DENIED',reason:'MODERATION_'+result.status};
  }catch{
   // A storage error can follow an attempted external effect. Never turn an

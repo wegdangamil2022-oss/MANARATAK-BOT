@@ -695,6 +695,7 @@ export function isValidTelegramInlineKeyboard(input:unknown):input is TelegramIn
      !/^mi:1:g:[sno]:(?:0|[1-9][0-9]{0,2})$/u.test(button.callback_data)&&
      !/^gp:1:p:-[1-9][0-9]{0,15}:[1-9][0-9]{0,9}$/u.test(button.callback_data)&&
      !/^c_[A-Za-z0-9_-]{24}$/u.test(button.callback_data)&&
+     !/^mc:1:[cx]:[A-Za-z0-9_-]{24}$/u.test(button.callback_data)&&
      !/^ms:1:(?:h|p:(?:0|[1-9][0-9]{0,2})|g:-[1-9][0-9]{0,18}:[1-9][0-9]{0,9}:(?:0|[1-9][0-9]{0,2}))$/u.test(button.callback_data)&&
      !/^ms:1:o:-[1-9][0-9]{0,18}:[1-9][0-9]{0,9}:(?:0|[1-9][0-9]{0,2}):(?:0|[1-9][0-9]{0,2}):[a-f0-9]{12}$/u.test(button.callback_data)&&
      !/^mr:1:(?:h|p:(?:0|[1-9][0-9]{0,2})|d:(?:0|[1-9][0-9]{0,2}):[1-8]:[a-f0-9]{12}|v:(?:0|[1-9][0-9]{0,2}):[1-8]:[a-f0-9]{12}:[ae])$/u.test(button.callback_data)&&

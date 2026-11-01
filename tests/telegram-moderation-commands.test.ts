@@ -25,7 +25,7 @@ async function fixture(engine:'json'|'sqlite'){
  const app=(configured=true,service=moderation)=>new TelegramUpdateApplication({store,policy,education,
   admin:new EducationAdminFacade(store,policy,education),faq:new ApprovedAnswerService(store,policy),links:new ResourceLinkService(store,policy),
   botId:'commands-test',botUsername:'ManaratakBot',clock:()=>now,membership:async()=>{throw Error('unexpected membership request');},
-  ...(configured?{moderation:service}:{})});
+  ...(configured?{moderation:service,moderationCommandMode:'direct' as const}:{})});
  return {dir,store,policy,gateway,moderation,app,advance:()=>{now++;},close:()=>rm(dir,{recursive:true,force:true})};
 }
 for(const engine of ['json','sqlite'] as const){

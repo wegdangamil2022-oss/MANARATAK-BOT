@@ -1,5 +1,6 @@
 import {protectionMediaFromMessage,type ProtectionMedia} from './telegram-protection-media.js';
 import { timingSafeEqual,createHash } from 'node:crypto';
+import {ModerationCommandReview,cancelModerationCommandReview} from './telegram-moderation-command-review.js';
 import {staleCommunityMessage,COMMUNITY_CLOSED_TEXT} from './community-message-receipt.js';
 import type { IncomingMessage, RequestListener, ServerResponse } from 'node:http';
 import { BotStore, type AuditRecord, type BotState, type TelegramReplyJob } from './store.js';
@@ -119,6 +120,8 @@ export interface TelegramApplicationOptions {
   studentMenuMode?:'inline'|'legacy';
   /** Explicitly injected moderation adapter; absent means commands cannot execute. */
   moderation?:ModerationService;
+  /** Explicit compatibility path for isolated command-adapter rehearsals. */
+  moderationCommandMode?:'reviewed'|'direct';
   /** Explicit reviewed-deletion service; no automatic metadata collection. */
   purge?:ModerationPurgeService;
 }
@@ -355,6 +358,7 @@ export class TelegramUpdateApplication {
    return {status:'APPLIED',reason:'RESPONSE_PLANNED_ONLY',plan:plain?planned:{...base,studioMarkup:screen.keyboard},...(screen.public?{communityAccess:screen.access}:{adminUIAccess:screen.access})};
   }
   private async process(event:Event):Promise<ProcessedReply> {
+    if(this.opts.moderation&&event.kind==='private'&&(event.callbackData!==undefined?!event.callbackData.startsWith('mc:1:'):event.text.startsWith('/')||(Object.values(menuLabels) as string[]).includes(event.text)))await cancelModerationCommandReview(this.opts.store,event.actorId);
     if(event.protectionMedia){
      const media=event.protectionMedia;
      await new GroupProtectionPolicyService(this.opts.store,this.opts.policy,this.clock).observeIncomingMessage(
@@ -384,6 +388,11 @@ export class TelegramUpdateApplication {
      // Reauthorize the real sender at every tap. Never dispatch a privileged
      // command from untrusted callback_data or from a group context.
      if(kind!=='private'||actorId!==chatId)return {status:'DENIED',reason:'PRIVATE_CALLBACK_ONLY'};
+     if(event.callbackData.startsWith('mc:1:')){
+      if(!this.opts.moderation)return {status:'DENIED',reason:'MODERATION_NOT_CONFIGURED'};
+      const view=await new ModerationCommandReview(this.opts.store,this.opts.policy,this.opts.moderation,this.clock).handle(actorId,event.callbackData);
+      return view?{status:view.status,reason:view.reason,adminUIAccess:view.access,plan:this.plan(actorId,view.text,undefined,view.keyboard,event.callbackMessageId)}:{status:'DENIED',reason:'MODERATION_CONFIRMATION_STALE'};
+     }
      if(event.callbackData.startsWith('pn:1:')){
       const selected=await readPublicNavigation(this.opts.store,actorId,event.callbackData,publicMenuText,this.clock);if(!selected)return {status:'DENIED',reason:'PUBLIC_NAVIGATION_STALE_OR_INVALID'};
       const {callbackData:_,...base}=event;return this.process({...base,text:selected});
@@ -609,6 +618,10 @@ export class TelegramUpdateApplication {
      if(command.status==='INVALID')return {status:'DENIED',reason:'INVALID_MODERATION_COMMAND'};
      if(command.status==='COMMAND'){
       if(!this.opts.moderation)return {status:'DENIED',reason:'MODERATION_NOT_CONFIGURED'};
+      if(this.opts.moderationCommandMode!=='direct'){
+       const view=await new ModerationCommandReview(this.opts.store,this.opts.policy,this.opts.moderation,this.clock).preview(actorId,chatId,command.command);
+       return view?{status:view.status,reason:view.reason,adminUIAccess:view.access,plan:this.plan(actorId,view.text,undefined,view.keyboard)}:{status:'DENIED',reason:'MODERATION_PREVIEW_NOT_AUTHORIZED'};
+      }
       return executeReplyModerationCommand(this.opts.moderation,actorId,chatId,command.command);
      }
     }

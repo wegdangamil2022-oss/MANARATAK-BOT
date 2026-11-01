@@ -37,7 +37,7 @@ async function main():Promise<void>{
   }) as typeof fetch;
   const gateway=new TelegramBotApiModerationGateway('123456789:ABCDEFGHIJKLMNOPQRSTUVWXYZabcde',request,async()=>armed);
   const moderation=new ModerationService(store,policy,gateway,()=>1000);
-  const app=new TelegramUpdateApplication({store,policy,education,moderation,
+  const app=new TelegramUpdateApplication({store,policy,education,moderation,moderationCommandMode:'direct',
    admin:new EducationAdminFacade(store,policy,education),faq:new ApprovedAnswerService(store,policy),links:new ResourceLinkService(store,policy),
    botId:'offline-moderation-rehearsal',botUsername:'ManaratakBot',clock:()=>1000,
    membership:async()=>{throw Error('MEMBERSHIP_NOT_USED_IN_REHEARSAL');}});
