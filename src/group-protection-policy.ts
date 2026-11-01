@@ -2,7 +2,7 @@ import {advanceFloodWindow} from './protection-flood.js';
 import {protectionEntityLinks} from './protection-message-entities.js';
 import {BotStore,type BotState} from './store.js';
 import type {Policy} from './policy.js';
-import type {ProtectionEnforcer} from './protection-enforcement.js';
+import type {ProtectionEnforcer,ProtectionDelivery} from './protection-enforcement.js';
 import type {ProtectionAction} from './protection-rules.js';
 import {isValidProtectionPolicy,protectionMemberExempt,evaluateProtectionRules,type GroupProtectionRecord,type ProtectionEvaluation,type ProtectionMessage} from './protection-rules.js';
 type Inspection={status:'DENIED'|'UNCONFIGURED'|'STALE'}|{status:'CONFIGURED';record:GroupProtectionRecord;enforcementConnected:boolean};
@@ -11,6 +11,7 @@ const clockValid=(n:number)=>Number.isSafeInteger(n)&&n>=0&&n<=8640000000000000;
  * monitor configuration is not permission to issue Telegram mutations. */
 export class GroupProtectionPolicyService{
  constructor(private readonly store:BotStore,private readonly policy:Policy,private readonly clock:()=>number=Date.now,private readonly enforcer?:ProtectionEnforcer){}
+ deletionConnected():boolean{return this.enforcer?.supports('DELETE')===true;}
  canEnforce(config:GroupProtectionRecord['policy']):boolean{
   return Boolean(this.enforcer&&config.rules.filter(r=>r.enabled).every(r=>this.enforcer!.supports(r.action))&&
    (!config.flood?.enabled||this.enforcer.supports(config.flood.action))&&(!config.escalation?.enabled||this.enforcer.supports('MUTE'))&&(!config.raid?.enabled||this.enforcer.supportsRaid?.()===true)&&(!config.night?.enabled||this.enforcer.supportsRaid?.()===true));
@@ -91,10 +92,10 @@ export class GroupProtectionPolicyService{
  }
  /** Record-only incoming TEXT monitor. Authorization precedes body/entity
   * evaluation; observations retain no sender identity or message contents. */
- async observeIncomingText(member:string,chat:string,text:string,entities:unknown,updateKey:string,countTraffic=true):Promise<string>{
-  return this.observeIncomingMessage({chatId:chat,memberId:member,type:'TEXT',text},entities,updateKey,countTraffic);
+ async observeIncomingText(member:string,chat:string,text:string,entities:unknown,updateKey:string,countTraffic=true,delivery?:ProtectionDelivery):Promise<string>{
+  return this.observeIncomingMessage({chatId:chat,memberId:member,type:'TEXT',text},entities,updateKey,countTraffic,delivery);
  }
- async observeIncomingMessage(message:ProtectionMessage,entities:unknown,updateKey:string,countTraffic=true):Promise<string>{
+ async observeIncomingMessage(message:ProtectionMessage,entities:unknown,updateKey:string,countTraffic=true,delivery?:ProtectionDelivery):Promise<string>{
   const {chatId:chat,memberId:member}=message;
   if(!/^b3-webhook:[A-Za-z0-9_-]{1,80}:[0-9]+$/u.test(updateKey))return 'DENIED';
   const prepared=await this.store.transaction(state=>{
@@ -149,10 +150,10 @@ export class GroupProtectionPolicyService{
   // The durable claim precedes the external authority reads. A lost/failed
   // attempt is not replayed by redelivery, even after a process restart.
   let status:string;
-  try{status=prepared.raid?await this.enforcer!.executeRaid!(prepared.record.updatedBy,chat,prepared.record.policy.raid!.lockSeconds,current):await this.enforcer!.execute(prepared.record.updatedBy,chat,member,prepared.action as ProtectionAction,prepared.key,current);}
+  try{status=prepared.raid?await this.enforcer!.executeRaid!(prepared.record.updatedBy,chat,prepared.record.policy.raid!.lockSeconds,current):await this.enforcer!.execute(prepared.record.updatedBy,chat,member,prepared.action as ProtectionAction,prepared.key,current,delivery);}
   catch{status='UNAVAILABLE';}
   await this.store.transaction(state=>{state.audit.push({updateKey:prepared.key+':result',decision:'NOOP',
-   reason:'PROTECTION_ENFORCEMENT_RESULT:'+(['ADDED','NO_CHANGE','APPLIED','DENIED','BLOCKED_PENDING','BLOCKED_UNKNOWN','FAILED_CONFIRMED','UNKNOWN_OUTCOME','REVIEW','CONFIRMED'].includes(status)?status:'UNAVAILABLE'),
+   reason:'PROTECTION_ENFORCEMENT_RESULT:'+(['ADDED','NO_CHANGE','APPLIED','DENIED','BLOCKED_PENDING','BLOCKED_UNKNOWN','FAILED_CONFIRMED','UNKNOWN_OUTCOME','REVIEW','CONFIRMED','ACKNOWLEDGED'].includes(status)?status:'UNAVAILABLE'),
    policyVersion:prepared.record.chatPolicyVersion,at:this.clock()});});
   return 'ENFORCEMENT_ATTEMPTED';
  }

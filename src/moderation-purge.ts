@@ -103,13 +103,13 @@ const hash=(m:RollingMessageMeta)=>createHash('sha256').update(JSON.stringify([
  * not replace the approved target/filter while external rights checks wait. */
 const attemptBinding=(job:PurgeJob,item:PurgeItem):string=>JSON.stringify([
  job.id,job.chatId,job.actorId,job.createdAt,job.expiresAt,job.scopeVersion,job.filter,
- job.confirmedAt,job.confirmedBy,item.messageId,item.metaDigest,item.attemptId,item.startedAt,item.leaseUntil
+ job.confirmedAt,job.confirmedBy,...(Object.hasOwn(job,'automatic')?[{automatic:job.automatic}]:[]),item.messageId,item.metaDigest,item.attemptId,item.startedAt,item.leaseUntil
 ]);
 /** Local comparison digest of exactly what a human previewed. This is not
  * authentication against replacement of both database and original button. */
 export const purgeReviewDigest=(job:PurgeJob):string=>createHash('sha256').update(JSON.stringify([
  job.id,job.chatId,job.actorId,job.createdAt,job.expiresAt,job.scopeVersion,job.filter,
- job.items.map(i=>[i.messageId,i.metaDigest])
+ job.items.map(i=>[i.messageId,i.metaDigest]),...(Object.hasOwn(job,'automatic')?[{automatic:job.automatic}]:[])
 ])).digest('hex').slice(0,16);
 const terminalItem=(s:PurgeItem['status'])=>s==='ACKNOWLEDGED'||s==='CANCELLED'||s==='SKIPPED_UNVERIFIED';
 const protectedMessage=(m:RollingMessageMeta)=>m.pinned||m.linkedChannel||m.adminLog||m.approvedAnnouncement;
@@ -194,7 +194,8 @@ export class ModerationPurgeService {
    return true;
   });
  }
- async preview(actor:string,chatId:string,filter:PurgeFilter):Promise<PurgeJob>{
+ async preview(actor:string,chatId:string,filter:PurgeFilter,sourceCurrent?:(s:BotState)=>boolean,automatic=false):Promise<PurgeJob>{
+  if(automatic&&(!sourceCurrent||filter?.limit!==1))throw Error('AUTOMATIC_PURGE_PROOF_REQUIRED');
   if(!filter||!Number.isSafeInteger(filter.limit)||filter.limit<1||filter.limit>MAX_PREVIEW||
     (filter.beforeMessageId!==undefined&&!validId(filter.beforeMessageId))||
     (filter.senderId!==undefined&&(typeof filter.senderId!=='string'||!/^\d+$/.test(filter.senderId)))||
@@ -202,7 +203,7 @@ export class ModerationPurgeService {
     Object.keys(filter).some(k=>!['limit','beforeMessageId','senderId','linksOnly','mediaOnly','commandsOnly'].includes(k)))
    throw new Error('INVALID_PURGE_FILTER');
   return this.store.transaction(s=>{
-   if(!allowed(s,this.policy,actor,chatId,this.clock()))throw new Error('MANAGE_DENIED');
+   if(sourceCurrent&&!sourceCurrent(s)||!allowed(s,this.policy,actor,chatId,this.clock()))throw new Error('MANAGE_DENIED');
    const now=this.clock();
    prune(s,now);
    const observed=s.rollingMessageMeta.filter(m=>m.chatId===chatId&&matches(m,filter))
@@ -211,18 +212,19 @@ export class ModerationPurgeService {
    const selected=observed.filter(m=>!protectedMessage(m)).slice(0,filter.limit);
    if(selected.length===0)throw new Error('NO_ELIGIBLE_OBSERVED_MESSAGES');
    const job:PurgeJob={id:randomUUID(),chatId,actorId:actor,createdAt:now,expiresAt:now+REVIEW_MS,
-     scopeVersion:this.policy.chatRevision(s,chatId),status:'PREVIEW',filter:structuredClone(filter),
+     scopeVersion:this.policy.chatRevision(s,chatId),status:'PREVIEW',...(automatic?{automatic:true as const}:{}),filter:structuredClone(filter),
      excluded,items:selected.map(m=>({messageId:m.messageId,metaDigest:hash(m),status:'QUEUED'}))};
    s.purgeJobs.push(job);
    return structuredClone(job);
   });
  }
- async confirm(actor:string,jobId:string,expectedReviewDigest?:string):Promise<PurgeJob>{
+ async confirm(actor:string,jobId:string,expectedReviewDigest?:string,sourceCurrent?:(s:BotState)=>boolean):Promise<PurgeJob>{
   return this.store.transaction(s=>{
    const job=s.purgeJobs.find(x=>x.id===jobId);
    if(!job)throw new Error('PURGE_NOT_FOUND');
+   if(Object.hasOwn(job,'automatic')&&(job.automatic!==true||!sourceCurrent))throw Error('AUTOMATIC_PURGE_PROOF_REQUIRED');
    const now=this.clock();
-   if(!allowed(s,this.policy,actor,job.chatId,now))throw new Error('MANAGE_DENIED');
+   if(sourceCurrent&&!sourceCurrent(s)||!allowed(s,this.policy,actor,job.chatId,now))throw new Error('MANAGE_DENIED');
    if(actor!==job.actorId&&!this.policy.isOwner(actor))throw new Error('PREVIEW_ACTOR_MISMATCH');
    if(job.items.length>10&&!this.policy.isOwner(actor))throw new Error('OWNER_APPROVAL_REQUIRED');
    if(job.status!=='PREVIEW')throw new Error('ALREADY_CONFIRMED');
@@ -242,10 +244,12 @@ export class ModerationPurgeService {
    return structuredClone(job);
   });
  }
- async dispatchNext(jobId:string):Promise<PurgeDispatchResult>{
+ async dispatchNext(jobId:string,sourceCurrent?:(s:BotState)=>boolean):Promise<PurgeDispatchResult>{
   const claimed=await this.store.transaction(s=>{
    const job=s.purgeJobs.find(x=>x.id===jobId);
    if(!job)throw new Error('PURGE_NOT_FOUND');
+   if(Object.hasOwn(job,'automatic')&&(job.automatic!==true||!sourceCurrent))return {kind:'BLOCKED' as const};
+   if(sourceCurrent&&!sourceCurrent(s))return {kind:'BLOCKED' as const};
    if(job.status==='PREVIEW')return {kind:'NOT_CONFIRMED' as const};
    if(job.status==='CANCELLED')return {kind:'CANCELLED' as const};
    if(job.status==='PAUSED')return {kind:'PAUSED' as const};
@@ -282,7 +286,7 @@ export class ModerationPurgeService {
    const items=job.items.filter(i=>i.messageId===claimed.messageId);
    if(items.length!==1)return false;
    const item=items[0]!;
-   return job.status==='READY'&&item.status==='SENDING'&&item.attemptId===claimed.attemptId&&
+   return (!sourceCurrent||sourceCurrent(s))&&job.status==='READY'&&item.status==='SENDING'&&item.attemptId===claimed.attemptId&&
     attemptBinding(job,item)===claimed.binding&&!leaseExpired(item.leaseUntil,this.clock())&&
     allowed(s,this.policy,claimed.actor,claimed.chatId,this.clock())&&
     this.policy.chatRevision(s,claimed.chatId)===claimed.version&&available(s,{...job,items:[item]},this.clock());
@@ -299,7 +303,7 @@ export class ModerationPurgeService {
    if(leaseExpired(item.leaseUntil,this.clock())){item.status='UNKNOWN_OUTCOME';return false;}
    if(attemptBinding(job,item)!==claimed.binding){item.status='UNKNOWN_OUTCOME';return false;}
    prune(s,this.clock());
-   if(job.status==='READY'&&rights&&allowed(s,this.policy,claimed.actor,claimed.chatId,this.clock())&&
+   if((!sourceCurrent||sourceCurrent(s))&&job.status==='READY'&&rights&&allowed(s,this.policy,claimed.actor,claimed.chatId,this.clock())&&
      this.policy.chatRevision(s,claimed.chatId)===claimed.version&&available(s,{...job,items:[item]},this.clock()))return true;
    item.status=job.status==='CANCELLED'?'CANCELLED':'QUEUED';
    delete item.attemptId;delete item.leaseUntil;delete item.startedAt;

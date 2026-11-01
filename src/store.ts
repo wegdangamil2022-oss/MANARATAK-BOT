@@ -85,7 +85,7 @@ export interface PurgeItem {
 /** Separate explicit review required before any mock delete request. */
 export interface PurgeJob {
   id:string; chatId:string; actorId:string; scopeVersion:number; createdAt:number; expiresAt:number;
-  filter:PurgeFilter; excluded:{protected:number;expired:number};
+  filter:PurgeFilter; automatic?:true; excluded:{protected:number;expired:number};
   status:'PREVIEW'|'READY'|'PAUSED'|'CANCELLED'|'COMPLETED';
   confirmedBy?:string; confirmedAt?:number; rateLimitedUntil?:number; items:PurgeItem[];
 }

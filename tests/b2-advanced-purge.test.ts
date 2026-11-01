@@ -1,3 +1,4 @@
+import {fileURLToPath} from 'node:url';
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {mkdtemp,rm,writeFile} from 'node:fs/promises';
@@ -299,7 +300,7 @@ test('B2-advanced: two independent SQLite workers cannot delete the same observe
   const job=await f.service().preview(OWNER,GROUP,{limit:1});
   await f.service().confirm(OWNER,job.id);
   const exec=promisify(execFile);
-  const file=new URL('./b2-purge-worker.js',import.meta.url).pathname;
+  const file=fileURLToPath(new URL('./b2-purge-worker.js',import.meta.url));
   const out=await Promise.all([
    exec(process.execPath,[file,f.file,job.id]),
    exec(process.execPath,[file,f.file,job.id])

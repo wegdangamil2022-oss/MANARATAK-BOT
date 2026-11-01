@@ -44,7 +44,7 @@ export async function renderOwnerPurgeQueue(store:BotStore,policy:Policy,actor:s
   const unknown=job.items.filter(i=>i.status==='UNKNOWN_OUTCOME').length;
   const acknowledged=job.items.filter(i=>i.status==='ACKNOWLEDGED').length;
   const rows:ReturnType<typeof button>[][]=[];
-  const canConfirm=configured&&job.status==='PREVIEW'&&job.actorId===actor&&job.items.length===1&&
+  const canConfirm=configured&&!Object.hasOwn(job,'automatic')&&job.status==='PREVIEW'&&job.actorId===actor&&job.items.length===1&&
    now>=job.createdAt&&now<=job.expiresAt&&policy.chatRevision(state,job.chatId)===job.scopeVersion;
   if(canConfirm)rows.push([
    button('✅ تأكيد حذف الرسالة','pd:1:c:'+job.id+':'+purgeReviewDigest(job)),
@@ -52,7 +52,7 @@ export async function renderOwnerPurgeQueue(store:BotStore,policy:Policy,actor:s
   ]);
   rows.push([button('↩️ معاينات الحذف','pq:1:p:'+pageNumber)],back);
   return {text:'<b>🧹 تفاصيل خطة الحذف المحلية</b>\n'
-   +'الحالة: '+states[job.status]+'\nالرسائل المحددة: '+job.items.length+'\n'
+   +(job.automatic?'المصدر: قاعدة حماية آلية؛ لا تعاد من شاشة المعاينات.\n':'')+'الحالة: '+states[job.status]+'\nالرسائل المحددة: '+job.items.length+'\n'
    +'طلبات مقبولة في السجل: '+acknowledged+'\nمجهولة النتيجة: '+unknown+'\n'
    +(canConfirm?'التأكيد يرسل طلب رسالة واحدة بعد إعادة التحقق من المراجعة والصلاحيات.\n':'هذه الشاشة للعرض؛ لا تأكيد متاح لهذه الخطة في حالتها الحالية.\n')
    +'إقرار الطلب لا يثبت الحذف المادي، ولا تعاد العملية المجهولة تلقائيًا.',keyboard:{inline_keyboard:rows}};

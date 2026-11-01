@@ -104,7 +104,7 @@ export class TelegramProtectionEditor{
   return screen('<b>🚫 الكلمات والعبارات والروابط والأنواع</b>\nالمجموعة: <code>'+escape(f.chat.id)+'</code>\n'
    +(notice?escape(notice)+'\n':'')+(f.stale?'السياسة قديمة أو وقتها غير موثوق؛ التعديل محجوب.':
     'الحالة: '+(f.config.mode==='OFF'?'متوقفة':f.config.mode==='MONITOR'?'مراقبة فقط':'تنفيذ القواعد المفعلة')+'\nالقواعد: '+f.config.rules.length+' · النسخة: '+f.config.revision)+'\n'
-   +'التنفيذ يتطلب خدمة موصولة وتأكيدًا مستقلًا. الكتم التلقائي مدته دقيقة واحدة؛ الحذف غير موصول.',rows);
+   +'التنفيذ يتطلب خدمة موصولة وتأكيدًا مستقلًا. الكتم التلقائي مدته دقيقة واحدة؛ '+(this.service.deletionConnected()?'الحذف لرسالة مطابقة مرصودة موثوقة فقط.':'الحذف غير موصول.'),rows);
  }
  private async fresh(actor:string,chat:string,notice=''):Promise<OwnerInlineScreen|null>{
   const state=await this.store.snapshot(),index=this.groups(state,actor).findIndex(c=>c.id===chat);
@@ -156,7 +156,7 @@ export class TelegramProtectionEditor{
      const value:Wizard={key,userId:actor,chatId:actor,topicId:'',flow:'protection-enforce:'+f.chat.id+':'+f.digest+':'+nonce,step:0,version:(old?.version??0)+1,expiresAt:now+120000,policyVersion:f.epoch,status:'ACTIVE'};
      if(old)Object.assign(old,value);else s.wizards.push(value);return true;
     });
-    return created?screen('⚠️ تفعيل تنفيذ القواعد المفعلة لهذه المجموعة؟\nالمراجعة تُسجل فقط، والتحذير يسجل مخالفة، والكتم مدته دقيقة واحدة. تُحترم الاستثناءات وحماية المشرفين والصلاحيات. الحذف غير موصول.\nالوضع الليلي: '+(f.config.night?.enabled?'قفل واستعادة حسب الوقت المحفوظ':'معطل')+'\nAntiRaid: '+(f.config.raid?.enabled?'قفل إرسال مؤقت '+f.config.raid.lockSeconds+' ثانية؛ استعادة اللقطة عبر العامل المفعّل':'معطل')+'\nعدد القواعد المفعلة: '+f.config.rules.filter(r=>r.enabled).length+'\nالفلود: '+(f.config.flood?.enabled?'مفعل':'متوقف')+'\nالتأكيد صالح لدقيقتين؛ الرجوع يلغيه.',[[btn('✅ تأكيد التنفيذ',key('I',f,':'+nonce))],[btn('↩️ رجوع دون تفعيل',key('g',f))]]):null;
+    return created?screen('⚠️ تفعيل تنفيذ القواعد المفعلة لهذه المجموعة؟\nالمراجعة تُسجل فقط، والتحذير يسجل مخالفة، والكتم مدته دقيقة واحدة. تُحترم الاستثناءات وحماية المشرفين والصلاحيات. '+(this.service.deletionConnected()?'الحذف لرسالة المطابقة المفهرسة فقط؛ لا حذف عند غياب بياناتها الموثوقة.':'الحذف غير موصول.')+'\nالوضع الليلي: '+(f.config.night?.enabled?'قفل واستعادة حسب الوقت المحفوظ':'معطل')+'\nAntiRaid: '+(f.config.raid?.enabled?'قفل إرسال مؤقت '+f.config.raid.lockSeconds+' ثانية؛ استعادة اللقطة عبر العامل المفعّل':'معطل')+'\nعدد القواعد المفعلة: '+f.config.rules.filter(r=>r.enabled).length+'\nالفلود: '+(f.config.flood?.enabled?'مفعل':'متوقف')+'\nالتأكيد صالح لدقيقتين؛ الرجوع يلغيه.',[[btn('✅ تأكيد التنفيذ',key('I',f,':'+nonce))],[btn('↩️ رجوع دون تفعيل',key('g',f))]]):null;
    }
    const claimed=await this.store.transaction(s=>{
     const rows=s.wizards.filter(w=>w.key==='protection-enforce:'+actor),w=rows[0],now=this.clock();
