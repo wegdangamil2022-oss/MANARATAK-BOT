@@ -1,5 +1,6 @@
 import {randomBytes} from 'node:crypto';
 import {studioPresetContent} from './button-studio-presets.js';
+import {studioSettingsHistory,recordStudioSettingsChange,studioSettingsRestoreProof,type StudioSettingsHistory} from './studio-settings-history.js';
 import type {BotStore,BotState} from './store.js';
 import type {Policy} from './policy.js';
 import {validStudioContent,studioId,defaultStudioSettings,validStudioSettings,type StudioSettings,type StudioTemplate,type StudioContent,type StudioAction,type StudioButton} from './button-studio-model.js';
@@ -160,6 +161,25 @@ export class ButtonStudioService{
   const now=this.auth(s,actor),studio=s.buttonStudio??={templates:[],inputs:[]},current=studio.settings??defaultStudioSettings();
   if(current.revision!==revision||current.revision>=999999||!['defaultTemplateId','buttonLimit','rowsPerPage','colorsByFunction','inputSeconds','confirmationSeconds'].includes(field))throw Error('STUDIO_STALE_SETTINGS');
   const next={...current,[field]:value,revision:revision+1};if(!validStudioSettings(next)||next.defaultTemplateId&&!studio.templates.some(t=>t.id===next.defaultTemplateId)||studio.templates.some(t=>t.draft.buttons.length>next.buttonLimit))throw Error('STUDIO_INVALID_SETTINGS');
-  studio.settings=next;s.audit.push({actorId:actor,updateKey:'studio-settings:'+next.revision,decision:'ALLOW',reason:'STUDIO_SETTINGS_CHANGED',policyVersion:0,at:now});return structuredClone(next);
+  studio.settings=next;recordStudioSettingsChange(s,actor,now,current,next);return structuredClone(next);
+ });}
+ async settingsHistory(actor:string,revision:number):Promise<StudioSettingsHistory[]>{const s=await this.store.snapshot(),now=this.auth(s,actor);if((s.buttonStudio?.settings??defaultStudioSettings()).revision!==revision)throw Error('STUDIO_STALE_SETTINGS');return studioSettingsHistory(s,now);}
+ private settingsRestore(s:BotState,actor:string,revision:number,nonce:string):{current:StudioSettings;next:StudioSettings;source:StudioSettingsHistory}{
+  const now=this.auth(s,actor),current=s.buttonStudio?.settings??defaultStudioSettings(),source=studioSettingsHistory(s,now).find(r=>r.nonce===nonce&&r.after.revision<=current.revision);
+  if(current.revision!==revision||current.revision>=999999||!source)throw Error('STUDIO_STALE_SETTINGS');
+  const next={...source.before,revision:revision+1};
+  if(!validStudioSettings(next)||next.defaultTemplateId&&s.buttonStudio?.templates.filter(t=>t.id===next.defaultTemplateId).length!==1||s.buttonStudio?.templates.some(t=>t.draft.buttons.length>next.buttonLimit))throw Error('STUDIO_INVALID_SETTINGS');
+  return {current,next,source};
+ }
+ async issueSettingsRestore(actor:string,revision:number,nonce:string):Promise<{ref:string;current:StudioSettings;next:StudioSettings}>{return this.store.transaction(s=>{
+  const {current,next,source}=this.settingsRestore(s,actor,revision,nonce),ref='c_'+randomBytes(18).toString('base64url');
+  s.callbacks.push({ref,action:'studio.SETTINGS_RESTORE:'+revision+':'+nonce+':'+studioSettingsRestoreProof(s,current,source),chatId:'private',actorId:actor,policyVersion:0,expiresAt:this.clock()+current.confirmationSeconds*1000,oneShot:true,used:false,revoked:false});return {ref,current,next};
+ });}
+ async confirmSettingsRestore(actor:string,ref:string):Promise<StudioSettings|null>{return this.store.transaction(s=>{
+  const now=this.auth(s,actor),matches=s.callbacks.filter(c=>c.ref===ref),c=matches[0];
+  if(!/^c_[A-Za-z0-9_-]{24}$/u.test(ref)||matches.length!==1||!c||c.actorId!==actor||c.chatId!=='private'||c.policyVersion!==0||c.oneShot!==true||c.used!==false||c.revoked!==false||!Number.isSafeInteger(c.expiresAt)||c.expiresAt<=now||c.expiresAt>now+120000)return null;
+  const match=/^studio\.SETTINGS_RESTORE:([1-9][0-9]{0,5}):([A-Za-z0-9_-]{24}):([a-f0-9]{64})$/u.exec(c.action);if(!match||match[0]!==c.action)return null;
+  const {current,next,source}=this.settingsRestore(s,actor,Number(match[1]),match[2]!);if(studioSettingsRestoreProof(s,current,source)!==match[3])return null;
+  s.buttonStudio!.settings=next;recordStudioSettingsChange(s,actor,now,current,next,true);c.used=true;return structuredClone(next);
  });}
 }

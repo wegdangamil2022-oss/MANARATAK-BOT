@@ -29,7 +29,7 @@ for(const engine of ['json','sqlite'] as const){
  }
  test(engine+' owner cancellation revokes one pending preview in each supported family',async()=>{
   const f=await fixture();try{
-   const actions=['studio.RESTORE:','studio.DELETE_BUTTON:','delegation.confirm:','category.write:','owner.faq.APPROVED:','owner.faq.ARCHIVED:','owner.library.archive:'];let seq=1;
+   const actions=['studio.RESTORE:','studio.DELETE_BUTTON:','studio.SETTINGS_RESTORE:','delegation.confirm:','category.write:','owner.faq.APPROVED:','owner.faq.ARCHIVED:','owner.library.archive:'];let seq=1;
    for(const [i,action] of actions.entries()){
     const ref='c_'+String(i).padStart(24,'A'),sibling='c_'+String(i).padStart(24,'B');
     await f.store.transaction(s=>{s.callbacks.push(...[ref,sibling].map(ref=>({ref,action:action+'local-preview',actorId:'100',chatId:action.startsWith('owner.faq')?'-100123':'private',policyVersion:0,oneShot:true,used:false,revoked:false,expiresAt:NOW+120000})));});

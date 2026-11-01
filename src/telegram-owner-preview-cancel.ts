@@ -4,6 +4,7 @@ import type {OwnerInlineScreen} from './telegram-inline-owner.js';
 const route=/^oc:1:k:([A-Za-z0-9_-]{24})$/u;
 const destinations=[
  ['studio.RESTORE:','st:1:l:09:0'],['studio.DELETE_BUTTON:','st:1:l:09:0'],
+ ['studio.SETTINGS_RESTORE:','st:1:C'],
  ['delegation.confirm:','mi:1:i:03:01'],['category.write:','ec:1:h'],
  ['owner.faq.APPROVED:','of:1:p:0'],['owner.faq.ARCHIVED:','of:1:p:0'],
  ['owner.library.archive:','ol:1:p:0']

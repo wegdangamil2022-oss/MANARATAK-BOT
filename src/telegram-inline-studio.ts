@@ -11,6 +11,7 @@ import {randomBytes} from 'node:crypto';
 export interface OwnerStudioScreen extends OwnerInlineScreen{nativeKeyboard?:StudioNativeKeyboard;}
 const n='(0|[1-9][0-9]{0,5})',rev='([1-9][0-9]{0,6})',id='([a-f0-9]{12})',mode='(0[1-9]|1[0-6])';
 const patterns=[/^st:1:N:[A-Za-z0-9_-]{24}$/u,new RegExp('^st:1:l:'+mode+':'+n+'$','u'),/^st:1:n$/u,/^st:1:g:(?:education|welcome)$/u,/^st:1:c:[A-Za-z0-9_-]{24}$/u,
+ new RegExp('^st:1:A:'+rev+':'+n+'$','u'),new RegExp('^st:1:K:'+rev+':[A-Za-z0-9_-]{24}:'+n+'$','u'),/^st:1:F:[A-Za-z0-9_-]{24}$/u,
  new RegExp('^st:1:[dsvhj]:'+id+':'+rev+'$','u'),new RegExp('^st:1:v:'+id+':'+rev+':'+n+'$','u'),new RegExp('^st:1:e:'+mode+':'+id+':'+rev+'$','u'),
  new RegExp('^st:1:E:(?:01|02|04|06):'+id+':'+rev+':'+n+'$','u'),
  new RegExp('^st:1:i:'+id+':'+rev+':(?:NAME|TEXT|ADD_BUTTON|LAYOUT|TIMEZONE|(?:BUTTON_TITLE|TARGET|OPENS_AT|CLOSES_AT|SEATS):'+id+')$','u'),
@@ -109,6 +110,7 @@ export async function renderOwnerInlineStudio(store:BotStore,policy:Policy,actor
     rows.push([b('دون قالب افتراضي',set('defaultTemplateId','none'))],[b('↩️ الإعدادات','st:1:C')],root);return ui('<b>القالب الافتراضي</b>\nتُنسخ مسودته عند إنشاء قالب جديد، دون نقل اعتماد أو سجل سابق.\nالصفحة '+(page+1)+' من '+pages,rows);
    }
    return ui('<b>إعدادات الاستوديو المحلية</b>\nنسخة الإعدادات: '+settings.revision+'\nالقالب الافتراضي: '+studioEscape(all.find(t=>t.id===settings.defaultTemplateId)?.draft.name??'دون قالب')+'\nحد الأزرار: '+settings.buttonLimit+'\nصفوف الصفحة الجديدة: '+settings.rowsPerPage+'\nألوان حسب الوظيفة: '+(settings.colorsByFunction?'مفعلة':'معطلة')+'\nالإدخال: '+settings.inputSeconds+' ثانية\nالتأكيد: '+settings.confirmationSeconds+' ثانية\nالتغييرات للعمليات الجديدة؛ النسخ المحفوظة لا تتغير.',[
+    [b('📜 سجل الإعدادات واستعادتها','st:1:A:'+settings.revision+':0')],
     [b('القالب الافتراضي','st:1:D:'+settings.revision+':0')],
     [b('تبديل الألوان الوظيفية',set('colorsByFunction',settings.colorsByFunction?0:1))],
     ...(['buttonLimit','rowsPerPage','inputSeconds','confirmationSeconds'] as const).map(field=>
@@ -127,6 +129,21 @@ export async function renderOwnerInlineStudio(store:BotStore,policy:Policy,actor
   if(parts[2]==='n')return studioDraftScreen(await svc.create(actor,'قالب جديد'));
   if(parts[2]==='g')return studioDraftScreen(await svc.create(actor,'نموذج',parts[3]!));
   if(parts[2]==='c'){const t=await svc.confirmDecision(actor,'c_'+parts[3]);return t?studioDraftScreen(t):null;}
+  if(parts[2]==='F'){const restored=await svc.confirmSettingsRestore(actor,'c_'+parts[3]);if(!restored)return null;const screen=await renderOwnerInlineStudio(store,policy,actor,'st:1:C',clock);return screen?{...screen,text:'استُعيدت إعدادات الاستوديو بإصدار جديد.\n'+screen.text}:null;}
+  if(parts[2]==='A'||parts[2]==='K'){
+   const revision=Number(parts[3]),page=Number(parts[parts[2]==='A'?4:5]),history=await svc.settingsHistory(actor,revision),pages=Math.max(1,Math.ceil(history.length/8));if(page>=pages)return null;
+   const route=(p:number)=>'st:1:A:'+revision+':'+p;
+   if(parts[2]==='A'){
+    const rows=history.slice(page*8,page*8+8).map(h=>[b('إعدادات ما قبل الإصدار '+h.after.revision,'st:1:K:'+revision+':'+h.nonce+':'+page)]),nav=[];
+    if(page)nav.push(b('السابق',route(page-1)));if(page+1<pages)nav.push(b('التالي',route(page+1)));if(nav.length)rows.push(nav);rows.push([b('↩️ الإعدادات','st:1:C')],root);
+    return ui('<b>سجل إعدادات الاستوديو</b>\nالإصدار الحالي: '+revision+'\nالصفحة '+(page+1)+' من '+pages+'\nتُعرض التغييرات ذات القيم السابقة الموثقة فقط؛ لا يمكن استعادة تغييرات قديمة بلا هذا السجل.'+(history.length?'':'\nلا يوجد تغيير موثق قابل للاستعادة.'),rows);
+   }
+   const source=history.slice(page*8,page*8+8).find(h=>h.nonce===parts[4]);if(!source)return null;
+   const decision=await svc.issueSettingsRestore(actor,revision,source.nonce),describe=(settings:StudioSettings)=>
+    'القالب الافتراضي: '+studioEscape(settings.defaultTemplateId?(all.find(t=>t.id===settings.defaultTemplateId)?.draft.name??'غير متاح'):'دون قالب')+'\nحد الأزرار: '+settings.buttonLimit+'\nصفوف الصفحة الجديدة: '+settings.rowsPerPage+'\nالألوان الوظيفية: '+(settings.colorsByFunction?'مفعلة':'معطلة')+'\nالإدخال: '+settings.inputSeconds+' ثانية\nالتأكيد: '+settings.confirmationSeconds+' ثانية';
+   return ui('<b>معاينة استعادة إعدادات الاستوديو</b>\nالقيم السابقة قبل الإصدار '+source.after.revision+'\nالمعدّل: '+studioEscape(source.by)+'\nالتاريخ: '+new Date(source.at).toISOString()+'\n\n<b>الحالي</b>\n'+describe(decision.current)+'\n\n<b>بعد الاستعادة</b>\n'+describe(decision.next)+'\n\nتُحفظ الاستعادة بإصدار جديد دون تعديل القوالب أو حذف السجل. يتوقف التأكيد إذا تغيرت الإعدادات أو القوالب.\nالتأكيد صالح '+decision.current.confirmationSeconds+' ثانية.',[
+    [b('✅ تأكيد الاستعادة','st:1:F:'+decision.ref.slice(2)),b('إلغاء الاستعادة',ownerPreviewCancelData(decision.ref))],[b('↩️ السجل',route(page))],root]);
+  }
   const mode=parts[2]==='e'||parts[2]==='E'?parts[3]:undefined,id=parts[mode?4:3]!,revision=Number(parts[mode?5:4]),t=all.find(t=>t.id===id&&t.revision===revision);if(!t||!studioId(id))return null;
   const action=parts[2],button=parts[5]?t.draft.buttons.find(b=>b.id===parts[5]):undefined;
   if(action==='d')return studioDraftScreen(t);
