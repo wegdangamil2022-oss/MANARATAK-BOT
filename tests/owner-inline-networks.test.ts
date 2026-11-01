@@ -410,7 +410,7 @@ test('stale network cleanup callback routes are canonical and length bounded',()
   'nw:1:q:abcdef123456:2:-100123:01:0',
   'nw:1:q:abcdef123456:2:100123:1:0',
   'nw:1:q:abcdef123456:2:-100123:1:0\\n',
-  'nw:1:q:abcdef123456:9999999999:-1234567890123456:9999999999:999'])
+  'nw:1:q:abcdef123456:9999999999:-1234567890123456:9999999999:1000'])
   assert.equal(validOwnerNetworkRoute(key),false,key);
 });
 for(const engine of ['json','sqlite'] as const){
@@ -474,6 +474,29 @@ for(const engine of ['json','sqlite'] as const){
    f.advance(121000);
    assert.equal((await f.app().handle(callback(831,timedToken))).status,'DENIED');
    assert.equal((await f.store.snapshot()).groupNetworks?.[0]?.members.length,1);
+  }finally{await f.close();}
+ });
+}
+
+for(const engine of ['json','sqlite'] as const){
+ test('revoked group association can be detached without reauthorizing the chat ('+engine+')',async()=>{
+  const f=await setup(engine);try{
+   await f.approve(GROUP);
+   const n=await f.create();
+   const link=await f.app().handle(callback(840,'nw:1:t:'+n.id+':1:'+GROUP+':1:0'));
+   assert.equal((await f.app().handle(callback(841,find(link,'تأكيد')))).status,'APPLIED');
+   await f.policy.revokeChatAtRevision(OWNER,GROUP,1);
+   const card=await f.app().handle(callback(842,'nw:1:d:'+n.id));
+   assert.match(card.plan?.text??'',/ارتباطات تحتاج مراجعة: 1/);
+   const stale=await f.app().handle(callback(843,find(card,'مراجعة الارتباطات القديمة')));
+   const preview=await f.app().handle(callback(844,find(stale,GROUP)));
+   assert.equal((await f.app().handle(callback(845,find(preview,'تأكيد الفصل')))).status,'APPLIED');
+   const saved=await f.store.snapshot();
+   assert.deepEqual(saved.groupNetworks?.[0]?.members,[]);
+   assert.equal(saved.chats.find(c=>c.id===GROUP)?.approved,false);
+   const deletion=await f.app().handle(callback(846,'nw:1:x:'+n.id));
+   assert.equal((await f.app().handle(callback(847,find(deletion,'تأكيد الحذف')))).status,'APPLIED');
+   assert.equal((await f.store.snapshot()).groupNetworks?.length,0);
   }finally{await f.close();}
  });
 }
