@@ -31,12 +31,14 @@ async function setup(engine:'json'|'sqlite'){
   botId:'networks-test',botUsername:'ManaratakBot',clock:()=>now,
   membership:async()=>{throw Error('Network editor must not contact Telegram');}});
  const approve=(id:string)=>policy.approveChat(OWNER,id,['navigation','moderation','assistant']);
+ let creates=0;
  const create=async(name='شبكة الطب')=>{
-  assert.equal((await app().handle(callback(700,'nw:1:n'))).status,'APPLIED');
-  const input=await app().handle(textMsg(701,name));
+  const base=700+creates++*10;
+  assert.equal((await app().handle(callback(base,'nw:1:n'))).status,'APPLIED');
+  const input=await app().handle(textMsg(base+1,name));
   assert.equal(input.status,'APPLIED');
   assert.match(input.plan?.text??'',/معاينة/);
-  const saved=await app().handle(callback(702,find(input,'تأكيد')));
+  const saved=await app().handle(callback(base+2,find(input,'تأكيد')));
   assert.equal(saved.status,'APPLIED');
   return (await store.snapshot()).groupNetworks![0]!;
  };
