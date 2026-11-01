@@ -61,6 +61,27 @@ for(const engine of ['json','sqlite'] as const){
    assert.equal((await f.app().handle(event(955,back))).status,'DENIED');assert.equal((await f.store.snapshot()).callbacks.filter(x=>x.ref.startsWith('studio-seat:')).length,0);
   }finally{await f.close();}
  });
+ test('owner moves a selected button through paged row targets and rejects forged or stale moves ('+engine+')',async()=>{
+  const f=await fixture();try{
+   let t=await f.svc.create('100','الصفوف');for(let i=0;i<12;i++)t=await f.svc.edit('100',t.id,t.revision,{kind:'ADD_BUTTON',value:'زر '+i});
+   const button=t.draft.buttons[0]!,before=structuredClone(t.draft);
+   const rowEditor=await f.app().handle(event(997,'st:1:e:03:'+t.id+':'+t.revision)),list=await f.app().handle(event(998,select(rowEditor,'st:1:e:01:'))),details=await f.app().handle(event(1000,select(list,'st:1:b:')));
+   let picker=await f.app().handle(event(1001,select(details,'st:1:B:')));assert.equal(picker.status,'APPLIED');assert.ok(picker.plan!.text.includes('الصف الحالي: 1'));
+   const next=buttons(picker).find(b=>b.text==='التالي')!.callback_data;assert.equal((await f.app().handle(event(1002,next,300))).status,'DENIED');assert.equal((await f.app().handle(event(1003,next,100,true))).status,'DENIED');
+   picker=await f.app().handle(event(1004,next));assert.ok(picker.plan!.text.includes('الصفحة 2 من 2'));const move=buttons(picker).find(b=>b.text.startsWith('الصف 10 '))!.callback_data;
+   assert.ok(buttons(picker).every(b=>Buffer.byteLength(b.callback_data)<=64));assert.equal((await f.app().handle(event(1005,move,300))).status,'DENIED');
+   const moved=await f.app().handle(event(1006,move));assert.equal(moved.status,'APPLIED');t=(await f.svc.list('100'))[0]!;
+   assert.deepEqual(t.draft.layout,[1,1,1,1,1,1,1,1,2,1,1]);assert.deepEqual(t.draft.buttons.map(b=>b.id),[...before.buttons.slice(1,10).map(b=>b.id),button.id,...before.buttons.slice(10).map(b=>b.id)]);
+   assert.equal((await f.app().handle(event(1007,move))).status,'DENIED');assert.equal((await f.app().handle(event(1008,next))).status,'DENIED');
+   const newPicker=await f.app().handle(event(1009,select(moved,'st:1:B:')));assert.equal(newPicker.status,'APPLIED');
+   const back=await f.app().handle(event(1010,select(newPicker,'st:1:b:')));assert.equal(back.status,'APPLIED');assert.deepEqual((await f.svc.list('100'))[0]!.draft,t.draft);
+   t=await f.svc.edit('100',t.id,t.revision,{kind:'LAYOUT',value:'3-3-3-3'});
+   const full=await f.app().handle(event(1011,'st:1:B:'+t.id+':'+t.revision+':'+button.id+':0'));assert.equal(buttons(full).filter(b=>b.callback_data.startsWith('st:1:V:')).length,1);
+   const forged='st:1:V:'+t.id+':'+t.revision+':'+button.id+':0';assert.equal((await f.app().handle(event(1012,forged))).status,'DENIED');
+   assert.equal((await f.app().handle(event(1013,'st:1:B:'+t.id+':'+t.revision+':'+button.id+':99'))).status,'DENIED');assert.deepEqual((await f.svc.list('100'))[0]!.draft,t.draft);
+   const appended=await f.app().handle(event(1014,select(full,'st:1:V:')));assert.equal(appended.status,'APPLIED');assert.deepEqual((await f.svc.list('100'))[0]!.draft.layout,[3,3,3,2,1]);
+  }finally{await f.close();}
+ });
  test('studio target review shows the actual domain and complete escaped URL in bounded pages ('+engine+')',async()=>{
   const f=await fixture();try{
    let t=await f.svc.create('100','قالب');t=await f.svc.edit('100',t.id,t.revision,{kind:'ADD_BUTTON',value:'رابط'});const id=t.draft.buttons[0]!.id;

@@ -6,7 +6,7 @@ import {validStudioContent,studioId,defaultStudioSettings,validStudioSettings,ty
 export type StudioEdit={kind:'NAME'|'TEXT'|'ADD_BUTTON'|'LAYOUT'|'TIMEZONE';value:string}|{kind:'BUTTON_TITLE';buttonId:string;value:string}|
  {kind:'ACTION';buttonId:string;action:StudioAction}|{kind:'STYLE';buttonId:string;style:StudioButton['style']}|
  {kind:'CONDITION';buttonId:string;condition:StudioButton['condition']}|{kind:'DELETE_BUTTON'|'COPY_BUTTON';buttonId:string}|
- {kind:'MOVE_BUTTON';from:number;to:number}|{kind:'COPY_ROW';row:number}|{kind:'PAGE_SIZE';rows:number}|{kind:'FORMAT';hour12:boolean;calendar:StudioContent['calendar']};
+ {kind:'MOVE_BUTTON';from:number;to:number}|{kind:'PLACE_BUTTON';buttonId:string;row:number}|{kind:'COPY_ROW';row:number}|{kind:'PAGE_SIZE';rows:number}|{kind:'FORMAT';hour12:boolean;calendar:StudioContent['calendar']};
 export const studioInputFields=['NAME','TEXT','ADD_BUTTON','LAYOUT','BUTTON_TITLE','TARGET','TIMEZONE','OPENS_AT','CLOSES_AT','SEATS'] as const;
 const id=()=>randomBytes(6).toString('hex');
 export class ButtonStudioService{
@@ -42,6 +42,16 @@ export class ButtonStudioService{
    case 'MOVE_BUTTON':{
     if(!Number.isSafeInteger(edit.from)||!Number.isSafeInteger(edit.to)||edit.from<0||edit.to<0||edit.from>=d.buttons.length||edit.to>=d.buttons.length||edit.from===edit.to)throw Error('STUDIO_INVALID_MOVE');
     const [b]=d.buttons.splice(edit.from,1);d.buttons.splice(edit.to,0,b!);break;
+   }
+   case 'PLACE_BUTTON':{
+    if(!Number.isSafeInteger(edit.row)||edit.row<0||edit.row>d.layout.length)throw Error('STUDIO_INVALID_ROW');
+    const rows:StudioButton[][]=[];let offset=0;
+    for(const size of d.layout){rows.push(d.buttons.slice(offset,offset+size));offset+=size;}
+    const source=rows.findIndex(row=>row.some(b=>b.id===edit.buttonId));
+    if(source<0||source===edit.row||edit.row<rows.length&&rows[edit.row]!.length>=3||edit.row===rows.length&&source===rows.length-1&&rows[source]!.length===1)throw Error('STUDIO_INVALID_MOVE');
+    rows[source]=rows[source]!.filter(b=>b.id!==edit.buttonId);
+    if(edit.row===rows.length)rows.push([button!]);else rows[edit.row]!.push(button!);
+    const remaining=rows.filter(row=>row.length);d.buttons=remaining.flat();d.layout=remaining.map(row=>row.length);break;
    }
    case 'COPY_ROW':{
     if(!Number.isSafeInteger(edit.row)||edit.row<0||edit.row>=d.layout.length)throw Error('STUDIO_INVALID_ROW');

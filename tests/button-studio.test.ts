@@ -9,6 +9,30 @@ import {ButtonStudioService} from '../src/button-studio.js';
 import {validStudioState,studioURL,defaultStudioSettings} from '../src/button-studio-model.js';
 for(const engine of ['json','sqlite'] as const){
  async function fixture(){const dir=await mkdtemp(join(tmpdir(),'studio-')),store=new BotStore(join(dir,'state.'+engine),{engine});let now=1700000000000;const policy=new Policy(store,'100',()=>now),svc=()=>new ButtonStudioService(store,policy,()=>now);return {store,svc,setTime:(n:number)=>{now=n;},close:()=>rm(dir,{recursive:true,force:true})};}
+ test('placing buttons in another row preserves row order, identity and metadata ('+engine+')',async()=>{
+  const f=await fixture();try{
+   let t=await f.svc().create('100','قالب');for(const name of ['a','b','c','d','e','f','g'])t=await f.svc().edit('100',t.id,t.revision,{kind:'ADD_BUTTON',value:name});
+   const customized=t.draft.buttons[1]!;
+   t=await f.svc().edit('100',t.id,t.revision,{kind:'ACTION',buttonId:customized.id,action:{kind:'URL',target:'https://example.org/study'}});
+   t=await f.svc().edit('100',t.id,t.revision,{kind:'STYLE',buttonId:customized.id,style:'danger'});
+   t=await f.svc().edit('100',t.id,t.revision,{kind:'CONDITION',buttonId:customized.id,condition:{role:'OWNER',opensAt:1700000000000,closesAt:1700000060000,seats:5}});
+   t=await f.svc().edit('100',t.id,t.revision,{kind:'LAYOUT',value:'2-1-3-1'});
+   const ids=Object.fromEntries(t.draft.buttons.map(b=>[b.title,b.id])),original=structuredClone(t.draft.buttons[1]!);
+   t=await f.svc().edit('100',t.id,t.revision,{kind:'PLACE_BUTTON',buttonId:ids.b!,row:1});
+   assert.deepEqual(t.draft.layout,[1,2,3,1]);assert.deepEqual(t.draft.buttons.map(b=>b.title),['a','c','b','d','e','f','g']);assert.deepEqual(t.draft.buttons.find(b=>b.id===ids.b),original);
+   t=await f.svc().edit('100',t.id,t.revision,{kind:'PLACE_BUTTON',buttonId:ids.g!,row:0});assert.deepEqual(t.draft.layout,[2,2,3]);assert.deepEqual(t.draft.buttons.map(b=>b.title),['a','g','c','b','d','e','f']);
+   t=await f.svc().edit('100',t.id,t.revision,{kind:'PLACE_BUTTON',buttonId:ids.a!,row:3});assert.deepEqual(t.draft.layout,[1,2,3,1]);assert.deepEqual(t.draft.buttons.map(b=>b.title),['g','c','b','d','e','f','a']);
+   t=await f.svc().edit('100',t.id,t.revision,{kind:'PLACE_BUTTON',buttonId:ids.g!,row:1});assert.deepEqual(t.draft.layout,[3,3,1]);assert.deepEqual(t.draft.buttons.map(b=>b.title),['c','b','g','d','e','f','a']);
+   const before=await f.store.snapshot();
+   for(const row of [-1,0,1,4,0.5,NaN])await assert.rejects(f.svc().edit('100',t.id,t.revision,{kind:'PLACE_BUTTON',buttonId:ids.c!,row}));
+   await assert.rejects(f.svc().edit('100',t.id,t.revision,{kind:'PLACE_BUTTON',buttonId:ids.a!,row:3}));
+   await assert.rejects(f.svc().edit('300',t.id,t.revision,{kind:'PLACE_BUTTON',buttonId:ids.a!,row:0}));
+   await assert.rejects(f.svc().edit('100',t.id,t.revision-1,{kind:'PLACE_BUTTON',buttonId:ids.a!,row:0}));
+   await assert.rejects(f.svc().edit('100',t.id,t.revision,{kind:'PLACE_BUTTON',buttonId:'000000000000',row:0}));
+   assert.deepEqual(await f.store.snapshot(),before);assert.equal(new Set(t.draft.buttons.map(b=>b.id)).size,7);
+   await f.svc().save('100',t.id,t.revision);assert.deepEqual((await f.svc().list('100'))[0]!.versions[0]!.content,t.draft);
+  }finally{await f.close();}
+ });
  test('adding, copying and deleting buttons preserve unaffected row layouts ('+engine+')',async()=>{
   const f=await fixture();try{
    let t=await f.svc().create('100','قالب');
