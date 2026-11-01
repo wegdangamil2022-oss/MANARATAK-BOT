@@ -1,0 +1,1205 @@
+{
+  "schemaVersion": 1,
+  "sourceCommit": "f6d05b8599d73d7826c1c8c4aa3a6bb14ab12668",
+  "sourceDirty": true,
+  "officialPlan": "docs/MANARATAK_BOT_MASTER_v1.2.1_AR.md",
+  "officialButtons": "docs/أزرار_منارتك.md",
+  "navigationAcceptance": "LOCAL_RUNTIME_PASS",
+  "fullPhaseClosure": "OPEN",
+  "liveTelegram": "NOT_TESTED",
+  "ownerSections": 16,
+  "ownerButtons": 253,
+  "engines": [
+    {
+      "engine": "json",
+      "buttonsPassed": 253,
+      "duplicateProtectionPassed": 253,
+      "unauthorizedDenied": 253,
+      "groupContextDenied": 253,
+      "businessStateUnchanged": true
+    },
+    {
+      "engine": "sqlite",
+      "buttonsPassed": 253,
+      "duplicateProtectionPassed": 253,
+      "unauthorizedDenied": 253,
+      "groupContextDenied": 253,
+      "businessStateUnchanged": true
+    }
+  ],
+  "connectedCatalogueEntries": 47,
+  "specificationOnlyEntries": 206,
+  "sections": [
+    {
+      "section": "01",
+      "title": "👥 المجموعات والشبكات",
+      "connected": 9,
+      "specificationOnly": [
+        {
+          "label": "➕ ربط مجموعة",
+          "route": "mi:1:i:01:02",
+          "connection": "SPECIFICATION"
+        },
+        {
+          "label": "🏢 غرف الإدارة",
+          "route": "mi:1:i:01:04",
+          "connection": "SPECIFICATION"
+        },
+        {
+          "label": "🧩 مواضيع المجموعات",
+          "route": "mi:1:i:01:05",
+          "connection": "SPECIFICATION"
+        }
+      ]
+    },
+    {
+      "section": "02",
+      "title": "🛡️ الحماية والعقوبات",
+      "connected": 9,
+      "specificationOnly": [
+        {
+          "label": "⚖️ العقوبات والأعضاء",
+          "route": "mi:1:i:02:02",
+          "connection": "SPECIFICATION"
+        },
+        {
+          "label": "⚠️ التحذيرات والاعتراضات",
+          "route": "mi:1:i:02:03",
+          "connection": "SPECIFICATION"
+        },
+        {
+          "label": "🔐 قفل وفتح المجموعة",
+          "route": "mi:1:i:02:04",
+          "connection": "SPECIFICATION"
+        },
+        {
+          "label": "🚨 الاحتيال والانتحال",
+          "route": "mi:1:i:02:09",
+          "connection": "SPECIFICATION"
+        },
+        {
+          "label": "🔞 حماية المحتوى الحساس",
+          "route": "mi:1:i:02:10",
+          "connection": "SPECIFICATION"
+        },
+        {
+          "label": "📜 قوانين المجموعة",
+          "route": "mi:1:i:02:11",
+          "connection": "SPECIFICATION"
+        },
+        {
+          "label": "📺 حماية القنوات المربوطة",
+          "route": "mi:1:i:02:14",
+          "connection": "SPECIFICATION"
+        }
+      ]
+    },
+    {
+      "section": "03",
+      "title": "👑 المشرفون والصلاحيات",
+      "connected": 5,
+      "specificationOnly": [
+        {
+          "label": "🏅 الرتب والمستويات",
+          "route": "mi:1:i:03:03",
+          "connection": "SPECIFICATION"
+        },
+        {
+          "label": "📲 صلاحيات Telegram",
+          "route": "mi:1:i:03:06",
+          "connection": "SPECIFICATION"
+        },
+        {
+          "label": "🛡️ الاستثناءات والحصانات",
+          "route": "mi:1:i:03:08",
+          "connection": "SPECIFICATION"
+        },
+        {
+          "label": "🗓️ جدول المناوبات",
+          "route": "mi:1:i:03:09",
+          "connection": "SPECIFICATION"
+        },
+        {
+          "label": "📥 المهام وتسليمها",
+          "route": "mi:1:i:03:10",
+          "connection": "SPECIFICATION"
+        },
+        {
+          "label": "✅ الموافقات الحساسة",
+          "route": "mi:1:i:03:11",
+          "connection": "SPECIFICATION"
+        },
+        {
+          "label": "⚖️ النزاعات والاعتراضات",
+          "route": "mi:1:i:03:12",
+          "connection": "SPECIFICATION"
+        },
+        {
+          "label": "🔍 مراجعة الصلاحيات",
+          "route": "mi:1:i:03:13",
+          "connection": "SPECIFICATION"
+        },
+        {
+          "label": "📜 سجل الإدارة والتقارير",
+          "route": "mi:1:i:03:14",
+          "connection": "SPECIFICATION"
+        },
+        {
+          "label": "🔄 انتقال المسؤولية",
+          "route": "mi:1:i:03:15",
+          "connection": "SPECIFICATION"
+        },
+        {
+          "label": "⚙️ إعدادات المشرفين",
+          "route": "mi:1:i:03:16",
+          "connection": "SPECIFICATION"
+        }
+      ]
+    },
+    {
+      "section": "04",
+      "title": "🔐 الانضمام والاشتراكات",
+      "connected": 4,
+      "specificationOnly": [
+        {
+          "label": "📊 حالة الانضمام والإحصائيات",
+          "route": "mi:1:i:04:01",
+          "connection": "SPECIFICATION"
+        },
+        {
+          "label": "📥 طلبات الانضمام",
+          "route": "mi:1:i:04:06",
+          "connection": "SPECIFICATION"
+        },
+        {
+          "label": "🤖 اختبار CAPTCHA",
+          "route": "mi:1:i:04:07",
+          "connection": "SPECIFICATION"
+        },
+        {
+          "label": "👤 رحلة العضو الجديد",
+          "route": "mi:1:i:04:08",
+          "connection": "SPECIFICATION"
+        },
+        {
+          "label": "🔒 قيود الأعضاء الجدد",
+          "route": "mi:1:i:04:09",
+          "connection": "SPECIFICATION"
+        },
+        {
+          "label": "⏳ المهل والمحاولات",
+          "route": "mi:1:i:04:10",
+          "connection": "SPECIFICATION"
+        },
+        {
+          "label": "🔄 إعادة التحقق",
+          "route": "mi:1:i:04:11",
+          "connection": "SPECIFICATION"
+        },
+        {
+          "label": "🧑‍⚖️ المراجعة اليدوية",
+          "route": "mi:1:i:04:12",
+          "connection": "SPECIFICATION"
+        },
+        {
+          "label": "🛡️ إعفاءات الاشتراك",
+          "route": "mi:1:i:04:13",
+          "connection": "SPECIFICATION"
+        },
+        {
+          "label": "🔗 روابط الدعوة",
+          "route": "mi:1:i:04:14",
+          "connection": "SPECIFICATION"
+        },
+        {
+          "label": "🎁 الإحالات والمكافآت",
+          "route": "mi:1:i:04:15",
+          "connection": "SPECIFICATION"
+        },
+        {
+          "label": "⚙️ إعدادات الانضمام",
+          "route": "mi:1:i:04:16",
+          "connection": "SPECIFICATION"
+        }
+      ]
+    },
+    {
+      "section": "05",
+      "title": "📺 إدارة محتوى القنوات",
+      "connected": 0,
+      "specificationOnly": [
+        {
+          "label": "📺 القنوات وربطها",
+          "route": "mi:1:i:05:01",
+          "connection": "SPECIFICATION"
+        },
+        {
+          "label": "📝 إنشاء محتوى",
+          "route": "mi:1:i:05:02",
+          "connection": "SPECIFICATION"
+        },
+        {
+          "label": "📂 الأقسام والسلاسل",
+          "route": "mi:1:i:05:03",
+          "connection": "SPECIFICATION"
+        },
+        {
+          "label": "📋 المسودات",
+          "route": "mi:1:i:05:04",
+          "connection": "SPECIFICATION"
+        },
+        {
+          "label": "🔎 تدقيق المصادر",
+          "route": "mi:1:i:05:05",
+          "connection": "SPECIFICATION"
+        },
+        {
+          "label": "👥 فريق التحرير",
+          "route": "mi:1:i:05:06",
+          "connection": "SPECIFICATION"
+        },
+        {
+          "label": "✅ المراجعة والاعتماد",
+          "route": "mi:1:i:05:07",
+          "connection": "SPECIFICATION"
+        },
+        {
+          "label": "👁️ معاينة المنشور",
+          "route": "mi:1:i:05:08",
+          "connection": "SPECIFICATION"
+        },
+        {
+          "label": "📅 تقويم المحتوى",
+          "route": "mi:1:i:05:09",
+          "connection": "SPECIFICATION"
+        },
+        {
+          "label": "📰 سجل المنشورات",
+          "route": "mi:1:i:05:10",
+          "connection": "SPECIFICATION"
+        },
+        {
+          "label": "✏️ التصحيحات والتحديثات",
+          "route": "mi:1:i:05:11",
+          "connection": "SPECIFICATION"
+        },
+        {
+          "label": "💬 التعليقات والمناقشات",
+          "route": "mi:1:i:05:12",
+          "connection": "SPECIFICATION"
+        },
+        {
+          "label": "📨 صندوق رسائل القنوات",
+          "route": "mi:1:i:05:13",
+          "connection": "SPECIFICATION"
+        },
+        {
+          "label": "📥 مقترحات المنشورات",
+          "route": "mi:1:i:05:14",
+          "connection": "SPECIFICATION"
+        },
+        {
+          "label": "🎨 الجودة والقوالب",
+          "route": "mi:1:i:05:15",
+          "connection": "SPECIFICATION"
+        },
+        {
+          "label": "⚙️ إعدادات القنوات",
+          "route": "mi:1:i:05:16",
+          "connection": "SPECIFICATION"
+        }
+      ]
+    },
+    {
+      "section": "06",
+      "title": "📢 النشر والإذاعة",
+      "connected": 0,
+      "specificationOnly": [
+        {
+          "label": "📢 إنشاء إذاعة",
+          "route": "mi:1:i:06:01",
+          "connection": "SPECIFICATION"
+        },
+        {
+          "label": "📎 استيراد ملف وجدولة النشر",
+          "route": "mi:1:i:06:02",
+          "connection": "SPECIFICATION"
+        },
+        {
+          "label": "📺 النشر في القنوات",
+          "route": "mi:1:i:06:03",
+          "connection": "SPECIFICATION"
+        },
+        {
+          "label": "👥 النشر في المجموعات",
+          "route": "mi:1:i:06:04",
+          "connection": "SPECIFICATION"
+        },
+        {
+          "label": "🎯 اختيار الوجهات",
+          "route": "mi:1:i:06:05",
+          "connection": "SPECIFICATION"
+        },
+        {
+          "label": "🗂️ الحملات والمسودات",
+          "route": "mi:1:i:06:06",
+          "connection": "SPECIFICATION"
+        },
+        {
+          "label": "👁️ المعاينة والاعتماد",
+          "route": "mi:1:i:06:07",
+          "connection": "SPECIFICATION"
+        },
+        {
+          "label": "📅 الجدولة والتكرار",
+          "route": "mi:1:i:06:08",
+          "connection": "SPECIFICATION"
+        },
+        {
+          "label": "🎨 القوالب والوسائط",
+          "route": "mi:1:i:06:09",
+          "connection": "SPECIFICATION"
+        },
+        {
+          "label": "📌 تثبيت الرسائل",
+          "route": "mi:1:i:06:10",
+          "connection": "SPECIFICATION"
+        },
+        {
+          "label": "🎤 إعلانات الفعاليات",
+          "route": "mi:1:i:06:11",
+          "connection": "SPECIFICATION"
+        },
+        {
+          "label": "🔔 التذكيرات والملخصات",
+          "route": "mi:1:i:06:12",
+          "connection": "SPECIFICATION"
+        },
+        {
+          "label": "❤️ التفاعل والتصويت",
+          "route": "mi:1:i:06:13",
+          "connection": "SPECIFICATION"
+        },
+        {
+          "label": "📤 طابور الإرسال",
+          "route": "mi:1:i:06:14",
+          "connection": "SPECIFICATION"
+        },
+        {
+          "label": "⏸️ إيقاف وإلغاء الحملات",
+          "route": "mi:1:i:06:15",
+          "connection": "SPECIFICATION"
+        },
+        {
+          "label": "📊 تقارير النشر",
+          "route": "mi:1:i:06:16",
+          "connection": "SPECIFICATION"
+        },
+        {
+          "label": "⚙️ إعدادات وضوابط الإذاعة",
+          "route": "mi:1:i:06:17",
+          "connection": "SPECIFICATION"
+        }
+      ]
+    },
+    {
+      "section": "07",
+      "title": "🎨 الأزرار والقوالب",
+      "connected": 13,
+      "specificationOnly": [
+        {
+          "label": "🤖 الردود التلقائية",
+          "route": "mi:1:i:07:10",
+          "connection": "SPECIFICATION"
+        },
+        {
+          "label": "🖼️ الصور والتنسيق",
+          "route": "mi:1:i:07:13",
+          "connection": "SPECIFICATION"
+        },
+        {
+          "label": "🔗 ربط ونشر الأزرار",
+          "route": "mi:1:i:07:14",
+          "connection": "SPECIFICATION"
+        }
+      ]
+    },
+    {
+      "section": "08",
+      "title": "🎮 الألعاب والمسابقات",
+      "connected": 0,
+      "specificationOnly": [
+        {
+          "label": "🎮 مكتبة الألعاب",
+          "route": "mi:1:i:08:01",
+          "connection": "SPECIFICATION"
+        },
+        {
+          "label": "➕ إنشاء مسابقة",
+          "route": "mi:1:i:08:02",
+          "connection": "SPECIFICATION"
+        },
+        {
+          "label": "🧠 مسابقات الأسئلة",
+          "route": "mi:1:i:08:03",
+          "connection": "SPECIFICATION"
+        },
+        {
+          "label": "🧩 الألغاز والتحديات",
+          "route": "mi:1:i:08:04",
+          "connection": "SPECIFICATION"
+        },
+        {
+          "label": "⚡ المسابقات المباشرة",
+          "route": "mi:1:i:08:05",
+          "connection": "SPECIFICATION"
+        },
+        {
+          "label": "🌐 منافسات المجموعات",
+          "route": "mi:1:i:08:06",
+          "connection": "SPECIFICATION"
+        },
+        {
+          "label": "📅 تحديات اليوم والأسبوع",
+          "route": "mi:1:i:08:07",
+          "connection": "SPECIFICATION"
+        },
+        {
+          "label": "📚 بنك الأسئلة",
+          "route": "mi:1:i:08:08",
+          "connection": "SPECIFICATION"
+        },
+        {
+          "label": "🗳️ التصويت والإعجابات",
+          "route": "mi:1:i:08:09",
+          "connection": "SPECIFICATION"
+        },
+        {
+          "label": "🖼️ مشاركات المتسابقين",
+          "route": "mi:1:i:08:10",
+          "connection": "SPECIFICATION"
+        },
+        {
+          "label": "🎁 الجوائز والقرعة",
+          "route": "mi:1:i:08:11",
+          "connection": "SPECIFICATION"
+        },
+        {
+          "label": "🛡️ مكافحة الغش والرشق",
+          "route": "mi:1:i:08:12",
+          "connection": "SPECIFICATION"
+        },
+        {
+          "label": "🏆 النقاط والترتيب",
+          "route": "mi:1:i:08:13",
+          "connection": "SPECIFICATION"
+        },
+        {
+          "label": "⚖️ النتائج والاعتراضات",
+          "route": "mi:1:i:08:14",
+          "connection": "SPECIFICATION"
+        },
+        {
+          "label": "📋 مسابقاتي والجولات",
+          "route": "mi:1:i:08:15",
+          "connection": "SPECIFICATION"
+        },
+        {
+          "label": "⚙️ إعدادات المسابقات",
+          "route": "mi:1:i:08:16",
+          "connection": "SPECIFICATION"
+        }
+      ]
+    },
+    {
+      "section": "09",
+      "title": "👋 التفاعل والترحيب",
+      "connected": 0,
+      "specificationOnly": [
+        {
+          "label": "👋 الترحيب والوداع",
+          "route": "mi:1:i:09:01",
+          "connection": "SPECIFICATION"
+        },
+        {
+          "label": "🧭 دليل العضو الجديد",
+          "route": "mi:1:i:09:02",
+          "connection": "SPECIFICATION"
+        },
+        {
+          "label": "📜 القوانين والرسائل الثابتة",
+          "route": "mi:1:i:09:03",
+          "connection": "SPECIFICATION"
+        },
+        {
+          "label": "🧹 الرسائل الخدمية",
+          "route": "mi:1:i:09:04",
+          "connection": "SPECIFICATION"
+        },
+        {
+          "label": "🤖 الردود التلقائية",
+          "route": "mi:1:i:09:05",
+          "connection": "SPECIFICATION"
+        },
+        {
+          "label": "💌 الهمسات الخاصة",
+          "route": "mi:1:i:09:06",
+          "connection": "SPECIFICATION"
+        },
+        {
+          "label": "💬 النقاشات والأسئلة",
+          "route": "mi:1:i:09:07",
+          "connection": "SPECIFICATION"
+        },
+        {
+          "label": "📊 استطلاعات الرأي",
+          "route": "mi:1:i:09:08",
+          "connection": "SPECIFICATION"
+        },
+        {
+          "label": "🗓️ اللقاءات والفعاليات",
+          "route": "mi:1:i:09:09",
+          "connection": "SPECIFICATION"
+        },
+        {
+          "label": "🎤 جلسات اسأل الخبير",
+          "route": "mi:1:i:09:10",
+          "connection": "SPECIFICATION"
+        },
+        {
+          "label": "👥 زملاء الدراسة",
+          "route": "mi:1:i:09:11",
+          "connection": "SPECIFICATION"
+        },
+        {
+          "label": "🏅 الشارات والتقدير",
+          "route": "mi:1:i:09:12",
+          "connection": "SPECIFICATION"
+        },
+        {
+          "label": "❤️ تفاعل المنشورات",
+          "route": "mi:1:i:09:13",
+          "connection": "SPECIFICATION"
+        },
+        {
+          "label": "🌙 وضع المحاضرة",
+          "route": "mi:1:i:09:14",
+          "connection": "SPECIFICATION"
+        },
+        {
+          "label": "📈 تقارير التفاعل",
+          "route": "mi:1:i:09:15",
+          "connection": "SPECIFICATION"
+        },
+        {
+          "label": "⚙️ إعدادات القسم",
+          "route": "mi:1:i:09:16",
+          "connection": "SPECIFICATION"
+        }
+      ]
+    },
+    {
+      "section": "10",
+      "title": "🎓 التعليم والمكتبة",
+      "connected": 3,
+      "specificationOnly": [
+        {
+          "label": "🎓 المنح الدراسية",
+          "route": "mi:1:i:10:01",
+          "connection": "SPECIFICATION"
+        },
+        {
+          "label": "🏛️ الجامعات",
+          "route": "mi:1:i:10:02",
+          "connection": "SPECIFICATION"
+        },
+        {
+          "label": "🩺 التخصصات الدراسية",
+          "route": "mi:1:i:10:03",
+          "connection": "SPECIFICATION"
+        },
+        {
+          "label": "📚 الدورات التعليمية",
+          "route": "mi:1:i:10:04",
+          "connection": "SPECIFICATION"
+        },
+        {
+          "label": "📝 الاختبارات الدولية",
+          "route": "mi:1:i:10:05",
+          "connection": "SPECIFICATION"
+        },
+        {
+          "label": "🌍 الدراسة حول العالم",
+          "route": "mi:1:i:10:06",
+          "connection": "SPECIFICATION"
+        },
+        {
+          "label": "📋 أدلة التقديم والقبول",
+          "route": "mi:1:i:10:07",
+          "connection": "SPECIFICATION"
+        },
+        {
+          "label": "📅 المواعيد والتنبيهات",
+          "route": "mi:1:i:10:10",
+          "connection": "SPECIFICATION"
+        },
+        {
+          "label": "🧭 خطتي واستعدادي",
+          "route": "mi:1:i:10:11",
+          "connection": "SPECIFICATION"
+        },
+        {
+          "label": "🧰 الأدوات والخدمات الطلابية",
+          "route": "mi:1:i:10:12",
+          "connection": "SPECIFICATION"
+        },
+        {
+          "label": "🔍 البحث والفلاتر",
+          "route": "mi:1:i:10:13",
+          "connection": "SPECIFICATION"
+        },
+        {
+          "label": "➕ إضافة واستيراد الموارد",
+          "route": "mi:1:i:10:14",
+          "connection": "SPECIFICATION"
+        },
+        {
+          "label": "✅ مراجعة ونشر الموارد",
+          "route": "mi:1:i:10:15",
+          "connection": "SPECIFICATION"
+        }
+      ]
+    },
+    {
+      "section": "11",
+      "title": "🤖 المساعد الذكي",
+      "connected": 1,
+      "specificationOnly": [
+        {
+          "label": "🤖 حالة المساعد",
+          "route": "mi:1:i:11:01",
+          "connection": "SPECIFICATION"
+        },
+        {
+          "label": "👥 ذكاء المجموعات",
+          "route": "mi:1:i:11:02",
+          "connection": "SPECIFICATION"
+        },
+        {
+          "label": "📚 مصادر المعرفة",
+          "route": "mi:1:i:11:04",
+          "connection": "SPECIFICATION"
+        },
+        {
+          "label": "🌐 ربط منصة منارتك",
+          "route": "mi:1:i:11:05",
+          "connection": "SPECIFICATION"
+        },
+        {
+          "label": "❓ الإجابات المعتمدة",
+          "route": "mi:1:i:11:06",
+          "connection": "SPECIFICATION"
+        },
+        {
+          "label": "🔎 البحث الذكي",
+          "route": "mi:1:i:11:07",
+          "connection": "SPECIFICATION"
+        },
+        {
+          "label": "👁️ تجربة المساعد",
+          "route": "mi:1:i:11:08",
+          "connection": "SPECIFICATION"
+        },
+        {
+          "label": "🧠 شخصية المساعد",
+          "route": "mi:1:i:11:09",
+          "connection": "SPECIFICATION"
+        },
+        {
+          "label": "🎓 الخدمات التعليمية",
+          "route": "mi:1:i:11:10",
+          "connection": "SPECIFICATION"
+        },
+        {
+          "label": "📄 تحليل المحتوى",
+          "route": "mi:1:i:11:11",
+          "connection": "SPECIFICATION"
+        },
+        {
+          "label": "✅ المراجعة البشرية",
+          "route": "mi:1:i:11:12",
+          "connection": "SPECIFICATION"
+        },
+        {
+          "label": "🔌 النماذج والمزودون",
+          "route": "mi:1:i:11:13",
+          "connection": "SPECIFICATION"
+        },
+        {
+          "label": "💰 الميزانية والحصص",
+          "route": "mi:1:i:11:14",
+          "connection": "SPECIFICATION"
+        },
+        {
+          "label": "🔐 الخصوصية والأمان",
+          "route": "mi:1:i:11:15",
+          "connection": "SPECIFICATION"
+        },
+        {
+          "label": "📊 السجلات والطوارئ",
+          "route": "mi:1:i:11:16",
+          "connection": "SPECIFICATION"
+        }
+      ]
+    },
+    {
+      "section": "12",
+      "title": "📨 الدعم والبلاغات",
+      "connected": 0,
+      "specificationOnly": [
+        {
+          "label": "📨 صندوق التذاكر",
+          "route": "mi:1:i:12:01",
+          "connection": "SPECIFICATION"
+        },
+        {
+          "label": "➕ إنشاء تذكرة",
+          "route": "mi:1:i:12:02",
+          "connection": "SPECIFICATION"
+        },
+        {
+          "label": "🚨 بلاغات الإساءة والاحتيال",
+          "route": "mi:1:i:12:03",
+          "connection": "SPECIFICATION"
+        },
+        {
+          "label": "🎓 استفسارات الطلاب",
+          "route": "mi:1:i:12:04",
+          "connection": "SPECIFICATION"
+        },
+        {
+          "label": "📝 تصحيح المحتوى",
+          "route": "mi:1:i:12:05",
+          "connection": "SPECIFICATION"
+        },
+        {
+          "label": "🧭 تصنيف الطلبات",
+          "route": "mi:1:i:12:06",
+          "connection": "SPECIFICATION"
+        },
+        {
+          "label": "👥 التوزيع والتكليف",
+          "route": "mi:1:i:12:07",
+          "connection": "SPECIFICATION"
+        },
+        {
+          "label": "💬 الردود والمتابعة",
+          "route": "mi:1:i:12:08",
+          "connection": "SPECIFICATION"
+        },
+        {
+          "label": "📎 المرفقات والأدلة",
+          "route": "mi:1:i:12:09",
+          "connection": "SPECIFICATION"
+        },
+        {
+          "label": "🔐 البلاغات السرية",
+          "route": "mi:1:i:12:10",
+          "connection": "SPECIFICATION"
+        },
+        {
+          "label": "⏳ الأولويات والمهل",
+          "route": "mi:1:i:12:11",
+          "connection": "SPECIFICATION"
+        },
+        {
+          "label": "🔄 التصعيد والاعتراضات",
+          "route": "mi:1:i:12:12",
+          "connection": "SPECIFICATION"
+        },
+        {
+          "label": "📋 نماذج الدعم",
+          "route": "mi:1:i:12:13",
+          "connection": "SPECIFICATION"
+        },
+        {
+          "label": "💡 الاقتراحات والتطوير",
+          "route": "mi:1:i:12:14",
+          "connection": "SPECIFICATION"
+        },
+        {
+          "label": "📊 تقارير الدعم",
+          "route": "mi:1:i:12:15",
+          "connection": "SPECIFICATION"
+        },
+        {
+          "label": "⚙️ إعدادات الدعم",
+          "route": "mi:1:i:12:16",
+          "connection": "SPECIFICATION"
+        }
+      ]
+    },
+    {
+      "section": "13",
+      "title": "📊 الإحصائيات والتقارير",
+      "connected": 2,
+      "specificationOnly": [
+        {
+          "label": "👥 نمو المجموعات",
+          "route": "mi:1:i:13:02",
+          "connection": "SPECIFICATION"
+        },
+        {
+          "label": "🔐 العضوية والاشتراكات",
+          "route": "mi:1:i:13:03",
+          "connection": "SPECIFICATION"
+        },
+        {
+          "label": "👑 نشاط المشرفين",
+          "route": "mi:1:i:13:05",
+          "connection": "SPECIFICATION"
+        },
+        {
+          "label": "📺 نشر القنوات",
+          "route": "mi:1:i:13:06",
+          "connection": "SPECIFICATION"
+        },
+        {
+          "label": "📢 الحملات والإذاعة",
+          "route": "mi:1:i:13:07",
+          "connection": "SPECIFICATION"
+        },
+        {
+          "label": "🎮 مسابقات وتصويت",
+          "route": "mi:1:i:13:08",
+          "connection": "SPECIFICATION"
+        },
+        {
+          "label": "👋 تفاعل الأعضاء",
+          "route": "mi:1:i:13:09",
+          "connection": "SPECIFICATION"
+        },
+        {
+          "label": "🎓 المحتوى التعليمي",
+          "route": "mi:1:i:13:10",
+          "connection": "SPECIFICATION"
+        },
+        {
+          "label": "🤖 المساعد والتكلفة",
+          "route": "mi:1:i:13:11",
+          "connection": "SPECIFICATION"
+        },
+        {
+          "label": "📨 الدعم والتذاكر",
+          "route": "mi:1:i:13:12",
+          "connection": "SPECIFICATION"
+        },
+        {
+          "label": "⏱️ الأداء والصحة",
+          "route": "mi:1:i:13:13",
+          "connection": "SPECIFICATION"
+        },
+        {
+          "label": "🎯 مقارنة الشبكات",
+          "route": "mi:1:i:13:14",
+          "connection": "SPECIFICATION"
+        },
+        {
+          "label": "📤 تقارير وتصدير",
+          "route": "mi:1:i:13:15",
+          "connection": "SPECIFICATION"
+        },
+        {
+          "label": "⚙️ قياس وخصوصية",
+          "route": "mi:1:i:13:16",
+          "connection": "SPECIFICATION"
+        }
+      ]
+    },
+    {
+      "section": "14",
+      "title": "🔗 التكاملات والبيانات",
+      "connected": 0,
+      "specificationOnly": [
+        {
+          "label": "🔌 مركز التكاملات",
+          "route": "mi:1:i:14:01",
+          "connection": "SPECIFICATION"
+        },
+        {
+          "label": "🌐 منصة منارتك API",
+          "route": "mi:1:i:14:02",
+          "connection": "SPECIFICATION"
+        },
+        {
+          "label": "📚 مزامنة المحتوى",
+          "route": "mi:1:i:14:03",
+          "connection": "SPECIFICATION"
+        },
+        {
+          "label": "📥 استيراد البيانات",
+          "route": "mi:1:i:14:04",
+          "connection": "SPECIFICATION"
+        },
+        {
+          "label": "📤 تصدير البيانات",
+          "route": "mi:1:i:14:05",
+          "connection": "SPECIFICATION"
+        },
+        {
+          "label": "📂 إدارة الملفات",
+          "route": "mi:1:i:14:06",
+          "connection": "SPECIFICATION"
+        },
+        {
+          "label": "🧩 مصادر المعرفة",
+          "route": "mi:1:i:14:07",
+          "connection": "SPECIFICATION"
+        },
+        {
+          "label": "🤖 مزودو AI",
+          "route": "mi:1:i:14:08",
+          "connection": "SPECIFICATION"
+        },
+        {
+          "label": "📺 Telegram والحقوق",
+          "route": "mi:1:i:14:09",
+          "connection": "SPECIFICATION"
+        },
+        {
+          "label": "🧵 هويات البوتات",
+          "route": "mi:1:i:14:10",
+          "connection": "SPECIFICATION"
+        },
+        {
+          "label": "🔗 Webhooks وتدفق الأحداث",
+          "route": "mi:1:i:14:11",
+          "connection": "SPECIFICATION"
+        },
+        {
+          "label": "🗂️ قاموس البيانات",
+          "route": "mi:1:i:14:12",
+          "connection": "SPECIFICATION"
+        },
+        {
+          "label": "🔒 حدود الوصول",
+          "route": "mi:1:i:14:13",
+          "connection": "SPECIFICATION"
+        },
+        {
+          "label": "🕓 المزامنة والأخطاء",
+          "route": "mi:1:i:14:14",
+          "connection": "SPECIFICATION"
+        },
+        {
+          "label": "🧪 اختبار الاتصالات",
+          "route": "mi:1:i:14:15",
+          "connection": "SPECIFICATION"
+        },
+        {
+          "label": "⚙️ إعدادات التكامل",
+          "route": "mi:1:i:14:16",
+          "connection": "SPECIFICATION"
+        }
+      ]
+    },
+    {
+      "section": "15",
+      "title": "⚙️ الإعدادات والأتمتة",
+      "connected": 1,
+      "specificationOnly": [
+        {
+          "label": "👥 إعدادات المجموعات",
+          "route": "mi:1:i:15:02",
+          "connection": "SPECIFICATION"
+        },
+        {
+          "label": "🧩 ميزات النظام",
+          "route": "mi:1:i:15:03",
+          "connection": "SPECIFICATION"
+        },
+        {
+          "label": "📑 قوالب سياسات",
+          "route": "mi:1:i:15:04",
+          "connection": "SPECIFICATION"
+        },
+        {
+          "label": "⏰ المواعيد والأوقات",
+          "route": "mi:1:i:15:05",
+          "connection": "SPECIFICATION"
+        },
+        {
+          "label": "🔄 جدولة المهام",
+          "route": "mi:1:i:15:06",
+          "connection": "SPECIFICATION"
+        },
+        {
+          "label": "🧠 منشئ القواعد",
+          "route": "mi:1:i:15:07",
+          "connection": "SPECIFICATION"
+        },
+        {
+          "label": "🎯 الأحداث والشروط",
+          "route": "mi:1:i:15:08",
+          "connection": "SPECIFICATION"
+        },
+        {
+          "label": "⚡ الإجراءات الآلية",
+          "route": "mi:1:i:15:09",
+          "connection": "SPECIFICATION"
+        },
+        {
+          "label": "🧪 المحاكاة والمعاينة",
+          "route": "mi:1:i:15:10",
+          "connection": "SPECIFICATION"
+        },
+        {
+          "label": "🚥 الأولويات والتعارض",
+          "route": "mi:1:i:15:11",
+          "connection": "SPECIFICATION"
+        },
+        {
+          "label": "🧯 إيقاف القواعد",
+          "route": "mi:1:i:15:12",
+          "connection": "SPECIFICATION"
+        },
+        {
+          "label": "🔔 التنبيهات الآلية",
+          "route": "mi:1:i:15:13",
+          "connection": "SPECIFICATION"
+        },
+        {
+          "label": "📦 نسخ ونقل الإعدادات",
+          "route": "mi:1:i:15:14",
+          "connection": "SPECIFICATION"
+        },
+        {
+          "label": "📜 سجل التعديلات والتراجع",
+          "route": "mi:1:i:15:15",
+          "connection": "SPECIFICATION"
+        },
+        {
+          "label": "🔐 الحوكمة والتفويض",
+          "route": "mi:1:i:15:16",
+          "connection": "SPECIFICATION"
+        }
+      ]
+    },
+    {
+      "section": "16",
+      "title": "🚨 الأمان والتشغيل",
+      "connected": 0,
+      "specificationOnly": [
+        {
+          "label": "🚨 مركز الحالة والطوارئ",
+          "route": "mi:1:i:16:01",
+          "connection": "SPECIFICATION"
+        },
+        {
+          "label": "🩺 فحوص الصحة",
+          "route": "mi:1:i:16:02",
+          "connection": "SPECIFICATION"
+        },
+        {
+          "label": "🔒 هوية البوت والتوكنات",
+          "route": "mi:1:i:16:03",
+          "connection": "SPECIFICATION"
+        },
+        {
+          "label": "👮 تدقيق الصلاحيات",
+          "route": "mi:1:i:16:04",
+          "connection": "SPECIFICATION"
+        },
+        {
+          "label": "🧱 تصاريح المجموعات",
+          "route": "mi:1:i:16:05",
+          "connection": "SPECIFICATION"
+        },
+        {
+          "label": "🛡️ الأمن والتهديدات",
+          "route": "mi:1:i:16:06",
+          "connection": "SPECIFICATION"
+        },
+        {
+          "label": "📜 سجل التدقيق",
+          "route": "mi:1:i:16:07",
+          "connection": "SPECIFICATION"
+        },
+        {
+          "label": "⚖️ غرفة الحوادث",
+          "route": "mi:1:i:16:08",
+          "connection": "SPECIFICATION"
+        },
+        {
+          "label": "⛔ مفاتيح الإيقاف",
+          "route": "mi:1:i:16:09",
+          "connection": "SPECIFICATION"
+        },
+        {
+          "label": "🔄 الطوابير والتعافي",
+          "route": "mi:1:i:16:10",
+          "connection": "SPECIFICATION"
+        },
+        {
+          "label": "💾 النسخ الاحتياطي والاستعادة",
+          "route": "mi:1:i:16:11",
+          "connection": "SPECIFICATION"
+        },
+        {
+          "label": "🧪 الاختبارات الآمنة",
+          "route": "mi:1:i:16:12",
+          "connection": "SPECIFICATION"
+        },
+        {
+          "label": "🔍 مراقبة الأخطاء",
+          "route": "mi:1:i:16:13",
+          "connection": "SPECIFICATION"
+        },
+        {
+          "label": "🧩 بيئات التشغيل",
+          "route": "mi:1:i:16:14",
+          "connection": "SPECIFICATION"
+        },
+        {
+          "label": "🧹 الخصوصية والاحتفاظ",
+          "route": "mi:1:i:16:15",
+          "connection": "SPECIFICATION"
+        },
+        {
+          "label": "⚙️ إجراءات التشغيل",
+          "route": "mi:1:i:16:16",
+          "connection": "SPECIFICATION"
+        }
+      ]
+    }
+  ],
+  "runtimeChecks": [
+    "HTTP_WEBHOOK",
+    "STUDENT_HOME_AND_ALL_ROOT_ENTRIES",
+    "OWNER_AND_STAFF_INLINE",
+    "GROUP_TOPIC_BOUNDARIES",
+    "EDIT_MESSAGE",
+    "CALLBACK_FEEDBACK",
+    "AUTHORIZATION",
+    "REPLAY",
+    "EXPIRY",
+    "STOP",
+    "PRIVATE_PAYLOAD_REDACTION"
+  ],
+  "testFiles": [
+    "tests/phase2-navigation-runtime.test.ts",
+    "tests/owner-inline-navigation.test.ts",
+    "tests/public-navigation-inline.test.ts",
+    "tests/staff-inline-navigation.test.ts",
+    "tests/group-library-inline.test.ts",
+    "tests/community-folder.test.ts"
+  ],
+  "liveRequests": 0,
+  "originalDatabaseWrites": 0,
+  "limitations": [
+    "Local fake-provider runtime is not real Telegram acceptance.",
+    "Connected entry points can contain incomplete subfeatures.",
+    "Remaining specification-only features must retain their official phase and must not be described as working.",
+    "No deployment, merge or live moderation was performed."
+  ]
+}
