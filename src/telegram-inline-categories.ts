@@ -7,6 +7,7 @@ import {OwnerTelegramCategoryMenu,ownerCategoryMenuLabel,parseOwnerCategoryActio
 import {ownerCategoryChoiceToken} from './education-category-policy.js';
 import {menuLabels} from './telegram-menu.js';
 import {EducationCategoryEditor} from './education-category-editor.js';
+import {ownerPreviewCancelData} from './telegram-owner-preview-cancel.js';
 export function validOwnerCategoryInlineRoute(data:string):boolean{
  if(typeof data!=='string'||Buffer.byteLength(data)>64)return false;
  const m=/^(?:ec:1:[hn]|ec:1:[rap]:[A-Za-z0-9_-]{24})$/u.exec(data);return m?.[0]===data;
@@ -27,7 +28,7 @@ export async function renderOwnerInlineCategories(store:BotStore,policy:Policy,e
   if(data.startsWith('ec:1:p:')){
    const choice=await editor.chooseParent(actor,'c_'+data.slice(7));if(!choice)return null;
    if(choice.kind==='PAGE')return pickerScreen(await editor.parentPicker(actor,choice.id,choice.returnPage,choice.page,choice.proof,choice.epoch));
-   return {text:'<b>معاينة تغيير القسم الأب</b>\nالقسم الأب: '+escape(choice.name)+'\nلم يُحفظ التغيير بعد. ينتهي التأكيد بعد دقيقتين.',keyboard:{inline_keyboard:[[button('✅ تأكيد الحفظ','ec:1:a:'+choice.ref.slice(2))],[button('إلغاء','ec:1:h')]]}};
+   return {text:'<b>معاينة تغيير القسم الأب</b>\nالقسم الأب: '+escape(choice.name)+'\nلم يُحفظ التغيير بعد. ينتهي التأكيد بعد دقيقتين.',keyboard:{inline_keyboard:[[button('✅ تأكيد الحفظ','ec:1:a:'+choice.ref.slice(2))],[button('إلغاء',ownerPreviewCancelData(choice.ref))]]}};
   }
   let label=ownerCategoryMenuLabel,returnPage=0;
   if(data==='ec:1:n')label='edit:ROOT';

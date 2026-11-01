@@ -36,6 +36,14 @@ for(const engine of ['json','sqlite'] as const){
    assert.equal((await f.store.snapshot()).deliveries.length,0);
   }finally{await f.close();}
  });
+ test('cancelling category rename revokes the pending text confirmation ('+engine+')',async()=>{
+  const f=await fixture();try{
+   const root=await f.app().handle(event(800,'mi:1:i:10:16')),detail=await f.app().handle(event(801,select(root,'قسم 0')));
+   await f.app().handle(event(802,select(detail,'تغيير الاسم')));const review=await f.app().handle(message(803,'اسم ملغى')),confirm=select(review,'تأكيد الحفظ');
+   assert.equal((await f.app().handle(event(804,select(review,'إلغاء')))).status,'APPLIED');
+   assert.equal((await f.app().handle(event(805,confirm))).status,'DENIED');assert.equal((await f.store.snapshot()).educationCategories[0]!.title,'قسم 0');
+  }finally{await f.close();}
+ });
  test('owner category text confirmation rechecks expiry, dashboard and restored boolean flags ('+engine+')',async()=>{
   const f=await fixture();try{
    let root=await f.app().handle(event(230,'ec:1:h')),detail=await f.app().handle(event(231,select(root,'قسم 0')));await f.app().handle(event(232,select(detail,'تغيير الاسم')));

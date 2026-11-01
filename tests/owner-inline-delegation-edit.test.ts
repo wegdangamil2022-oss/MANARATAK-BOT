@@ -49,6 +49,16 @@ for(const engine of ['json','sqlite'] as const){
    assert.equal((await f.app().handle(event(14,'od:1:g:0',200))).status,'DENIED');assert.equal((await f.app().handle(event(15,'od:1:g:0',100,true))).status,'DENIED');
   }finally{await f.close();}
  });
+ test('cancelling grant and revoke reviews preserves the current delegation ('+engine+')',async()=>{
+  const f=await fixture();try{
+   await f.begin(600);let review=await f.app().handle(message(605,'200')),confirm=select(review,'تأكيد التفويض');
+   await f.app().handle(event(606,select(review,'إلغاء')));assert.equal((await f.app().handle(event(607,confirm))).status,'DENIED');assert.equal((await f.store.snapshot()).grants.length,0);
+   await f.begin(610);review=await f.app().handle(message(615,'200'));await f.app().handle(event(616,select(review,'تأكيد التفويض')));
+   const root=await f.app().handle(event(617,'mi:1:i:03:01')),detail=await f.app().handle(event(618,select(root,'👤 200'))),revoke=await f.app().handle(event(619,select(detail,'مراجعة سحب')));
+   confirm=select(revoke,'تأكيد السحب');await f.app().handle(event(620,select(revoke,'إلغاء')));assert.equal((await f.app().handle(event(621,confirm))).status,'DENIED');
+   assert.equal(f.policy.has(await f.store.snapshot(),'200','content.publish',CHAT,NOW),true);
+  }finally{await f.close();}
+ });
  test('delegation UI excludes unavailable capabilities and rejects forged scope choices ('+engine+')',async()=>{
   const f=await fixture();try{
    const root=await f.app().handle(event(80,'mi:1:i:03:01')),groups=await f.app().handle(event(81,select(root,'إنشاء تفويض'))),caps=await f.app().handle(event(82,select(groups,CHAT)));

@@ -6,6 +6,7 @@ import {studioId,type StudioSettings,type StudioTemplate,type StudioButton,type 
 import type {StudioNativeKeyboard,StudioNativeButton} from './telegram-studio-rich.js';
 import {renderStudentInline} from './telegram-inline-student.js';
 import {studioPresets} from './button-studio-presets.js';
+import {ownerPreviewCancelData} from './telegram-owner-preview-cancel.js';
 export interface OwnerStudioScreen extends OwnerInlineScreen{nativeKeyboard?:StudioNativeKeyboard;}
 const n='(0|[1-9][0-9]{0,5})',rev='([1-9][0-9]{0,6})',id='([a-f0-9]{12})',mode='(0[1-9]|1[0-6])';
 const patterns=[new RegExp('^st:1:l:'+mode+':'+n+'$','u'),/^st:1:n$/u,/^st:1:g:(?:education|welcome)$/u,/^st:1:c:[A-Za-z0-9_-]{24}$/u,
@@ -118,7 +119,7 @@ export async function renderOwnerInlineStudio(store:BotStore,policy:Policy,actor
   if(action==='r'||action==='x'){
    const target=parts[5]!,v=action==='r'?t.versions.find(v=>v.revision===Number(target)):undefined;if(action==='r'?!v:!button)return null;
    const ref=await svc.issueDecision(actor,id,revision,action==='r'?'RESTORE':'DELETE_BUTTON',target);
-   return ui(action==='r'?'<b>معاينة الاستعادة</b>\nالقالب الحالي: '+studioEscape(t.draft.name)+'\nاسم النسخة المختارة: '+studioEscape(v!.content.name)+'\nعدد الأزرار: '+v!.content.buttons.length+'\nسيُحفظ إصدار جديد ولن تُمسح الإصدارات القديمة.':'<b>معاينة حذف الزر</b>\nسيُحذف من المسودة: '+studioEscape(button!.title),[[b('✅ تأكيد','st:1:c:'+ref.slice(2))],[b('إلغاء',key('d',t))],root]);
+   return ui(action==='r'?'<b>معاينة الاستعادة</b>\nالقالب الحالي: '+studioEscape(t.draft.name)+'\nاسم النسخة المختارة: '+studioEscape(v!.content.name)+'\nعدد الأزرار: '+v!.content.buttons.length+'\nسيُحفظ إصدار جديد ولن تُمسح الإصدارات القديمة.':'<b>معاينة حذف الزر</b>\nسيُحذف من المسودة: '+studioEscape(button!.title),[[b('✅ تأكيد','st:1:c:'+ref.slice(2))],[b('إلغاء',ownerPreviewCancelData(ref))],root]);
   }
   if(action==='b')return button?buttonScreen(t,button):null;
   if(action==='H'&&button){

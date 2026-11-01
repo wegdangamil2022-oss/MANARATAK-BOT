@@ -48,6 +48,14 @@ for(const engine of ['json','sqlite'] as const){
    assert.equal((await f.app().handle(event(6,token))).status,'DENIED');
   }finally{await f.close();}
  });
+ test('cancelling library archive prevents its old confirmation ('+engine+')',async()=>{
+  const f=await fixture();try{
+   const list=await f.app().handle(event(800,'mi:1:i:10:09')),detail=await f.app().handle(event(801,select(list,'ol:1:d:')));
+   const review=await f.app().handle(event(802,select(detail,'ol:1:a:'))),confirm=select(review,'ol:1:c:');
+   assert.equal((await f.app().handle(event(803,select(review,'oc:1:k:')))).status,'APPLIED');
+   assert.equal((await f.app().handle(event(804,confirm))).status,'DENIED');assert.equal((await f.store.snapshot()).educationResources[0]!.status,'PUBLISHED');
+  }finally{await f.close();}
+ });
  test('library refuses nonowners, group context, changed copy, disabled dashboard and expired review ('+engine+')',async()=>{
   const f=await fixture();try{
    assert.equal((await f.app().handle(event(10,'mi:1:i:10:09',300))).status,'DENIED');
