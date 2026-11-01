@@ -13,7 +13,7 @@ export class GroupProtectionPolicyService{
  constructor(private readonly store:BotStore,private readonly policy:Policy,private readonly clock:()=>number=Date.now,private readonly enforcer?:ProtectionEnforcer){}
  canEnforce(config:GroupProtectionRecord['policy']):boolean{
   return Boolean(this.enforcer&&config.rules.filter(r=>r.enabled).every(r=>this.enforcer!.supports(r.action))&&
-   (!config.flood?.enabled||this.enforcer.supports(config.flood.action)));
+   (!config.flood?.enabled||this.enforcer.supports(config.flood.action))&&(!config.escalation?.enabled||this.enforcer.supports('MUTE')));
  }
  private allowed(state:BotState,actor:string,chat:string,now:number):boolean{
   return clockValid(now)&&this.policy.canUseChat(state,chat,'moderation')&&this.policy.has(state,actor,'chat.manage',chat,now);
@@ -118,18 +118,22 @@ export class GroupProtectionPolicyService{
    const matches=result.matchedRuleIds.length+(flood==='EXCEEDED'?1:0);
    const choices=['REVIEW','WARN','DELETE','MUTE'];
    const floodAction=flood==='EXCEEDED'?record.policy.flood!.action:null;
-   const action=floodAction&&choices.indexOf(floodAction)>choices.indexOf(result.proposedAction??'')?floodAction:result.proposedAction;
+   let action=floodAction&&choices.indexOf(floodAction)>choices.indexOf(result.proposedAction??'')?floodAction:result.proposedAction;
+   const escalation=record.policy.escalation;
+   const warningSource=escalation?.enabled?JSON.stringify(state.warnings.filter(w=>w.chatId===chat&&w.memberId===member)):null;
+   const previousAction=action;
+   if(matches&&action==='WARN'&&escalation?.enabled&&state.warnings.filter(w=>w.chatId===chat&&w.memberId===member&&w.active&&w.at<=now&&w.at>now-escalation.windowMs).length>=escalation.afterWarnings)action='MUTE';
    if(matches)state.audit.push({updateKey:key,decision:'NOOP',
     reason:(record.policy.mode==='ENFORCE'?'PROTECTION_ENFORCEMENT_CLAIM:':'PROTECTION_MONITOR_MATCH:')+'revision='+record.policy.revision+';action='+action+';rules='+matches,
     policyVersion:record.chatPolicyVersion,at:now});
-   if(matches&&action&&record.policy.mode==='ENFORCE')return {record:structuredClone(record),action,key,at:now};
+   if(matches&&action&&record.policy.mode==='ENFORCE')return {record:structuredClone(record),action,key,at:now,warningSource,escalated:previousAction==='WARN'&&action==='MUTE'};
    return 'OBSERVED';
   });
   if(typeof prepared==='string')return prepared;
   const current=(state:BotState)=>{
    const now=this.clock(),rows=state.protectionPolicies?.filter(r=>r.policy.chatId===chat)??[];
    return clockValid(now)&&now>=prepared.at&&now<prepared.at+5000&&rows.length===1&&
-    JSON.stringify(rows[0])===JSON.stringify(prepared.record)&&this.allowed(state,prepared.record.updatedBy,chat,now)&&
+    JSON.stringify(rows[0])===JSON.stringify(prepared.record)&&(!prepared.escalated||state.warnings.filter(w=>w.chatId===chat&&w.memberId===member&&w.active&&w.at<=now&&w.at>now-prepared.record.policy.escalation!.windowMs).length>=prepared.record.policy.escalation!.afterWarnings)&&(prepared.warningSource===null||prepared.warningSource===JSON.stringify(state.warnings.filter(w=>w.chatId===chat&&w.memberId===member)))&&this.allowed(state,prepared.record.updatedBy,chat,now)&&
     prepared.record.chatPolicyVersion===this.policy.chatRevision(state,chat)&&
     !this.policy.isOwner(member)&&!this.policy.has(state,member,'chat.manage',chat,now)&&!protectionMemberExempt(prepared.record.policy,member,now);
   };

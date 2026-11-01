@@ -5,7 +5,7 @@ export type ProtectionAction='REVIEW'|'WARN'|'DELETE'|'MUTE';
 export type ProtectionMessageType='TEXT'|'PHOTO'|'VIDEO'|'ANIMATION'|'STICKER'|'DOCUMENT'|'AUDIO'|'VOICE'|'VIDEO_NOTE'|'CONTACT'|'LOCATION'|'POLL';
 type BaseRule={id:string;enabled:boolean;action:ProtectionAction};
 export type ProtectionRule=BaseRule & ({kind:'WORD'|'PHRASE';value:string}|{kind:'TYPE';type:ProtectionMessageType}|{kind:'LINK';hosts:'*'|string[]}|{kind:'FORWARD'});
-export interface ProtectionPolicy{chatId:string;revision:number;mode:'OFF'|'MONITOR'|'ENFORCE';rules:ProtectionRule[];allowedDomains:string[];allowedPhrases:string[];exemptMemberIds:string[];flood?:FloodPolicy;temporaryExemptions?:{memberId:string;createdAt:number;expiresAt:number}[];}
+export interface ProtectionPolicy{chatId:string;revision:number;mode:'OFF'|'MONITOR'|'ENFORCE';rules:ProtectionRule[];allowedDomains:string[];allowedPhrases:string[];exemptMemberIds:string[];flood?:FloodPolicy;escalation?:{enabled:boolean;afterWarnings:number;windowMs:number};temporaryExemptions?:{memberId:string;createdAt:number;expiresAt:number}[];}
 export interface ProtectionMessage{chatId:string;memberId:string;type:ProtectionMessageType;text?:string;caption?:string;links?:string[];forwarded?:boolean;}
 export interface ProtectionEvaluation{status:'INVALID_POLICY'|'INVALID_MESSAGE'|'OFF'|'EXEMPT'|'CLEAR'|'MATCH';matchedRuleIds:string[];proposedAction:ProtectionAction|null;authorizedToSend:false;}
 const object=(v:unknown):v is Record<string,unknown>=>v!==null&&typeof v==='object'&&!Array.isArray(v);
@@ -23,6 +23,11 @@ function host(v:unknown):v is string{
  try{const u=new URL('https://'+v);return u.hostname===v&&u.port===''&&u.username===''&&u.password===''&&u.pathname==='/';}catch{return false;}
 }
 const stringList=(v:unknown,check:(x:unknown)=>boolean,max:number):v is string[]=>Array.isArray(v)&&v.length<=max&&new Set(v).size===v.length&&v.every(check);
+function validEscalation(v:unknown):boolean{
+ return object(v)&&keys(v,['enabled','afterWarnings','windowMs'])&&typeof v.enabled==='boolean'&&typeof v.afterWarnings==='number'&&
+  Number.isSafeInteger(v.afterWarnings)&&v.afterWarnings>=1&&v.afterWarnings<=20&&typeof v.windowMs==='number'&&
+  Number.isSafeInteger(v.windowMs)&&v.windowMs>=60000&&v.windowMs<=86400000;
+}
 function validTemporaryExemptions(v:unknown):boolean{
  if(!Array.isArray(v)||v.length>100)return false;
  const seen=new Set<string>();return v.every(e=>{
@@ -36,10 +41,10 @@ export function protectionMemberExempt(config:ProtectionPolicy,memberId:string,n
  return config.exemptMemberIds.includes(memberId)||Boolean(config.temporaryExemptions?.some(e=>e.memberId===memberId&&now>=e.createdAt&&now<e.expiresAt));
 }
 export function isValidProtectionPolicy(v:unknown):v is ProtectionPolicy{
- if(!object(v)||!keys(v,['chatId','revision','mode','rules','allowedDomains','allowedPhrases','exemptMemberIds',...(Object.hasOwn(v,'flood')?['flood']:[]),...(Object.hasOwn(v,'temporaryExemptions')?['temporaryExemptions']:[])])||Object.hasOwn(v,'flood')&&!isValidFloodPolicy(v.flood)||!group(v.chatId)||
+ if(!object(v)||!keys(v,['chatId','revision','mode','rules','allowedDomains','allowedPhrases','exemptMemberIds',...(Object.hasOwn(v,'flood')?['flood']:[]),...(Object.hasOwn(v,'temporaryExemptions')?['temporaryExemptions']:[]),...(Object.hasOwn(v,'escalation')?['escalation']:[])])||Object.hasOwn(v,'flood')&&!isValidFloodPolicy(v.flood)||!group(v.chatId)||
   !Number.isSafeInteger(v.revision)||typeof v.revision!=='number'||v.revision<1||(typeof v.mode!=='string'||!['OFF','MONITOR','ENFORCE'].includes(v.mode))||
   !stringList(v.allowedDomains,host,100)||!stringList(v.allowedPhrases,phrase,100)||!stringList(v.exemptMemberIds,member,100)||
-  Object.hasOwn(v,'temporaryExemptions')&&!validTemporaryExemptions(v.temporaryExemptions)||!Array.isArray(v.rules)||v.rules.length>100)return false;
+  Object.hasOwn(v,'escalation')&&!validEscalation(v.escalation)||Object.hasOwn(v,'temporaryExemptions')&&!validTemporaryExemptions(v.temporaryExemptions)||!Array.isArray(v.rules)||v.rules.length>100)return false;
  const seen=new Set<string>();
  return v.rules.every(r=>{
   if(!object(r)||typeof r.id!=='string'||!/^[A-Za-z0-9][A-Za-z0-9_-]{0,47}$/u.test(r.id)||seen.has(r.id)||
