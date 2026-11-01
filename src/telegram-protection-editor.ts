@@ -74,6 +74,7 @@ export class TelegramProtectionEditor{
    rows.push([btn('📋 النطاقات المسموحة',key('s',f,':0:1')),btn('📋 العبارات المسموحة',key('s',f,':0:2'))]);
    rows.push([btn('🌊 مكافحة الفلود',key('S',f))]);
    rows.push([btn('🔒 أنواع الرسائل',key('y',f,':0'))]);
+   rows.push([btn('🔐 أقفال أذونات Telegram','lk:1:h')]);
    rows.push([btn('📋 القواعد',key('l',f,':0')),btn('🧪 اختبار القواعد',key('t',f))]);
    rows.push([btn('👁️ تشغيل المراقبة',key('m',f)),btn('⏹ إيقاف الفحص',key('o',f))]);
    if(this.service.canEnforce({...f.config,revision:Math.max(1,f.config.revision)}))rows.push([btn('⚠️ مراجعة تفعيل التنفيذ',key('H',f))]);

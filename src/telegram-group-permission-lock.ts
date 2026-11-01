@@ -6,10 +6,10 @@ import {protectionUIEpoch,type AdminUIAccess} from './protection-ui-access.js';
 import type {TelegramInlineKeyboard} from './telegram-inline-owner.js';
 type Screen={text:string;keyboard:TelegramInlineKeyboard;access:AdminUIAccess;status:'APPLIED'|'DENIED'|'UNKNOWN';reason:string};
 const GROUP='(-[1-9][0-9]{0,15}):([1-9][0-9]{0,9}):(0|[1-9][0-9]{0,2})';
-const detail=new RegExp('^lk:1:g:'+GROUP+'$','u'),action=new RegExp('^lk:1:([lu]):'+GROUP+':([mvl])$','u');
+const detail=new RegExp('^lk:1:[gt]:'+GROUP+'$','u'),action=new RegExp('^lk:1:([lu]):'+GROUP+':([mvlpidsaonq])$','u');
 export const validGroupPermissionRoute=(data:string)=>/^lk:1:(?:h|p:(?:0|[1-9][0-9]{0,2})|[cx]:[A-Za-z0-9_-]{24})$/u.exec(data)?.[0]===data||detail.exec(data)?.[0]===data||action.exec(data)?.[0]===data;
 const labels:Record<typeof GROUP_PERMISSION_KEYS[number],string>={can_send_messages:'الرسائل النصية وجهات الاتصال والمواقع',can_send_audios:'الصوتيات',can_send_documents:'الملفات',can_send_photos:'الصور',can_send_videos:'الفيديو',can_send_video_notes:'الدوائر المرئية',can_send_voice_notes:'الرسائل الصوتية',can_send_polls:'الاستطلاعات',can_send_other_messages:'الملصقات والحركة والألعاب',can_add_web_page_previews:'معاينات الروابط',can_react_to_messages:'التفاعلات',can_edit_tag:'تعديل الوسم',can_change_info:'معلومات المجموعة',can_invite_users:'دعوة الأعضاء',can_pin_messages:'التثبيت',can_manage_topics:'إنشاء المواضيع'};
-const modes:Record<string,GroupLockMode>={m:'MESSAGES',v:'MEDIA',l:'LINKS'};
+const modes:Record<string,GroupLockMode>={m:'MESSAGES',v:'MEDIA',l:'LINKS',p:'PHOTOS',i:'VIDEOS',d:'DOCUMENTS',s:'OTHER',a:'AUDIOS',o:'VOICE',n:'VIDEO_NOTES',q:'POLLS'};
 const b=(text:string,callback_data:string)=>({text,callback_data});
 function groups(s:BotState,p:Policy,actor:string,now:number):Chat[]{return s.chats.filter(c=>s.chats.filter(x=>x.id===c.id).length===1&&groupPermissionEpoch(s,p,actor,c.id,now)!==null).sort((a,b)=>a.id.localeCompare(b.id));}
 const groupKey=(c:Chat,page:number)=>'lk:1:g:'+c.id+':'+c.version+':'+page;
@@ -36,7 +36,9 @@ export class TelegramGroupPermissionLock{
   const s=await this.store.snapshot(),now=this.clock(),all=groups(s,this.policy,actor,now),d=detail.exec(data),a=action.exec(data);
   if(d||a){const m=(d??a)!,offset=a?1:0,chat=m[1+offset]!,version=Number(m[2+offset]),page=Number(m[3+offset]),c=all.slice(page*8,page*8+8).find(c=>c.id===chat&&c.version===version);if(!c)return null;
    if(a)return this.command(actor,chat,a[1]==='u'?'RESTORE':'LOCK',modes[a[5]!]!);
-   const stem=':'+chat+':'+version+':'+page+':';return this.build(s,actor,'<b>قفل وفتح المجموعة</b>\nالمجموعة: <code>'+chat+'</code>\nكل تغيير يبدأ بقراءة الأذونات الحالية ومعاينة وتأكيد. الفتح يستعيد لقطة قفل موثقة فقط؛ لا يفتح جميع الصلاحيات.',[[b('🔒 قفل الإرسال','lk:1:l'+stem+'m')],[b('🎞️ قفل الوسائط','lk:1:l'+stem+'v')],[b('🔗 قفل معاينات الروابط','lk:1:l'+stem+'l')],[b('🔓 استعادة ما قبل القفل','lk:1:u'+stem+'m')],[b('↩️ المجموعات','lk:1:p:'+page)]]);
+   if(data.startsWith('lk:1:t:'))return this.build(s,actor,'<b>قفل نوع محدد</b>\nالمجموعة: <code>'+chat+'</code>\nاختر النوع ثم راجع الأذونات قبل التأكيد. تبقى بقية الأذونات كما هي. Telegram يجمع الملصقات وGIF والألعاب في إذن واحد؛ لا فصل بينها من هذا القفل.',
+    [...(['p','i','d','s','a','o','n','q'] as const).map(code=>[b('🔒 '+labels[({p:'can_send_photos',i:'can_send_videos',d:'can_send_documents',s:'can_send_other_messages',a:'can_send_audios',o:'can_send_voice_notes',n:'can_send_video_notes',q:'can_send_polls'} as const)[code]],'lk:1:l:'+chat+':'+version+':'+page+':'+code)]),[b('↩️ قفل وفتح المجموعة',groupKey(c,page))]]);
+   const stem=':'+chat+':'+version+':'+page+':';return this.build(s,actor,'<b>قفل وفتح المجموعة</b>\nالمجموعة: <code>'+chat+'</code>\nكل تغيير يبدأ بقراءة الأذونات الحالية ومعاينة وتأكيد. الفتح يستعيد لقطة قفل موثقة فقط؛ لا يفتح جميع الصلاحيات.',[[b('🧩 قفل نوع محدد','lk:1:t:'+chat+':'+version+':'+page)],[b('🔒 قفل الإرسال','lk:1:l'+stem+'m')],[b('🎞️ قفل الوسائط','lk:1:l'+stem+'v')],[b('🔗 قفل معاينات الروابط','lk:1:l'+stem+'l')],[b('🔓 استعادة ما قبل القفل','lk:1:u'+stem+'m')],[b('↩️ المجموعات','lk:1:p:'+page)]]);
   }
   const page=data.startsWith('lk:1:p:')?Number(data.slice(7)):0,pages=Math.max(1,Math.ceil(all.length/8));if(page>=pages)return null;
   const rows=all.slice(page*8,page*8+8).map(c=>[b('👥 '+c.id,groupKey(c,page))]);const nav=[];if(page>0)nav.push(b('⬅️ السابق','lk:1:p:'+(page-1)));if(page+1<pages)nav.push(b('➡️ التالي','lk:1:p:'+(page+1)));if(nav.length)rows.push(nav);rows.push([this.policy.isOwner(actor)?b('↩️ قسم الحماية','mi:1:s:02:0'):b('🏠 الرئيسية','pn:1:h')]);

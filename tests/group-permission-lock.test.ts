@@ -9,7 +9,7 @@ import {EducationService} from '../src/education.js';
 import {EducationAdminFacade} from '../src/education-admin.js';
 import {ApprovedAnswerService,ResourceLinkService} from '../src/education-interactions.js';
 import {GroupPermissionLockService} from '../src/group-permission-lock.js';
-import {GROUP_PERMISSION_KEYS,readGroupPermissions,lockedGroupPermissions,type GroupPermissions} from '../src/group-permission-model.js';
+import {GROUP_PERMISSION_KEYS,GROUP_LOCK_SINGLE_PERMISSION,readGroupPermissions,lockedGroupPermissions,type GroupPermissions,type GroupLockMode} from '../src/group-permission-model.js';
 import {telegramGroupPermissionGateway,type GroupPermissionPort} from '../src/telegram-group-permission-gateway.js';
 import {TelegramUpdateApplication} from '../src/telegram-transport.js';
 import {TelegramReplyDispatcher} from '../src/telegram-replies.js';
@@ -29,6 +29,27 @@ for(const engine of ['json','sqlite'] as const){
  }
  type Result=Awaited<ReturnType<Awaited<ReturnType<typeof fixture>>['command']>>;
  const choose=(r:Result,starts:string)=>{const b=r.plan?.inlineMarkup?.inline_keyboard.flat().find(b=>b.text.startsWith(starts));assert.ok(b,JSON.stringify(r));return b.callback_data;};
+ test(engine+' every individual media lock changes exactly one permission and restores its original snapshot',async()=>{
+  const f=await fixture();try{
+   for(const [mode,key] of Object.entries(GROUP_LOCK_SINGLE_PERMISSION)){
+    const job=await f.service.preview('301',CHAT,'LOCK',mode as GroupLockMode);assert.ok(job);
+    const expected={...BASE,[key]:false};assert.deepEqual(job.after,expected);
+    assert.equal(await f.service.confirm('301',job.id),'CONFIRMED');assert.deepEqual(f.current(),expected);
+    const restore=await f.service.preview('301',CHAT,'RESTORE');assert.ok(restore);assert.deepEqual(restore.after,BASE);
+    assert.equal(await f.service.confirm('301',restore.id),'CONFIRMED');assert.deepEqual(f.current(),BASE);
+   }
+   assert.equal(f.calls(),16);
+  }finally{await f.close();}
+ });
+ test(engine+' media picker opens private previews without changing permissions and preserves back navigation',async()=>{
+  const f=await fixture();try{
+   const root=await f.click('lk:1:h'),group=await f.click(choose(root,'👥'));
+   const media=await f.click(choose(group,'🧩 قفل نوع محدد'));assert.match(media.plan!.text,/يجمع الملصقات/u);assert.equal(f.calls(),0);
+   const back=choose(media,'↩️ قفل وفتح');assert.equal(back,choose(root,'👥'));
+   const preview=await f.click(choose(media,'🔒 الصور'));assert.match(preview.plan!.text,/الصور: من مسموح إلى ممنوع/u);assert.equal(f.calls(),0);
+   assert.equal((await f.click(choose(preview,'✅'))).status,'APPLIED');assert.deepEqual(f.current(),{...BASE,can_send_photos:false});
+  }finally{await f.close();}
+ });
  test(engine+' lock and restore require private confirmation and restore exact original permissions',async()=>{
   const f=await fixture();try{
    let r=await f.command('/lock');assert.equal(r.plan!.chatId,'301');assert.equal(f.calls(),0);const route=choose(r,'✅');assert.equal((await f.click(route,302)).status,'DENIED');assert.equal((await f.click(route,301,true)).status,'DENIED');assert.equal((await f.click(route)).status,'APPLIED');assert.equal(f.current().can_send_messages,false);assert.equal(f.current().can_invite_users,false);assert.equal((await f.click(route)).status,'DENIED');assert.equal(f.calls(),1);

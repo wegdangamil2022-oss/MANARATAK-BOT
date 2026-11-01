@@ -1,7 +1,7 @@
 import {createHash,randomBytes} from 'node:crypto';
 import type {BotState,BotStore} from './store.js';
 import type {Policy} from './policy.js';
-import {equalGroupPermissions,lockedGroupPermissions,validGroupPermissions,type GroupLockMode,type GroupPermissionJob} from './group-permission-model.js';
+import {GROUP_LOCK_MODES,equalGroupPermissions,lockedGroupPermissions,validGroupPermissions,type GroupLockMode,type GroupPermissionJob} from './group-permission-model.js';
 import type {GroupPermissionPort} from './telegram-group-permission-gateway.js';
 const TTL=120000;
 export function groupPermissionEpoch(s:BotState,p:Policy,actor:string,chat:string,now:number,except=''):string|null{
@@ -20,7 +20,7 @@ export class GroupPermissionLockService{
  constructor(private readonly store:BotStore,private readonly policy:Policy,private readonly gateway:GroupPermissionPort,private readonly clock:()=>number){}
  async cancelForActor(actor:string):Promise<void>{await this.store.transaction(s=>{for(const j of s.groupPermissionJobs??[])if(j.actorId===actor&&j.status==='PREVIEW')j.status='CANCELLED';});}
  async preview(actor:string,chat:string,kind:'LOCK'|'RESTORE',mode:GroupLockMode='MESSAGES'):Promise<GroupPermissionJob|null>{
-  if(!['LOCK','RESTORE'].includes(kind)||!['MESSAGES','MEDIA','LINKS'].includes(mode))return null;
+  if(!['LOCK','RESTORE'].includes(kind)||!GROUP_LOCK_MODES.includes(mode))return null;
   const before=await this.store.snapshot(),now=this.clock(),source=epoch(before,this.policy,actor,chat,now);if(!source||blocked(before,chat)||(before.groupPermissionJobs?.length??0)>=1000)return null;
   const permissions=await this.gateway.read(chat);if(!permissions||!validGroupPermissions(permissions))return null;
   return this.store.transaction(s=>{
