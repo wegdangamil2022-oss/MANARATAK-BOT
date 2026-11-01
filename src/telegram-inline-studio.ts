@@ -8,6 +8,7 @@ import {renderStudentInline} from './telegram-inline-student.js';
 import {studioPresets} from './button-studio-presets.js';
 import {ownerPreviewCancelData} from './telegram-owner-preview-cancel.js';
 import {randomBytes} from 'node:crypto';
+import {studioComparisonText} from './studio-version-comparison.js';
 export interface OwnerStudioScreen extends OwnerInlineScreen{nativeKeyboard?:StudioNativeKeyboard;}
 const n='(0|[1-9][0-9]{0,5})',rev='([1-9][0-9]{0,6})',id='([a-f0-9]{12})',mode='(0[1-9]|1[0-6])';
 const patterns=[/^st:1:N:[A-Za-z0-9_-]{24}$/u,new RegExp('^st:1:l:'+mode+':'+n+'$','u'),/^st:1:n$/u,/^st:1:g:(?:education|welcome)$/u,/^st:1:c:[A-Za-z0-9_-]{24}$/u,
@@ -24,6 +25,7 @@ const patterns=[/^st:1:N:[A-Za-z0-9_-]{24}$/u,new RegExp('^st:1:l:'+mode+':'+n+'
  new RegExp('^st:1:m:'+id+':'+rev+':'+n+':'+n+'$','u'),new RegExp('^st:1:q:'+id+':'+rev+':'+n+'$','u'),
  new RegExp('^st:1:R:'+id+':'+rev+':'+n+'$','u'),
  new RegExp('^st:1:h:'+id+':'+rev+':'+n+'$','u'),new RegExp('^st:1:z:'+id+':'+rev+':'+rev+':'+n+'$','u'),
+ new RegExp('^st:1:W:'+id+':'+rev+':'+rev+':'+n+'$','u'),new RegExp('^st:1:Q:'+id+':'+rev+':'+rev+':'+rev+':'+n+'$','u'),
  new RegExp('^st:1:P:'+id+':'+rev+':[1-8]$','u'),new RegExp('^st:1:v:'+id+':'+rev+':'+n+':'+n+'$','u'),/^st:1:C$/u,
  new RegExp('^st:1:t:'+id+':'+rev+':'+id+':'+n+':'+n+'$','u'),
  new RegExp('^st:1:T:'+id+':'+rev+':'+id+':'+n+'$','u'),
@@ -160,13 +162,30 @@ export async function renderOwnerInlineStudio(store:BotStore,policy:Policy,actor
    const nav=[];if(page)nav.push(b('السابق',key('h',t,String(page-1))));if(page+1<pages)nav.push(b('التالي',key('h',t,String(page+1))));if(nav.length)rows.push(nav);rows.push([b('↩️ المسودة',key('d',t))],root);
    return ui('<b>سجل النسخ</b>\nالصفحة '+(page+1)+' من '+pages+'\nاختر نسخة لمقارنتها بالمسودة قبل الاستعادة. كل استعادة تحفظ إصدارًا جديدًا وتُسجل صاحب التغيير.',rows);
   }
+  if(action==='W'){
+   const selected=t.versions.find(v=>v.revision===Number(parts[5])),page=Number(parts[6]);if(!selected)return null;
+   const others=[...t.versions].reverse().filter(v=>v!==selected),pages=Math.max(1,Math.ceil(others.length/8));if(page>=pages)return null;
+   const rows=others.slice(page*8,page*8+8).map(v=>[b('نسخة '+v.revision+' · '+new Date(v.at).toISOString().slice(0,16),key('Q',t,selected.revision+':'+v.revision+':0'))]),nav=[];
+   if(page)nav.push(b('السابق',key('W',t,selected.revision+':'+(page-1))));if(page+1<pages)nav.push(b('التالي',key('W',t,selected.revision+':'+(page+1))));if(nav.length)rows.push(nav);
+   rows.push([b('↩️ مقارنة المسودة',key('z',t,selected.revision+':0'))],root);
+   return ui('<b>اختيار نسخة للمقارنة</b>\nالنسخة الأولى: '+selected.revision+'\nاختر النسخة الثانية.\nالصفحة '+(page+1)+' من '+pages+(others.length?'':'\nلا توجد نسخة محفوظة أخرى بعد.'),rows);
+  }
+  if(action==='Q'){
+   const first=t.versions.find(v=>v.revision===Number(parts[5])),second=t.versions.find(v=>v.revision===Number(parts[6])),page=Number(parts[7]);if(!first||!second||first===second)return null;
+   const label=(v:typeof first)=>'النسخة '+v.revision+'، صاحب الحفظ: '+v.by+'، التاريخ: '+new Date(v.at).toISOString();
+   const chars=Array.from(studioComparisonText(first.content,second.content,label(first),label(second))),pages=Math.ceil(chars.length/600);if(page>=pages)return null;
+   const route=(p:number)=>key('Q',t,first.revision+':'+second.revision+':'+p),nav=[];
+   if(page)nav.push(b('السابق',route(page-1)));if(page+1<pages)nav.push(b('التالي',route(page+1)));
+   return ui('<b>مقارنة نسختين محفوظتين</b>\nالنسخة '+first.revision+' ← النسخة '+second.revision+'\nالصفحة '+(page+1)+' من '+pages+'\n<pre>'+studioEscape(chars.slice(page*600,page*600+600).join(''))+'</pre>',[
+    ...(nav.length?[nav]:[]),[b('استعادة النسخة '+first.revision,key('r',t,String(first.revision))),b('استعادة النسخة '+second.revision,key('r',t,String(second.revision)))],
+    [b('↩️ اختيار النسخة الثانية',key('W',t,first.revision+':'+Math.floor(([...t.versions].reverse().filter(v=>v!==first).indexOf(second))/8)))],root]);
+  }
   if(action==='z'){
    const v=t.versions.find(v=>v.revision===Number(parts[5])),page=Number(parts[6]);if(!v)return null;
-   const describe=(c:StudioTemplate['draft'])=>JSON.stringify(c,null,2);
-   const full='المسودة الحالية:\n'+describe(t.draft)+'\n\nالنسخة '+v.revision+'، صاحب الحفظ: '+v.by+'\n'+describe(v.content);
-   const chars=Array.from(full),pages=Math.ceil(chars.length/240);if(page>=pages)return null;
+   const full=studioComparisonText(v.content,t.draft,'النسخة '+v.revision+'، صاحب الحفظ: '+v.by+'، التاريخ: '+new Date(v.at).toISOString(),'المسودة الحالية:');
+   const chars=Array.from(full),pages=Math.ceil(chars.length/600);if(page>=pages)return null;
    const nav=[];if(page)nav.push(b('السابق',key('z',t,v.revision+':'+(page-1))));if(page+1<pages)nav.push(b('التالي',key('z',t,v.revision+':'+(page+1))));
-   return ui('<b>مقارنة النسخة والمسودة</b>\nالصفحة '+(page+1)+' من '+pages+'\n<pre>'+studioEscape(chars.slice(page*240,page*240+240).join(''))+'</pre>',[...(nav.length?[nav]:[]),[b('استعادة هذه النسخة',key('r',t,String(v.revision)))],[b('↩️ سجل النسخ',key('h',t,String(Math.floor((t.versions.length-1-t.versions.indexOf(v))/8))))],root]);
+   return ui('<b>مقارنة النسخة والمسودة</b>\nالصفحة '+(page+1)+' من '+pages+'\n<pre>'+studioEscape(chars.slice(page*600,page*600+600).join(''))+'</pre>',[...(nav.length?[nav]:[]),[b('🔎 مقارنة بنسخة محفوظة',key('W',t,v.revision+':0'))],[b('استعادة هذه النسخة',key('r',t,String(v.revision)))],[b('↩️ سجل النسخ',key('h',t,String(Math.floor((t.versions.length-1-t.versions.indexOf(v))/8))))],root]);
   }
   if(action==='r'||action==='x'){
    const target=parts[5]!,v=action==='r'?t.versions.find(v=>v.revision===Number(target)):undefined;if(action==='r'?!v:!button)return null;
