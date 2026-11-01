@@ -500,3 +500,135 @@ for(const engine of ['json','sqlite'] as const){
   }finally{await f.close();}
  });
 }
+
+
+test('network stale batch callbacks have canonical bounded payloads',()=>{
+ for(const value of ['nw:1:b:abcdef123456:1:0','nw:1:b:abcdef123456:9999999999:999'])
+  assert.equal(validOwnerNetworkRoute(value),true,value);
+ for(const value of ['nw:1:b:abcdef123456:01:0','nw:1:b:ABCDEF123456:1:0',
+  'nw:1:b:abcdef123456:1:00','nw:1:b:abcdef123456:1:1000',
+  'nw:1:b:abcdef123456:0:0','nw:1:b:abcdef123456:1:0\n'])
+  assert.equal(validOwnerNetworkRoute(value),false,value);
+});
+
+for(const engine of ['json','sqlite'] as const){
+ test('network batch stale cleanup is scoped and atomic ('+engine+')',async()=>{
+  const f=await setup(engine);try{
+   await f.approve(GROUP);
+   const n=await f.create();
+   const link=await f.app().handle(callback(1000,'nw:1:t:'+n.id+':1:'+GROUP+':1:0'));
+   assert.equal((await f.app().handle(callback(1001,find(link,'تأكيد')))).status,'APPLIED');
+   const oldIds=Array.from({length:9},(_,i)=>'-2000'+(10+i));
+   await f.store.transaction(s=>{
+    const network=s.groupNetworks![0]!;
+    network.members.push(...oldIds.map(chatId=>({chatId,version:1})));
+    network.revision++;
+   });
+   const card=await f.app().handle(callback(1002,'nw:1:d:'+n.id));
+   assert.match(card.plan?.text??'',/مجموعات فعالة: 1/);
+   assert.match(card.plan?.text??'',/ارتباطات تحتاج مراجعة: 9/);
+   const page=await f.app().handle(callback(1003,'nw:1:s:'+n.id+':0'));
+   assert.equal(page.status,'APPLIED');
+   assert.match(page.plan?.text??'',/صفحة 1 من 2/);
+   const preview=await f.app().handle(callback(1004,find(page,'تنظيف الصفحة')));
+   assert.equal(preview.status,'APPLIED');
+   assert.match(preview.plan?.text??'',/معاينة تنظيف جماعي/);
+   assert.match(preview.plan?.text??'',/8 ارتباطات/);
+   assert.ok(oldIds.slice(0,8).every(id=>(preview.plan?.text??'').includes(id)));
+   assert.equal((preview.plan?.text??'').includes(oldIds[8]!),false);
+   const token=find(preview,'تأكيد التنظيف');
+   assert.equal((await f.app().handle(callback(1005,token,200))).status,'DENIED');
+   assert.equal((await f.app().handle(callback(1006,token,100,true))).status,'DENIED');
+   const concurrent=await Promise.all([
+    f.app().handle(callback(1007,token)),f.app().handle(callback(1008,token))
+   ]);
+   assert.deepEqual(concurrent.map(x=>x.status).sort(),['APPLIED','DENIED']);
+   let s=await f.store.snapshot();
+   assert.equal(s.groupNetworks?.[0]?.revision,4);
+   assert.deepEqual(s.groupNetworks?.[0]?.members.map(x=>x.chatId).sort(),
+    [GROUP,oldIds[8]!].sort());
+   assert.equal(s.audit.filter(a=>a.reason==='OWNER_NETWORK_STALE_MEMBERS_PRUNED').length,1);
+   assert.equal(s.chats.find(x=>x.id===GROUP)?.approved,true);
+   const again=await f.app().handle(callback(1009,'nw:1:s:'+n.id+':0'));
+   assert.equal(again.status,'APPLIED');
+   assert.match(again.plan?.text??'',/صفحة 1 من 1/);
+   const last=await f.app().handle(callback(1010,find(again,'تنظيف الصفحة')));
+   assert.match(last.plan?.text??'',/1 ارتباط/);
+   assert.equal((await f.app().handle(callback(1011,find(last,'تأكيد التنظيف')))).status,'APPLIED');
+   s=await f.store.snapshot();
+   assert.deepEqual(s.groupNetworks?.[0]?.members,[{chatId:GROUP,version:1}]);
+   assert.equal(s.groupNetworks?.[0]?.revision,5);
+   const history=await f.app().handle(callback(1012,'nw:1:r:p:0'));
+   const receipts=buttons(history).filter(b=>b.text.includes('تنظيف جماعي'));
+   assert.equal(receipts.length,2);
+   const detail=await f.app().handle(callback(1013,receipts[0]!.callback_data));
+   assert.match(detail.plan?.text??'',/OWNER_NETWORK_STALE_MEMBERS_PRUNED/);
+  }finally{await f.close();}
+ });
+ test('network stale batch rejects active links and changed revisions ('+engine+')',async()=>{
+  const f=await setup(engine);try{
+   await f.approve(GROUP);
+   const n=await f.create();
+   const link=await f.app().handle(callback(1020,'nw:1:t:'+n.id+':1:'+GROUP+':1:0'));
+   assert.equal((await f.app().handle(callback(1021,find(link,'تأكيد')))).status,'APPLIED');
+   assert.equal((await f.app().handle(callback(1022,'nw:1:b:'+n.id+':2:0'))).status,'DENIED');
+   await f.approve(GROUP); // old association becomes stale
+   const batch=await f.app().handle(callback(1023,'nw:1:b:'+n.id+':2:0'));
+   assert.equal(batch.status,'APPLIED');
+   const token=find(batch,'تأكيد التنظيف');
+   await f.approve(GROUP); // no network edit: just the group approval epoch changes
+   assert.equal((await f.app().handle(callback(1024,token))).status,'DENIED');
+   assert.equal((await f.store.snapshot()).groupNetworks?.[0]?.members.length,1);
+   assert.equal((await f.app().handle(callback(1025,'nw:1:b:'+n.id+':1:0'))).status,'DENIED');
+   const fresh=await f.app().handle(callback(1026,'nw:1:b:'+n.id+':2:0'));
+   assert.equal(fresh.status,'APPLIED');
+   const freshToken=find(fresh,'تأكيد التنظيف');
+   await f.store.transaction(s=>{
+    const network=s.groupNetworks![0]!;
+    network.name='شبكة الطب المحدثة';network.revision++;
+   });
+   assert.equal((await f.app().handle(callback(1027,freshToken))).status,'DENIED');
+   assert.equal((await f.store.snapshot()).groupNetworks?.[0]?.members.length,1);
+  }finally{await f.close();}
+ });
+ test('network stale batch cancellation and expiry are irreversible ('+engine+')',async()=>{
+  const f=await setup(engine);try{
+   const n=await f.create();
+   await f.store.transaction(s=>{
+    s.groupNetworks![0]!.members=[{chatId:GROUP,version:1}];
+    s.groupNetworks![0]!.revision=2;
+   });
+   const preview=await f.app().handle(callback(1030,'nw:1:b:'+n.id+':2:0'));
+   assert.equal(preview.status,'APPLIED');
+   const token=find(preview,'تأكيد التنظيف');
+   assert.equal((await f.app().handle(callback(1031,find(preview,'إلغاء')))).status,'APPLIED');
+   assert.equal((await f.app().handle(callback(1032,token))).status,'DENIED');
+   const second=await f.app().handle(callback(1033,'nw:1:b:'+n.id+':2:0'));
+   const token2=find(second,'تأكيد التنظيف');
+   f.advance(121000);
+   assert.equal((await f.app().handle(callback(1034,token2))).status,'DENIED');
+   assert.deepEqual((await f.store.snapshot()).groupNetworks?.[0]?.members,
+    [{chatId:GROUP,version:1}]);
+   assert.equal((await f.store.snapshot()).audit.filter(a=>a.reason==='OWNER_NETWORK_STALE_MEMBERS_PRUNED').length,0);
+  }finally{await f.close();}
+ });
+ test('network stale batch audit rejects duplicate evidence ('+engine+')',async()=>{
+  const f=await setup(engine);try{
+   const n=await f.create();
+   await f.store.transaction(s=>{s.groupNetworks![0]!.members=[{chatId:GROUP,version:1}];});
+   const preview=await f.app().handle(callback(1040,'nw:1:b:'+n.id+':1:0'));
+   assert.equal((await f.app().handle(callback(1041,find(preview,'تأكيد التنظيف')))).status,'APPLIED');
+   const history=await f.app().handle(callback(1042,'nw:1:r:p:0'));
+   const ref=buttons(history).find(x=>x.text.includes('تنظيف جماعي'))?.callback_data;
+   assert.ok(ref);
+   await f.store.transaction(s=>{
+    const event=s.audit.find(a=>a.reason==='OWNER_NETWORK_STALE_MEMBERS_PRUNED')!;
+    s.audit.push({...event});
+   });
+   const after=await f.app().handle(callback(1043,'nw:1:r:p:0'));
+   assert.equal(buttons(after).some(x=>x.callback_data===ref),false);
+   assert.equal((await f.app().handle(callback(1044,ref!))).status,'DENIED');
+   assert.equal((await f.store.snapshot()).groupNetworks?.[0]?.members.length,0);
+  }finally{await f.close();}
+ });
+}
