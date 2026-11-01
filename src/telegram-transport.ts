@@ -90,7 +90,7 @@ interface IncomingDocument {
 }
 /** Offline B3 application adapter: creates plans, NEVER sends a message or connects to Telegram. */
 export interface TelegramReplyPlan { chatId: string; parseMode: 'HTML'; text: string;
- replyMarkup?:TelegramReplyKeyboard; inlineMarkup?:TelegramInlineKeyboard; studioMarkup?:import('./telegram-studio-rich.js').StudioNativeKeyboard; editMessageId?:number; }
+ replyMarkup?:TelegramReplyKeyboard; inlineMarkup?:TelegramInlineKeyboard; studioMarkup?:import('./telegram-studio-rich.js').StudioNativeKeyboard; editMessageId?:number;messageThreadId?:number; }
 export interface TelegramResult { status: 'APPLIED' | 'DUPLICATE' | 'DENIED' | 'IGNORED' | 'UNKNOWN'; reason: string; plan?: TelegramReplyPlan; deliveryKey?: string; callbackQueryId?:string; }
 type ProcessedReply={status:TelegramResult['status'];reason:string;plan?:TelegramReplyPlan;
  groupQuestionAccess?:TelegramReplyJob['groupQuestionAccess'];
@@ -337,7 +337,7 @@ export class TelegramUpdateApplication {
   private async groupLibrary(event:Event,categoryId?:string):Promise<ProcessedReply>{
    const view=await groupLibraryInline(this.opts.store,this.opts.policy,{actor:event.actorId,chat:event.chatId,...(event.topicId!==undefined?{topic:event.topicId}:{})},event.callbackData!==undefined?{callback:event.callbackData}:{...(categoryId!==undefined?{categoryId}:{})},this.clock,this.opts.subscription?(chat,actor)=>this.opts.subscription!.verify(chat,actor):undefined);
    if('denied' in view)return {status:'DENIED',reason:view.denied};
-   return {status:'APPLIED',reason:'RESPONSE_PLANNED_ONLY',plan:this.plan(event.chatId,view.screen.text,undefined,view.screen.keyboard,event.callbackMessageId),groupMenuAccess:{actorId:event.actorId,epoch:view.epoch,expiresAt:view.expiresAt}};
+   return {status:'APPLIED',reason:'RESPONSE_PLANNED_ONLY',plan:{...this.plan(event.chatId,view.screen.text,undefined,view.screen.keyboard,event.callbackMessageId),...(event.topicId!==undefined?{messageThreadId:event.topicId}:{})},groupMenuAccess:{actorId:event.actorId,epoch:view.epoch,expiresAt:view.expiresAt}};
   }
   private async process(event:Event):Promise<ProcessedReply> {
     if(event.protectionMedia){
@@ -358,6 +358,7 @@ export class TelegramUpdateApplication {
     }
     if(event.document)return this.handleDocument(event);
     const {actorId,chatId,kind,text}=event;
+    if(kind==='private'&&event.topicId!==undefined)return {status:'DENIED',reason:'PRIVATE_TOPIC_NOT_SUPPORTED'};
     if(event.callbackData!==undefined){
      if(kind==='group'&&event.callbackData.startsWith('gl:1:'))return this.groupLibrary(event);
      // Reauthorize the real sender at every tap. Never dispatch a privileged
@@ -589,6 +590,7 @@ export class TelegramUpdateApplication {
      const snap=await this.opts.store.snapshot();
      privateGroupSource={scope,epoch:privateGroupEpochDigest(snap,scope)};
     };
+    if(kind==='group'&&event.topicId!==undefined&&(cmd===`/ask@${this.opts.botUsername}`||groupQuestion!==null))return {status:'DENIED',reason:'TOPIC_ASSISTANT_NOT_CONFIGURED'};
     if(kind==='group'&&(cmd===`/ask@${this.opts.botUsername}`||groupQuestion!==null)) {
       const snapshot=await this.opts.store.snapshot();
       groupAnswerSubscriptionEpochValue=groupQuestionSubscriptionEpoch(snapshot,chatId);
@@ -673,7 +675,7 @@ export class TelegramUpdateApplication {
        if(text.startsWith('/')||Object.values(m).some(label=>label===text)||isOwnerMenuText(text))await categories.cancel(actorId);
        else try{
         const preview=await categories.preview(actorId,text);
-        if(preview)return {status:'APPLIED',reason:'CATEGORY_TEXT_PREVIEW',plan:this.plan(chatId,'<b>معاينة '+(preview.kind==='PARENT'?'تغيير القسم الأب':preview.kind==='RENAME'?'تغيير الاسم':preview.kind==='LANG'?'تغيير اللغة':'إنشاء قسم')+'</b>\nالقيمة: '+escapeTelegramHtml(preview.name)+'\nلم يُحفظ التغيير بعد. ينتهي التأكيد بعد دقيقتين.',undefined,{inline_keyboard:[[{text:'✅ تأكيد الحفظ',callback_data:'ec:1:a:'+preview.ref.slice(2)}],[{text:'إلغاء','callback_data':ownerPreviewCancelData(preview.ref)}]]})};
+        if(preview)return {status:'APPLIED',reason:'CATEGORY_TEXT_PREVIEW',plan:this.plan(chatId,'<b>معاينة '+(preview.kind==='GENERAL'?'تغيير ظهور المحادثة العامة':preview.kind==='TOPIC'?'تغيير ظهور الموضوع':preview.kind==='PARENT'?'تغيير القسم الأب':preview.kind==='RENAME'?'تغيير الاسم':preview.kind==='LANG'?'تغيير اللغة':'إنشاء قسم')+'</b>\nالقيمة: '+escapeTelegramHtml(preview.name)+'\nلم يُحفظ التغيير بعد. ينتهي التأكيد بعد دقيقتين.',undefined,{inline_keyboard:[[{text:'✅ تأكيد الحفظ',callback_data:'ec:1:a:'+preview.ref.slice(2)}],[{text:'إلغاء','callback_data':ownerPreviewCancelData(preview.ref)}]]})};
        }catch{return {status:'DENIED',reason:'CATEGORY_TEXT_INVALID_OR_STALE',plan:this.plan(chatId,'تعذّر قبول الاسم أو انتهت خطوة الإدخال. افتح التصنيف الحالي وأعد المحاولة.')};}
        const studio=new ButtonStudioService(this.opts.store,this.opts.policy,this.clock);
        const pending=(await this.opts.store.snapshot()).buttonStudio?.inputs.some(i=>i.actor===actorId);

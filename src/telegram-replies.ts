@@ -23,8 +23,9 @@ const validChat=(chat:string)=>/^(?:[1-9]\d{0,15}|-[1-9]\d{0,15})$/.test(chat)&&
 const validPlan=(p:unknown):p is TelegramReplyPlan=>{
  if(!p||typeof p!=='object'||Array.isArray(p))return false;
  const v=p as Record<string,unknown>;
- return (Object.keys(v).length===(3+(v.replyMarkup===undefined?0:1)+(v.inlineMarkup===undefined?0:1)+(v.studioMarkup===undefined?0:1)+(v.editMessageId===undefined?0:1)))&&
-  Object.keys(v).every(k=>['chatId','parseMode','text','replyMarkup','inlineMarkup','studioMarkup','editMessageId'].includes(k))&&
+ return (Object.keys(v).length===(3+(v.replyMarkup===undefined?0:1)+(v.inlineMarkup===undefined?0:1)+(v.studioMarkup===undefined?0:1)+(v.editMessageId===undefined?0:1)+(v.messageThreadId===undefined?0:1)))&&
+  Object.keys(v).every(k=>['chatId','parseMode','text','replyMarkup','inlineMarkup','studioMarkup','editMessageId','messageThreadId'].includes(k))&&
+  (v.messageThreadId===undefined||typeof v.chatId==='string'&&v.chatId.startsWith('-')&&Number.isSafeInteger(v.messageThreadId)&&Number(v.messageThreadId)>0&&Number(v.messageThreadId)<=2147483647)&&
   [v.replyMarkup,v.inlineMarkup,v.studioMarkup].filter(x=>x!==undefined).length<=1&&
   (v.replyMarkup===undefined||isValidTelegramReplyKeyboard(v.replyMarkup))&&
   (v.inlineMarkup===undefined||isValidTelegramInlineKeyboard(v.inlineMarkup))&&
@@ -55,6 +56,7 @@ export class TelegramBotApiTextSender implements TelegramReplySender {
     body:JSON.stringify({chat_id:plan.chatId,text:plan.text,parse_mode:'HTML',
      link_preview_options:{is_disabled:true},
      ...(plan.editMessageId===undefined?{protect_content:true}:{message_id:plan.editMessageId}),
+     ...(plan.editMessageId===undefined&&plan.messageThreadId!==undefined?{message_thread_id:plan.messageThreadId}:{}),
      ...(plan.studioMarkup?{reply_markup:plan.studioMarkup}:plan.inlineMarkup?{reply_markup:plan.inlineMarkup}:plan.replyMarkup?{reply_markup:plan.replyMarkup}:{})}),
     redirect:'error',signal:AbortSignal.timeout(8000)
    });
@@ -73,6 +75,7 @@ export class TelegramBotApiTextSender implements TelegramReplySender {
    const msg=v.result as Record<string,unknown>,chat=msg.chat;
    if(Number.isSafeInteger(msg.message_id)&&typeof msg.message_id==='number'&&msg.message_id>0&&
       (plan.editMessageId===undefined||plan.editMessageId===msg.message_id)&&
+      (plan.messageThreadId===undefined||plan.messageThreadId===msg.message_thread_id)&&
       chat&&typeof chat==='object'&&!Array.isArray(chat)&&
       (chat as Record<string,unknown>).id===Number(plan.chatId))
     return {status:'CONFIRMED',messageId:msg.message_id};
@@ -143,6 +146,7 @@ export function validTelegramReplyJob(v:unknown):v is TelegramReplyJob{
  const j=v as Record<string,unknown>;
  return typeof j.updateKey==='string'&&/^b3-webhook:[a-zA-Z0-9_-]{1,80}:\d+$/.test(j.updateKey)&&
   knownStatus(j.status)&&
+  ((j.plan as TelegramReplyPlan|undefined)?.messageThreadId===undefined||j.groupReplyKind==='GENERAL'&&validGroupReplyAccess(j.groupMenuAccess))&&
   (j.status==='QUEUED'?validPlan(j.plan):(j.plan===undefined||validPlan(j.plan)))&&
   (j.queuedAt===undefined||(typeof j.queuedAt==='number'&&Number.isSafeInteger(j.queuedAt)&&j.queuedAt>=0))&&
   (j.startedAt===undefined||(typeof j.startedAt==='number'&&Number.isSafeInteger(j.startedAt)&&j.startedAt>=0))&&
@@ -251,7 +255,7 @@ export class TelegramReplyDispatcher {
       (kind==='FAQ'?this.policy.mayAskGroup(snap,groupId,actor,true):
        this.policy.canUseChat(snap,groupId,'navigation'))&&
       (kind==='FAQ'?groupQuestionEpochDigest(snap,groupId):
-       kind==='MENU'?groupMenuEpochDigest(snap,groupId):
+       kind==='MENU'?groupMenuEpochDigest(snap,groupId,job.plan!.messageThreadId):
        privateGroupEpochDigest(snap,groupId))===access.epoch){
     if(kind==='PRIVATE_GROUP'){
      if(!this.membership||await this.membership(groupId,actor)!=='VERIFIED')
@@ -323,7 +327,7 @@ export class TelegramReplyDispatcher {
     !(faq?this.policy.mayAskGroup(s,accessScope,access.actorId,true):
       this.policy.canUseChat(s,accessScope,'navigation'))||
     (faq?groupQuestionEpochDigest(s,accessScope):
-      menu?groupMenuEpochDigest(s,accessScope):
+      menu?groupMenuEpochDigest(s,accessScope,plan.messageThreadId):
       privateGroupEpochDigest(s,accessScope))!==access.epoch));
    const groupUnavailable=plan.chatId.startsWith('-')&&
     !this.policy.canUseChat(s,plan.chatId,'navigation');

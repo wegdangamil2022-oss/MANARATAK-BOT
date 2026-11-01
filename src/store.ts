@@ -2,7 +2,7 @@ import {isValidFloodWindow,type FloodWindow} from './protection-flood.js';
 import {validGroupNetworks,type GroupNetwork} from './group-network-model.js';
 import {validAdminUIAccess,type AdminUIAccess} from './protection-ui-access.js';
 import {validStudioState,type StudioState} from './button-studio-model.js';
-import {validCategoryLanguage} from './education-category-policy.js';
+import {validCategoryLanguage,validTopicVisibility} from './education-category-policy.js';
 import { mkdir, open, readFile, rename, rm, stat, lstat, realpath, writeFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
 import { randomUUID } from 'node:crypto';
@@ -22,7 +22,7 @@ export interface ProcessedUpdate { key: string; status: 'CLAIMED' | 'DONE' | 'UN
 export interface Operation { id: string; updateKey: string; kind: 'CHAT_LEAVE'; chatId: string; policyVersion: number; status: OperationStatus; startedAt?: number; }
 export interface AuditRecord { actorId?: string; updateKey: string; decision: 'ALLOW' | 'DENY' | 'NOOP'; reason: string; policyVersion: number; at: number; /** For owner-moderation reviews only; absent on legacy audit events. */ moderationEvidenceDigest?:string; }
 import type { Candidate, ImportFormat, ImportReport } from './ingestion.js';
-export interface EducationCategory { id: string; scope: string; parentId: string | null; title: string; order: number; enabled: boolean; language?:string; /** Monotonic optional revision for preexisting saved categories. */ revision?: number; }
+export interface EducationCategory { id: string; scope: string; parentId: string | null; title: string; order: number; enabled: boolean; language?:string; groupVisible?:boolean; topicVisibility?:{topicId:number;enabled:boolean}[]; /** Monotonic optional revision for preexisting saved categories. */ revision?: number; }
 export interface EducationResource { id: string; categoryId: string; scope: string; title: string; university: string; cycle: string; degree: string; seats: number | null; sourceImportId: string; sourceLocator: string; reviewedBy: string; status: 'PUBLISHED' | 'ARCHIVED'; publicationText?: string; publicationTextReviewedBy?: string; }
 export interface ImportRun { id: string; scope: string; uploadedBy: string; origin: 'TELEGRAM_ADMIN' | 'ADMIN_WEB'; format: ImportFormat; filename: string; digest: string; report: ImportReport; candidates: Candidate[]; createdAt: number; }
 export type RestrictionKind = 'NONE' | 'MUTE' | 'BAN';
@@ -92,7 +92,7 @@ export interface TelegramReplyJob {
   replyMarkup?:import('./telegram-menu.js').TelegramReplyKeyboard;
   inlineMarkup?:import('./telegram-inline-owner.js').TelegramInlineKeyboard;
   studioMarkup?:import('./telegram-studio-rich.js').StudioNativeKeyboard;
-  editMessageId?:number};
+  editMessageId?:number;messageThreadId?:number};
  status:'QUEUED'|'SENDING'|'SENT'|'FAILED_CONFIRMED'|'UNKNOWN_OUTCOME';
  attemptId?:string;startedAt?:number;messageId?:number;
  queuedAt?:number;redactedAt?:number;
@@ -351,6 +351,7 @@ export class BotStore {
         if(!raw||typeof raw!=='object'||Array.isArray(raw))return true;
         const job=raw as Record<string,unknown>;
         const plan=job.plan as Record<string,unknown>|undefined;
+        if(plan?.messageThreadId!==undefined&&(!Number.isSafeInteger(plan.messageThreadId)||Number(plan.messageThreadId)<1||Number(plan.messageThreadId)>2147483647||typeof plan.chatId!=='string'||!plan.chatId.startsWith('-')||job.groupMenuAccess===undefined))return true;
         if(job.accessDenialCode!==undefined&&(
            job.status!=='FAILED_CONFIRMED'||typeof job.accessDenialCode!=='string'||
            !['LEGACY_UNVERIFIABLE','ACCESS_RECHECK_FAILED','GROUP_UNAVAILABLE']
@@ -433,6 +434,8 @@ export class BotStore {
       !Array.isArray(previous.moderationOperations) || !Array.isArray(previous.subscriptionRequirements) ||
       !Array.isArray(previous.warnings) || !Array.isArray(previous.educationCategories) ||
       previous.educationCategories.some(c=>c&&typeof c==='object'&&Object.hasOwn(c,'language')&&!validCategoryLanguage((c as Record<string,unknown>).language)) ||
+      previous.educationCategories.some(c=>c&&typeof c==='object'&&Object.hasOwn(c,'topicVisibility')&&(!validTopicVisibility((c as Record<string,unknown>).topicVisibility)||(c as Record<string,unknown>).scope==='private')) ||
+      previous.educationCategories.some(c=>c&&typeof c==='object'&&Object.hasOwn(c,'groupVisible')&&(typeof (c as Record<string,unknown>).groupVisible!=='boolean'||(c as Record<string,unknown>).scope==='private')) ||
       !Array.isArray(previous.educationResources) || !Array.isArray(previous.importRuns))
       throw new Error('Unsupported state schema');
     return previous as unknown as BotState;

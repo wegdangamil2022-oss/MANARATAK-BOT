@@ -26,9 +26,9 @@ function callbackPath(s:BotState,data:string,actor:string,chat:string,epoch:stri
 }
 export async function groupLibraryInline(store:BotStore,policy:Policy,context:{actor:string;chat:string;topic?:number},input:{callback:string}|{categoryId?:string},clock:()=>number,verify?:SubscriptionGate['verify']):Promise<{screen:OwnerInlineScreen;epoch:string;expiresAt:number}|{denied:string}>{
  const {actor,chat}=context,deny=(reason='GROUP_LIBRARY_STALE_OR_UNAUTHORIZED')=>({denied:reason});
- if(context.topic!==undefined)return deny('GROUP_LIBRARY_TOPIC_NOT_SUPPORTED');
+ if(context.topic!==undefined&&(!Number.isSafeInteger(context.topic)||context.topic<1||context.topic>2147483647))return deny();
  if(!/^[1-9][0-9]{0,18}$/u.test(actor)||!/^-[1-9][0-9]{0,18}$/u.test(chat))return deny();
- const before=await store.snapshot(),epoch=groupMenuEpochDigest(before,chat),now=clock();
+ const before=await store.snapshot(),epoch=groupMenuEpochDigest(before,chat,context.topic),now=clock();
  if(!policy.canUseChat(before,chat,'navigation')||!Number.isSafeInteger(now)||now<0||now>8640000000000000-TTL)return deny();
  if('callback' in input&&!callbackPath(before,input.callback,actor,chat,epoch,now))return deny();
  const mode=subscriptionRequirementMode(before,chat);
@@ -38,8 +38,8 @@ export async function groupLibraryInline(store:BotStore,policy:Policy,context:{a
   try{const proof=await verify(chat,actor);if(!acceptsActiveSubscriptionEvidence(proof.status,policy.isOwner(actor)))return deny(proof.status==='NOT_MEMBER'?'SUBSCRIPTION_REQUIRED':'SUBSCRIPTION_UNAVAILABLE');}catch{return deny('SUBSCRIPTION_UNAVAILABLE');}
  }
  return store.transaction(s=>{
-  const at=clock();if(!Number.isSafeInteger(at)||at<now||at>8640000000000000-TTL||!policy.canUseChat(s,chat,'navigation')||groupMenuEpochDigest(s,chat)!==epoch)return deny('SUBSCRIPTION_UNAVAILABLE');
-  const categories=s.educationCategories.filter(c=>c.scope===chat&&visibleEducationCategory(s,c)).sort((a,b)=>a.order-b.order||a.id.localeCompare(b.id));
+  const at=clock();if(!Number.isSafeInteger(at)||at<now||at>8640000000000000-TTL||!policy.canUseChat(s,chat,'navigation')||groupMenuEpochDigest(s,chat,context.topic)!==epoch)return deny('SUBSCRIPTION_UNAVAILABLE');
+  const categories=s.educationCategories.filter(c=>c.scope===chat&&visibleEducationCategory(s,c,context.topic)).sort((a,b)=>a.order-b.order||a.id.localeCompare(b.id));
   if(!categories.length)return deny('NO_ACCESSIBLE_CATEGORIES');
   let path:Path;
   if('callback' in input){

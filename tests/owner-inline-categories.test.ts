@@ -36,12 +36,30 @@ for(const engine of ['json','sqlite'] as const){
    assert.equal((await f.store.snapshot()).deliveries.length,0);
   }finally{await f.close();}
  });
+ test('owner configures independent topic visibility with preview, cancellation and stale approval checks ('+engine+')',async()=>{
+  const f=await fixture();try{
+   await f.policy.approveChat('100','-100123',['navigation']);await f.education.createCategory('100',{id:'group-cat',scope:'-100123',title:'قسم المجموعة',order:0});
+   let list=await f.app().handle(event(900,'ec:1:h')),detail=await f.app().handle(event(901,select(list,'قسم المجموعة')));await f.app().handle(event(902,select(detail,'ظهور المواضيع')));
+   let preview=await f.app().handle(message(903,'٧ تفعيل'));assert.ok(preview.plan!.text.includes('تغيير ظهور الموضوع'));assert.ok(preview.plan!.text.includes('الموضوع 7'));const cancelled=select(preview,'تأكيد الحفظ');await f.app().handle(event(904,select(preview,'إلغاء')));assert.equal((await f.app().handle(event(905,cancelled))).status,'DENIED');assert.equal((await f.store.snapshot()).educationCategories.find(c=>c.id==='group-cat')!.topicVisibility,undefined);
+   list=await f.app().handle(event(906,'ec:1:h'));detail=await f.app().handle(event(907,select(list,'قسم المجموعة')));await f.app().handle(event(908,select(detail,'ظهور المواضيع')));preview=await f.app().handle(message(909,'7 تفعيل'));assert.equal((await f.app().handle(event(910,select(preview,'تأكيد الحفظ')))).status,'APPLIED');assert.deepEqual((await f.store.snapshot()).educationCategories.find(c=>c.id==='group-cat')!.topicVisibility,[{topicId:7,enabled:true}]);
+   list=await f.app().handle(event(911,'ec:1:h'));const privateDetail=await f.app().handle(event(912,select(list,'قسم 0')));assert.equal(privateDetail.plan!.inlineMarkup!.inline_keyboard.flat().some(b=>b.text.includes('ظهور المواضيع')),false);
+   detail=await f.app().handle(event(913,select(list,'قسم المجموعة')));assert.ok(detail.plan!.text.includes('7: ظاهر'));await f.app().handle(event(914,select(detail,'ظهور المحادثة العامة')));preview=await f.app().handle(message(915,'إيقاف'));assert.ok(preview.plan!.text.includes('تغيير ظهور المحادثة العامة'));assert.equal((await f.app().handle(event(916,select(preview,'تأكيد الحفظ')))).status,'APPLIED');const saved=(await f.store.snapshot()).educationCategories.find(c=>c.id==='group-cat')!;assert.equal(saved.groupVisible,false);assert.equal(saved.topicVisibility![0]!.enabled,true);
+   list=await f.app().handle(event(917,'ec:1:h'));detail=await f.app().handle(event(918,select(list,'قسم المجموعة')));await f.app().handle(event(919,select(detail,'ظهور المواضيع')));preview=await f.app().handle(message(920,'7 إيقاف'));await f.policy.revokeChat('100','-100123');assert.equal((await f.app().handle(event(921,select(preview,'تأكيد الحفظ')))).status,'DENIED');
+  }finally{await f.close();}
+ });
  test('cancelling category rename revokes the pending text confirmation ('+engine+')',async()=>{
   const f=await fixture();try{
    const root=await f.app().handle(event(800,'mi:1:i:10:16')),detail=await f.app().handle(event(801,select(root,'قسم 0')));
    await f.app().handle(event(802,select(detail,'تغيير الاسم')));const review=await f.app().handle(message(803,'اسم ملغى')),confirm=select(review,'تأكيد الحفظ');
    assert.equal((await f.app().handle(event(804,select(review,'إلغاء')))).status,'APPLIED');
    assert.equal((await f.app().handle(event(805,confirm))).status,'DENIED');assert.equal((await f.store.snapshot()).educationCategories[0]!.title,'قسم 0');
+  }finally{await f.close();}
+ });
+ test('topic rule details stay within Telegram message bounds at the saved rule limit ('+engine+')',async()=>{
+  const f=await fixture();try{
+   await f.policy.approveChat('100','-100123',['navigation']);const id='g'.repeat(64);await f.education.createCategory('100',{id,scope:'-100123',title:"'".repeat(100),order:0});
+   await f.store.transaction(s=>{s.educationCategories.find(c=>c.id===id)!.topicVisibility=Array.from({length:100},(_,i)=>({topicId:2147483647-i,enabled:i%2===0}));});
+   const list=await f.app().handle(event(950,'ec:1:h')),detail=await f.app().handle(event(951,select(list,"'")));assert.equal(detail.status,'APPLIED');assert.ok(Buffer.byteLength(detail.plan!.text)<=4096);assert.ok(detail.plan!.text.includes('2147483548: مخفي'));
   }finally{await f.close();}
  });
  test('owner category text confirmation rechecks expiry, dashboard and restored boolean flags ('+engine+')',async()=>{
