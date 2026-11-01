@@ -3,6 +3,8 @@ export interface GroupPermissionPort{
  read(chat:string):Promise<GroupPermissions|null>;
  apply(chat:string,before:GroupPermissions,after:GroupPermissions,current:()=>Promise<boolean>):Promise<'CONFIRMED'|'FAILED_CONFIRMED'|'UNKNOWN_OUTCOME'>;
 }
+const officialPorts=new WeakSet<object>();
+export const isOfficialGroupPermissionGateway=(port:GroupPermissionPort):boolean=>officialPorts.has(port);
 /** Closed-over credentials and functions; no mutable public transport/rights
  * helpers. Construction does not contact Telegram; the default gate is STOP. */
 export function telegramGroupPermissionGateway(token:string,request:typeof fetch=fetch,safetyGate:()=>Promise<boolean>=async()=>false):GroupPermissionPort{
@@ -33,5 +35,5 @@ export function telegramGroupPermissionGateway(token:string,request:typeof fetch
   if(result.kind==='DENIED')return 'FAILED_CONFIRMED';if(result.kind!=='OK'||result.value!==true)return 'UNKNOWN_OUTCOME';
   const observed=await read(chat);try{return observed&&equalGroupPermissions(observed,desired)&&await current()?'CONFIRMED':'UNKNOWN_OUTCOME';}catch{return 'UNKNOWN_OUTCOME';}
  }
- return Object.freeze({read,apply});
+ const port=Object.freeze({read,apply});officialPorts.add(port);return port;
 }

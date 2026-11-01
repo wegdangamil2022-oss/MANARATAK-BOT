@@ -2,7 +2,7 @@ import {createHash,randomBytes} from 'node:crypto';
 import type {BotState,BotStore} from './store.js';
 import type {Policy} from './policy.js';
 import {GROUP_LOCK_MODES,equalGroupPermissions,lockedGroupPermissions,validGroupPermissions,type GroupLockMode,type GroupPermissionJob} from './group-permission-model.js';
-import type {GroupPermissionPort} from './telegram-group-permission-gateway.js';
+import {isOfficialGroupPermissionGateway,type GroupPermissionPort} from './telegram-group-permission-gateway.js';
 const TTL=120000;
 export function groupPermissionEpoch(s:BotState,p:Policy,actor:string,chat:string,now:number,except=''):string|null{
  if(/^[1-9][0-9]{0,15}$/u.exec(actor)?.[0]!==actor||!Number.isSafeInteger(Number(actor))||/^-[1-9][0-9]{0,15}$/u.exec(chat)?.[0]!==chat||!Number.isSafeInteger(Number(chat))||!Number.isSafeInteger(now)||now<0||now>8640000000000000-TTL||s.chats.filter(c=>c.id===chat).length!==1||!p.canUseChat(s,chat,'moderation')||!p.has(s,actor,'chat.manage',chat,now)||p.isOwner(actor)&&!p.privateFeature(s,'owner.dashboard',actor))return null;
@@ -10,7 +10,7 @@ export function groupPermissionEpoch(s:BotState,p:Policy,actor:string,chat:strin
 }
 const epoch=groupPermissionEpoch;
 const blocked=(s:BotState,chat:string,except='')=>(s.groupPermissionJobs??[]).some(j=>j.chatId===chat&&j.id!==except&&['INTENT','STARTED','UNKNOWN_OUTCOME'].includes(j.status));
-const identity=(j:GroupPermissionJob)=>JSON.stringify([j.id,j.chatId,j.actorId,j.scopeVersion,j.kind,j.mode,j.before,j.after,j.sourceEpoch,j.createdAt,j.expiresAt,j.restores,...(j.restoreAt===undefined?[]:[{restoreAt:j.restoreAt}])]);
+const identity=(j:GroupPermissionJob)=>JSON.stringify([j.id,j.chatId,j.actorId,j.scopeVersion,j.kind,j.mode,j.before,j.after,j.sourceEpoch,j.createdAt,j.expiresAt,j.restores,...(j.automationKey===undefined?[]:[{automationKey:j.automationKey}]),...(j.gatewayOrigin===undefined?[]:[{gatewayOrigin:j.gatewayOrigin}]),...(j.restoreAt===undefined?[]:[{restoreAt:j.restoreAt}])]);
 function lastLock(s:BotState,chat:string):GroupPermissionJob|null{
  const jobs=s.groupPermissionJobs??[],restored=new Set(jobs.filter(j=>j.chatId===chat&&j.status==='CONFIRMED'&&j.kind==='RESTORE').map(j=>j.restores));
  const active=jobs.filter(j=>j.chatId===chat&&j.kind==='LOCK'&&j.status==='CONFIRMED'&&!restored.has(j.id));if(!active.length)return null;
@@ -19,9 +19,9 @@ function lastLock(s:BotState,chat:string):GroupPermissionJob|null{
 export class GroupPermissionLockService{
  constructor(private readonly store:BotStore,private readonly policy:Policy,private readonly gateway:GroupPermissionPort,private readonly clock:()=>number){}
  async cancelForActor(actor:string):Promise<void>{await this.store.transaction(s=>{for(const j of s.groupPermissionJobs??[])if(j.actorId===actor&&j.status==='PREVIEW')j.status='CANCELLED';});}
- async preview(actor:string,chat:string,kind:'LOCK'|'RESTORE',mode:GroupLockMode='MESSAGES',restoreAfterSeconds?:number,scheduledSourceId?:string):Promise<GroupPermissionJob|null>{
-  if(!['LOCK','RESTORE'].includes(kind)||!GROUP_LOCK_MODES.includes(mode)||restoreAfterSeconds!==undefined&&(kind!=='LOCK'||!Number.isSafeInteger(restoreAfterSeconds)||restoreAfterSeconds<60||restoreAfterSeconds>86400)||scheduledSourceId!==undefined&&(kind!=='RESTORE'||restoreAfterSeconds!==undefined))return null;
-  const before=await this.store.snapshot(),now=this.clock(),source=epoch(before,this.policy,actor,chat,now);if(!source||blocked(before,chat)||(before.groupPermissionJobs?.length??0)>=1000)return null;
+ async preview(actor:string,chat:string,kind:'LOCK'|'RESTORE',mode:GroupLockMode='MESSAGES',restoreAfterSeconds?:number,scheduledSourceId?:string,sourceCurrent?:(s:BotState)=>boolean,automationKey?:string,restoreDeadline?:number):Promise<GroupPermissionJob|null>{
+  if(restoreDeadline!==undefined&&(automationKey===undefined||!Number.isSafeInteger(restoreDeadline))||automationKey!==undefined&&(kind!=='LOCK'||restoreAfterSeconds===undefined||/^[a-f0-9]{64}$/u.exec(automationKey)?.[0]!==automationKey)||!['LOCK','RESTORE'].includes(kind)||!GROUP_LOCK_MODES.includes(mode)||restoreAfterSeconds!==undefined&&(kind!=='LOCK'||!Number.isSafeInteger(restoreAfterSeconds)||restoreAfterSeconds<60||restoreAfterSeconds>86400)||scheduledSourceId!==undefined&&(kind!=='RESTORE'||restoreAfterSeconds!==undefined))return null;
+  const before=await this.store.snapshot(),now=this.clock(),source=epoch(before,this.policy,actor,chat,now);if(automationKey!==undefined&&before.groupPermissionJobs?.some(j=>j.automationKey===automationKey)||sourceCurrent&&!sourceCurrent(before)||!source||blocked(before,chat)||(before.groupPermissionJobs?.length??0)>=1000)return null;
   const scheduledCurrent=(s:BotState,at:number)=>{
    if(scheduledSourceId===undefined)return true;
    const lock=lastLock(s,chat);return !!lock&&lock.id===scheduledSourceId&&lock.actorId===actor&&lock.restoreAt!==undefined&&lock.restoreAt<=at&&
@@ -30,30 +30,30 @@ export class GroupPermissionLockService{
   if(!scheduledCurrent(before,now))return null;
   const permissions=await this.gateway.read(chat);if(!permissions||!validGroupPermissions(permissions))return null;
   return this.store.transaction(s=>{
-   const at=this.clock();if(at<now||at>=now+TTL||epoch(s,this.policy,actor,chat,at)!==source||blocked(s,chat)||(s.groupPermissionJobs?.length??0)>=1000||!scheduledCurrent(s,at))return null;
-   const restoreAt=restoreAfterSeconds===undefined?undefined:at+restoreAfterSeconds*1000;if(restoreAt!==undefined&&(!Number.isSafeInteger(restoreAt)||restoreAt>8640000000000000||!this.policy.has(s,actor,'chat.manage',chat,restoreAt)))return null;
-   const old=kind==='RESTORE'?lastLock(s,chat):null;if(kind==='RESTORE'&&(!old||old.scopeVersion!==this.policy.chatRevision(s,chat)||!equalGroupPermissions(permissions,old.after)))return null;
+   const at=this.clock();if(automationKey!==undefined&&s.groupPermissionJobs?.some(j=>j.automationKey===automationKey)||sourceCurrent&&!sourceCurrent(s)||at<now||at>=now+TTL||epoch(s,this.policy,actor,chat,at)!==source||blocked(s,chat)||(s.groupPermissionJobs?.length??0)>=1000||!scheduledCurrent(s,at))return null;
+   const restoreAt=restoreAfterSeconds===undefined?undefined:restoreDeadline??at+restoreAfterSeconds*1000;if(restoreAt!==undefined&&(!Number.isSafeInteger(restoreAt)||restoreAt<at+60000||restoreAt>at+86400000||restoreAt>8640000000000000||!this.policy.has(s,actor,'chat.manage',chat,restoreAt)))return null;
+   const old=kind==='RESTORE'?lastLock(s,chat):null;if(kind==='RESTORE'&&(!old||isOfficialGroupPermissionGateway(this.gateway)&&old.gatewayOrigin!=='TELEGRAM_API'||old.scopeVersion!==this.policy.chatRevision(s,chat)||!equalGroupPermissions(permissions,old.after)))return null;
    const desired=kind==='RESTORE'?old!.before:lockedGroupPermissions(permissions,mode);if(equalGroupPermissions(permissions,desired))return null;
    for(const j of s.groupPermissionJobs??[])if(j.actorId===actor&&j.status==='PREVIEW')j.status='CANCELLED';
-   const job:GroupPermissionJob={id:randomBytes(18).toString('base64url'),chatId:chat,actorId:actor,scopeVersion:this.policy.chatRevision(s,chat),kind,mode:old?.mode??mode,before:structuredClone(permissions),after:structuredClone(desired),sourceEpoch:epoch(s,this.policy,actor,chat,at)!,createdAt:at,expiresAt:at+TTL,status:'PREVIEW',...(old?{restores:old.id}:{}),...(restoreAt===undefined?{}:{restoreAt})};
+   const job:GroupPermissionJob={id:randomBytes(18).toString('base64url'),chatId:chat,actorId:actor,scopeVersion:this.policy.chatRevision(s,chat),kind,mode:old?.mode??mode,before:structuredClone(permissions),after:structuredClone(desired),sourceEpoch:epoch(s,this.policy,actor,chat,at)!,createdAt:at,expiresAt:at+TTL,status:'PREVIEW',...(automationKey===undefined?{}:{automationKey}),...(isOfficialGroupPermissionGateway(this.gateway)?{gatewayOrigin:'TELEGRAM_API' as const}:{}),...(old?{restores:old.id}:{}),...(restoreAt===undefined?{}:{restoreAt})};
    s.groupPermissionJobs??=[];s.groupPermissionJobs.push(job);return structuredClone(job);
   });
  }
  async cancel(actor:string,id:string):Promise<boolean>{return this.store.transaction(s=>{const j=s.groupPermissionJobs?.find(j=>j.id===id);if(!j||j.actorId!==actor||j.status!=='PREVIEW'||!epoch(s,this.policy,actor,j.chatId,this.clock(),j.id))return false;j.status='CANCELLED';return true;});}
- async confirm(actor:string,id:string):Promise<'CONFIRMED'|'FAILED_CONFIRMED'|'UNKNOWN_OUTCOME'|'DENIED'>{
+ async confirm(actor:string,id:string,sourceCurrent?:(s:BotState)=>boolean):Promise<'CONFIRMED'|'FAILED_CONFIRMED'|'UNKNOWN_OUTCOME'|'DENIED'>{
   const reserved=await this.store.transaction(s=>{
-   const j=s.groupPermissionJobs?.find(j=>j.id===id),now=this.clock();if(!j||j.actorId!==actor||j.status!=='PREVIEW'||j.attemptId!==undefined||now<j.createdAt||now>=j.expiresAt||j.restoreAt!==undefined&&j.restoreAt<=now+30000||epoch(s,this.policy,actor,j.chatId,now,j.id)!==j.sourceEpoch||blocked(s,j.chatId,j.id))return null;
+   const j=s.groupPermissionJobs?.find(j=>j.id===id),now=this.clock();if(sourceCurrent&&!sourceCurrent(s)||!j||j.actorId!==actor||j.status!=='PREVIEW'||isOfficialGroupPermissionGateway(this.gateway)&&j.gatewayOrigin!=='TELEGRAM_API'||j.attemptId!==undefined||now<j.createdAt||now>=j.expiresAt||j.restoreAt!==undefined&&j.restoreAt<=now+30000||epoch(s,this.policy,actor,j.chatId,now,j.id)!==j.sourceEpoch||blocked(s,j.chatId,j.id))return null;
    if(j.kind==='RESTORE'&&lastLock(s,j.chatId)?.id!==j.restores)return null;
    j.status='INTENT';return structuredClone(j);
   });
   if(!reserved)return 'DENIED';
-  const still=async(status:'INTENT'|'STARTED',attemptId?:string)=>{const s=await this.store.snapshot(),j=s.groupPermissionJobs?.find(j=>j.id===id),now=this.clock();return !!j&&j.status===status&&j.attemptId===attemptId&&identity(j)===identity(reserved)&&now>=j.createdAt&&now<j.expiresAt&&(j.restoreAt===undefined||j.restoreAt>now+30000)&&epoch(s,this.policy,actor,j.chatId,now,j.id)===j.sourceEpoch&&!blocked(s,j.chatId,j.id);};
+  const still=async(status:'INTENT'|'STARTED',attemptId?:string)=>{const s=await this.store.snapshot(),j=s.groupPermissionJobs?.find(j=>j.id===id),now=this.clock();return (!sourceCurrent||sourceCurrent(s))&&!!j&&j.status===status&&j.attemptId===attemptId&&identity(j)===identity(reserved)&&now>=j.createdAt&&now<j.expiresAt&&(j.restoreAt===undefined||j.restoreAt>now+30000)&&epoch(s,this.policy,actor,j.chatId,now,j.id)===j.sourceEpoch&&!blocked(s,j.chatId,j.id);};
   let observed;try{observed=await this.gateway.read(reserved.chatId);}catch{observed=null;}
   if(!observed||!validGroupPermissions(observed)||!equalGroupPermissions(observed,reserved.before)||!await still('INTENT')){
    await this.store.transaction(s=>{const j=s.groupPermissionJobs?.find(j=>j.id===id);if(j?.status==='INTENT'&&identity(j)===identity(reserved))j.status='CANCELLED';});return 'DENIED';
   }
   const attemptId=randomBytes(18).toString('base64url');
-  const started=await this.store.transaction(s=>{const j=s.groupPermissionJobs?.find(j=>j.id===id),now=this.clock();if(!j||j.status!=='INTENT'||identity(j)!==identity(reserved)||now<j.createdAt||now>=j.expiresAt||j.restoreAt!==undefined&&j.restoreAt<=now+30000||epoch(s,this.policy,actor,j.chatId,now,j.id)!==j.sourceEpoch||blocked(s,j.chatId,j.id))return false;j.status='STARTED';j.attemptId=attemptId;return true;});
+  const started=await this.store.transaction(s=>{const j=s.groupPermissionJobs?.find(j=>j.id===id),now=this.clock();if(sourceCurrent&&!sourceCurrent(s)||!j||j.status!=='INTENT'||identity(j)!==identity(reserved)||now<j.createdAt||now>=j.expiresAt||j.restoreAt!==undefined&&j.restoreAt<=now+30000||epoch(s,this.policy,actor,j.chatId,now,j.id)!==j.sourceEpoch||blocked(s,j.chatId,j.id))return false;j.status='STARTED';j.attemptId=attemptId;return true;});
   if(!started)return 'DENIED';let outcome:'CONFIRMED'|'FAILED_CONFIRMED'|'UNKNOWN_OUTCOME';
   try{outcome=await this.gateway.apply(reserved.chatId,reserved.before,reserved.after,()=>still('STARTED',attemptId));}catch{outcome='UNKNOWN_OUTCOME';}
   if(!['CONFIRMED','FAILED_CONFIRMED','UNKNOWN_OUTCOME'].includes(outcome))outcome='UNKNOWN_OUTCOME';
@@ -62,7 +62,7 @@ export class GroupPermissionLockService{
    const j=s.groupPermissionJobs?.find(j=>j.id===id);if(!j||j.status!=='STARTED'||j.attemptId!==attemptId||identity(j)!==identity(reserved)){
     s.groupPermissionJobs??=[];s.groupPermissionJobs.push({...reserved,id:randomBytes(18).toString('base64url'),status:'UNKNOWN_OUTCOME',attemptId});return 'UNKNOWN_OUTCOME' as const;
    }
-   if(outcome==='CONFIRMED'&&epoch(s,this.policy,actor,j.chatId,this.clock(),j.id)!==j.sourceEpoch)outcome='UNKNOWN_OUTCOME';j.status=outcome;
+   if(outcome==='CONFIRMED'&&(sourceCurrent&&!sourceCurrent(s)||epoch(s,this.policy,actor,j.chatId,this.clock(),j.id)!==j.sourceEpoch))outcome='UNKNOWN_OUTCOME';j.status=outcome;
    s.audit.push({actorId:actor,updateKey:'group-permissions:'+j.id,decision:outcome==='CONFIRMED'?'ALLOW':'DENY',reason:'GROUP_PERMISSIONS_'+outcome,policyVersion:j.scopeVersion,at:this.clock()});return outcome;
   });
  }

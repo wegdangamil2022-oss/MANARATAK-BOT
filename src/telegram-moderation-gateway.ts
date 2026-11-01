@@ -6,7 +6,7 @@ export interface ReviewedRestorationSource{kind:'BAN'|'MUTE';untilDate?:number;}
 
 /**
  * A separately injectable, deliberately DISARMED BY DEFAULT Telegram Bot API
- * moderation adapter. It is NOT connected to createLiveTelegramServer yet.
+ * moderation adapter. The live server selects it only through an explicit phase-3 option.
  *
  * Every mutation checks a trusted safety gate, fresh bot admin rights, target
  * protection, then the safety gate again. Outbound results are never retried,

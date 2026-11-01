@@ -1,3 +1,4 @@
+import {createPhase3ModerationRuntime} from './phase3-moderation-runtime.js';
 import {GroupProtectionPolicyService} from './group-protection-policy.js';
 import {startProtectionMaintenance} from './protection-maintenance.js';
 import {createServer,type Server} from 'node:http';
@@ -19,6 +20,7 @@ import {readTelegramSafetySwitch,createTelegramSafetyGate} from './telegram-safe
 
 export interface LiveTelegramConfig{
  ownerId:string;botId:string;botUsername:string;stateFile:string;
+ phase3ModerationEnabled?:true;phase3TimersEnabled?:true;
  token:string;webhookSecret:string;listenPort:number;publicWebhookUrl:string;safetySwitchFile:string;
 }
 /** An advisory URL syntax and topology gate, NOT DNS/TLS or proxy verification.
@@ -60,7 +62,7 @@ export function loadLiveTelegramConfig(env:Readonly<Record<string,string|undefin
  const webhookSecret=env.TELEGRAM_WEBHOOK_SECRET,port=Number(env.TELEGRAM_LISTEN_PORT);
  const publicWebhookUrl=env.TELEGRAM_WEBHOOK_PUBLIC_URL;
  const safetySwitchFile=env.TELEGRAM_SAFETY_FILE;
- if(env.BOT_ENV!=='production'||env.TELEGRAM_ENABLED!=='true'||
+ if(![undefined,'false','true'].includes(env.TELEGRAM_PHASE3_MODERATION_ENABLED)||![undefined,'false','true'].includes(env.TELEGRAM_PHASE3_TIMERS_ENABLED)||env.TELEGRAM_PHASE3_TIMERS_ENABLED==='true'&&env.TELEGRAM_PHASE3_MODERATION_ENABLED!=='true'||env.BOT_ENV!=='production'||env.TELEGRAM_ENABLED!=='true'||
     env.TELEGRAM_REPLY_DELIVERY_ENABLED!=='true'||
     !validOwner(ownerId)||
     !botId||!/^[A-Za-z0-9_-]{1,80}$/.test(botId)||
@@ -77,7 +79,7 @@ export function loadLiveTelegramConfig(env:Readonly<Record<string,string|undefin
     /[\u0000-\u001f\u007f]/u.test(safetySwitchFile)||
     safetySwitchFile===stateFile)
    throw new Error('LIVE_TELEGRAM_CONFIG_INVALID');
- return {ownerId,botId,botUsername,stateFile,token,webhookSecret,listenPort:port,publicWebhookUrl,safetySwitchFile};
+ return {ownerId,botId,botUsername,stateFile,token,webhookSecret,listenPort:port,publicWebhookUrl,safetySwitchFile,...(env.TELEGRAM_PHASE3_MODERATION_ENABLED==='true'?{phase3ModerationEnabled:true as const}:{}),...(env.TELEGRAM_PHASE3_TIMERS_ENABLED==='true'?{phase3TimersEnabled:true as const}:{})};
 }
 /** Independently checks a pre-existing local state; never initializes databases.
  * Common verification for both the read-only preflight command and real runtime.
@@ -149,12 +151,15 @@ export async function stopLiveTelegramServer(server:Server,graceMs=15_000):
 export async function createLiveTelegramServer(config:LiveTelegramConfig,
  request:typeof fetch=fetch):Promise<Server>{
  // Reject stale/malformed or manually constructed configuration as well.
+ if(config.phase3ModerationEnabled!==undefined&&config.phase3ModerationEnabled!==true||config.phase3TimersEnabled!==undefined&&config.phase3TimersEnabled!==true)throw Error('LIVE_TELEGRAM_CONFIG_INVALID');
  const check=loadLiveTelegramConfig({
   BOT_ENV:'production',TELEGRAM_ENABLED:'true',TELEGRAM_REPLY_DELIVERY_ENABLED:'true',
   BOT_OWNER_ID:config.ownerId,BOT_ID:config.botId,BOT_USERNAME:config.botUsername,
   BOT_STATE_FILE:config.stateFile,TELEGRAM_BOT_TOKEN:config.token,
   TELEGRAM_WEBHOOK_SECRET:config.webhookSecret,TELEGRAM_LISTEN_PORT:String(config.listenPort),
   TELEGRAM_WEBHOOK_PUBLIC_URL:config.publicWebhookUrl,
+  TELEGRAM_PHASE3_MODERATION_ENABLED:config.phase3ModerationEnabled===true?'true':undefined,
+  TELEGRAM_PHASE3_TIMERS_ENABLED:config.phase3TimersEnabled===true?'true':undefined,
   TELEGRAM_SAFETY_FILE:config.safetySwitchFile
  });
  await assertPrivateStateReady(check.stateFile);
@@ -169,12 +174,14 @@ export async function createLiveTelegramServer(config:LiveTelegramConfig,
  // Telegram membership is an external privileged read: require the bot to be
  // admin in the requested approved group before consulting a student's status.
  const membership=new TelegramBotApiMembershipGateway(check.token,request);
+ const phase3=check.phase3ModerationEnabled?await createPhase3ModerationRuntime(store,policy,check.token,request,safetyGate,Date.now,check.phase3TimersEnabled===true):undefined;
  // SubscriptionGate.verify uses only read-only membership checks. The existing
- // moderation gateway stays mock-only: no live ban/mute is activated here.
+ // moderation gateway stays mock-only unless the explicit phase-3 option is selected.
  const subscription=new SubscriptionGate(store,policy,membership,
-  new ModerationService(store,policy,new FakeModerationGateway()));
+  phase3?.moderation??new ModerationService(store,policy,new FakeModerationGateway()));
  const app=new TelegramUpdateApplication({store,policy,education,admin,faq,links,
   botId:check.botId,botUsername:check.botUsername,
+  ...(phase3?{moderation:phase3.moderation,groupPermissions:phase3.groupPermissions,protectionEnforcer:phase3.protectionEnforcer}:{}),
   membership:(chatId,actorId)=>membership.verifyMembership(chatId,actorId),subscription,
   documentDownload:new TelegramBotApiDocumentDownloader(check.token,request,safetyGate),
   moderationSafetyFile:check.safetySwitchFile,ownerMenuMode:'inline',studentMenuMode:'inline'});
@@ -187,6 +194,7 @@ export async function createLiveTelegramServer(config:LiveTelegramConfig,
   const protection=new GroupProtectionPolicyService(store,policy);
   const cleanup=startProtectionMaintenance(async()=>{
    const result=await protection.cleanupFloodWindows();
+   if(phase3)await phase3.tick(check.phase3TimersEnabled===true);
    if(result.status==='CLOCK_UNTRUSTED')throw Error('PROTECTION_CLOCK_UNTRUSTED');
   },undefined,()=>process.stderr.write('PROTECTION_MAINTENANCE_FAILED\n'));
   protectionMaintenanceStops.set(server,cleanup.stop);

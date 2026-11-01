@@ -11,9 +11,9 @@ import type {OwnerInlineScreen} from './telegram-inline-owner.js';
 type Button={text:string;callback_data:string};
 type Frame={chat:Chat;config:ProtectionPolicy;epoch:number;page:number;slot:number;digest:string;stale:boolean;returnToOwnerGroup:string|null};
 type Outcome={status:'APPLIED'|'DENIED';reason:string;screen:OwnerInlineScreen};
-type InputKind='WORD'|'PHRASE'|'LINK'|'TEST'|'DOMAIN'|'ALLOWPHRASE'|'FLOOD'|'EXEMPT'|'ESCALATION';
+type InputKind='WORD'|'PHRASE'|'LINK'|'TEST'|'DOMAIN'|'ALLOWPHRASE'|'FLOOD'|'EXEMPT'|'ESCALATION'|'RAID'|'NIGHT';
 const TTL=300000,PREFIX='protection-ui:';
-const flow=/^protection-ui:(WORD|PHRASE|TEST|LINK|DOMAIN|ALLOWPHRASE|FLOOD|EXEMPT|ESCALATION):(-[1-9][0-9]{0,15}):([1-9][0-9]{0,15}):(0|[1-9][0-9]{0,15}):(0|[1-9][0-9]{0,15}):([A-Za-z0-9_-]{16})(?::([A-Za-z0-9][A-Za-z0-9_-]{0,47}))?$/u;
+const flow=/^protection-ui:(WORD|PHRASE|TEST|LINK|DOMAIN|ALLOWPHRASE|FLOOD|EXEMPT|ESCALATION|RAID|NIGHT):(-[1-9][0-9]{0,15}):([1-9][0-9]{0,15}):(0|[1-9][0-9]{0,15}):(0|[1-9][0-9]{0,15}):([A-Za-z0-9_-]{16})(?::([A-Za-z0-9][A-Za-z0-9_-]{0,47}))?$/u;
 const escape=(v:string)=>v.replace(/\p{Cf}/gu,'').replace(/&/gu,'&amp;').replace(/</gu,'&lt;').replace(/>/gu,'&gt;').replace(/"/gu,'&quot;');
 const btn=(text:string,callback_data:string):Button=>({text,callback_data});
 const screen=(text:string,rows:Button[][]):OwnerInlineScreen=>({text,keyboard:{inline_keyboard:rows}});
@@ -32,6 +32,14 @@ function rulesWithInput(config:ProtectionPolicy,kind:'WORD'|'PHRASE'|'LINK',valu
  return editing?config.rules.map(r=>r.id===id?rule:r):[...config.rules,rule];
 }
 function inputPolicy(config:ProtectionPolicy,kind:Exclude<InputKind,'TEST'>,text:string,id:string,editing:boolean,now:number):ProtectionPolicy|null{
+ if(kind==='NIGHT'){
+  const m=/^([0-2][0-9]):([0-5][0-9]) ([0-2][0-9]):([0-5][0-9]) (-?(?:0|[1-9][0-9]{0,2}))$/u.exec(text);if(!m||m[0]!==text||Number(m[1])>23||Number(m[3])>23)return null;
+  return {...config,revision:config.revision+1,night:{enabled:config.night?.enabled??false,startMinute:Number(m[1])*60+Number(m[2]),endMinute:Number(m[3])*60+Number(m[4]),offsetMinutes:Number(m[5])}};
+ }
+ if(kind==='RAID'){
+  const m=/^([1-9][0-9]{0,2}) ([1-9][0-9]{0,3}) ([1-9][0-9]{0,2})$/u.exec(text);if(!m||m[0]!==text)return null;
+  return {...config,revision:config.revision+1,raid:{enabled:config.raid?.enabled??false,minimumMembers:Number(m[1]),minimumMessages:Number(m[2]),lockSeconds:Number(m[3])}};
+ }
  if(kind==='ESCALATION'){
   const m=/^([1-9][0-9]?) ([1-9][0-9]{0,4})$/u.exec(text);if(!m||m[0]!==text)return null;
   return {...config,revision:config.revision+1,escalation:{enabled:config.escalation?.enabled??false,afterWarnings:Number(m[1]),windowMs:Number(m[2])*1000}};
@@ -85,6 +93,7 @@ export class TelegramProtectionEditor{
    rows.push([btn('📋 النطاقات المسموحة',key('s',f,':0:1')),btn('📋 العبارات المسموحة',key('s',f,':0:2'))]);
    rows.push([btn('⏳ إضافة استثناء مؤقت',key('E',f)),btn('📋 الاستثناءات المؤقتة',key('s',f,':0:3'))]);
    rows.push([btn('🌊 مكافحة الفلود',key('S',f)),btn('📈 التدرج العقابي',key('B',f))]);
+   rows.push([btn('🛡 AntiRaid مؤقت',key('J',f)),btn('🌙 الوضع الليلي',key('N',f))]);
    rows.push([btn('🔒 أنواع الرسائل',key('y',f,':0'))]);
    rows.push([btn('🔐 أقفال أذونات Telegram','lk:1:h')]);
    rows.push([btn('📋 القواعد',key('l',f,':0')),btn('🧪 اختبار القواعد',key('t',f))]);
@@ -147,7 +156,7 @@ export class TelegramProtectionEditor{
      const value:Wizard={key,userId:actor,chatId:actor,topicId:'',flow:'protection-enforce:'+f.chat.id+':'+f.digest+':'+nonce,step:0,version:(old?.version??0)+1,expiresAt:now+120000,policyVersion:f.epoch,status:'ACTIVE'};
      if(old)Object.assign(old,value);else s.wizards.push(value);return true;
     });
-    return created?screen('⚠️ تفعيل تنفيذ القواعد المفعلة لهذه المجموعة؟\nالمراجعة تُسجل فقط، والتحذير يسجل مخالفة، والكتم مدته دقيقة واحدة. تُحترم الاستثناءات وحماية المشرفين والصلاحيات. الحذف غير موصول.\nعدد القواعد المفعلة: '+f.config.rules.filter(r=>r.enabled).length+'\nالفلود: '+(f.config.flood?.enabled?'مفعل':'متوقف')+'\nالتأكيد صالح لدقيقتين؛ الرجوع يلغيه.',[[btn('✅ تأكيد التنفيذ',key('I',f,':'+nonce))],[btn('↩️ رجوع دون تفعيل',key('g',f))]]):null;
+    return created?screen('⚠️ تفعيل تنفيذ القواعد المفعلة لهذه المجموعة؟\nالمراجعة تُسجل فقط، والتحذير يسجل مخالفة، والكتم مدته دقيقة واحدة. تُحترم الاستثناءات وحماية المشرفين والصلاحيات. الحذف غير موصول.\nالوضع الليلي: '+(f.config.night?.enabled?'قفل واستعادة حسب الوقت المحفوظ':'معطل')+'\nAntiRaid: '+(f.config.raid?.enabled?'قفل إرسال مؤقت '+f.config.raid.lockSeconds+' ثانية؛ استعادة اللقطة عبر العامل المفعّل':'معطل')+'\nعدد القواعد المفعلة: '+f.config.rules.filter(r=>r.enabled).length+'\nالفلود: '+(f.config.flood?.enabled?'مفعل':'متوقف')+'\nالتأكيد صالح لدقيقتين؛ الرجوع يلغيه.',[[btn('✅ تأكيد التنفيذ',key('I',f,':'+nonce))],[btn('↩️ رجوع دون تفعيل',key('g',f))]]):null;
    }
    const claimed=await this.store.transaction(s=>{
     const rows=s.wizards.filter(w=>w.key==='protection-enforce:'+actor),w=rows[0],now=this.clock();
@@ -157,6 +166,20 @@ export class TelegramProtectionEditor{
    if(!claimed)return null;
    const saved=await this.service.save(actor,{...f.config,revision:f.config.revision+1,mode:'ENFORCE'},f.epoch,f.config.revision);
    return saved.status==='SAVED'?this.fresh(actor,f.chat.id,'فُعّل تنفيذ القواعد المدعومة.'):null;
+  }
+  if(route.kind==='N')return this.nightScreen(f);
+  if(route.kind==='O')return this.begin(actor,f,'NIGHT');
+  if(route.kind==='P'){
+   if(!f.config.night)return null;
+   const saved=await this.service.save(actor,{...f.config,revision:f.config.revision+1,night:{...f.config.night,enabled:!f.config.night.enabled}},f.epoch,f.config.revision);
+   return saved.status==='SAVED'?this.fresh(actor,f.chat.id,'حُفظ إعداد الوضع الليلي.'):null;
+  }
+  if(route.kind==='J')return this.raidScreen(f);
+  if(route.kind==='K')return this.begin(actor,f,'RAID');
+  if(route.kind==='L'){
+   if(!f.config.raid||!f.config.flood?.enabled)return null;
+   const saved=await this.service.save(actor,{...f.config,revision:f.config.revision+1,raid:{...f.config.raid,enabled:!f.config.raid.enabled}},f.epoch,f.config.revision);
+   return saved.status==='SAVED'?this.fresh(actor,f.chat.id,'حُفظ إعداد AntiRaid.'):null;
   }
   if(route.kind==='B')return this.escalationScreen(f);
   if(route.kind==='C')return this.begin(actor,f,'ESCALATION');
@@ -242,6 +265,14 @@ export class TelegramProtectionEditor{
   const saved=await this.service.save(actor,next,f.epoch,f.config.revision);
   return saved.status==='SAVED'?this.fresh(actor,f.chat.id,'حُفظ تعديل القاعدة.'):null;
  }
+ private nightScreen(f:Frame):OwnerInlineScreen{
+  const n=f.config.night,hhmm=(v:number)=>String(Math.floor(v/60)).padStart(2,'0')+':'+String(v%60).padStart(2,'0');
+  return screen('الوضع الليلي المتكرر: قفل الإرسال ضمن الفترة اليومية ثم استعادة اللقطة الأصلية. يستخدم إزاحة UTC ثابتة بالدقائق، بلا تحويل تلقائي للتوقيت الصيفي. يتطلب وضع التنفيذ وعامل الاستعادة المفعّل.\n'+(n?'الحالة: '+(n.enabled?'مفعل':'معطل')+' · من '+hhmm(n.startMinute)+' إلى '+hhmm(n.endMinute)+' · UTC بالدقائق '+n.offsetMinutes:'لم يُضبط بعد.')+'\nلن يفتح قيدًا مستقلاً أو يستبدل معاينة بشرية. يتوقف عند تغير الأذونات أو الغموض؛ راجع السجل. إيقاف السياسة يمنع قفلاً جديدًا، ويظل موعد استعادة القفل المؤكد محفوظًا.',[[btn('⚙️ ضبط الوقت والإزاحة',key('O',f))],...(n?[[btn(n.enabled?'⏹ تعطيل الليلي':'✅ تفعيل الليلي',key('P',f))]]:[]),[btn('↩️ إعدادات المجموعة',key('g',f))]]);
+ }
+ private raidScreen(f:Frame):OwnerInlineScreen{
+  const r=f.config.raid;
+  return screen('AntiRaid لمعدل الإرسال الجماعي: يستخدم نافذة الفلود المرصودة فقط، ولا يدعي رصد الانضمامات. لا حظر جماعي؛ قفل إرسال مؤقت بلقطة أصلية. يشترط منفذًا موصولاً وعامل استعادة مفعلاً وتأكيد وضع التنفيذ.\n'+(r?'الحالة: '+(r.enabled?'مفعل':'معطل')+' · أعضاء: '+r.minimumMembers+' · رسائل: '+r.minimumMessages+' · القفل بالثواني: '+r.lockSeconds:'لم يُضبط بعد.')+'\nفعّل نافذة الفلود أولاً. العد محدود وقد يقل عن إجمالي الرسائل، ولا تُحتسب الرسائل المعدلة أو الأعضاء المستثنون. الاستعادة تحجب عند تغير الأذونات أو الحقوق أو غموض النتيجة.',[[btn('⚙️ ضبط الحدود والمدة',key('K',f))],...(r&&f.config.flood?.enabled?[[btn(r.enabled?'⏹ تعطيل AntiRaid':'✅ تفعيل AntiRaid',key('L',f))]]:[]),[btn('↩️ إعدادات المجموعة',key('g',f))]]);
+ }
  private escalationScreen(f:Frame):OwnerInlineScreen{
   const e=f.config.escalation;
   return screen('التدرج الاختياري: المخالفة ذات إجراء التحذير تتحول إلى كتم لدقيقة بعد بلوغ عدد التحذيرات النشطة للعضو في النافذة، بما فيها اليدوية. لا حظر دائم ولا عقوبتان للمخالفة نفسها.\n'+(e?'الحالة: '+(e.enabled?'مفعل':'معطل')+' · التحذيرات السابقة: '+e.afterWarnings+' · النافذة بالثواني: '+e.windowMs/1000:'لم يُضبط بعد.')+'\nالتنفيذ يتطلب تفعيل سياسة التنفيذ المستقل.',[[btn('⚙️ ضبط العدد والنافذة',key('C',f))],...(e?[[btn(e.enabled?'⏹ تعطيل التدرج':'✅ تفعيل التدرج',key('D',f))]]:[]),[btn('↩️ إعدادات المجموعة',key('g',f))]]);
@@ -284,6 +315,8 @@ export class TelegramProtectionEditor{
    return true;
   });
   return created?screen(kind==='TEST'?'أرسل عينة نصية لاختبار قواعد المحتوى، بما فيها المعطلة، دون تشغيلها أو حفظ العينة. لا يختبر هذا المسار وتيرة الفلود.':
+   kind==='NIGHT'?'أرسل البداية والنهاية بصيغة 24 ساعة ثم إزاحة UTC بالدقائق. مثال لليمن: 22:00 06:00 180. الوقتان مختلفان والإزاحة من -720 إلى 840؛ يبدأ الإعداد الجديد معطلاً.':
+   kind==='RAID'?'أرسل عدد الأعضاء ثم عدد الرسائل ثم مدة القفل بالثواني؛ مثال: 5 20 120. الأعضاء من 2 إلى 100 والرسائل حتى 1000 ولا تقل عن الأعضاء، والمدة من 60 إلى 600. يبدأ الإعداد الجديد معطلاً.':
    kind==='ESCALATION'?'أرسل عدد التحذيرات السابقة من 1 إلى 20 ثم نافذة بالثواني من 60 إلى 86400؛ مثال: 3 3600. يبدأ الإعداد الجديد معطلاً. الكتم لمدة دقيقة فقط.':
    kind==='EXEMPT'?'أرسل رقم العضو ثم المدة بالثواني، مفصولين بمسافة؛ المدة من 60 إلى 86400. مثال: 300 600. الاستثناء لفحص المحتوى والفلود فقط، ولا يرفع عقوبة قائمة. الرجوع يلغي الإدخال.':
    kind==='FLOOD'?'أرسل عدد الرسائل ثم المدة بالثواني، مفصولين بمسافة. العدد من 1 إلى 100 والمدة من 1 إلى 60. مثال إدخال فقط: 5 3. تبدأ السياسة الجديدة معطلة بإجراء مراجعة.':
@@ -348,7 +381,7 @@ export class TelegramProtectionEditor{
    if(!validTime(now)||now>=w.expiresAt||now<w.expiresAt-TTL||!f||f.stale||f.epoch!==epoch||f.config.revision!==revision){w.status='CANCELLED';w.version++;return {kind:'DENIED' as const};}
    let ruleId=m[7]??'';
    if(m[1]!=='TEST'){
-    if(!m[7]&&!['DOMAIN','ALLOWPHRASE','FLOOD','EXEMPT','ESCALATION'].includes(m[1]!)&&f.config.rules.length>=100)return {kind:'RETRY' as const,notice:'بلغت السياسة الحد الحالي للقواعد. ألغ الخطوة واحذف قاعدة قبل إضافة أخرى.'};
+    if(!m[7]&&!['DOMAIN','ALLOWPHRASE','FLOOD','EXEMPT','ESCALATION','RAID','NIGHT'].includes(m[1]!)&&f.config.rules.length>=100)return {kind:'RETRY' as const,notice:'بلغت السياسة الحد الحالي للقواعد. ألغ الخطوة واحذف قاعدة قبل إضافة أخرى.'};
     if(!m[7])ruleId=newRuleId(f.config);
     const candidate=inputPolicy(f.config,m[1] as Exclude<InputKind,'TEST'>,text,ruleId,Boolean(m[7]),now);
     if(!candidate||!isValidProtectionPolicy(candidate))return {kind:'RETRY' as const,notice:'المدخل غير صالح أو مكرر أو يتجاوز الحد. راجع صيغة الخطوة أو أرسل /cancel.'};
@@ -374,7 +407,7 @@ export class TelegramProtectionEditor{
   const candidate=inputPolicy(f.config,claim.kind,text,claim.ruleId,claim.editing,this.clock());
   if(!candidate)return {status:'DENIED',reason:'PROTECTION_EDITOR_STALE',screen:this.failure(actor)};
   const saved=await this.service.save(actor,candidate,f.epoch,f.config.revision);
-  const view=saved.status==='SAVED'?await this.fresh(actor,f.chat.id,claim.kind==='ESCALATION'?'حُفظ عدد التحذيرات ونافذة التدرج.':claim.kind==='EXEMPT'?'حُفظ الاستثناء المؤقت؛ ينتهي تلقائيًا في الموعد المعروض.':claim.kind==='FLOOD'?'حُفظت حدود الفلود المحلية.':claim.kind==='DOMAIN'||claim.kind==='ALLOWPHRASE'?'حُفظ عنصر السماح المحلي.':claim.editing?'حُفظ النص البديل مع إبقاء إعدادات القاعدة.':'أُضيفت القاعدة معطلة؛ راجعها واختبرها قبل أي تفعيل.'):null;
+  const view=saved.status==='SAVED'?await this.fresh(actor,f.chat.id,claim.kind==='NIGHT'?'حُفظ الوقت اليومي وإزاحة UTC.':claim.kind==='RAID'?'حُفظت حدود AntiRaid المؤقتة.':claim.kind==='ESCALATION'?'حُفظ عدد التحذيرات ونافذة التدرج.':claim.kind==='EXEMPT'?'حُفظ الاستثناء المؤقت؛ ينتهي تلقائيًا في الموعد المعروض.':claim.kind==='FLOOD'?'حُفظت حدود الفلود المحلية.':claim.kind==='DOMAIN'||claim.kind==='ALLOWPHRASE'?'حُفظ عنصر السماح المحلي.':claim.editing?'حُفظ النص البديل مع إبقاء إعدادات القاعدة.':'أُضيفت القاعدة معطلة؛ راجعها واختبرها قبل أي تفعيل.'):null;
   return view?{status:'APPLIED',reason:'PROTECTION_RULE_SAVED',screen:view}:{status:'DENIED',reason:'PROTECTION_EDITOR_STALE',screen:this.failure(actor)};
  }
 }
