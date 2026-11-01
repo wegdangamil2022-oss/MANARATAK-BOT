@@ -1,5 +1,6 @@
 import {protectionInlineRoute} from './protection-inline-route.js';
 import {validGroupPermissionRoute} from './telegram-group-permission-lock.js';
+import {validModerationCaseRoute} from './telegram-moderation-cases.js';
 import {validOwnerFAQInlineRoute} from './telegram-inline-faq.js';
 import {validOwnerLibraryInlineRoute} from './telegram-inline-library.js';
 import {validStudioInlineRoute,studioOwnerEntry} from './telegram-inline-studio.js';
@@ -698,6 +699,7 @@ export function isValidTelegramInlineKeyboard(input:unknown):input is TelegramIn
      !/^c_[A-Za-z0-9_-]{24}$/u.test(button.callback_data)&&
      !/^mc:1:[cx]:[A-Za-z0-9_-]{24}$/u.test(button.callback_data)&&
      !validGroupPermissionRoute(button.callback_data)&&
+     !validModerationCaseRoute(button.callback_data)&&
      !/^ms:1:(?:h|p:(?:0|[1-9][0-9]{0,2})|g:-[1-9][0-9]{0,18}:[1-9][0-9]{0,9}:(?:0|[1-9][0-9]{0,2}))$/u.test(button.callback_data)&&
      !/^ms:1:o:-[1-9][0-9]{0,18}:[1-9][0-9]{0,9}:(?:0|[1-9][0-9]{0,2}):(?:0|[1-9][0-9]{0,2}):[a-f0-9]{12}$/u.test(button.callback_data)&&
      !/^mr:1:(?:h|p:(?:0|[1-9][0-9]{0,2})|d:(?:0|[1-9][0-9]{0,2}):[1-8]:[a-f0-9]{12}|v:(?:0|[1-9][0-9]{0,2}):[1-8]:[a-f0-9]{12}:[ae])$/u.test(button.callback_data)&&
@@ -722,7 +724,7 @@ const navigation=(back:string,home=true)=>{
 export function ownerInlineConnection(data:string):'EDITOR'|'VIEW'|'SPECIFICATION'|null{
  const m=/^mi:1:i:([0-9]{2}):([0-9]{2})$/u.exec(data);if(!m||m[0]!==data)return null;
  const section=ownerInlineSections[Number(m[1])-1];if(!section||Number(m[2])<1||Number(m[2])>section.items.length)return null;
- if(data==='mi:1:i:02:04'||/^mi:1:i:04:0[234]$/u.test(data)||data==='mi:1:i:13:04'||delegationOwnerEntry(data)||/^mi:1:i:01:(?:03|06|07|08|12)$/u.test(data)||data==='mi:1:i:10:16'||data==='mi:1:i:11:03'||studioOwnerEntry(data))return 'EDITOR';
+ if(/^mi:1:i:02:0[234]$/u.test(data)||/^mi:1:i:04:0[234]$/u.test(data)||data==='mi:1:i:13:04'||delegationOwnerEntry(data)||/^mi:1:i:01:(?:03|06|07|08|12)$/u.test(data)||data==='mi:1:i:10:16'||data==='mi:1:i:11:03'||studioOwnerEntry(data))return 'EDITOR';
  if(ownerInlineLinkedReadOnly(data)!==null||/^mi:1:i:01:(?:09|10|11)$/u.test(data)||data==='mi:1:i:03:01'||data==='mi:1:i:02:01'||data==='mi:1:i:02:15'||data==='mi:1:i:02:16'||data==='mi:1:i:02:13'||/^mi:1:i:02:(?:0[5678]|12)$/u.test(data))return 'VIEW';
  return 'SPECIFICATION';
 }

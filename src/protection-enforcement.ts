@@ -12,7 +12,7 @@ export function moderationProtectionEnforcer(service:ModerationService):Protecti
  return Object.freeze({
   supports:(action:ProtectionAction)=>action==='REVIEW'||action==='WARN'||action==='MUTE',
   async execute(actor:string,chat:string,member:string,action:ProtectionAction,key:string,current:(s:BotState)=>boolean){
-   const reference='protection:'+createHash('sha256').update(key).digest('hex');
+   const reference='protection_'+createHash('sha256').update(key).digest('hex').slice(0,48);
    if(action==='REVIEW')return 'REVIEW';
    if(action==='WARN')return (await service.issueWarning(actor,chat,member,reference,current)).status;
    if(action==='MUTE')return (await service.addManualReason(actor,chat,member,reference,'MUTE',current,60,current)).status;

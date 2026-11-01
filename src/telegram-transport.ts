@@ -2,6 +2,7 @@ import {protectionMediaFromMessage,type ProtectionMedia} from './telegram-protec
 import { timingSafeEqual,createHash } from 'node:crypto';
 import {ModerationCommandReview,cancelModerationCommandReview} from './telegram-moderation-command-review.js';
 import {TelegramGroupPermissionLock} from './telegram-group-permission-lock.js';
+import {TelegramModerationCases} from './telegram-moderation-cases.js';
 import type {GroupPermissionLockService} from './group-permission-lock.js';
 import {staleCommunityMessage,COMMUNITY_CLOSED_TEXT} from './community-message-receipt.js';
 import type { IncomingMessage, RequestListener, ServerResponse } from 'node:http';
@@ -394,6 +395,10 @@ export class TelegramUpdateApplication {
      // Reauthorize the real sender at every tap. Never dispatch a privileged
      // command from untrusted callback_data or from a group context.
      if(kind!=='private'||actorId!==chatId)return {status:'DENIED',reason:'PRIVATE_CALLBACK_ONLY'};
+     if(event.callbackData.startsWith('cs:1:')||/^mi:1:i:02:0[23]$/u.test(event.callbackData)){
+      const view=await new TelegramModerationCases(this.opts.store,this.opts.policy,this.opts.moderation,this.clock).handle(actorId,event.callbackData);
+      return view?{status:view.status,reason:view.reason,adminUIAccess:view.access,plan:this.plan(actorId,view.text,undefined,view.keyboard,event.callbackMessageId)}:{status:'DENIED',reason:'MODERATION_CASE_STALE_OR_UNAUTHORIZED'};
+     }
      if(event.callbackData==='mi:1:i:02:04'||event.callbackData.startsWith('lk:1:')){
       if(event.callbackData==='mi:1:i:02:04'&&!this.opts.policy.isOwner(actorId))return {status:'DENIED',reason:'OWNER_ONLY'};
       const view=await new TelegramGroupPermissionLock(this.opts.store,this.opts.policy,this.opts.groupPermissions,this.clock).handle(actorId,event.callbackData);
@@ -453,6 +458,7 @@ export class TelegramUpdateApplication {
        actorId,event.callbackData,this.clock());
       if(!screen)return {status:'DENIED',reason:'STAFF_SCOPE_OR_CALLBACK_INVALID'};
       if(this.opts.groupPermissions)screen={...screen,keyboard:{inline_keyboard:[...screen.keyboard.inline_keyboard,[{text:'🔐 قفل وفتح مجموعاتي',callback_data:'lk:1:h'}]]}};
+      if(this.opts.moderation)screen={...screen,keyboard:{inline_keyboard:[...screen.keyboard.inline_keyboard,[{text:'⚖️ حالات العقوبات',callback_data:'cs:1:h:b:0'},{text:'⚠️ التحذيرات',callback_data:'cs:1:h:w:0'}]]}};
       return {status:'APPLIED',reason:'RESPONSE_PLANNED_ONLY',
        plan:this.plan(chatId,screen.text,undefined,screen.keyboard,event.callbackMessageId)};
      }
