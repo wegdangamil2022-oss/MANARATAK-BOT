@@ -4,6 +4,7 @@ import type {Policy} from './policy.js';
 import {ApprovedAnswerService} from './education-interactions.js';
 import {faqReviewFingerprint} from './faq-review.js';
 import {ownerFAQSourceAvailable} from './telegram-owner-faq.js';
+import {ownerPreviewCancelData} from './telegram-owner-preview-cancel.js';
 import type {OwnerInlineScreen} from './telegram-inline-owner.js';
 const page='(0|[1-9][0-9]{0,2})';
 const list=new RegExp('^of:1:p:'+page+'$','u');
@@ -59,6 +60,6 @@ export async function renderOwnerInlineFAQ(store:BotStore,policy:Policy,actor:st
  if(selected[1]==='a'?!approve:!archive)return null;
  try{
   const ref=await service.issueInlineReview(actor,q.id,selected[1]==='a'?'APPROVED':'ARCHIVED',faqReviewFingerprint(state,q),epoch(state,policy,q),current);
-  return ui(text+'\n\nالقرار: '+(selected[1]==='a'?'اعتماد الإجابة':'أرشفة الإجابة')+'\nالتأكيد صالح لدقيقتين ولمرة واحدة.',[[b('✅ تأكيد القرار','of:1:c:'+ref.slice(2))],[b('↩️ إلغاء والعودة',key('d',current,slot,selected[4]!))],back]);
+  return ui(text+'\n\nالقرار: '+(selected[1]==='a'?'اعتماد الإجابة':'أرشفة الإجابة')+'\nالتأكيد صالح لدقيقتين ولمرة واحدة.',[[b('✅ تأكيد القرار','of:1:c:'+ref.slice(2))],[b('↩️ إلغاء والعودة',ownerPreviewCancelData(ref))],back]);
  }catch{return null;}
 }

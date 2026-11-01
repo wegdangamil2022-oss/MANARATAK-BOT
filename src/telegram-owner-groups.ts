@@ -1,3 +1,4 @@
+import {subscriptionRuleLabel} from './subscription-integrity.js';
 import type {BotStore,BotState,Chat,SubscriptionRequirement} from './store.js';
 import type {Policy} from './policy.js';
 import type {VerifiedAdminContext} from './education-admin.js';
@@ -89,7 +90,7 @@ function details(chat:Chat,subscription?:SubscriptionRequirement):OwnerGroupScre
   +'وضع AI المحفوظ: '+chat.groupAI+'\n'
   +'إصدار السياسة: '+chat.version+'\n'
   +'الاشتراك المحفوظ: '+(subscription?.channelIds.length?
-    subscription.mode+' / '+subscription.channelIds.length+' قناة':'غير مفعّل أو معلّق')+'\n'
+    subscriptionRuleLabel(subscription)+' / '+subscription.channelIds.length+' قناة':'غير مفعّل أو معلّق')+'\n'
   +'هذه معلومات من قاعدة البيانات فقط، وليست تحققًا حيًا من Telegram.';
  if(!chat.approved)return screen(body+'\nلا يمكن إعادة اعتماد محادثة عبر هذا الزر.',
   [groupMenuLabel]);
@@ -147,7 +148,7 @@ export class OwnerTelegramGroupMenu{
    const channels=subscription?.channelIds??[];
    return screen('<b>تفاصيل الاشتراك المحفوظة 📋</b>\n'
     +'المحادثة: <code>'+chat.id+'</code>\n'
-    +'الوضع: '+(channels.length?subscription!.mode:'غير مفعل')+'\n'
+    +'الوضع: '+(channels.length?subscriptionRuleLabel(subscription!):'غير مفعل')+'\n'
     +'عدد القنوات: '+channels.length+'\n'
     +(channels.length?'القنوات المحلية: '+channels.join(', ')+'\n':'')
     +'لا يوجد تحقق حي من Telegram في هذه الشاشة.\n'
@@ -161,6 +162,7 @@ export class OwnerTelegramGroupMenu{
    if(!chat.scopes.includes('verification')||!subscription?.channelIds.length||
       subscription.version!==action.requirementVersion||
       !action.channelId||!subscription.channelIds.includes(action.channelId))return null;
+   if(subscription.mode==='AT_LEAST'&&subscription.channelIds.length>1&&subscription.channelIds.length-1<subscription.minimumCount!)return screen('عدد القنوات المتبقي سيكون أقل من الحد الأدنى. عدّل الحد من إعداد الاشتراك أو علّق الشرط أولًا.',['📋 تفاصيل الاشتراك · '+chat.id]);
    const suffix=' · '+chat.id+':'+action.channelId+':'+chat.version+':'+subscription.version;
    if(action.kind==='channelReview')
     return screen('<b>مراجعة إزالة قناة مشترطة 🧹</b>\n'
@@ -184,7 +186,7 @@ export class OwnerTelegramGroupMenu{
    if(action.kind==='subscriptionReview')
     return screen('<b>مراجعة تعليق شرط الاشتراك 🧊</b>\n'
      +'سيصبح شرط الاشتراك غير مفعّل لهذه المجموعة محليًا.\n'
-     +'القنوات الحالية: '+subscription.channelIds.length+' ('+subscription.mode+').\n'
+     +'القنوات الحالية: '+subscription.channelIds.length+' ('+subscriptionRuleLabel(subscription)+').\n'
      +'لا يتم فك أي عقوبات أو تقييدات قائمة تلقائيًا، ولا توجد مكالمات Telegram.',
      ['✅ تأكيد تعليق الاشتراك'+suffix,'🏷️ محادثة · '+chat.id]);
    try{await this.policy.pauseSubscriptionAtRevision(ctx.actorId,chat.id,chat.version,subscription.version);}

@@ -18,6 +18,70 @@ const buttons=(r:Result)=>r.plan?.inlineMarkup?.inline_keyboard.flat()??r.plan?.
 const select=(r:Result,prefix:string)=>{const b=buttons(r).find(b=>b.callback_data.startsWith(prefix));assert.ok(b,'missing '+prefix);return b.callback_data;};
 for(const engine of ['json','sqlite'] as const){
  async function fixture(){const dir=await mkdtemp(join(tmpdir(),'studio-ui-')),store=new BotStore(join(dir,'state.'+engine),{engine}),policy=new Policy(store,'100'),education=new EducationService(store,policy);const app=()=>new TelegramUpdateApplication({store,policy,education,admin:new EducationAdminFacade(store,policy,education),faq:new ApprovedAnswerService(store,policy),links:new ResourceLinkService(store,policy),clock:()=>1700000000000,botId:'studio-local',botUsername:'ManaratakBot',membership:async()=>{throw Error('NETWORK_FORBIDDEN');}});return {store,policy,app,svc:new ButtonStudioService(store,policy,()=>1700000000000),close:()=>rm(dir,{recursive:true,force:true})};}
+ test('nested menu paging and service returns preserve ancestors without consuming another seat ('+engine+')',async()=>{
+  const f=await fixture();try{
+   let a=await f.svc.create('100','A'),b=await f.svc.create('100','B'),c=await f.svc.create('100','C');
+   c=await f.svc.edit('100',c.id,c.revision,{kind:'TEXT',value:'آخر قائمة'});
+   b=await f.svc.edit('100',b.id,b.revision,{kind:'TEXT',value:'ب'.repeat(450)});
+   for(const name of ['إلى الثالثة','الخدمة'])b=await f.svc.edit('100',b.id,b.revision,{kind:'ADD_BUTTON',value:name});
+   const next=b.draft.buttons[0]!,service=b.draft.buttons[1]!;
+   b=await f.svc.edit('100',b.id,b.revision,{kind:'ACTION',buttonId:next.id,action:{kind:'MENU',target:c.id}});
+   b=await f.svc.edit('100',b.id,b.revision,{kind:'ACTION',buttonId:service.id,action:{kind:'SERVICE',target:'student:open'}});
+   a=await f.svc.edit('100',a.id,a.revision,{kind:'ADD_BUTTON',value:'إلى الثانية'});const enter=a.draft.buttons[0]!;
+   a=await f.svc.edit('100',a.id,a.revision,{kind:'ACTION',buttonId:enter.id,action:{kind:'MENU',target:b.id}});
+   a=await f.svc.edit('100',a.id,a.revision,{kind:'CONDITION',buttonId:enter.id,condition:{...enter.condition,seats:1}});
+   let i=900,screen=await f.app().handle(event(i++,'st:1:v:'+a.id+':'+a.revision));
+   screen=await f.app().handle(event(i++,select(screen,'st:1:t:')));assert.equal(screen.status,'APPLIED');
+   const route=(text:string)=>{const item=buttons(screen).find(x=>x.text===text);assert.ok(item,text);return item.callback_data;};
+   screen=await f.app().handle(event(i++,route('➡️ بقية النص')));assert.ok(screen.plan!.text.includes('النص (2 من 3)'));
+   screen=await f.app().handle(event(i++,route('إلى الثالثة')));assert.ok(screen.plan!.text.includes('آخر قائمة'));
+   const back=route('↩️ القائمة السابقة');assert.equal((await f.app().handle(event(i++,back,300))).status,'DENIED');assert.equal((await f.app().handle(event(i++,back,100,true))).status,'DENIED');
+   screen=await f.app().handle(event(i++,back));assert.ok(screen.plan!.text.includes('النص (2 من 3)'));
+   screen=await f.app().handle(event(i++,route('الخدمة')));assert.equal(screen.status,'APPLIED');
+   screen=await f.app().handle(event(i++,route('↩️ المعاينة')));assert.ok(screen.plan!.text.includes('النص (2 من 3)'));
+   const stale=route('إلى الثالثة');screen=await f.app().handle(event(i++,route('↩️ القائمة السابقة')));assert.equal(screen.status,'APPLIED');
+   assert.equal((await f.store.snapshot()).callbacks.filter(x=>x.ref.startsWith('studio-seat:')).length,1);
+   a=await f.svc.edit('100',a.id,a.revision,{kind:'NAME',value:'A جديد'});
+   assert.equal((await f.app().handle(event(i++,stale))).status,'DENIED');
+   assert.equal((await f.store.snapshot()).callbacks.filter(x=>x.ref.startsWith('studio-seat:')).length,1);
+  }finally{await f.close();}
+ });
+ test('nested menu references reject expiration, duplicate records and revoked context ('+engine+')',async()=>{
+  const f=await fixture();try{
+   let a=await f.svc.create('100','A');const b=await f.svc.create('100','B');
+   a=await f.svc.edit('100',a.id,a.revision,{kind:'ADD_BUTTON',value:'فتح'});a=await f.svc.edit('100',a.id,a.revision,{kind:'ACTION',buttonId:a.draft.buttons[0]!.id,action:{kind:'MENU',target:b.id}});
+   const first=await f.app().handle(event(950,'st:1:v:'+a.id+':'+a.revision)),opened=await f.app().handle(event(951,select(first,'st:1:t:'))),back=select(opened,'st:1:N:');
+   const ref='studio-nav:'+back.slice(7),original=(await f.store.snapshot()).callbacks.find(x=>x.ref===ref)!;
+   await f.store.transaction(s=>{s.callbacks.push({...original});});assert.equal((await f.app().handle(event(952,back))).status,'DENIED');
+   await f.store.transaction(s=>{s.callbacks=s.callbacks.filter(x=>x.ref!==ref);s.callbacks.push({...original,expiresAt:1700000000000});});assert.equal((await f.app().handle(event(953,back))).status,'DENIED');
+   await f.store.transaction(s=>{s.callbacks=s.callbacks.filter(x=>x.ref!==ref);s.callbacks.push({...original,revoked:true});});assert.equal((await f.app().handle(event(954,back))).status,'DENIED');
+   a=await f.svc.edit('100',a.id,a.revision,{kind:'CONDITION',buttonId:a.draft.buttons[0]!.id,condition:{...a.draft.buttons[0]!.condition,seats:1}});
+   const press='st:1:t:'+a.id+':'+a.revision+':'+a.draft.buttons[0]!.id+':0:0',ancestor='st:1:v:'+a.id+':'+a.revision+':0:0';
+   await f.store.transaction(s=>{s.callbacks=s.callbacks.filter(x=>x.ref!==ref);s.callbacks.push({...original,action:'studio.navigation:'+JSON.stringify({route:press,trail:Array(8).fill(ancestor)})});});
+   assert.equal((await f.app().handle(event(955,back))).status,'DENIED');assert.equal((await f.store.snapshot()).callbacks.filter(x=>x.ref.startsWith('studio-seat:')).length,0);
+  }finally{await f.close();}
+ });
+ test('owner moves a selected button through paged row targets and rejects forged or stale moves ('+engine+')',async()=>{
+  const f=await fixture();try{
+   let t=await f.svc.create('100','الصفوف');for(let i=0;i<12;i++)t=await f.svc.edit('100',t.id,t.revision,{kind:'ADD_BUTTON',value:'زر '+i});
+   const button=t.draft.buttons[0]!,before=structuredClone(t.draft);
+   const rowEditor=await f.app().handle(event(997,'st:1:e:03:'+t.id+':'+t.revision)),list=await f.app().handle(event(998,select(rowEditor,'st:1:e:01:'))),details=await f.app().handle(event(1000,select(list,'st:1:b:')));
+   let picker=await f.app().handle(event(1001,select(details,'st:1:B:')));assert.equal(picker.status,'APPLIED');assert.ok(picker.plan!.text.includes('الصف الحالي: 1'));
+   const next=buttons(picker).find(b=>b.text==='التالي')!.callback_data;assert.equal((await f.app().handle(event(1002,next,300))).status,'DENIED');assert.equal((await f.app().handle(event(1003,next,100,true))).status,'DENIED');
+   picker=await f.app().handle(event(1004,next));assert.ok(picker.plan!.text.includes('الصفحة 2 من 2'));const move=buttons(picker).find(b=>b.text.startsWith('الصف 10 '))!.callback_data;
+   assert.ok(buttons(picker).every(b=>Buffer.byteLength(b.callback_data)<=64));assert.equal((await f.app().handle(event(1005,move,300))).status,'DENIED');
+   const moved=await f.app().handle(event(1006,move));assert.equal(moved.status,'APPLIED');t=(await f.svc.list('100'))[0]!;
+   assert.deepEqual(t.draft.layout,[1,1,1,1,1,1,1,1,2,1,1]);assert.deepEqual(t.draft.buttons.map(b=>b.id),[...before.buttons.slice(1,10).map(b=>b.id),button.id,...before.buttons.slice(10).map(b=>b.id)]);
+   assert.equal((await f.app().handle(event(1007,move))).status,'DENIED');assert.equal((await f.app().handle(event(1008,next))).status,'DENIED');
+   const newPicker=await f.app().handle(event(1009,select(moved,'st:1:B:')));assert.equal(newPicker.status,'APPLIED');
+   const back=await f.app().handle(event(1010,select(newPicker,'st:1:b:')));assert.equal(back.status,'APPLIED');assert.deepEqual((await f.svc.list('100'))[0]!.draft,t.draft);
+   t=await f.svc.edit('100',t.id,t.revision,{kind:'LAYOUT',value:'3-3-3-3'});
+   const full=await f.app().handle(event(1011,'st:1:B:'+t.id+':'+t.revision+':'+button.id+':0'));assert.equal(buttons(full).filter(b=>b.callback_data.startsWith('st:1:V:')).length,1);
+   const forged='st:1:V:'+t.id+':'+t.revision+':'+button.id+':0';assert.equal((await f.app().handle(event(1012,forged))).status,'DENIED');
+   assert.equal((await f.app().handle(event(1013,'st:1:B:'+t.id+':'+t.revision+':'+button.id+':99'))).status,'DENIED');assert.deepEqual((await f.svc.list('100'))[0]!.draft,t.draft);
+   const appended=await f.app().handle(event(1014,select(full,'st:1:V:')));assert.equal(appended.status,'APPLIED');assert.deepEqual((await f.svc.list('100'))[0]!.draft.layout,[3,3,3,2,1]);
+  }finally{await f.close();}
+ });
  test('studio target review shows the actual domain and complete escaped URL in bounded pages ('+engine+')',async()=>{
   const f=await fixture();try{
    let t=await f.svc.create('100','قالب');t=await f.svc.edit('100',t.id,t.revision,{kind:'ADD_BUTTON',value:'رابط'});const id=t.draft.buttons[0]!.id;
@@ -239,6 +303,40 @@ for(const engine of ['json','sqlite'] as const){
    const result=await f.app().handle(event(751,select(page,'st:1:t:')));
    assert.equal(result.status,'APPLIED');assert.match(result.plan!.text,/تحتاج اعتمادًا/);
    assert.equal((await f.store.snapshot()).callbacks.some(c=>c.action.startsWith('studio.seat:')),false);
+  }finally{await f.close();}
+ });
+ test('owner selects actual education destinations without entering route codes ('+engine+')',async()=>{
+  const f=await fixture();try{
+   let t=await f.svc.create('100','خدمات');t=await f.svc.edit('100',t.id,t.revision,{kind:'ADD_BUTTON',value:'خدمة'});const id=t.draft.buttons[0]!.id;
+   const detail=await f.app().handle(event(760,'st:1:b:'+t.id+':'+t.revision+':'+id));
+   const picker=await f.app().handle(event(761,buttons(detail).find(b=>b.text==='🎓 اختيار خدمة تعليمية')!.callback_data));
+   for(const title of ['مكتبة الطالب','المنح الدراسية','الجامعات والتخصصات','الدورات التعليمية','الاختبارات','الملفات والنماذج'])assert.ok(buttons(picker).some(b=>b.text.includes(title)),title);
+   const route=buttons(picker).find(b=>b.text.includes('المنح الدراسية'))!.callback_data;
+   assert.equal((await f.app().handle(event(762,route,300))).status,'DENIED');
+   assert.equal((await f.app().handle(event(763,route,100,true))).status,'DENIED');
+   const saved=await f.app().handle(event(764,route));assert.equal(saved.status,'APPLIED');
+   t=(await f.svc.list('100'))[0]!;assert.deepEqual(t.draft.buttons[0]!.action,{kind:'SERVICE',target:'si:2:s:h'});
+   assert.equal((await f.app().handle(event(765,route))).status,'DENIED');
+   const preview=await f.app().handle(event(766,'st:1:v:'+t.id+':'+t.revision));
+   const opened=await f.app().handle(event(767,select(preview,'st:1:t:')));assert.equal(opened.status,'APPLIED');assert.match(opened.plan!.text,/المنح الدراسية/);
+  }finally{await f.close();}
+ });
+ test('all education choices open the matching local section and honor its feature switch ('+engine+')',async()=>{
+  const f=await fixture();try{
+   let t=await f.svc.create('100','الخدمات');t=await f.svc.edit('100',t.id,t.revision,{kind:'ADD_BUTTON',value:'خدمة'});const id=t.draft.buttons[0]!.id;
+   const cases=[['مكتبة الطالب','student:open','مكتبة الطالب'],['المنح الدراسية','si:2:s:h','المنح الدراسية'],['الجامعات والتخصصات','si:2:u:h','الجامعات والتخصصات'],['الدورات التعليمية','si:2:c:h','الدورات التعليمية'],['الاختبارات','si:2:e:h','الاختبارات'],['الملفات والنماذج','si:2:f:h','الملفات والنماذج']] as const;
+   let seq=800;
+   for(const [label,target,title] of cases){
+    const picker=await f.app().handle(event(seq++,'st:1:H:'+t.id+':'+t.revision+':'+id));
+    const choice=buttons(picker).find(b=>b.text===label);assert.ok(choice);
+    assert.equal((await f.app().handle(event(seq++,choice.callback_data))).status,'APPLIED');
+    t=(await f.svc.list('100'))[0]!;assert.equal(t.draft.buttons[0]!.action.target,target);
+    const page=await f.app().handle(event(seq++,'st:1:v:'+t.id+':'+t.revision));const press=select(page,'st:1:t:');
+    const opened=await f.app().handle(event(seq++,press));assert.equal(opened.status,'APPLIED');assert.ok(opened.plan!.text.includes(title));
+    await f.store.transaction(s=>{s.privateFeatures['education.navigate']=false;});
+    assert.equal((await f.app().handle(event(seq++,press))).status,'DENIED');
+    await f.store.transaction(s=>{s.privateFeatures['education.navigate']=true;});
+   }
   }finally{await f.close();}
  });
 }

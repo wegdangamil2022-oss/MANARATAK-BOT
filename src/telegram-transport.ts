@@ -1,5 +1,6 @@
 import {protectionMediaFromMessage,type ProtectionMedia} from './telegram-protection-media.js';
 import { timingSafeEqual,createHash } from 'node:crypto';
+import {staleCommunityMessage,COMMUNITY_CLOSED_TEXT} from './community-message-receipt.js';
 import type { IncomingMessage, RequestListener, ServerResponse } from 'node:http';
 import { BotStore, type AuditRecord, type BotState, type TelegramReplyJob } from './store.js';
 import {groupQuestionSubscriptionEpoch,groupMenuEpochDigest,privateGroupEpochDigest} from './telegram-group-access.js';
@@ -11,7 +12,7 @@ import type { ImportFormat } from './ingestion.js';
 import type { SubscriptionGate } from './subscription.js';
 import type {PlatformCatalogPreviewService} from './platform-catalog-preview.js';
 import type {B6AnswerPreflight} from './b6-approved-answer-preflight.js';
-import {subscriptionRequirementMode,acceptsActiveSubscriptionEvidence} from './subscription-integrity.js';
+import {subscriptionRequirementMode,subscriptionRuleWitness,acceptsActiveSubscriptionEvidence} from './subscription-integrity.js';
 import type { TelegramReplyDispatcher } from './telegram-replies.js';
 import {BoundedIngress,decodeStrictJsonBytes,type IngressOptions} from './http-ingress-guard.js';
 import {menuLabels,mainMenuKeyboard,backMenuKeyboard,categoryButton,
@@ -20,17 +21,22 @@ import {menuLabels,mainMenuKeyboard,backMenuKeyboard,categoryButton,
  catalogBackToCategories,catalogBackToCategory,parseCatalogBackToCategory,
  type TelegramReplyKeyboard} from './telegram-menu.js';
 import {OwnerTelegramMenu,isOwnerMenuText} from './telegram-owner-menu.js';
-import {ownerInlineHome,ownerInlineRender,ownerInlineLinkedReadOnly,type TelegramInlineKeyboard} from './telegram-inline-owner.js';
+import {ownerInlineHome,ownerInlineRender,ownerInlineLinkedReadOnly,ownerInlineReturnRoute,type TelegramInlineKeyboard} from './telegram-inline-owner.js';
+import {renderOwnerInlineImports} from './telegram-inline-imports.js';
+import {renderOwnerUpload,claimOwnerUpload,cancelOwnerUpload} from './telegram-owner-upload.js';
+import {renderSubscriptionConfig,cancelSubscriptionConfig} from './telegram-inline-subscription-config.js';
+import {CommunityFolderUI,cancelCommunityFolder,publicFolderGroups,type FolderScreen} from './telegram-community-folders.js';
 import {renderOwnerInlineFAQ} from './telegram-inline-faq.js';
 import {renderOwnerInlineLibrary} from './telegram-inline-library.js';
-import {renderOwnerInlineStudio,studioOwnerEntry,studioDraftScreen} from './telegram-inline-studio.js';
+import {renderOwnerInlineStudio,studioOwnerEntry,studioDraftScreen,studioCatalogueReturn} from './telegram-inline-studio.js';
 import {ButtonStudioService} from './button-studio.js';
 import {renderOwnerInlineCategories} from './telegram-inline-categories.js';
 import {EducationCategoryEditor} from './education-category-editor.js';
 import {renderPrivateSettings} from './telegram-inline-private-settings.js';
-import {protectionUIEpoch,ADMIN_UI_TTL_MS} from './protection-ui-access.js';
+import {protectionUIEpoch,protectionUISourceEpoch,ADMIN_UI_TTL_MS} from './protection-ui-access.js';
 import {privateLibraryEpoch} from './private-library-access.js';
 import {studioPreviewEpoch,studioPreviewSourceEpoch} from './studio-preview-access.js';
+import {cancelOwnerPreview,ownerPreviewCancelData} from './telegram-owner-preview-cancel.js';
 import {OwnerDelegationEditor} from './telegram-inline-delegation-edit.js';
 import {renderOwnerInlineGroups} from './telegram-inline-groups.js';
 import {OwnerGroupSetup} from './telegram-inline-group-setup.js';
@@ -49,6 +55,8 @@ import {renderOwnerPurgeQueue} from './telegram-inline-purge.js';
 import {renderOwnerModerationRateStatus} from './telegram-inline-moderation-rate-status.js';
 import {renderOwnerModerationEmergencyStatus} from './telegram-inline-moderation-emergency.js';
 import {renderStudentInline,studentSectionInlineData} from './telegram-inline-student.js';
+import {groupLibraryInline} from './telegram-group-library-inline.js';
+import {readPublicNavigation,publicNavigationMarkup} from './telegram-public-navigation.js';
 import {parseSearchQuery,parseSearchPageCommand,searchPageButton,
  searchResourceButton,parseSearchResourceSelection,searchResultsBreadcrumb,
  parseSearchResultsBreadcrumb} from './telegram-search.js';
@@ -68,7 +76,7 @@ import {isReplyDeleteCommand,previewReplyDelete,handleReplyDeleteCallback} from 
 import {parseReplyModerationCommand,executeReplyModerationCommand} from './telegram-moderation-commands.js';
 import {parseB6OwnerReplyTarget} from './b6-telegram-owner-reply.js';
 
-/** Inbound-only boundary. A test double may supply bytes; there is intentionally no live HTTP implementation. */
+/** Inbound-only boundary. Live downloads use the fixed-host, bounded, safety-gated adapter. */
 export interface TelegramDocumentPort {
   download(fileId: string, maxBytes: number): Promise<Uint8Array>;
 }
@@ -87,14 +95,14 @@ interface IncomingDocument {
 }
 /** Offline B3 application adapter: creates plans, NEVER sends a message or connects to Telegram. */
 export interface TelegramReplyPlan { chatId: string; parseMode: 'HTML'; text: string;
- replyMarkup?:TelegramReplyKeyboard; inlineMarkup?:TelegramInlineKeyboard; studioMarkup?:import('./telegram-studio-rich.js').StudioNativeKeyboard; editMessageId?:number; }
+ replyMarkup?:TelegramReplyKeyboard; inlineMarkup?:TelegramInlineKeyboard; studioMarkup?:import('./telegram-studio-rich.js').StudioNativeKeyboard; editMessageId?:number;messageThreadId?:number; }
 export interface TelegramResult { status: 'APPLIED' | 'DUPLICATE' | 'DENIED' | 'IGNORED' | 'UNKNOWN'; reason: string; plan?: TelegramReplyPlan; deliveryKey?: string; callbackQueryId?:string; }
 type ProcessedReply={status:TelegramResult['status'];reason:string;plan?:TelegramReplyPlan;
  groupQuestionAccess?:TelegramReplyJob['groupQuestionAccess'];
  groupMenuAccess?:TelegramReplyJob['groupMenuAccess'];
  privateGroupAccess?:TelegramReplyJob['privateGroupAccess'];
  adminUIAccess?:TelegramReplyJob['adminUIAccess'];
- privateLibraryAccess?:TelegramReplyJob['privateLibraryAccess']};
+ privateLibraryAccess?:TelegramReplyJob['privateLibraryAccess'];communityAccess?:TelegramReplyJob['communityAccess'];communityClose?:TelegramReplyJob['communityClose']};
 export interface TelegramApplicationOptions {
   store: BotStore; policy: Policy; education: EducationService; admin: EducationAdminFacade;
   faq: ApprovedAnswerService; links: ResourceLinkService; membership: MembershipPort;
@@ -115,7 +123,7 @@ export interface TelegramApplicationOptions {
   purge?:ModerationPurgeService;
 }
 
-type Event = {updateId: number; actorId: string; chatId: string; kind: 'private' | 'group'; text: string; entities?:unknown; messageId?:number; replyTo?:unknown; document?: IncomingDocument; protectionMedia?:ProtectionMedia; edited?:true; forwarded?:true; callbackData?:string; callbackQueryId?:string; callbackMessageId?:number};
+type Event = {updateId: number; actorId: string; chatId: string; kind: 'private' | 'group'; text: string; topicId?:number; entities?:unknown; messageId?:number; replyTo?:unknown; document?: IncomingDocument; protectionMedia?:ProtectionMedia; edited?:true; forwarded?:true; callbackData?:string; callbackQueryId?:string; callbackMessageId?:number};
 const isObject=(x:unknown):x is Record<string,unknown>=>Boolean(x)&&typeof x==='object'&&!Array.isArray(x);
 const positiveId=(x:unknown): x is number=>typeof x==='number'&&Number.isSafeInteger(x)&&x>0;
 const chatId=(x:unknown): x is number=>typeof x==='number'&&Number.isSafeInteger(x)&&x!==0;
@@ -149,9 +157,10 @@ function eventFrom(value:unknown):{event?:Event;reason:string} {
    if(!kind||(kind==='private'&&cb.message.chat.id!==cb.from.id)||
     (kind==='group'&&cb.message.chat.id>=0))
     return {reason:'INVALID_CALLBACK_CHAT'};
+   if(cb.message.message_thread_id!==undefined&&!positiveId(cb.message.message_thread_id))return {reason:'INVALID_CALLBACK_TOPIC'};
    return {event:{updateId:value.update_id as number,actorId:String(cb.from.id),
     chatId:String(cb.message.chat.id),kind,text:'',
-    callbackData:cb.data,callbackQueryId:cb.id,callbackMessageId:cb.message.message_id},reason:'VALID'};
+    callbackData:cb.data,callbackQueryId:cb.id,callbackMessageId:cb.message.message_id,...(cb.message.message_thread_id!==undefined?{topicId:cb.message.message_thread_id as number}:{})},reason:'VALID'};
   }
   if(!isObject(value.message))return {reason:'UNSUPPORTED_EVENT'};
   const msg=value.message;
@@ -167,6 +176,7 @@ function eventFrom(value:unknown):{event?:Event;reason:string} {
 
   const kind=msg.chat.type==='private'?'private':msg.chat.type==='group'||msg.chat.type==='supergroup'?'group':null;
   if(!kind || (kind==='private'&&(msg.chat.id!==msg.from.id))||(kind==='group'&&msg.chat.id>=0))return {reason:'INVALID_CHAT_CONTEXT'};
+  if(msg.message_thread_id!==undefined&&!positiveId(msg.message_thread_id))return {reason:'INVALID_MESSAGE_TOPIC'};
   if(kind==='group'){
    const decoded=protectionMediaFromMessage(msg);
    if(decoded.status==='INVALID')return {reason:'INVALID_GROUP_MEDIA'};
@@ -187,12 +197,12 @@ function eventFrom(value:unknown):{event?:Event;reason:string} {
       return {reason:'INVALID_DOCUMENT'};
     if(msg.caption!==undefined&&(typeof msg.caption!=='string'||msg.caption.length>100))return {reason:'INVALID_DOCUMENT_CAPTION'};
     const document:IncomingDocument={fileId:d.file_id,filename:d.file_name,size:d.file_size,format,caption:typeof msg.caption==='string'?msg.caption:''};
-    return {event:{updateId:value.update_id as number,actorId:String(msg.from.id),chatId:String(msg.chat.id),kind,text:'',document},reason:'VALID'};
+    return {event:{updateId:value.update_id as number,actorId:String(msg.from.id),chatId:String(msg.chat.id),kind,text:'',document,...(msg.message_thread_id!==undefined?{topicId:msg.message_thread_id as number}:{})},reason:'VALID'};
   }
   if(typeof msg.text!=='string'||msg.text.length<1||msg.text.length>4096)return {reason:'UNSUPPORTED_MESSAGE'};
   if(/\u0000/u.test(msg.text))return {reason:'INVALID_TEXT'};
   return {event:{updateId:value.update_id as number,actorId:String(msg.from.id),chatId:String(msg.chat.id),kind,text:msg.text,...(forwarded?{forwarded:true as const}:{}),
-   ...(msg.entities!==undefined?{entities:msg.entities}:{}),
+   ...(msg.entities!==undefined?{entities:msg.entities}:{}),...(msg.message_thread_id!==undefined?{topicId:msg.message_thread_id as number}:{}),
    ...(msg.message_id!==undefined?{messageId:msg.message_id as number}:{}),
    ...(msg.reply_to_message!==undefined?{replyTo:msg.reply_to_message}:{})},reason:'VALID'};
 }
@@ -205,6 +215,9 @@ function eventFrom(value:unknown):{event?:Event;reason:string} {
 const isScope=(scope:string):boolean=>scope==='private'||/^-[1-9]\d{0,18}$/.test(scope);
 const isId=(value:string):boolean=>/^[a-zA-Z0-9_-]{1,64}$/.test(value);
 const asNumber=(value:string):number|null=>/^\d{1,8}$/.test(value)&&Number.isSafeInteger(Number(value))?Number(value):null;
+const publicMenuText=(text:string):boolean=>Object.values(menuLabels).some(label=>label===text&&label!==menuLabels.owner)||text===catalogBackToCategories||text===privateFAQBrowseLabel||text===privateFAQSearchLabel||Boolean(
+ categoryButtonId(text)||resourceButtonId(text)||parseMenuPageCommand(text)||parseCatalogBackToCategory(text)||parseSearchPageCommand(text)||parseSearchResourceSelection(text)||parseSearchResultsBreadcrumb(text)||
+ parsePrivateFAQPage(text)||parsePrivateFAQSelection(text)||parsePrivateFAQBrowseReturn(text)!==null||parsePrivateFAQSearchPage(text)||parsePrivateFAQSearchSelection(text)||parsePrivateFAQSearchReturn(text));
 function safeError(err:unknown):string {
   const message=err instanceof Error?err.message:'';
   const known=new Set(['UPLOAD_DENIED','PUBLISH_DENIED','INVALID_UPLOAD_ORIGIN','INVALID_FAQ','INVALID_FORMAT','INVALID_FILENAME','DOCUMENT_TOO_LARGE','NOT_APPROVED','CANDIDATE_NOT_FOUND','IMPORT_NOT_FOUND','CATEGORY_SCOPE_MISMATCH','NEEDS_REVIEW','DUPLICATE_CANDIDATE','RESOURCE_ARCHIVED','CATEGORY_DISABLED_OR_MISSING']);
@@ -272,7 +285,7 @@ export class TelegramUpdateApplication {
     const epoch=(state:Awaited<ReturnType<BotStore['snapshot']>>):string=>{
       const group=state.chats.find(c=>c.id===scope);
       const rules=state.subscriptionRequirements.filter(r=>r.chatId===scope)
-       .map(r=>[r.version,r.mode,...r.channelIds]);
+       .map(subscriptionRuleWitness);
       return JSON.stringify([group?.version,group?.approved,group?.scopes,rules]);
     };
     const originalEpoch=epoch(before);
@@ -300,31 +313,46 @@ export class TelegramUpdateApplication {
     const {actorId,chatId,kind,document}=event;
     if(!document)throw Error('MISSING_DOCUMENT');
     // Even approved groups must not download documents or process them as admin commands.
-    if(kind!=='private')return {status:'DENIED',reason:'PRIVATE_ADMIN_UPLOAD_ONLY'};
+    if(kind!=='private'||event.topicId!==undefined)return {status:'DENIED',reason:'PRIVATE_ADMIN_UPLOAD_ONLY'};
     const scopeMatch=/^\/upload\s+(private|-[1-9]\d{0,18})$/u.exec(document.caption);
-    if(!scopeMatch)return {status:'DENIED',reason:'INVALID_DOCUMENT_CAPTION'};
-    const scope=scopeMatch[1]!;
+    if(scopeMatch&&this.opts.policy.isOwner(actorId))await cancelOwnerUpload(this.opts.store,actorId);
+    const wizard=document.caption===''?await claimOwnerUpload(this.opts.store,this.opts.policy,actorId,this.clock):null;
+    if(!scopeMatch&&!wizard)return {status:'DENIED',reason:'INVALID_DOCUMENT_CAPTION'};
+    const scope=scopeMatch?.[1]??wizard!;
+    const deny=(reason:string):ProcessedReply=>({status:'DENIED',reason,...(wizard?{plan:this.plan(chatId,'<b>تعذر فحص الملف</b>\nلم يُستورد هذا الملف عبر خطوة الرفع الحالية. يمكنك بدء رفع جديد أو الرجوع إلى الوارد.',undefined,{inline_keyboard:[[{text:'📥 بدء رفع جديد',callback_data:'ou:1:h'},{text:'🧾 مراجعة الوارد',callback_data:'mi:1:i:13:04'}]]})}:{})});
     const ctx:VerifiedAdminContext={origin:'TELEGRAM_PRIVATE',actorId,chatId,verified:true};
     const panel=await this.opts.admin.panel(ctx,scope);
     // The permission gate MUST precede any expensive or external download request.
-    if(!panel.canUpload)return {status:'DENIED',reason:'UPLOAD_DENIED'};
-    if(!this.opts.documentDownload)return {status:'DENIED',reason:'DOCUMENT_DOWNLOAD_NOT_CONFIGURED'};
+    if(!panel.canUpload)return deny('UPLOAD_DENIED');
+    if(!this.opts.documentDownload)return deny('DOCUMENT_DOWNLOAD_NOT_CONFIGURED');
     let data:Uint8Array;
     try{data=await this.opts.documentDownload.download(document.fileId,MAX_DOCUMENT_BYTES);}
-    catch{return {status:'DENIED',reason:'DOCUMENT_DOWNLOAD_UNAVAILABLE'};}
+    catch{return deny('DOCUMENT_DOWNLOAD_UNAVAILABLE');}
     if(!(data instanceof Uint8Array) || data.byteLength!==document.size || data.byteLength>MAX_DOCUMENT_BYTES)
-      return {status:'DENIED',reason:'DOCUMENT_SIZE_MISMATCH'};
+      return deny('DOCUMENT_SIZE_MISMATCH');
     let text:string;
     try{text=new TextDecoder('utf-8',{fatal:true}).decode(data);}
-    catch{return {status:'DENIED',reason:'DOCUMENT_NOT_UTF8'};}
+    catch{return deny('DOCUMENT_NOT_UTF8');}
     if(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/u.test(text))
-      return {status:'DENIED',reason:'DOCUMENT_BINARY_CONTENT'};
+      return deny('DOCUMENT_BINARY_CONTENT');
     // EducationService rechecks upload authorization under its state transaction
     // after the asynchronous download; revocation wins over a stale preflight.
     const run=await this.opts.admin.upload(ctx,scope,document.format,document.filename,text);
     const report=run.report;
     return {status:'APPLIED',reason:'RESPONSE_PLANNED_ONLY',plan:this.plan(chatId,
-      `<b>تقرير استيراد ملف Telegram تجريبي</b>\nالمعرف: <code>${escapeTelegramHtml(run.id)}</code>\nالأقسام: ${report.sections}\nالجامعات: ${report.universities}\nفرص مرشحة: ${report.opportunities}\nيتطلب المراجعة قبل الاعتماد والنشر المحلي.`)};
+      `<b>تقرير استيراد ملف Telegram تجريبي</b>\nالمعرف: <code>${escapeTelegramHtml(run.id)}</code>\nالأقسام: ${report.sections}\nالجامعات: ${report.universities}\nفرص مرشحة: ${report.opportunities}\nيتطلب المراجعة قبل الاعتماد والنشر المحلي.`,undefined,wizard?{inline_keyboard:[[{text:'🧾 مراجعة الوارد',callback_data:'mi:1:i:13:04'}]]}:undefined)};
+  }
+  private async groupLibrary(event:Event,categoryId?:string):Promise<ProcessedReply>{
+   const view=await groupLibraryInline(this.opts.store,this.opts.policy,{actor:event.actorId,chat:event.chatId,...(event.topicId!==undefined?{topic:event.topicId}:{})},event.callbackData!==undefined?{callback:event.callbackData}:{...(categoryId!==undefined?{categoryId}:{})},this.clock,this.opts.subscription?(chat,actor)=>this.opts.subscription!.verify(chat,actor):undefined);
+   if('denied' in view)return {status:'DENIED',reason:view.denied};
+   return {status:'APPLIED',reason:'RESPONSE_PLANNED_ONLY',plan:{...this.plan(event.chatId,view.screen.text,undefined,view.screen.keyboard,event.callbackMessageId),...(event.topicId!==undefined?{messageThreadId:event.topicId}:{})},groupMenuAccess:{actorId:event.actorId,epoch:view.epoch,expiresAt:view.expiresAt}};
+  }
+  private folderReply(event:Event,screen:FolderScreen|null):ProcessedReply{
+   if(!screen)return {status:'DENIED',reason:'COMMUNITY_FOLDER_UNAVAILABLE'};
+   const plain=screen.keyboard.inline_keyboard.every(row=>row.every(b=>'callback_data' in b));
+   const markup=plain?{inline_keyboard:screen.keyboard.inline_keyboard.map(row=>row.map(b=>{if(!('callback_data' in b))throw Error('INVALID_FOLDER_KEYBOARD');return {text:b.text,callback_data:b.callback_data};}))}:{inline_keyboard:[[{text:'المجلدات',callback_data:screen.public?'fj:1:h':'cf:1:h'}]]};
+   const planned=this.plan(event.chatId,screen.text,undefined,markup,event.callbackMessageId),{inlineMarkup:_,...base}=planned;
+   return {status:'APPLIED',reason:'RESPONSE_PLANNED_ONLY',plan:plain?planned:{...base,studioMarkup:screen.keyboard},...(screen.public?{communityAccess:screen.access}:{adminUIAccess:screen.access})};
   }
   private async process(event:Event):Promise<ProcessedReply> {
     if(event.protectionMedia){
@@ -343,20 +371,43 @@ export class TelegramUpdateApplication {
       event.actorId,event.chatId,event.text,event.entities,'b3-webhook:'+this.opts.botId+':'+event.updateId,false);
      return {status:'IGNORED',reason:'PROTECTION_EDIT_MONITOR_ONLY'};
     }
+    if(event.kind==='private'&&this.opts.policy.isOwner(event.actorId)&&!event.callbackData?.startsWith('sc:1:')&&event.callbackData!=='mi:1:i:04:02'&&event.callbackData!=='mi:1:i:04:04')await cancelSubscriptionConfig(this.opts.store,event.actorId);
+    const folderNavigation=event.callbackData!==undefined?!event.callbackData.startsWith('cf:1:')&&event.callbackData!=='mi:1:i:04:03':event.document!==undefined||event.text.startsWith('/')||isOwnerMenuText(event.text)||(Object.values(menuLabels) as string[]).includes(event.text);
+    if(event.kind==='private'&&this.opts.policy.isOwner(event.actorId)&&folderNavigation)await cancelCommunityFolder(this.opts.store,event.actorId);
     if(event.document)return this.handleDocument(event);
     const {actorId,chatId,kind,text}=event;
+    if(kind==='private'&&this.opts.policy.isOwner(actorId)&&!event.callbackData?.startsWith('ou:1:'))await cancelOwnerUpload(this.opts.store,actorId);
+    if(kind==='private'&&event.topicId!==undefined)return {status:'DENIED',reason:'PRIVATE_TOPIC_NOT_SUPPORTED'};
+    if(kind==='private'&&event.callbackData===undefined&&this.opts.policy.isOwner(actorId)&&!folderNavigation){const screen=await new CommunityFolderUI(this.opts.store,this.opts.policy,this.opts.subscription,this.clock).text(actorId,text);if(screen)return this.folderReply(event,screen);}
     if(event.callbackData!==undefined){
+     if(kind==='group'&&event.callbackData.startsWith('gl:1:'))return this.groupLibrary(event);
      // Reauthorize the real sender at every tap. Never dispatch a privileged
      // command from untrusted callback_data or from a group context.
      if(kind!=='private'||actorId!==chatId)return {status:'DENIED',reason:'PRIVATE_CALLBACK_ONLY'};
+     if(event.callbackData.startsWith('pn:1:')){
+      const selected=await readPublicNavigation(this.opts.store,actorId,event.callbackData,publicMenuText,this.clock);if(!selected)return {status:'DENIED',reason:'PUBLIC_NAVIGATION_STALE_OR_INVALID'};
+      const {callbackData:_,...base}=event;return this.process({...base,text:selected});
+     }
      if(this.opts.policy.isOwner(actorId)&&!event.callbackData.startsWith('ec:1:')&&event.callbackData!=='mi:1:i:10:16')await new EducationCategoryEditor(this.opts.store,this.opts.policy,this.clock).cancel(actorId);
      if(this.opts.policy.isOwner(actorId)&&!event.callbackData.startsWith('nw:1:'))await new OwnerNetworkEditor(this.opts.store,this.opts.policy,this.clock).cancelInput(actorId);
      if(this.opts.policy.isOwner(actorId)&&!event.callbackData.startsWith('od:1:'))await new OwnerDelegationEditor(this.opts.store,this.opts.policy,this.clock).cancel(actorId);
      if(this.opts.policy.isOwner(actorId)&&!event.callbackData.startsWith('st:1:')&&!studioOwnerEntry(event.callbackData))await new ButtonStudioService(this.opts.store,this.opts.policy,this.clock).cancelInput(actorId);
-     if(this.opts.policy.isOwner(actorId)&&!event.callbackData.startsWith('ps:1:')&&event.callbackData!=='mi:1:i:11:03'&&!event.callbackData.startsWith('si:1:')&&!event.callbackData.startsWith('si:2:')&&!event.callbackData.startsWith('ms:1:')&&!this.opts.policy.privateFeature(await this.opts.store.snapshot(),'owner.dashboard',actorId))return {status:'DENIED',reason:'OWNER_DASHBOARD_DISABLED'};
+     if(this.opts.policy.isOwner(actorId)&&!event.callbackData.startsWith('ps:1:')&&event.callbackData!=='mi:1:i:11:03'&&!event.callbackData.startsWith('si:1:')&&!event.callbackData.startsWith('si:2:')&&!event.callbackData.startsWith('ms:1:')&&!event.callbackData.startsWith('fj:1:')&&!this.opts.policy.privateFeature(await this.opts.store.snapshot(),'owner.dashboard',actorId))return {status:'DENIED',reason:'OWNER_DASHBOARD_DISABLED'};
+     if(event.callbackData==='mi:1:i:04:03'||event.callbackData.startsWith('cf:1:')||event.callbackData.startsWith('fj:1:')){
+      const screen=await new CommunityFolderUI(this.opts.store,this.opts.policy,this.opts.subscription,this.clock).handle(actorId,event.callbackData);
+      if(!screen&&/^fj:1:[A-Za-z0-9_-]{24}$/u.exec(event.callbackData)?.[0]===event.callbackData&&event.callbackMessageId!==undefined){
+       const receipt=staleCommunityMessage(await this.opts.store.snapshot(),this.opts.policy,actorId,event.callbackMessageId,this.clock());
+       if(receipt)return {status:'APPLIED',reason:'COMMUNITY_MESSAGE_CLOSURE_PLANNED',communityClose:receipt,plan:this.plan(chatId,COMMUNITY_CLOSED_TEXT,undefined,{inline_keyboard:[[{text:'🏠 الرئيسية',callback_data:'pn:1:h'}]]},event.callbackMessageId)};
+      }
+      return this.folderReply(event,screen);
+     }
      if(event.callbackData==='mi:1:i:11:03'||event.callbackData.startsWith('ps:1:')){
       const view=await renderPrivateSettings(this.opts.store,this.opts.policy,actorId,event.callbackData,this.clock);
       return view?{status:'APPLIED',reason:'RESPONSE_PLANNED_ONLY',plan:this.plan(chatId,view.text,undefined,view.keyboard,event.callbackMessageId)}:{status:'DENIED',reason:'PRIVATE_SETTINGS_STALE_OR_UNAUTHORIZED'};
+     }
+     if(event.callbackData.startsWith('oc:1:')){
+      const view=await cancelOwnerPreview(this.opts.store,this.opts.policy,actorId,event.callbackData,this.clock);
+      return view?{status:'APPLIED',reason:'RESPONSE_PLANNED_ONLY',plan:this.plan(chatId,view.text,undefined,view.keyboard,event.callbackMessageId)}:{status:'DENIED',reason:'OWNER_PREVIEW_CANCEL_DENIED'};
      }
      if(event.callbackData.startsWith('pr:1:')||/^mi:1:i:02:(?:0[5678]|12)$/u.test(event.callbackData)){
       if(/^mi:1:i:02:(?:0[5678]|12)$/u.test(event.callbackData)&&!this.opts.policy.isOwner(actorId))return {status:'DENIED',reason:'OWNER_ONLY'};
@@ -426,6 +477,22 @@ export class TelegramUpdateApplication {
       const planned=this.plan(chatId,screen.text,undefined,screen.keyboard,event.callbackMessageId);
       if(screen.nativeKeyboard){const {inlineMarkup:_,...base}=planned;return {status:'APPLIED',reason:'RESPONSE_PLANNED_ONLY',plan:{...base,studioMarkup:screen.nativeKeyboard}};}
       return {status:'APPLIED',reason:'RESPONSE_PLANNED_ONLY',plan:planned};
+     }
+     if(event.callbackData==='mi:1:i:04:02'||event.callbackData==='mi:1:i:04:04'||event.callbackData.startsWith('sc:1:')){
+      const screen=await renderSubscriptionConfig(this.opts.store,this.opts.policy,this.opts.subscription,actorId,event.callbackData,this.clock);
+      if(!screen)return {status:'DENIED',reason:'INVALID_OR_STALE_SUBSCRIPTION_CONFIG'};
+      return {status:'APPLIED',reason:'RESPONSE_PLANNED_ONLY',adminUIAccess:screen.access,plan:this.plan(chatId,screen.text,undefined,screen.keyboard,event.callbackMessageId)};
+     }
+     if(event.callbackData.startsWith('ou:1:')){
+      const screen=await renderOwnerUpload(this.opts.store,this.opts.policy,actorId,event.callbackData,this.clock);
+      if(!screen)return {status:'DENIED',reason:'INVALID_OR_STALE_UPLOAD_CALLBACK'};
+      return {status:'APPLIED',reason:'RESPONSE_PLANNED_ONLY',plan:this.plan(chatId,screen.text,undefined,screen.keyboard,event.callbackMessageId)};
+     }
+     if(event.callbackData==='mi:1:i:13:04'||event.callbackData.startsWith('oi:1:')){
+      const menu=new OwnerTelegramMenu(this.opts.store,this.opts.policy,this.opts.education,this.opts.admin,this.opts.platformCatalog,this.clock);
+      const screen=await renderOwnerInlineImports(this.opts.store,this.opts.policy,menu,actorId,event.callbackData,this.clock);
+      if(!screen)return {status:'DENIED',reason:'INVALID_OR_STALE_IMPORT_CALLBACK'};
+      return {status:'APPLIED',reason:'RESPONSE_PLANNED_ONLY',plan:this.plan(chatId,screen.text,undefined,screen.keyboard,event.callbackMessageId)};
      }
      if(event.callbackData==='mi:1:i:10:09'||event.callbackData.startsWith('ol:1:')){
       const screen=await renderOwnerInlineLibrary(this.opts.store,this.opts.policy,actorId,event.callbackData,this.clock);
@@ -567,8 +634,8 @@ export class TelegramUpdateApplication {
      const snap=await this.opts.store.snapshot();
      privateGroupSource={scope,epoch:privateGroupEpochDigest(snap,scope)};
     };
-    if(kind==='group'&&(cmd==='/categories'||cmd==='/resources'||
-      cmd===`/ask@${this.opts.botUsername}`||groupQuestion!==null)) {
+    if(kind==='group'&&event.topicId!==undefined&&(cmd===`/ask@${this.opts.botUsername}`||groupQuestion!==null))return {status:'DENIED',reason:'TOPIC_ASSISTANT_NOT_CONFIGURED'};
+    if(kind==='group'&&(cmd===`/ask@${this.opts.botUsername}`||groupQuestion!==null)) {
       const snapshot=await this.opts.store.snapshot();
       groupAnswerSubscriptionEpochValue=groupQuestionSubscriptionEpoch(snapshot,chatId);
       const requirement=subscriptionRequirementMode(snapshot,chatId);
@@ -652,7 +719,7 @@ export class TelegramUpdateApplication {
        if(text.startsWith('/')||Object.values(m).some(label=>label===text)||isOwnerMenuText(text))await categories.cancel(actorId);
        else try{
         const preview=await categories.preview(actorId,text);
-        if(preview)return {status:'APPLIED',reason:'CATEGORY_TEXT_PREVIEW',plan:this.plan(chatId,'<b>معاينة '+(preview.kind==='PARENT'?'تغيير القسم الأب':preview.kind==='RENAME'?'تغيير الاسم':preview.kind==='LANG'?'تغيير اللغة':'إنشاء قسم')+'</b>\nالقيمة: '+escapeTelegramHtml(preview.name)+'\nلم يُحفظ التغيير بعد. ينتهي التأكيد بعد دقيقتين.',undefined,{inline_keyboard:[[{text:'✅ تأكيد الحفظ',callback_data:'ec:1:a:'+preview.ref.slice(2)}],[{text:'إلغاء','callback_data':'ec:1:h'}]]})};
+        if(preview)return {status:'APPLIED',reason:'CATEGORY_TEXT_PREVIEW',plan:this.plan(chatId,'<b>معاينة '+(preview.kind==='GENERAL'?'تغيير ظهور المحادثة العامة':preview.kind==='TOPIC'?'تغيير ظهور الموضوع':preview.kind==='PARENT'?'تغيير القسم الأب':preview.kind==='RENAME'?'تغيير الاسم':preview.kind==='LANG'?'تغيير اللغة':'إنشاء قسم')+'</b>\nالقيمة: '+escapeTelegramHtml(preview.name)+'\nلم يُحفظ التغيير بعد. ينتهي التأكيد بعد دقيقتين.',undefined,{inline_keyboard:[[{text:'✅ تأكيد الحفظ',callback_data:'ec:1:a:'+preview.ref.slice(2)}],[{text:'إلغاء','callback_data':ownerPreviewCancelData(preview.ref)}]]})};
        }catch{return {status:'DENIED',reason:'CATEGORY_TEXT_INVALID_OR_STALE',plan:this.plan(chatId,'تعذّر قبول الاسم أو انتهت خطوة الإدخال. افتح التصنيف الحالي وأعد المحاولة.')};}
        const studio=new ButtonStudioService(this.opts.store,this.opts.policy,this.clock);
        const pending=(await this.opts.store.snapshot()).buttonStudio?.inputs.some(i=>i.actor===actorId);
@@ -666,7 +733,7 @@ export class TelegramUpdateApplication {
       }
       const dashboardEnabled=owner&&this.opts.policy.privateFeature(await this.opts.store.snapshot(),'owner.dashboard',actorId);
       const main=()=>result('<b>أهلًا بك في بوت منارتك 🎓</b>\n'
-        +'اختر أحد الأقسام من الأزرار أسفل المحادثة. تظهر الموارد المعتمدة فقط.\n'
+        +(this.opts.studentMenuMode==='inline'?'اختر أحد الأقسام من الأزرار الشفافة أدناه. تظهر الموارد المعتمدة فقط.\n':'اختر أحد الأقسام من الأزرار أسفل المحادثة. تظهر الموارد المعتمدة فقط.\n')
         +'لتصفح المكتبة بالأزرار الشفافة استخدم /studentinline.\n'
         +(dashboardEnabled?'لفتح لوحة المالك الشفافة استخدم /ownerinline، ولأدوات الإدارة القديمة /ownerlegacy.\n':owner?'لوحة المالك معطلة؛ لاستعادتها استخدم /ownerrecover.\n':'')
         +'يمكنك أيضًا استخدام /categories private و /help.\n'
@@ -1091,6 +1158,7 @@ export class TelegramUpdateApplication {
       return result(`تم نشر المورد داخل المكتبة المحلية فقط: ${escapeTelegramHtml(resource.title)}\nلا إرسال إلى قناة Telegram.`);
     }
     if(cmd==='/categories'){
+      if(kind==='group')return this.groupLibrary(event);
       const scope=kind==='private'?(words[1]??'private'):chatId;
       if(!isScope(scope))return {status:'DENIED',reason:'INVALID_SCOPE'};
       if(kind==='private') {
@@ -1105,6 +1173,7 @@ export class TelegramUpdateApplication {
     if(cmd==='/resources'){
       const scope=kind==='private'?(words[1]??''):chatId,cat=kind==='private'?words[2]:words[1];
       if(!isScope(scope)||!cat||!isId(cat))return {status:'DENIED',reason:'INVALID_RESOURCE_QUERY'};
+      if(kind==='group')return this.groupLibrary(event,cat);
       if(kind==='private') {
         await markPrivateGroupSource(scope);
         const denied=await this.authorizePrivateGroupBrowse(scope,actorId);
@@ -1174,14 +1243,43 @@ export class TelegramUpdateApplication {
      // this NEVER re-runs the operation or re-sends the durable reply.
      return event.callbackQueryId?{...duplicate,callbackQueryId:event.callbackQueryId}:duplicate;
     }
+    const publicText=event.kind==='private'&&event.callbackData?.startsWith('pn:1:')?await readPublicNavigation(this.opts.store,event.actorId,event.callbackData,publicMenuText,this.clock):null;
+    const effectiveText=publicText??event.text;
+    const staffInput=event.kind==='private'&&(event.callbackData?.startsWith('ms:1:')||event.text==='/staffinline');
+    const beforeStaff=staffInput?protectionUISourceEpoch(await this.opts.store.snapshot(),this.opts.policy,event.actorId,this.clock()):null;
     const libraryInput=event.kind==='private'&&(
      event.callbackData?.startsWith('si:1:')||event.callbackData?.startsWith('si:2:')||event.text==='/studentinline'||
-     this.opts.studentMenuMode==='inline'&&([menuLabels.scholarships,menuLabels.courses,menuLabels.universities,menuLabels.exams,menuLabels.files,menuLabels.library] as string[]).includes(event.text));
+     this.opts.studentMenuMode==='inline'&&(([menuLabels.scholarships,menuLabels.courses,menuLabels.universities,menuLabels.exams,menuLabels.files,menuLabels.library] as string[]).includes(effectiveText)||effectiveText===catalogBackToCategories||isPrivateFAQBrowseText(effectiveText)||isPrivateFAQSearchText(effectiveText)||effectiveText.startsWith('/search')||Boolean(parseSearchResourceSelection(effectiveText)||parseSearchPageCommand(effectiveText)||parseSearchResultsBreadcrumb(effectiveText)||categoryButtonId(effectiveText)||resourceButtonId(effectiveText)||parseMenuPageCommand(effectiveText)||parseCatalogBackToCategory(effectiveText))));
     const beforeLibrary=libraryInput?privateLibraryEpoch(await this.opts.store.snapshot(),this.opts.policy,event.actorId):null;
-    const studioInput=event.kind==='private'&&this.opts.policy.isOwner(event.actorId)&&/^(?:st:1:[vt]:|st:1:e:08:)/u.test(event.callbackData??'');
+    const studioInput=event.kind==='private'&&this.opts.policy.isOwner(event.actorId)&&/^(?:st:1:[vtNAKzWQ]:|st:1:e:08:)/u.test(event.callbackData??'');
     const beforeStudio=studioInput?studioPreviewSourceEpoch(await this.opts.store.snapshot()):null;
     let handled:ProcessedReply;
     try{handled=await this.process(event);}catch(err){handled={status:'DENIED',reason:safeError(err)};}
+    // Migrated root screens must retain the page of the official entry.
+    // This changes navigation only, after normal service authorization.
+    const catalogueBack=event.kind==='private'&&this.opts.policy.isOwner(event.actorId)?ownerInlineReturnRoute(event.callbackData??'')??studioCatalogueReturn(event.callbackData??''):null;
+    if(catalogueBack&&handled.plan){
+     const prefix=catalogueBack.slice(0,-1);
+     const inline=handled.plan.inlineMarkup,native=handled.plan.studioMarkup,rows=(inline??native)?.inline_keyboard;
+     if(rows){
+      const mapped=rows.map(row=>row.map(b=>'callback_data' in b&&b.callback_data.startsWith(prefix)?{...b,callback_data:catalogueBack}:b));
+      if(!mapped.flat().some(b=>'callback_data' in b&&b.callback_data===catalogueBack))mapped.push([{text:'↩️ رجوع للقسم',callback_data:catalogueBack}]);
+      handled={...handled,plan:{...handled.plan,...(inline?{inlineMarkup:{inline_keyboard:mapped as TelegramInlineKeyboard['inline_keyboard']}}:{studioMarkup:{inline_keyboard:mapped}})}};
+     }
+    }
+    if(event.kind==='private'&&this.opts.studentMenuMode==='inline'&&handled.plan){
+     if(handled.plan.replyMarkup){
+      const markup=await publicNavigationMarkup(this.opts.store,event.actorId,handled.plan.replyMarkup,menuLabels.owner,publicMenuText,this.clock);
+      if(markup){const {replyMarkup:_,...plan}=handled.plan;handled={...handled,plan:{...plan,inlineMarkup:markup}};}
+     }
+     const mainEntry=['/start','/help',menuLabels.home,menuLabels.back].includes(effectiveText);
+     if(mainEntry&&handled.plan?.inlineMarkup){const state=await this.opts.store.snapshot();if(this.opts.policy.privateFeature(state,'education.navigate',event.actorId)&&publicFolderGroups(state,this.opts.policy).length)handled={...handled,plan:{...handled.plan,inlineMarkup:{inline_keyboard:[...handled.plan.inlineMarkup.inline_keyboard,[{text:'📁 مجلدات المجتمع',callback_data:'fj:1:h'}]]}}};}
+     if(mainEntry&&handled.plan?.inlineMarkup&&await renderStaffInline(this.opts.store,this.opts.policy,event.actorId,'staff:open',this.clock()))handled={...handled,plan:{...handled.plan,inlineMarkup:{inline_keyboard:[...handled.plan.inlineMarkup.inline_keyboard,[{text:'🛡️ لوحة المشرف',callback_data:'ms:1:h'}]]}}};
+     if(handled.plan?.inlineMarkup&&(libraryInput||staffInput||event.callbackData?.startsWith('pn:1:'))){
+      const isHome=['/start','/help',menuLabels.home,menuLabels.back].includes(effectiveText),rows=handled.plan.inlineMarkup.inline_keyboard;
+      handled={...handled,plan:{...handled.plan,inlineMarkup:{inline_keyboard:[...rows,...(!isHome&&!rows.flat().some(b=>b.callback_data==='pn:1:h')?[[{text:menuLabels.home,callback_data:'pn:1:h'}]]:[])]},...(event.callbackMessageId!==undefined?{editMessageId:event.callbackMessageId}:{})}};
+     }
+    }
     if(event.kind==='private'&&event.callbackData&&!event.callbackData.startsWith('pr:1:')&&
      !/^mi:1:i:02:(?:0[5678]|12)$/u.test(event.callbackData)&&handled.plan){
      await new TelegramProtectionEditor(this.opts.store,this.opts.policy,this.clock).cancelNavigation(event.actorId);
@@ -1193,8 +1291,8 @@ export class TelegramUpdateApplication {
     }
     const callback=event.callbackData??'';
     const ownerScreen=event.kind==='private'&&this.opts.policy.isOwner(event.actorId)&&(
-     /^(?:mi:1:|ec:1:|od:1:|gw:1:|gt:1:|gs:1:|gb:1:|nw:1:|gp:1:|of:1:|ol:1:|st:1:|ps:1:|pr:1:|pd:1:|pq:1:|mr:1:|mp:1:|c_)/u.test(callback)||
-     event.text==='/ownerinline'||event.text==='/ownerlegacy'||event.text==='/ownerrecover'||isOwnerMenuText(event.text)||
+     /^(?:mi:1:|oi:1:|ou:1:|sc:1:|cf:1:|ec:1:|oc:1:|od:1:|gw:1:|gt:1:|gs:1:|gb:1:|nw:1:|gp:1:|of:1:|ol:1:|st:1:|ps:1:|pr:1:|pd:1:|pq:1:|mr:1:|mp:1:|c_)/u.test(callback)||
+     event.text==='/ownerinline'||event.text==='/ownerlegacy'||event.text==='/ownerrecover'||isOwnerMenuText(event.text)||(event.document!==undefined&&handled.plan?.inlineMarkup!==undefined)||
      handled.reason==='CATEGORY_TEXT_PREVIEW'||handled.reason==='NETWORK_TEXT_PREVIEW'||handled.reason==='DELEGATION_TEXT_PREVIEW'||handled.reason==='STUDIO_DRAFT_SAVED');
     if(ownerScreen&&handled.plan&&!handled.adminUIAccess){
      const state=await this.opts.store.snapshot(),now=this.clock(),epoch=studioInput?studioPreviewEpoch(state,this.opts.policy,event.actorId,now):protectionUIEpoch(state,this.opts.policy,event.actorId,now);
@@ -1203,6 +1301,11 @@ export class TelegramUpdateApplication {
       (handled.plan.text.startsWith('<b>استعادة لوحة المالك</b>')||handled.plan.text.startsWith('<b>معاينة إعداد الخاص</b>'));
      if(epoch&&(!studioInput||studioPreviewSourceEpoch(state)===beforeStudio)&&Number.isSafeInteger(now)&&now>=0&&now<=8640000000000000-ADMIN_UI_TTL_MS)handled={...handled,adminUIAccess:{actorId:event.actorId,epoch,expiresAt:now+ADMIN_UI_TTL_MS}};
      else if(!recovery){const {plan:_,...withoutPlan}=handled;handled={...withoutPlan,reason:'OWNER_RESPONSE_WITHHELD'};}
+    }
+    if(staffInput&&handled.plan){
+     const state=await this.opts.store.snapshot(),now=this.clock(),epoch=protectionUIEpoch(state,this.opts.policy,event.actorId,now);
+     if(epoch&&beforeStaff!==null&&protectionUISourceEpoch(state,this.opts.policy,event.actorId,now)===beforeStaff&&Number.isSafeInteger(now)&&now>=0&&now<=8640000000000000-ADMIN_UI_TTL_MS)handled={...handled,adminUIAccess:{actorId:event.actorId,epoch,expiresAt:now+ADMIN_UI_TTL_MS}};
+     else{const {plan:_,adminUIAccess:__,...withoutPlan}=handled;handled={...withoutPlan,reason:'STAFF_RESPONSE_WITHHELD'};}
     }
     if(libraryInput&&handled.plan){
      const state=await this.opts.store.snapshot(),now=this.clock(),epoch=privateLibraryEpoch(state,this.opts.policy,event.actorId);
@@ -1214,9 +1317,9 @@ export class TelegramUpdateApplication {
     // Commit the decision and outbound reply intent in one durable transaction.
     // No external call occurs before the outbox row exists.
     await this.opts.store.finish(key,audit,handled.plan,handled.groupQuestionAccess,
-     handled.groupMenuAccess,handled.privateGroupAccess,handled.adminUIAccess,handled.privateLibraryAccess,studioInput&&!!handled.adminUIAccess);
+     handled.groupMenuAccess,handled.privateGroupAccess,handled.adminUIAccess,handled.privateLibraryAccess,studioInput&&!!handled.adminUIAccess,handled.communityAccess,handled.communityClose);
     // Temporary actor IDs are only stored in the guarded queue, never returned.
-    const {groupQuestionAccess:_,groupMenuAccess:__,privateGroupAccess:___,adminUIAccess:____,privateLibraryAccess:_____,...publicResult}=handled;
+    const {groupQuestionAccess:_,groupMenuAccess:__,privateGroupAccess:___,adminUIAccess:____,privateLibraryAccess:_____,communityAccess:______,communityClose:_______,...publicResult}=handled;
     const visible=publicResult.plan?{...publicResult,deliveryKey:key}:publicResult;
     return event.callbackQueryId?{...visible,callbackQueryId:event.callbackQueryId}:visible;
   }
@@ -1239,7 +1342,7 @@ function respond(res:ServerResponse,status:number,body:Record<string,unknown>):v
 export function telegramWebhookListener(app:TelegramUpdateApplication,secretToken:string,
  outbound?:TelegramReplyDispatcher,ingressOptions:IngressOptions={},
  safetyGate?:()=>Promise<boolean>,
- callbackAcker?:{answer(callbackQueryId:string):Promise<void>}):RequestListener {
+ callbackAcker?:{answer(callbackQueryId:string,outcome?:TelegramResult['status']):Promise<void>}):RequestListener {
   if(!/^[A-Za-z0-9_-]{32,256}$/.test(secretToken))throw Error('INVALID_WEBHOOK_SECRET');
   const guard=new BoundedIngress(ingressOptions);
   return (req,res)=>{
@@ -1274,7 +1377,7 @@ export function telegramWebhookListener(app:TelegramUpdateApplication,secretToke
       // This is a bounded ephemeral Bot API operation, never a state change
       // or proof of message delivery. Failure does not replay a queued send.
       if(callbackAcker&&result.callbackQueryId)
-       await callbackAcker.answer(result.callbackQueryId);
+       await callbackAcker.answer(result.callbackQueryId,result.status);
       if(outbound&&result.plan&&result.deliveryKey)await outbound.dispatch(result.deliveryKey);
       // Keep the reply body minimal: no user text, provider errors or Bot API secret.
       respond(res,result.status==='DENIED'&&result.reason==='INVALID_UPDATE_ID'?422:200,{ok:true,status:result.status});

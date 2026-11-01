@@ -3,6 +3,7 @@ import type {BotStore,BotState,EducationResource} from './store.js';
 import type {Policy} from './policy.js';
 import {EducationService} from './education.js';
 import {resourceArchiveFingerprint} from './education-archive.js';
+import {ownerPreviewCancelData} from './telegram-owner-preview-cancel.js';
 import type {OwnerInlineScreen} from './telegram-inline-owner.js';
 const page='(0|[1-9][0-9]{0,2})';
 const list=new RegExp('^ol:1:p:'+page+'$','u');
@@ -51,6 +52,6 @@ export async function renderOwnerInlineLibrary(store:BotStore,policy:Policy,acto
  if(selected[1]==='d')return ui(text,[...(nav.length?[nav]:[]),[b('🗃️ معاينة الأرشفة',key('a',current,slot,selected[4]!))],back]);
  try{
   const ref=await service.issueInlineArchive(actor,r.id,resourceArchiveFingerprint(r),epoch(state,policy,r),current);
-  return ui(text+'\n\nستُؤرشف هذه النسخة من المورد. التأكيد صالح لدقيقتين ولمرة واحدة.',[[b('✅ تأكيد الأرشفة','ol:1:c:'+ref.slice(2))],[b('↩️ إلغاء والعودة',key('d',current,slot,selected[4]!))],back]);
+  return ui(text+'\n\nستُؤرشف هذه النسخة من المورد. التأكيد صالح لدقيقتين ولمرة واحدة.',[[b('✅ تأكيد الأرشفة','ol:1:c:'+ref.slice(2))],[b('↩️ إلغاء والعودة',ownerPreviewCancelData(ref))],back]);
  }catch{return null;}
 }

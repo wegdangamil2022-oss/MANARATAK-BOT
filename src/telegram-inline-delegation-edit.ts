@@ -4,6 +4,7 @@ import type {Policy} from './policy.js';
 import type {OwnerInlineScreen} from './telegram-inline-owner.js';
 import {delegationFingerprint} from './delegation-fingerprint.js';
 import {selectedOwnerDelegation} from './telegram-inline-delegations.js';
+import {ownerPreviewCancelData} from './telegram-owner-preview-cancel.js';
 const roles={a:['ai.ask','سؤال المساعد','assistant'],c:['content.publish','نشر المحتوى','publishing'],d:['content.upload','رفع المحتوى','navigation'],e:['chat.manage','إدارة المجموعة','moderation']} as const;
 type Role=keyof typeof roles;
 const group='(-[1-9][0-9]{0,18})',ver='([1-9][0-9]{0,9})',page='(0|[1-9][0-9]{0,2})',slot='([1-8])',role='([acde])';
@@ -57,7 +58,7 @@ export class OwnerDelegationEditor{
   if(s.callbacks.filter(x=>x.action.startsWith(CONFIRM)&&x.expiresAt>now).length>=200)throw Error('DELEGATION_REVIEW_LIMIT');
   const expiresAt=now+days*86400000,proof=delegationFingerprint(s,text,capability,id),ref='c_'+randomBytes(18).toString('base64url');
   s.callbacks.push({ref,action:CONFIRM+JSON.stringify(['GRANT',text,capability,id,version,expiresAt,p,proof]),actorId:actor,chatId:'private',policyVersion:0,oneShot:true,used:false,revoked:false,expiresAt:now+120000});c.used=true;
-  return ui('<b>معاينة تفويض داخلي</b>\nالنطاق: <code>'+escape(id)+'</code>\nالمستخدم: <code>'+escape(text)+'</code>\nالقدرة: '+roles[code][1]+'\nالمدة: '+days+' يوم\nهذا التفويض محلي فقط ولا يمنح حقوق Telegram. لم يُحفظ بعد.',[[button('✅ تأكيد التفويض','od:1:c:'+ref.slice(2))],[button('إلغاء','od:1:g:'+p)]]);
+  return ui('<b>معاينة تفويض داخلي</b>\nالنطاق: <code>'+escape(id)+'</code>\nالمستخدم: <code>'+escape(text)+'</code>\nالقدرة: '+roles[code][1]+'\nالمدة: '+days+' يوم\nهذا التفويض محلي فقط ولا يمنح حقوق Telegram. لم يُحفظ بعد.',[[button('✅ تأكيد التفويض','od:1:c:'+ref.slice(2))],[button('إلغاء',ownerPreviewCancelData(ref))]]);
  });}
  async handle(actor:string,data:string):Promise<OwnerInlineScreen|null>{
   if(!this.policy.isOwner(actor)||!validDelegationEditRoute(data))return null;
@@ -78,7 +79,7 @@ export class OwnerDelegationEditor{
      if(!current||delegationFingerprint(s,grant.actor,grant.capability,grant.chatId)!==proof||!this.policy.has(s,grant.actor,grant.capability,grant.chatId,at))return null;
      s.callbacks=s.callbacks.filter(x=>!x.action.startsWith(CONFIRM)||!Number.isSafeInteger(x.expiresAt)||x.expiresAt>at);if(s.callbacks.filter(x=>x.action.startsWith(CONFIRM)&&x.expiresAt>at).length>=200)return null;
      const ref='c_'+randomBytes(18).toString('base64url');s.callbacks.push({ref,action:CONFIRM+JSON.stringify(['REVOKE',grant.actor,grant.capability,grant.chatId,chat.version,grant.expiresAt,p,proof]),actorId:actor,chatId:'private',policyVersion:0,oneShot:true,used:false,revoked:false,expiresAt:at+120000});return ref;});if(!ref)return null;
-    return ui('<b>معاينة سحب التفويض</b>\nالنطاق: <code>'+escape(grant.chatId)+'</code>\nالمستخدم: <code>'+escape(grant.actor)+'</code>\nالقدرة: <code>'+escape(grant.capability)+'</code>\nلن تُعدل حقوق Telegram.',[[button('✅ تأكيد السحب','od:1:c:'+ref.slice(2))],[button('إلغاء','mi:1:d:p:'+p)]]);
+    return ui('<b>معاينة سحب التفويض</b>\nالنطاق: <code>'+escape(grant.chatId)+'</code>\nالمستخدم: <code>'+escape(grant.actor)+'</code>\nالقدرة: <code>'+escape(grant.capability)+'</code>\nلن تُعدل حقوق Telegram.',[[button('✅ تأكيد السحب','od:1:c:'+ref.slice(2))],[button('إلغاء',ownerPreviewCancelData(ref))]]);
    }
    const l=list.exec(data);if(l){const p=Number(l[1]),groups=allGroups(state),pages=Math.max(1,Math.ceil(groups.length/8));if(p>=pages)return null;
     const rows=groups.slice(p*8,p*8+8).map(c=>[button('👥 '+c.id,'od:1:b:'+c.id+':'+c.version+':'+p)]),nav=[];

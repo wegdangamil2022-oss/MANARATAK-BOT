@@ -1,8 +1,10 @@
 import {isValidFloodWindow,type FloodWindow} from './protection-flood.js';
 import {validGroupNetworks,type GroupNetwork} from './group-network-model.js';
+import {validCommunityFolders,type CommunityFolder} from './community-folder-model.js';
+import {validCommunityMessageMetadata,type CommunityMessageReceipt} from './community-message-receipt.js';
 import {validAdminUIAccess,type AdminUIAccess} from './protection-ui-access.js';
 import {validStudioState,type StudioState} from './button-studio-model.js';
-import {validCategoryLanguage} from './education-category-policy.js';
+import {validCategoryLanguage,validTopicVisibility} from './education-category-policy.js';
 import { mkdir, open, readFile, rename, rm, stat, lstat, realpath, writeFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
 import { randomUUID } from 'node:crypto';
@@ -22,7 +24,7 @@ export interface ProcessedUpdate { key: string; status: 'CLAIMED' | 'DONE' | 'UN
 export interface Operation { id: string; updateKey: string; kind: 'CHAT_LEAVE'; chatId: string; policyVersion: number; status: OperationStatus; startedAt?: number; }
 export interface AuditRecord { actorId?: string; updateKey: string; decision: 'ALLOW' | 'DENY' | 'NOOP'; reason: string; policyVersion: number; at: number; /** For owner-moderation reviews only; absent on legacy audit events. */ moderationEvidenceDigest?:string; }
 import type { Candidate, ImportFormat, ImportReport } from './ingestion.js';
-export interface EducationCategory { id: string; scope: string; parentId: string | null; title: string; order: number; enabled: boolean; language?:string; /** Monotonic optional revision for preexisting saved categories. */ revision?: number; }
+export interface EducationCategory { id: string; scope: string; parentId: string | null; title: string; order: number; enabled: boolean; language?:string; groupVisible?:boolean; topicVisibility?:{topicId:number;enabled:boolean}[]; /** Monotonic optional revision for preexisting saved categories. */ revision?: number; }
 export interface EducationResource { id: string; categoryId: string; scope: string; title: string; university: string; cycle: string; degree: string; seats: number | null; sourceImportId: string; sourceLocator: string; reviewedBy: string; status: 'PUBLISHED' | 'ARCHIVED'; publicationText?: string; publicationTextReviewedBy?: string; }
 export interface ImportRun { id: string; scope: string; uploadedBy: string; origin: 'TELEGRAM_ADMIN' | 'ADMIN_WEB'; format: ImportFormat; filename: string; digest: string; report: ImportReport; candidates: Candidate[]; createdAt: number; }
 export type RestrictionKind = 'NONE' | 'MUTE' | 'BAN';
@@ -31,7 +33,7 @@ export type ModerationDispatchGateway='SIMULATION'|'TELEGRAM_API'|'UNSPECIFIED';
 export interface ModerationReason { chatId: string; memberId: string; source: 'MANUAL' | 'SUBSCRIPTION'; reference: string; kind: 'MUTE' | 'BAN'; createdBy: string; active: boolean; }
 export interface ModerationOperation { id: string; chatId: string; memberId: string; actorId: string; kind: RestrictionKind; reasonFingerprint: string; policyVersion: number; status: OperationStatus; createdAt: number; /** Gateway used when the attempt entered STARTED. Absent on legacy/undispatched rows. */ attemptGateway?:ModerationDispatchGateway; /** Owner triage never alters status or authorizes retry. */ review?:{decision:'ACKNOWLEDGED_UNRESOLVED'|'ESCALATED';reviewedBy:string;reviewedAt:number;/** Approval epoch at review time; optional for legacy records. */policyVersion?:number;/** Immutable local attempt evidence binding; absent on legacy reviews. */evidenceDigest?:string}; }
 export interface Warning { chatId: string; memberId: string; reference: string; actorId: string; at: number; active: boolean; }
-export interface SubscriptionRequirement { chatId: string; channelIds: string[]; mode: 'ALL' | 'ANY'; version: number; }
+export interface SubscriptionRequirement { chatId: string; channelIds: string[]; mode: 'ALL' | 'ANY' | 'AT_LEAST'; minimumCount?:number; version: number; }
 export interface FAQEntry { id: string; scope: string; question: string; aliases: string[]; answer: string; sourceResourceId: string; createdBy: string; approvedBy?: string; status: 'DRAFT' | 'APPROVED' | 'ARCHIVED'; createdAt: number; }
 export interface ResourceLink { ref: string; scope: string; resourceId: string; resourceRevision: number; policyVersion: number; expiresAt: number; boundUserId?: string; issuedBy: string; revoked: boolean; }
 /** B4 uses snapshots of reviewed content; never treat an item ID as proof of its current revision. */
@@ -88,11 +90,14 @@ export interface PurgeJob {
 }
 /** Durable Telegram text reply intent; no automatic retry after unknown sends. */
 export interface TelegramReplyJob {
+ communityMessage?:CommunityMessageReceipt;
+ communityClose?:CommunityMessageReceipt;
+ communityEditTarget?:{chatId:string;messageId:number};
  updateKey:string;plan?:{chatId:string;parseMode:'HTML';text:string;
   replyMarkup?:import('./telegram-menu.js').TelegramReplyKeyboard;
   inlineMarkup?:import('./telegram-inline-owner.js').TelegramInlineKeyboard;
   studioMarkup?:import('./telegram-studio-rich.js').StudioNativeKeyboard;
-  editMessageId?:number};
+  editMessageId?:number;messageThreadId?:number};
  status:'QUEUED'|'SENDING'|'SENT'|'FAILED_CONFIRMED'|'UNKNOWN_OUTCOME';
  attemptId?:string;startedAt?:number;messageId?:number;
  queuedAt?:number;redactedAt?:number;
@@ -112,11 +117,12 @@ export interface TelegramReplyJob {
  /** New private replies declare origin; pre-v0.7.56 private QUEUED rows
   * without either this or privateGroupAccess are quarantine-only on dispatch.
   */
- privateReplyKind?:'LOCAL'|'GROUP_SCOPED'|'ADMIN_SCOPED'|'LIBRARY_SCOPED'|'STUDIO_SCOPED';
+ privateReplyKind?:'LOCAL'|'GROUP_SCOPED'|'ADMIN_SCOPED'|'LIBRARY_SCOPED'|'STUDIO_SCOPED'|'COMMUNITY_SCOPED';
  /** Ephemeral administrative view witness, removed before any outbound attempt. */
  adminUIAccess?:AdminUIAccess;
  /** Short-lived witness for private inline library contents. */
  privateLibraryAccess?:AdminUIAccess;
+ communityAccess?:AdminUIAccess;
  /** Explicit bounded classification of a locally denied QUEUED send.
   * No actor ID, chat ID, text, evidence key or provider description.
   * Historical FAILED_CONFIRMED and network-provider failures remain untagged.
@@ -152,6 +158,7 @@ export interface B6BudgetAttempt {
   operatorReview?:{reviewedBy:string;reviewedAt:number};
 }
 export interface BotState {
+  communityFolders?:CommunityFolder[];
   buttonStudio?:StudioState;
   /** Local owner network folders; never evidence of Telegram rights. */
   groupNetworks?:GroupNetwork[];
@@ -239,6 +246,7 @@ export class BotStore {
     }
     if (previous.schemaVersion !== 8 ||
       (previous.groupNetworks!==undefined&&!validGroupNetworks(previous.groupNetworks))||
+      (previous.communityFolders!==undefined&&!validCommunityFolders(previous.communityFolders))||
       (previous.privateSettingsRevision!==undefined&&(typeof previous.privateSettingsRevision!=='number'||!Number.isSafeInteger(previous.privateSettingsRevision)||previous.privateSettingsRevision<0||previous.privateSettingsRevision>=Number.MAX_SAFE_INTEGER))||
       (previous.buttonStudio!==undefined&&!validStudioState(previous.buttonStudio))||
       (previous.protectionFloodWindows!==undefined&&(!Array.isArray(previous.protectionFloodWindows)||
@@ -350,7 +358,9 @@ export class BotStore {
        previous.telegramReplyJobs.some((raw:unknown)=>{
         if(!raw||typeof raw!=='object'||Array.isArray(raw))return true;
         const job=raw as Record<string,unknown>;
+        if(!validCommunityMessageMetadata(raw as TelegramReplyJob))return true;
         const plan=job.plan as Record<string,unknown>|undefined;
+        if(plan?.messageThreadId!==undefined&&(!Number.isSafeInteger(plan.messageThreadId)||Number(plan.messageThreadId)<1||Number(plan.messageThreadId)>2147483647||typeof plan.chatId!=='string'||!plan.chatId.startsWith('-')||job.groupMenuAccess===undefined))return true;
         if(job.accessDenialCode!==undefined&&(
            job.status!=='FAILED_CONFIRMED'||typeof job.accessDenialCode!=='string'||
            !['LEGACY_UNVERIFIABLE','ACCESS_RECHECK_FAILED','GROUP_UNAVAILABLE']
@@ -383,17 +393,21 @@ export class BotStore {
             !Number.isSafeInteger(Number(plan.chatId))||
             job.groupReplyKind!==undefined||
             job.groupMenuAccess!==undefined||job.groupQuestionAccess!==undefined||
-            (job.privateReplyKind!=='LOCAL'&&job.privateReplyKind!=='GROUP_SCOPED'&&job.privateReplyKind!=='ADMIN_SCOPED'&&job.privateReplyKind!=='LIBRARY_SCOPED'&&job.privateReplyKind!=='STUDIO_SCOPED')||
+            (job.privateReplyKind!=='LOCAL'&&job.privateReplyKind!=='GROUP_SCOPED'&&job.privateReplyKind!=='ADMIN_SCOPED'&&job.privateReplyKind!=='LIBRARY_SCOPED'&&job.privateReplyKind!=='STUDIO_SCOPED'&&job.privateReplyKind!=='COMMUNITY_SCOPED')||
             (job.privateReplyKind==='LOCAL'&&(job.privateGroupAccess!==undefined||job.adminUIAccess!==undefined||job.privateLibraryAccess!==undefined))||
             (job.privateReplyKind==='GROUP_SCOPED'&&(job.privateGroupAccess===undefined||job.adminUIAccess!==undefined||job.privateLibraryAccess!==undefined))||
             ((job.privateReplyKind==='ADMIN_SCOPED'||job.privateReplyKind==='STUDIO_SCOPED')&&(job.adminUIAccess===undefined||job.privateGroupAccess!==undefined||job.privateLibraryAccess!==undefined))||
-            (job.privateReplyKind==='LIBRARY_SCOPED'&&(job.privateLibraryAccess===undefined||job.privateGroupAccess!==undefined||job.adminUIAccess!==undefined)))
+            (job.privateReplyKind==='LIBRARY_SCOPED'&&(job.privateLibraryAccess===undefined||job.privateGroupAccess!==undefined||job.adminUIAccess!==undefined))||
+            (job.privateReplyKind==='COMMUNITY_SCOPED'&&(job.communityAccess===undefined||job.privateLibraryAccess!==undefined||job.privateGroupAccess!==undefined||job.adminUIAccess!==undefined)))
           return true;
         }
         if(job.adminUIAccess!==undefined){
          if(!validAdminUIAccess(job.adminUIAccess)||job.status!=='QUEUED'||!plan||plan.chatId!==job.adminUIAccess.actorId||
           (job.privateReplyKind!=='ADMIN_SCOPED'&&job.privateReplyKind!=='STUDIO_SCOPED')||job.privateGroupAccess!==undefined||job.groupReplyKind!==undefined||
           job.groupQuestionAccess!==undefined||job.groupMenuAccess!==undefined)return true;
+        }
+        if(job.communityAccess!==undefined){
+         if(!validAdminUIAccess(job.communityAccess)||job.status!=='QUEUED'||!plan||plan.chatId!==job.communityAccess.actorId||job.privateReplyKind!=='COMMUNITY_SCOPED'||job.privateLibraryAccess!==undefined||job.privateGroupAccess!==undefined||job.adminUIAccess!==undefined||job.groupReplyKind!==undefined||job.groupQuestionAccess!==undefined||job.groupMenuAccess!==undefined)return true;
         }
         if(job.privateLibraryAccess!==undefined){
          if(!validAdminUIAccess(job.privateLibraryAccess)||job.status!=='QUEUED'||!plan||plan.chatId!==job.privateLibraryAccess.actorId||
@@ -433,6 +447,8 @@ export class BotStore {
       !Array.isArray(previous.moderationOperations) || !Array.isArray(previous.subscriptionRequirements) ||
       !Array.isArray(previous.warnings) || !Array.isArray(previous.educationCategories) ||
       previous.educationCategories.some(c=>c&&typeof c==='object'&&Object.hasOwn(c,'language')&&!validCategoryLanguage((c as Record<string,unknown>).language)) ||
+      previous.educationCategories.some(c=>c&&typeof c==='object'&&Object.hasOwn(c,'topicVisibility')&&(!validTopicVisibility((c as Record<string,unknown>).topicVisibility)||(c as Record<string,unknown>).scope==='private')) ||
+      previous.educationCategories.some(c=>c&&typeof c==='object'&&Object.hasOwn(c,'groupVisible')&&(typeof (c as Record<string,unknown>).groupVisible!=='boolean'||(c as Record<string,unknown>).scope==='private')) ||
       !Array.isArray(previous.educationResources) || !Array.isArray(previous.importRuns))
       throw new Error('Unsupported state schema');
     return previous as unknown as BotState;
@@ -714,7 +730,7 @@ export class BotStore {
     groupQuestionAccess?:TelegramReplyJob['groupQuestionAccess'],
     groupMenuAccess?:TelegramReplyJob['groupMenuAccess'],
     privateGroupAccess?:TelegramReplyJob['privateGroupAccess'],
-    adminUIAccess?:TelegramReplyJob['adminUIAccess'],privateLibraryAccess?:TelegramReplyJob['privateLibraryAccess'],studioScoped=false): Promise<void> {
+    adminUIAccess?:TelegramReplyJob['adminUIAccess'],privateLibraryAccess?:TelegramReplyJob['privateLibraryAccess'],studioScoped=false,communityAccess?:TelegramReplyJob['communityAccess'],communityClose?:CommunityMessageReceipt): Promise<void> {
     await this.transaction(s => {
       const update = s.updates.find(x => x.key === key);
       if (!update || update.status !== 'CLAIMED') throw new Error('Update not claimed');
@@ -727,11 +743,13 @@ export class BotStore {
          s.telegramReplyJobs.push({updateKey:key,plan:structuredClone(reply),status:'QUEUED',queuedAt:decision.at,
           ...(reply.chatId.startsWith('-')
            ?{groupReplyKind:groupQuestionAccess?'REVIEWED_FAQ' as const:'GENERAL' as const}
-           :{privateReplyKind:adminUIAccess?(studioScoped?'STUDIO_SCOPED' as const:'ADMIN_SCOPED' as const):privateGroupAccess?'GROUP_SCOPED' as const:privateLibraryAccess?'LIBRARY_SCOPED' as const:'LOCAL' as const}),
+           :{privateReplyKind:communityAccess?'COMMUNITY_SCOPED' as const:adminUIAccess?(studioScoped?'STUDIO_SCOPED' as const:'ADMIN_SCOPED' as const):privateGroupAccess?'GROUP_SCOPED' as const:privateLibraryAccess?'LIBRARY_SCOPED' as const:'LOCAL' as const}),
           ...(groupQuestionAccess?{groupQuestionAccess:structuredClone(groupQuestionAccess)}:{}),
           ...(groupMenuAccess?{groupMenuAccess:structuredClone(groupMenuAccess)}:{}),
           ...(privateGroupAccess?{privateGroupAccess:structuredClone(privateGroupAccess)}:{}),
           ...(adminUIAccess?{adminUIAccess:structuredClone(adminUIAccess)}:{}),
+          ...(communityAccess?{communityAccess:structuredClone(communityAccess)}:{}),
+          ...(communityClose?{communityClose:structuredClone(communityClose)}:{}),
           ...(privateLibraryAccess?{privateLibraryAccess:structuredClone(privateLibraryAccess)}:{})});
       }
     });

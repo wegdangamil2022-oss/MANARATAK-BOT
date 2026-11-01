@@ -134,6 +134,7 @@ export class OwnerTelegramCategoryMenu{
     +'المعرّف: '+safe(cat.id,64)+'\n'
     +'النطاق: '+safe(cat.scope,32)+'\n'
     +'الحالة المحلية: '+currentStatus+'\n'
+    +(cat.scope==='private'?'':'ظهور المحادثة العامة: '+(cat.groupVisible===false?'مخفي':'ظاهر')+'\nظهور المواضيع: غير مفعّل افتراضيًا\n'+(cat.topicVisibility??[]).map(r=>'• '+r.topicId+': '+(r.enabled?'ظاهر':'مخفي')).join('\n')+'\n')
     +'الترتيب الحالي بين الأقسام الشقيقة: '+(peerIndex+1)+' من '+peers.length+'\n'
     +'الموارد المنشورة مباشرة في هذا القسم: '+impacts+'\n'
     +'ترتيب الأقسام يُحدّث المكتبة المحلية فقط، ولا يُنشئ منشورات Telegram.\n'

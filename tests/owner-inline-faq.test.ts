@@ -51,6 +51,17 @@ for(const engine of ['json','sqlite'] as const){
    assert.equal(state.deliveries.length,0);
   }finally{await f.close();}
  });
+ test('cancelling FAQ approval and archive invalidates their confirmations ('+engine+')',async()=>{
+  const f=await fixture();try{
+   let list=await f.app().handle(event(800,'mi:1:i:10:08')),detail=await f.app().handle(event(801,select(list,'of:1:d:')));
+   let review=await f.app().handle(event(802,select(detail,'of:1:a:'))),confirm=select(review,'of:1:c:');
+   assert.equal((await f.app().handle(event(803,select(review,'oc:1:k:')))).status,'APPLIED');assert.equal((await f.app().handle(event(804,confirm))).status,'DENIED');assert.equal((await f.store.snapshot()).faqEntries[0]!.status,'DRAFT');
+   review=await f.app().handle(event(805,select(detail,'of:1:a:')));await f.app().handle(event(806,select(review,'of:1:c:')));
+   list=await f.app().handle(event(807,'mi:1:i:10:08'));detail=await f.app().handle(event(808,select(list,'of:1:d:')));
+   review=await f.app().handle(event(809,select(detail,'of:1:x:')));confirm=select(review,'of:1:c:');
+   await f.app().handle(event(810,select(review,'oc:1:k:')));assert.equal((await f.app().handle(event(811,confirm))).status,'DENIED');assert.equal((await f.store.snapshot()).faqEntries[0]!.status,'APPROVED');
+  }finally{await f.close();}
+ });
  test('FAQ inline rechecks actor, context, source, expiry and exact review before confirmation ('+engine+')',async()=>{
   const f=await fixture();try{
    assert.equal((await f.app().handle(event(1,'mi:1:i:10:08',300))).status,'DENIED');

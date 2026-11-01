@@ -7,11 +7,12 @@ import {OwnerTelegramCategoryMenu,ownerCategoryMenuLabel,parseOwnerCategoryActio
 import {ownerCategoryChoiceToken} from './education-category-policy.js';
 import {menuLabels} from './telegram-menu.js';
 import {EducationCategoryEditor} from './education-category-editor.js';
+import {ownerPreviewCancelData} from './telegram-owner-preview-cancel.js';
 export function validOwnerCategoryInlineRoute(data:string):boolean{
  if(typeof data!=='string'||Buffer.byteLength(data)>64)return false;
  const m=/^(?:ec:1:[hn]|ec:1:[rap]:[A-Za-z0-9_-]{24})$/u.exec(data);return m?.[0]===data;
 }
-const custom=(label:string)=>/^edit:(RENAME|CHILD|LANG|PARENT):([A-Za-z0-9_-]{1,24}|~[a-f0-9]{16})$/u.exec(label);
+const custom=(label:string)=>/^edit:(RENAME|CHILD|LANG|PARENT|TOPIC|GENERAL):([A-Za-z0-9_-]{1,24}|~[a-f0-9]{16})$/u.exec(label);
 const prefix='category.ui:';
 const button=(text:string,callback_data:string)=>({text,callback_data});
 const escape=(s:string)=>s.replace(/&/gu,'&amp;').replace(/</gu,'&lt;').replace(/>/gu,'&gt;').replace(/"/gu,'&quot;').replace(/'/gu,'&#39;');
@@ -27,7 +28,7 @@ export async function renderOwnerInlineCategories(store:BotStore,policy:Policy,e
   if(data.startsWith('ec:1:p:')){
    const choice=await editor.chooseParent(actor,'c_'+data.slice(7));if(!choice)return null;
    if(choice.kind==='PAGE')return pickerScreen(await editor.parentPicker(actor,choice.id,choice.returnPage,choice.page,choice.proof,choice.epoch));
-   return {text:'<b>معاينة تغيير القسم الأب</b>\nالقسم الأب: '+escape(choice.name)+'\nلم يُحفظ التغيير بعد. ينتهي التأكيد بعد دقيقتين.',keyboard:{inline_keyboard:[[button('✅ تأكيد الحفظ','ec:1:a:'+choice.ref.slice(2))],[button('إلغاء','ec:1:h')]]}};
+   return {text:'<b>معاينة تغيير القسم الأب</b>\nالقسم الأب: '+escape(choice.name)+'\nلم يُحفظ التغيير بعد. ينتهي التأكيد بعد دقيقتين.',keyboard:{inline_keyboard:[[button('✅ تأكيد الحفظ','ec:1:a:'+choice.ref.slice(2))],[button('إلغاء',ownerPreviewCancelData(choice.ref))]]}};
   }
   let label=ownerCategoryMenuLabel,returnPage=0;
   if(data==='ec:1:n')label='edit:ROOT';
@@ -44,11 +45,11 @@ export async function renderOwnerInlineCategories(store:BotStore,policy:Policy,e
   if(label==='edit:ROOT'||custom(label)){
    const m=custom(label),matches=m?state.educationCategories.filter(c=>ownerCategoryChoiceToken(c.id)===m[2]&&(c.scope==='private'||policy.canUseChat(state,c.scope,'navigation'))):[];
    if(m&&matches.length!==1)return null;
-   await editor.begin(actor,m?m[1] as 'RENAME'|'CHILD'|'LANG'|'PARENT':'ROOT',matches[0]?.id??'',returnPage);
+   await editor.begin(actor,m?m[1] as 'RENAME'|'CHILD'|'LANG'|'PARENT'|'TOPIC'|'GENERAL':'ROOT',matches[0]?.id??'',returnPage);
    if(m?.[1]==='PARENT'){
     try{return pickerScreen(await editor.parentPicker(actor,matches[0]!.id,returnPage));}catch{await editor.cancel(actor);return null;}
    }
-   return {text:(m?.[1]==='PARENT'?'اكتب معرّف القسم الأب من بطاقة تفاصيله، أو 0 لجعل هذا القسم رئيسيًا. لا يُسمح بتغيير النطاق أو إنشاء دورة في الشجرة.':m?.[1]==='LANG'?'اكتب رمز اللغة مثل ar أو en أو fr.':'اكتب '+(m?.[1]==='RENAME'?'الاسم الجديد':'اسم القسم الجديد')+' في رسالة واحدة (100 حرف كحد أقصى).')+'\nستظهر معاينة قبل التأكيد، وتنتهي خطوة الإدخال بعد عشر دقائق.\nالقسم الرئيسي الجديد يُنشأ في مكتبة الخاص.',keyboard:{inline_keyboard:[[button('إلغاء الإدخال','ec:1:h')]]}};
+   return {text:(m?.[1]==='GENERAL'?'أرسل تفعيل أو إيقاف لتغيير ظهور هذا القسم في المحادثة العامة فقط؛ تبقى قواعد المواضيع مستقلة.':m?.[1]==='TOPIC'?'اكتب رقم الموضوع ثم تفعيل أو إيقاف، مثل: 123 تفعيل. الظهور في المواضيع غير مفعّل افتراضيًا؛ يلزم إظهار الأقسام الأب في الموضوع نفسه أيضًا. لا يتغير ظهور القسم في المحادثة العامة.':m?.[1]==='PARENT'?'اكتب معرّف القسم الأب من بطاقة تفاصيله، أو 0 لجعل هذا القسم رئيسيًا. لا يُسمح بتغيير النطاق أو إنشاء دورة في الشجرة.':m?.[1]==='LANG'?'اكتب رمز اللغة مثل ar أو en أو fr.':'اكتب '+(m?.[1]==='RENAME'?'الاسم الجديد':'اسم القسم الجديد')+' في رسالة واحدة (100 حرف كحد أقصى).')+'\nستظهر معاينة قبل التأكيد، وتنتهي خطوة الإدخال بعد عشر دقائق.\nالقسم الرئيسي الجديد يُنشأ في مكتبة الخاص.',keyboard:{inline_keyboard:[[button('إلغاء الإدخال','ec:1:h')]]}};
   }
   const page=parseOwnerCategoryPage(label);if(page)returnPage=page.page;
   if(label===ownerCategoryMenuLabel&&returnPage>0)label='➡️ التالي · o:d:'+returnPage;
@@ -58,11 +59,12 @@ export async function renderOwnerInlineCategories(store:BotStore,policy:Policy,e
    s.callbacks=s.callbacks.filter(c=>!c.action.startsWith(prefix)||!Number.isSafeInteger(c.expiresAt)||c.expiresAt>now);
    const labels=screen.keyboard.keyboard.flat().map(b=>b.text).filter(t=>t!==menuLabels.owner&&t!==menuLabels.home);
    const chosen=parseOwnerCategoryAction(label);if(chosen?.kind==='detail')labels.push('edit:RENAME:'+chosen.token,'edit:CHILD:'+chosen.token,'edit:LANG:'+chosen.token,'edit:PARENT:'+chosen.token);
+   if(chosen?.kind==='detail'&&s.educationCategories.some(c=>ownerCategoryChoiceToken(c.id)===chosen.token&&c.scope!=='private'&&policy.canUseChat(s,c.scope,'navigation')))labels.push('edit:TOPIC:'+chosen.token,'edit:GENERAL:'+chosen.token);
    if(s.callbacks.filter(c=>c.action.startsWith(prefix)&&c.expiresAt>now).length+labels.length>200)throw Error('CATEGORY_UI_LIMIT');
    return labels.map(text=>{
     const ref='c_'+randomBytes(18).toString('base64url');s.callbacks.push({ref,actorId:actor,chatId:'private',policyVersion:0,oneShot:true,used:false,revoked:false,expiresAt:now+120000,action:prefix+JSON.stringify([text,returnPage])});
     const action=parseOwnerCategoryAction(text),category=action?.kind==='detail'?s.educationCategories.find(c=>ownerCategoryChoiceToken(c.id)===action.token&&(c.scope==='private'||policy.canUseChat(s,c.scope,'navigation'))):undefined;
-    const title=(text==='edit:ROOT'?'➕ قسم رئيسي في الخاص':custom(text)?.[1]==='PARENT'?'🌳 تغيير القسم الأب':custom(text)?.[1]==='LANG'?'🌐 لغة التصنيف':custom(text)?.[1]==='RENAME'?'✏️ تغيير الاسم':custom(text)?.[1]==='CHILD'?'➕ إضافة فرع':category?'🗂️ '+category.title:text.split(' · ')[0]!).replace(/[\u0000-\u001f\u007f\u202a-\u202e\u2066-\u2069]/gu,' ');
+    const title=(text==='edit:ROOT'?'➕ قسم رئيسي في الخاص':custom(text)?.[1]==='GENERAL'?'👁️ ظهور المحادثة العامة':custom(text)?.[1]==='TOPIC'?'🧵 ظهور المواضيع':custom(text)?.[1]==='PARENT'?'🌳 تغيير القسم الأب':custom(text)?.[1]==='LANG'?'🌐 لغة التصنيف':custom(text)?.[1]==='RENAME'?'✏️ تغيير الاسم':custom(text)?.[1]==='CHILD'?'➕ إضافة فرع':category?'🗂️ '+category.title:text.split(' · ')[0]!).replace(/[\u0000-\u001f\u007f\u202a-\u202e\u2066-\u2069]/gu,' ');
     return [button(Array.from(title).slice(0,60).join(''),'ec:1:r:'+ref.slice(2))];
    });
   });

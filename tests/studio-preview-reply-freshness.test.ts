@@ -41,6 +41,12 @@ for(const engine of ['json','sqlite'] as const){
    const revoked=await app.handle(cb(5,route()));await store.transaction(s=>{s.privateFeatures['owner.dashboard']=false;});
    assert.equal((await dispatcher.dispatch(revoked.deliveryKey!)).status,'FAILED_CONFIRMED');assert.equal(sent,1);
    await store.transaction(s=>{s.privateFeatures['owner.dashboard']=true;});
+   const child=await svc.create('100','قائمة فرعية');t=await svc.edit('100',t.id,t.revision,{kind:'ACTION',buttonId:t.draft.buttons[0]!.id,action:{kind:'MENU',target:child.id}});
+   const parent=await app.handle(cb(200,route())),enter=parent.plan!.studioMarkup!.inline_keyboard.flat().find(b=>'callback_data' in b&&b.callback_data.startsWith('st:1:t:'));assert.ok(enter&&'callback_data' in enter);
+   const nested=await app.handle(cb(201,enter.callback_data)),back=nested.plan!.studioMarkup!.inline_keyboard.flat().find(b=>'callback_data' in b&&b.callback_data.startsWith('st:1:N:'));assert.ok(back&&'callback_data' in back);
+   const returned=await app.handle(cb(202,back.callback_data));assert.equal((await store.snapshot()).telegramReplyJobs!.find(j=>j.updateKey===returned.deliveryKey)!.privateReplyKind,'STUDIO_SCOPED');
+   await svc.edit('100',child.id,child.revision,{kind:'TEXT',value:'تغيير بعد تجهيز العودة'});
+   assert.equal((await dispatcher.dispatch(returned.deliveryKey!)).status,'FAILED_CONFIRMED');assert.equal(sent,1);
    const expired=await app.handle(cb(6,route()));now+=120000;
    assert.equal((await dispatcher.dispatch(expired.deliveryKey!)).status,'FAILED_CONFIRMED');assert.equal(sent,1);
    const denied=(await store.snapshot()).telegramReplyJobs!.find(j=>j.updateKey===stale.deliveryKey)!;

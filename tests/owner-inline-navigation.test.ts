@@ -10,9 +10,10 @@ import {EducationAdminFacade} from '../src/education-admin.js';
 import {ApprovedAnswerService,ResourceLinkService} from '../src/education-interactions.js';
 import {TelegramUpdateApplication} from '../src/telegram-transport.js';
 import {TelegramBotApiTextSender,TelegramBotApiCallbackAcker} from '../src/telegram-replies.js';
-import {ownerInlineHome,ownerInlineRender,ownerInlineSections,isValidTelegramInlineKeyboard,ownerInlineLinkedReadOnly} from '../src/telegram-inline-owner.js';
+import {ownerInlineHome,ownerInlineRender,ownerInlineSections,isValidTelegramInlineKeyboard,ownerInlineLinkedReadOnly,ownerInlineConnection} from '../src/telegram-inline-owner.js';
 
 import {ownerMenuLabels} from '../src/telegram-owner-menu.js';
+import {studioCatalogueReturn} from '../src/telegram-inline-studio.js';
 const TOKEN='123456789:ABCDEFGHIJKLMNOPQRSTUVWXYZabcde';
 const message=(updateId:number,actor:number,text:string)=>({
  update_id:updateId,message:{message_id:updateId,chat:{id:actor,type:'private'},
@@ -62,7 +63,7 @@ test('owner inline home and section pagination are strict bounded Telegram marku
  }
  for(const bad of ['mi:1:p:2','mi:1:p:01','mi:1:s:00:0','mi:1:s:01:3',
    'mi:1:i:01:13','mi:1:i:01:00','mi:1:p:0:extra','mi:1:i:99:01',
-   'mi:1:h\n','mi:1:s:01:-1','mi:2:h'])assert.equal(ownerInlineRender(bad),null,bad);
+   'mi:1:h\n','mi:1:s:01:0\n','mi:1:i:01:01\n','mi:1:s:01:-1','mi:2:h'])assert.equal(ownerInlineRender(bad),null,bad);
 });
 test('broadcast section uses the approved nine and eight buttons with correct return pages',()=>{
  const first=ownerInlineRender('mi:1:s:06:0')!,second=ownerInlineRender('mi:1:s:06:1')!;
@@ -173,6 +174,43 @@ test('callback acknowledgement validates IDs and never reports false success',as
  await acker.answer('unsafe\nquery');
  assert.equal(requests.length,1);
  assert.match(requests[0]??'',/answerCallbackQuery$/);
+});
+test('catalogue connection classification matches every displayed availability marker',()=>{
+ for(let s=0;s<ownerInlineSections.length;s++){
+  const code=String(s+1).padStart(2,'0'),count=ownerInlineSections[s]!.items.length,pages=s===5?2:Math.ceil(count/8);
+  for(let p=0;p<pages;p++)for(const b of ownerInlineRender('mi:1:s:'+code+':'+p)!.keyboard.inline_keyboard.flat().filter(b=>b.callback_data.startsWith('mi:1:i:'))){
+   const kind=ownerInlineConnection(b.callback_data);assert.equal(b.text.startsWith(kind==='EDITOR'?'🛠️ ':kind==='VIEW'?'👁️ ':'⌛ '),true);
+  }
+ }
+ for(const route of ['mi:1:i:01:03','mi:1:i:01:06','mi:1:i:01:07','mi:1:i:01:08','mi:1:i:01:12'])assert.equal(ownerInlineConnection(route),'EDITOR');
+ for(const bad of ['mi:1:i:00:01','mi:1:i:17:01','mi:1:i:01:00','mi:1:i:01:99','mi:1:i:01:03\n','mi:1:h'])assert.equal(ownerInlineConnection(bad),null);
+});
+for(const engine of ['json','sqlite'] as const)test(engine+' migrated owner roots return to their exact catalogue page',async()=>{
+ const f=await fixture(engine,true);try{
+  let id=8000;
+  for(const route of ['mi:1:i:01:09','mi:1:i:01:10','mi:1:i:01:11','mi:1:i:07:09','mi:1:i:07:11','mi:1:i:07:12','mi:1:i:07:16','mi:1:i:10:16']){
+   const screen=await f.app.handle(callback(id++,100,route));assert.equal(screen.status,'APPLIED',route);
+   const section=route.slice(7,9),back='mi:1:s:'+section+':1';
+   assert.ok(screen.plan?.inlineMarkup?.inline_keyboard.flat().some(b=>b.callback_data===back),route+' missing '+back);
+   const returned=await f.app.handle(callback(id++,100,back));assert.equal(returned.status,'APPLIED');assert.equal(returned.plan?.editMessageId,55);assert.ok(returned.plan!.text.includes('صفحة 2'));
+  }
+  for(const route of ['st:1:C','st:1:l:09:0','st:1:l:12:0']){
+   const screen=await f.app.handle(callback(id++,100,route));assert.equal(screen.status,'APPLIED',route);assert.ok(screen.plan?.inlineMarkup?.inline_keyboard.flat().some(b=>b.callback_data==='mi:1:s:07:1'),route);
+  }
+ }finally{await f.close();}
+});
+test('studio catalogue return derives only validated explicit modes',()=>{
+ assert.equal(studioCatalogueReturn('st:1:l:01:0'),'mi:1:s:07:0');assert.equal(studioCatalogueReturn('st:1:l:09:0'),'mi:1:s:07:1');assert.equal(studioCatalogueReturn('st:1:C'),'mi:1:s:07:1');
+ for(const bad of ['st:1:C\n','st:1:l:17:0','st:1:l:09:-1','st:1:l:09:0\n','mi:1:h'])assert.equal(studioCatalogueReturn(bad),null);
+});
+
+test('callback acknowledgement explains denial, replay and unresolved outcomes without echoing commands or provider errors',async()=>{
+ const bodies:Record<string,unknown>[]=[];
+ const acker=new TelegramBotApiCallbackAcker(TOKEN,async(_url,init)=>{bodies.push(JSON.parse(String(init?.body)));return Response.json({ok:true,result:true});});
+ for(const outcome of ['DENIED','DUPLICATE','UNKNOWN','APPLIED','IGNORED'] as const)await acker.answer('cb_77',outcome);
+ assert.deepEqual(bodies.map(b=>b.text),['هذا الزر غير متاح أو انتهت صلاحيته. افتح القائمة مجددًا وتحقق من صلاحيتك.','عولج هذا الطلب سابقًا؛ لم تُكرر العملية.','نتيجة الطلب غير مؤكدة؛ لن تُعاد العملية تلقائيًا.',undefined,undefined]);
+ assert.deepEqual(bodies.map(b=>b.show_alert),[true,false,true,undefined,undefined]);
+ assert.ok(bodies.every(b=>b.cache_time===0));
 });
 
 test('linked owner inline read-only actions are exact documented selectors',()=>{

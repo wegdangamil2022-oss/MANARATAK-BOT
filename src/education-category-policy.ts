@@ -2,11 +2,18 @@ import {createHash} from 'node:crypto';
 import type {BotState,EducationCategory} from './store.js';
 const idPattern=/^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/u;
 /** A restored cycle, missing parent or duplicated ID must never grant visibility. */
-export function visibleEducationCategory(state:BotState,category:EducationCategory):boolean{
+export function validTopicVisibility(value:unknown):value is {topicId:number;enabled:boolean}[]{
+ if(!Array.isArray(value)||value.length>100)return false;const ids=new Set<number>();
+ for(const rule of value){if(!rule||typeof rule!=='object'||Array.isArray(rule)||Object.keys(rule).length!==2||!Number.isSafeInteger(rule.topicId)||rule.topicId<1||rule.topicId>2147483647||typeof rule.enabled!=='boolean'||ids.has(rule.topicId))return false;ids.add(rule.topicId);}return true;
+}
+export function visibleEducationCategory(state:BotState,category:EducationCategory,topicId?:number):boolean{
+ if(topicId!==undefined&&(!Number.isSafeInteger(topicId)||topicId<1||topicId>2147483647||category.scope==='private'))return false;
  const seen=new Set<string>();let current:EducationCategory|undefined=category;
  while(current){
   if(current.scope!==category.scope||current.enabled!==true||seen.has(current.id)||
    state.educationCategories.filter(x=>x.id===current!.id).length!==1)return false;
+  if(current.topicVisibility!==undefined&&!validTopicVisibility(current.topicVisibility)||topicId!==undefined&&!current.topicVisibility?.some(r=>r.topicId===topicId&&r.enabled))return false;
+  if(current.groupVisible!==undefined&&typeof current.groupVisible!=='boolean'||topicId===undefined&&current.groupVisible===false)return false;
   seen.add(current.id);if(current.parentId===null)return true;
   const parents=state.educationCategories.filter(x=>x.id===current!.parentId);
   if(parents.length!==1)return false;current=parents[0];
@@ -29,7 +36,7 @@ export function ownerCategoryChoiceToken(id:string):string{
  */
 export function categoryVisibilityFingerprint(cat:EducationCategory):string{
  return '~'+createHash('sha256').update(JSON.stringify([
-  cat.id,cat.scope,cat.parentId,cat.title,cat.order,cat.enabled,cat.revision??0,...(cat.language===undefined?[]:[cat.language])
+  cat.id,cat.scope,cat.parentId,cat.title,cat.order,cat.enabled,cat.revision??0,...(cat.language===undefined?[]:[cat.language]),...(cat.topicVisibility===undefined?[]:[cat.topicVisibility]),...(cat.groupVisible===undefined?[]:[cat.groupVisible])
  ]),'utf8').digest('hex').slice(0,16);
 }
 

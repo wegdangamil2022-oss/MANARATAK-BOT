@@ -248,8 +248,10 @@ for(const engine of ['json','sqlite'] as const){
    const history=await f.app().handle(cb(115,key(card,'سجل تغييرات')));
    assert.equal(history.status,'APPLIED');
    assert.match(history.plan?.text??'',/سجل تغييرات إعدادات المجموعة/);
-   assert.match(history.plan?.text??'',/GROUP_SETTINGS_AI_MODE_SAVED/);
-   assert.match(history.plan?.text??'',/GROUP_SETTINGS_MONITOR_ENABLED/);
+   assert.match(history.plan?.text??'',/المساعد: يجيب للمالك عند الإشارة/);
+   assert.match(history.plan?.text??'',/الحماية: مراقبة فقط/);
+   assert.match(history.plan?.text??'',/المعدّل: <code>100<\/code>/);
+   assert.doesNotMatch(history.plan?.text??'',/GROUP_SETTINGS_/);
    assert.equal(buttons(history).some(x=>x.text.includes('تأكيد')),false);
    assert.equal((await f.app().handle(cb(116,'gs:1:l:'+GROUP+':2:0',200))).status,'DENIED');
    assert.equal((await f.app().handle(cb(117,'gs:1:l:'+GROUP+':2:0',100,true))).status,'DENIED');
@@ -271,6 +273,154 @@ for(const engine of ['json','sqlite'] as const){
    assert.doesNotMatch(history.plan?.text??'',/GROUP_SETTINGS_AI_MODE_SAVED/);
    await f.policy.revokeChatAtRevision(OWNER,GROUP,2);
    assert.equal((await f.app().handle(cb(123,'gs:1:l:'+GROUP+':2:0'))).status,'DENIED');
+  }finally{await f.close();}
+ });
+ test('group setting history names each confirmed AI and monitor value ('+engine+')',async()=>{
+  const f=await fixture(engine);try{
+   await f.approve();assert.equal((await f.save()).status,'SAVED');
+   let version=1,seq=300;
+   for(const mode of ['m','f','o','s','a','x']){
+    const preview=await f.app().handle(cb(seq++,'gs:1:v:'+GROUP+':'+version+':0:'+mode));assert.equal(preview.status,'APPLIED');
+    const done=await f.app().handle(cb(seq++,key(preview,'تأكيد التعديل')));assert.equal(done.status,'APPLIED');
+    if(!['m','f'].includes(mode))version++;
+   }
+   const history=await f.app().handle(cb(seq++,'gs:1:l:'+GROUP+':'+version+':0'));assert.equal(history.status,'APPLIED');
+   for(const label of ['الحماية: مراقبة فقط','الحماية: متوقفة','المساعد: يجيب للمالك عند الإشارة','المساعد: يجيب للمشرفين عند الإشارة','المساعد: يجيب للجميع عند الإشارة','المساعد: متوقف'])assert.ok(history.plan!.text.includes(label),label);
+  }finally{await f.close();}
+ });
+ test('owner reviews and restores last recorded AI setting once without changing other policies ('+engine+')',async()=>{
+  const f=await fixture(engine);try{
+   await f.approve();
+   const change=await f.app().handle(cb(400,'gs:1:v:'+GROUP+':1:0:o'));
+   await f.app().handle(cb(401,key(change,'تأكيد التعديل')));
+   const history=await f.app().handle(cb(402,'gs:1:l:'+GROUP+':2:0'));
+   assert.match(history.plan!.text,/السابق: متوقف/);
+   const restore=key(history,'استعادة وضع المساعد السابق');
+   assert.equal((await f.app().handle(cb(403,restore,200))).status,'DENIED');
+   const review=await f.app().handle(cb(404,restore));assert.equal(review.status,'APPLIED');assert.match(review.plan!.text,/استعادة/);
+   assert.equal((await f.store.snapshot()).chats[0]!.groupAI,'OWNER_MENTION');
+   const confirm=key(review,'تأكيد');const applied=await Promise.all([f.app().handle(cb(405,confirm)),f.app().handle(cb(406,confirm))]);
+   assert.equal(applied.filter(x=>x.status==='APPLIED').length,1);
+   const state=await f.store.snapshot();assert.equal(state.chats[0]!.groupAI,'OFF');assert.equal(state.chats[0]!.version,3);
+   assert.equal((await f.app().handle(cb(407,restore))).status,'DENIED');
+   assert.equal(state.protectionPolicies,undefined);
+  }finally{await f.close();}
+ });
+ test('AI restoration denies cancelled, stale, tampered and ambiguous evidence ('+engine+')',async()=>{
+  const f=await fixture(engine);try{
+   await f.approve();const change=await f.app().handle(cb(420,'gs:1:v:'+GROUP+':1:0:o'));
+   await f.app().handle(cb(421,key(change,'تأكيد التعديل')));
+   let history=await f.app().handle(cb(422,'gs:1:l:'+GROUP+':2:0')),route=key(history,'استعادة وضع المساعد السابق');
+   const review=await f.app().handle(cb(423,route)),confirm=key(review,'تأكيد'),cancel=key(review,'إلغاء');
+   assert.equal((await f.app().handle(cb(424,cancel))).status,'APPLIED');assert.equal((await f.app().handle(cb(425,confirm))).status,'DENIED');
+   const next=await f.app().handle(cb(426,route)),stale=key(next,'تأكيد');
+   const changeAgain=await f.app().handle(cb(427,'gs:1:v:'+GROUP+':2:0:s'));await f.app().handle(cb(428,key(changeAgain,'تأكيد التعديل')));
+   assert.equal((await f.app().handle(cb(429,stale))).status,'DENIED');assert.equal((await f.app().handle(cb(430,route))).status,'DENIED');
+   history=await f.app().handle(cb(431,'gs:1:l:'+GROUP+':3:0'));route=key(history,'استعادة وضع المساعد السابق');
+   const nonce=route.slice('gs:1:r:'.length);
+   await f.store.transaction(s=>{const c=s.callbacks.find(x=>x.ref==='c_'+nonce)!;const a=JSON.parse(c.action.slice('owner-group-settings:'.length));a[5]='ALL_MENTION';c.action='owner-group-settings:'+JSON.stringify(a);});
+   assert.equal((await f.app().handle(cb(432,route))).status,'DENIED');
+   history=await f.app().handle(cb(433,'gs:1:l:'+GROUP+':3:0'));assert.equal(buttons(history).some(b=>b.text.includes('استعادة وضع المساعد السابق')),false);
+   const state=await f.store.snapshot();assert.equal(state.chats[0]!.groupAI,'STAFF_MENTION');
+  }finally{await f.close();}
+ });
+ test('AI restoration rejects expired reviews and duplicate prior-state evidence ('+engine+')',async()=>{
+  const f=await fixture(engine);try{
+   await f.approve();const change=await f.app().handle(cb(440,'gs:1:v:'+GROUP+':1:0:o'));await f.app().handle(cb(441,key(change,'تأكيد التعديل')));
+   const history=await f.app().handle(cb(442,'gs:1:l:'+GROUP+':2:0')),route=key(history,'استعادة وضع المساعد السابق');
+   const review=await f.app().handle(cb(443,route)),confirm=key(review,'تأكيد');f.advance(120000);
+   assert.equal((await f.app().handle(cb(444,confirm))).status,'DENIED');
+   const newReview=await f.app().handle(cb(445,route));assert.equal(newReview.status,'APPLIED');const newConfirm=key(newReview,'تأكيد');
+   await f.store.transaction(s=>{const prior=s.audit.find(a=>a.updateKey==='owner-group-settings-prior:'+route.slice('gs:1:r:'.length))!;s.audit.push({...prior});});
+   assert.equal((await f.app().handle(cb(446,newConfirm))).status,'DENIED');
+   assert.equal((await f.app().handle(cb(447,route))).status,'DENIED');
+   assert.equal((await f.store.snapshot()).chats[0]!.groupAI,'OWNER_MENTION');
+  }finally{await f.close();}
+ });
+ test('legacy history without recorded previous value remains readable but cannot restore ('+engine+')',async()=>{
+  const f=await fixture(engine);try{
+   await f.approve();const preview=await f.app().handle(cb(450,'gs:1:v:'+GROUP+':1:0:o'));const confirm=key(preview,'تأكيد التعديل');
+   await f.store.transaction(s=>{const c=s.callbacks.find(x=>x.ref==='c_'+confirm.slice('gs:1:c:'.length))!;const p=JSON.parse(c.action.slice('owner-group-settings:'.length));c.action='owner-group-settings:'+JSON.stringify(p.slice(0,5));});
+   assert.equal((await f.app().handle(cb(451,confirm))).status,'APPLIED');
+   const history=await f.app().handle(cb(452,'gs:1:l:'+GROUP+':2:0'));assert.equal(history.status,'APPLIED');
+   assert.match(history.plan!.text,/المساعد: يجيب للمالك عند الإشارة/);assert.doesNotMatch(history.plan!.text,/السابق:/);
+   assert.equal(buttons(history).some(b=>b.text.includes('استعادة وضع المساعد السابق')),false);
+  }finally{await f.close();}
+ });
+ test('restoring assistant mode preserves the protection policy and warns about revision staleness ('+engine+')',async()=>{
+  const f=await fixture(engine);try{
+   await f.approve();assert.equal((await f.save()).status,'SAVED');const before=(await f.store.snapshot()).protectionPolicies;
+   const changed=await f.app().handle(cb(460,'gs:1:v:'+GROUP+':1:0:o'));await f.app().handle(cb(461,key(changed,'تأكيد التعديل')));
+   const history=await f.app().handle(cb(462,'gs:1:l:'+GROUP+':2:0'));const review=await f.app().handle(cb(463,key(history,'استعادة وضع المساعد السابق')));
+   assert.match(review.plan!.text,/سياسة الحماية إلى مراجعة/);assert.equal((await f.app().handle(cb(464,key(review,'تأكيد')))).status,'APPLIED');
+   const state=await f.store.snapshot();assert.equal(state.chats[0]!.groupAI,'OFF');assert.equal(state.chats[0]!.version,3);assert.deepEqual(state.protectionPolicies,before);
+   const card=await f.app().handle(cb(465,'gs:1:g:'+GROUP+':3:0'));assert.match(card.plan!.text,/تحتاج مراجعة/);
+  }finally{await f.close();}
+ });
+ test('owner reviews and restores the last verified monitor mode with unchanged rules ('+engine+')',async()=>{
+  const f=await fixture(engine);try{
+   await f.approve();assert.equal((await f.save()).status,'SAVED');
+   const review=await f.app().handle(cb(470,'gs:1:v:'+GROUP+':1:0:m'));assert.equal((await f.app().handle(cb(471,key(review,'تأكيد التعديل')))).status,'APPLIED');
+   const history=await f.app().handle(cb(472,'gs:1:l:'+GROUP+':1:0'));assert.match(history.plan!.text,/السابق: متوقفة/);
+   const route=key(history,'استعادة وضع الحماية السابق');assert.equal((await f.app().handle(cb(473,route,200))).status,'DENIED');
+   const restore=await f.app().handle(cb(474,route));assert.match(restore.plan!.text,/معاينة استعادة/);
+   const confirm=key(restore,'تأكيد');const results=await Promise.all([f.app().handle(cb(475,confirm)),f.app().handle(cb(476,confirm))]);assert.equal(results.filter(r=>r.status==='APPLIED').length,1);
+   const state=await f.store.snapshot();assert.equal(state.protectionPolicies![0]!.policy.mode,'OFF');assert.equal(state.protectionPolicies![0]!.policy.revision,3);
+   assert.deepEqual(state.protectionPolicies![0]!.policy.rules,[{id:'rule_one',kind:'WORD',value:'spam',enabled:true,action:'REVIEW'}]);
+   assert.deepEqual(state.protectionPolicies![0]!.policy.allowedDomains,['example.org']);assert.equal((await f.app().handle(cb(477,route))).status,'DENIED');
+  }finally{await f.close();}
+ });
+ test('monitor restore rejects cancellation, expiry, changed policy and altered receipts ('+engine+')',async()=>{
+  const f=await fixture(engine);try{
+   await f.approve();await f.save();const review=await f.app().handle(cb(480,'gs:1:v:'+GROUP+':1:0:m'));await f.app().handle(cb(481,key(review,'تأكيد التعديل')));
+   const history=await f.app().handle(cb(482,'gs:1:l:'+GROUP+':1:0')),route=key(history,'استعادة وضع الحماية السابق');
+   let r=await f.app().handle(cb(483,route)),confirm=key(r,'تأكيد');await f.app().handle(cb(484,key(r,'إلغاء')));assert.equal((await f.app().handle(cb(485,confirm))).status,'DENIED');
+   r=await f.app().handle(cb(486,route));confirm=key(r,'تأكيد');f.advance(120000);assert.equal((await f.app().handle(cb(487,confirm))).status,'DENIED');
+   r=await f.app().handle(cb(488,route));confirm=key(r,'تأكيد');
+   const policy=(await f.store.snapshot()).protectionPolicies![0]!.policy;
+   assert.equal((await new GroupProtectionPolicyService(f.store,f.policy,()=>NOW+120000).save(OWNER,{...policy,revision:3,allowedDomains:['changed.org']},1,2)).status,'SAVED');
+   assert.equal((await f.app().handle(cb(489,confirm))).status,'DENIED');assert.equal((await f.app().handle(cb(490,route))).status,'DENIED');
+   const state=await f.store.snapshot();assert.equal(state.protectionPolicies![0]!.policy.mode,'MONITOR');assert.deepEqual(state.protectionPolicies![0]!.policy.allowedDomains,['changed.org']);
+  }finally{await f.close();}
+ });
+ test('monitor restore rejects source and audit evidence altered after review ('+engine+')',async()=>{
+  const f=await fixture(engine);try{
+   await f.approve();await f.save();const review=await f.app().handle(cb(500,'gs:1:v:'+GROUP+':1:0:m'));await f.app().handle(cb(501,key(review,'تأكيد التعديل')));
+   const history=await f.app().handle(cb(502,'gs:1:l:'+GROUP+':1:0')),route=key(history,'استعادة وضع الحماية السابق');
+   const preview=await f.app().handle(cb(503,route)),confirm=key(preview,'تأكيد');
+   await f.store.transaction(s=>{const prior=s.audit.find(a=>a.updateKey==='owner-group-settings-prior:'+route.slice('gs:1:q:'.length))!;s.audit.push({...prior});});
+   assert.equal((await f.app().handle(cb(504,confirm))).status,'DENIED');assert.equal((await f.app().handle(cb(505,route))).status,'DENIED');
+   assert.equal((await f.store.snapshot()).protectionPolicies![0]!.policy.mode,'MONITOR');
+  }finally{await f.close();}
+ });
+ test('legacy monitor history stays readable without offering unproven restoration ('+engine+')',async()=>{
+  const f=await fixture(engine);try{
+   await f.approve();await f.save();const review=await f.app().handle(cb(510,'gs:1:v:'+GROUP+':1:0:m')),confirm=key(review,'تأكيد التعديل');
+   await f.store.transaction(s=>{const c=s.callbacks.find(x=>x.ref==='c_'+confirm.slice('gs:1:c:'.length))!;const a=JSON.parse(c.action.slice('owner-group-settings:'.length));c.action='owner-group-settings:'+JSON.stringify(a.slice(0,5));});
+   assert.equal((await f.app().handle(cb(511,confirm))).status,'APPLIED');
+   const history=await f.app().handle(cb(512,'gs:1:l:'+GROUP+':1:0'));assert.match(history.plan!.text,/الحماية: مراقبة فقط/);
+   assert.equal(buttons(history).some(b=>b.text.includes('استعادة وضع الحماية السابق')),false);
+  }finally{await f.close();}
+ });
+ test('monitor restore rechecks approved group before confirmation ('+engine+')',async()=>{
+  const f=await fixture(engine);try{
+   await f.approve();await f.save();const review=await f.app().handle(cb(520,'gs:1:v:'+GROUP+':1:0:m'));await f.app().handle(cb(521,key(review,'تأكيد التعديل')));
+   const history=await f.app().handle(cb(522,'gs:1:l:'+GROUP+':1:0')),route=key(history,'استعادة وضع الحماية السابق');
+   const restore=await f.app().handle(cb(523,route)),confirm=key(restore,'تأكيد');await f.policy.revokeChatAtRevision(OWNER,GROUP,1);
+   assert.equal((await f.app().handle(cb(524,confirm))).status,'DENIED');assert.equal((await f.app().handle(cb(525,route))).status,'DENIED');
+   assert.equal((await f.store.snapshot()).protectionPolicies![0]!.policy.mode,'MONITOR');
+  }finally{await f.close();}
+ });
+ test('monitor restoration records a new reversible change in either direction ('+engine+')',async()=>{
+  const f=await fixture(engine);try{
+   await f.approve();assert.equal((await f.save(GROUP,'MONITOR')).status,'SAVED');
+   const stop=await f.app().handle(cb(530,'gs:1:v:'+GROUP+':1:0:f'));assert.equal((await f.app().handle(cb(531,key(stop,'تأكيد')))).status,'APPLIED');
+   let history=await f.app().handle(cb(532,'gs:1:l:'+GROUP+':1:0'));assert.match(history.plan!.text,/السابق: مراقبة فقط/);
+   let review=await f.app().handle(cb(533,key(history,'استعادة وضع الحماية السابق')));assert.equal((await f.app().handle(cb(534,key(review,'تأكيد')))).status,'APPLIED');
+   assert.equal((await f.store.snapshot()).protectionPolicies![0]!.policy.mode,'MONITOR');
+   history=await f.app().handle(cb(535,'gs:1:l:'+GROUP+':1:0'));assert.match(history.plan!.text,/السابق: متوقفة/);
+   review=await f.app().handle(cb(536,key(history,'استعادة وضع الحماية السابق')));assert.equal((await f.app().handle(cb(537,key(review,'تأكيد')))).status,'APPLIED');
+   const state=await f.store.snapshot();assert.equal(state.protectionPolicies![0]!.policy.mode,'OFF');assert.equal(state.protectionPolicies![0]!.policy.revision,4);
   }finally{await f.close();}
  });
  test('settings history has bounded paging and no live side effects ('+engine+')',async()=>{

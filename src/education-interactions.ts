@@ -4,7 +4,7 @@ import { Policy } from './policy.js';
 import { publicEducationResource, type PublicEducationResource } from './education.js';
 import {faqReviewFingerprint} from './faq-review.js';
 import {normalizeEducationDiscovery} from './education-search-normalization.js';
-import {subscriptionRequirementMode,acceptsActiveSubscriptionEvidence} from './subscription-integrity.js';
+import {subscriptionRequirementMode,subscriptionRuleWitness,acceptsActiveSubscriptionEvidence} from './subscription-integrity.js';
 import {visibleEducationCategory} from './education-category-policy.js';
 
 /** Only a trusted Telegram adapter may attest the chat membership status; user-provided claims are not evidence. */
@@ -262,7 +262,7 @@ export class ResourceLinkService {
     const afterMember=await this.store.snapshot();
     const requiredEpoch=(s:BotState,scope:string):string=>
       JSON.stringify(s.subscriptionRequirements.filter(r=>r.chatId===scope)
-       .map(r=>[r.version,r.mode,...r.channelIds]));
+       .map(subscriptionRuleWitness));
     const subscriptionEpoch=link.scope==='private'?'':requiredEpoch(afterMember,link.scope);
     if(link.scope!=='private'){
       const requirement=subscriptionRequirementMode(afterMember,link.scope);

@@ -385,7 +385,7 @@ export class OwnerGroupPolicyTemplates{
   return entries;
  }
  private alreadyReverted(s:BotState,nonce:string):boolean{
-  return s.audit.some(a=>a.updateKey==='group-template-bulk-rollback:'+nonce);
+  return s.audit.some(a=>a.updateKey==='group-template-bulk-rollback:'+nonce||a.updateKey==='group-template-rollback:'+nonce);
  }
  /** A rollback is allowed only for the exact untouched policies created by
   * the original operation. Reconstruct the PRE-SAVE state and compare the
@@ -394,12 +394,28 @@ export class OwnerGroupPolicyTemplates{
  private reversible(s:BotState,actor:string,now:number,event:HistoryEvent):{
   ids:string[];proof:string
  }|null{
-  if(event.type!=='bulk'||!event.templateKind||event.page===null||
-   !event.digest||this.alreadyReverted(s,event.nonce)||
+  if(this.alreadyReverted(s,event.nonce)||
    now<event.audit.at||now-event.audit.at>REVERT_WINDOW)return null;
   const groupSet=new Set(event.ids),groups=cardScope(s,this.policy,actor,now);
   if(event.ids.some(id=>!groups.some(c=>c.id===id))||
    s.protectionFloodWindows?.some(w=>groupSet.has(w.chatId)))return null;
+  const stateBefore:BotState={...s,
+   protectionPolicies:(s.protectionPolicies??[]).filter(row=>!groupSet.has(row.policy.chatId))};
+  let expected:(id:string)=>ProtectionPolicy;
+  if(event.type==='bulk'){
+   if(!event.templateKind||event.page===null||!event.digest)return null;
+   const before=this.bulkEvidence(stateBefore,actor,now,event.templateKind,event.page);
+   if(!before||before.digest!==event.digest||JSON.stringify(before.eligible.map(g=>g.id))!==JSON.stringify(event.ids))return null;
+   const kind=event.templateKind;expected=id=>template(kind,id);
+  }else{
+   let values:unknown;try{values=JSON.parse(event.receipt.action.slice(PREFIX.length));}catch{return null;}
+   // historyEvent has already validated the receipt; retain a separate guard
+   // here because rollback must reconstruct the exact original pre-save state.
+   if(!Array.isArray(values)||values.length!==5||event.ids.length!==1||!['e','l','c'].includes(values[0])||typeof values[1]!=='string')return null;
+   const before=this.evidence(stateBefore,actor,now,values[0] as Mode,values[1],event.ids[0]!);
+   if(!before||before.value.proof!==values[4]||before.value.targetVersion!==values[3])return null;
+   expected=()=>before.policy;
+  }
   const policies:NonNullable<BotState['protectionPolicies']>=[];
   for(const id of event.ids){
    const records=(s.protectionPolicies??[]).filter(row=>row.policy.chatId===id);
@@ -407,15 +423,10 @@ export class OwnerGroupPolicyTemplates{
    if(records.length!==1||!row||!isValidGroupProtectionRecord(row)||
     row.updatedBy!==actor||row.updatedAt!==event.audit.at||
     row.chatPolicyVersion!==group.version||
-    JSON.stringify(row.policy)!==JSON.stringify(template(event.templateKind,id)))
+    JSON.stringify(row.policy)!==JSON.stringify(expected(id)))
     return null;
    policies.push(row);
   }
-  const stateBefore:BotState={...s,
-   protectionPolicies:(s.protectionPolicies??[]).filter(row=>!groupSet.has(row.policy.chatId))};
-  const before=this.bulkEvidence(stateBefore,actor,now,event.templateKind,event.page);
-  if(!before||before.digest!==event.digest||
-   JSON.stringify(before.eligible.map(g=>g.id))!==JSON.stringify(event.ids))return null;
   const proof=createHash('sha256').update(JSON.stringify([
    event.audit,event.receipt,event.ids,policies,
    s.privateSettingsRevision??0,s.privateFeatures['owner.dashboard']
@@ -489,7 +500,7 @@ export class OwnerGroupPolicyTemplates{
    e.ids.map(id=>'• <code>'+esc(id)+'</code>').join('\n')+'\n'+
    'وقت الحفظ (UTC): '+new Date(e.audit.at).toISOString().slice(0,16).replace('T',' ')+'\n'+
    'الاسترجاع: '+(reverted?'مسترجعة':
-    reversible?'متاح بعد تأكيد جديد':'غير متاح؛ العملية ليست جماعية أو تغيّرت الأدلة أو انتهت المهلة')+
+    reversible?'متاح بعد تأكيد جديد':'غير متاح؛ تغيّرت الأدلة أو انتهت المهلة')+
    '\nلا توجد تغييرات حية في Telegram.',rows);
  }
  private async previewRevert(actor:string,nonce:string):Promise<OwnerInlineScreen|null>{
@@ -508,7 +519,7 @@ export class OwnerGroupPolicyTemplates{
    s.callbacks.push({ref,action:REVERT_PREFIX+JSON.stringify([nonce,evidence.proof]),
     chatId:'private',actorId:actor,policyVersion:0,expiresAt:now+TTL,
     oneShot:true,used:false,revoked:false});
-   return ui('<b>🔎 معاينة الاسترجاع الجماعي المحلي</b>\n'+
+   return ui('<b>🔎 معاينة الاسترجاع '+(event.type==='bulk'?'الجماعي ':'')+'المحلي</b>\n'+
     'سيُسترجع وضع '+evidence.ids.length+' مجموعات بإزالة القوالب التي أضافتها هذه العملية فقط:\n'+
     evidence.ids.map(id=>'• <code>'+esc(id)+'</code>').join('\n')+'\n'+
     'لن تُحذف سياسات المجموعات المعدلة أو التغييرات اللاحقة؛ عند الشك تُرفض الدفعة كاملة.\n'+
@@ -541,10 +552,10 @@ export class OwnerGroupPolicyTemplates{
    const ids=new Set(evidence.ids);
    s.protectionPolicies=(s.protectionPolicies??[]).filter(row=>!ids.has(row.policy.chatId));
    receipt.used=true;
-   s.audit.push({actorId:actor,updateKey:'group-template-bulk-rollback:'+event.nonce,
-    decision:'ALLOW',reason:'GROUP_TEMPLATE_BULK_MONITOR_REVERTED',
+   s.audit.push({actorId:actor,updateKey:(event.type==='bulk'?'group-template-bulk-rollback:':'group-template-rollback:')+event.nonce,
+    decision:'ALLOW',reason:event.type==='bulk'?'GROUP_TEMPLATE_BULK_MONITOR_REVERTED':'GROUP_TEMPLATE_MONITOR_REVERTED',
     policyVersion:0,at:now});
-   return ui('<b>✅ استرجاع القالب الجماعي محليًا</b>\n'+
+   return ui('<b>✅ استرجاع القالب '+(event.type==='bulk'?'الجماعي ':'')+'محليًا</b>\n'+
     'أزيلت القواعد المحفوظة في '+evidence.ids.length+' مجموعات دون مساس بأي سياسة أخرى.\n'+
     'تم تسجيل العملية في سجل التدقيق؛ لا توجد أوامر Telegram حية.',
     [[btn('🕘 سجل تغييرات القوالب','gt:1:r:h'),btn('📋 مجموعاتي','mi:1:i:01:01')],

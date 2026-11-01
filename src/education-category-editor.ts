@@ -2,21 +2,25 @@ import {createHash,randomBytes} from 'node:crypto';
 import type {BotStore,BotState,EducationCategory,CallbackRecord} from './store.js';
 import type {Policy} from './policy.js';
 import {categoryVisibilityFingerprint,validCategoryLanguage} from './education-category-policy.js';
-type Edit={kind:'RENAME'|'CHILD'|'ROOT'|'LANG'|'PARENT';id:string;proof:string;epoch:number;page:number};
+type Edit={kind:'RENAME'|'CHILD'|'ROOT'|'LANG'|'PARENT'|'TOPIC'|'GENERAL';id:string;proof:string;epoch:number;page:number};
 const INPUT='category.input:',WRITE='category.write:',PICK='category.parent.picker:';
 const random=()=>randomBytes(18).toString('base64url');
 function decode(v:unknown):Edit|null{
- if(!Array.isArray(v)||v.length!==5||!['RENAME','CHILD','ROOT','LANG','PARENT'].includes(v[0])||typeof v[1]!=='string'||typeof v[2]!=='string'||!Number.isSafeInteger(v[3])||v[3]<0||!Number.isSafeInteger(v[4])||v[4]<0||v[4]>999)return null;
+ if(!Array.isArray(v)||v.length!==5||!['RENAME','CHILD','ROOT','LANG','PARENT','TOPIC','GENERAL'].includes(v[0])||typeof v[1]!=='string'||typeof v[2]!=='string'||!Number.isSafeInteger(v[3])||v[3]<0||!Number.isSafeInteger(v[4])||v[4]<0||v[4]>999)return null;
  return {kind:v[0],id:v[1],proof:v[2],epoch:v[3],page:v[4]};
 }
 const encode=(e:Edit)=>[e.kind,e.id,e.proof,e.epoch,e.page];
+function topicValue(value:string,canonical=false):{topicId:number;enabled:boolean}|null{
+ const normalized=value.replace(/[٠-٩]/gu,c=>String(c.charCodeAt(0)-1632)),match=(canonical?/^([1-9][0-9]{0,9}):(on|off)$/u:/^([1-9][0-9]{0,9}) (تفعيل|إيقاف)$/u).exec(normalized);
+ if(!match||Number(match[1])>2147483647)return null;return {topicId:Number(match[1]),enabled:match[2]==='on'||match[2]==='تفعيل'};
+}
 export class EducationCategoryEditor{
  constructor(private store:BotStore,private policy:Policy,private clock:()=>number=Date.now){}
  private auth(s:BotState,actor:string):number{const now=this.clock();if(!this.policy.isOwner(actor)||!this.policy.privateFeature(s,'owner.dashboard',actor)||!Number.isSafeInteger(now)||now<0||now>8640000000000000-600000)throw Error('CATEGORY_EDITOR_DENIED');return now;}
  private current(s:BotState,e:Edit):EducationCategory|null{
   if(e.kind==='ROOT'){if(e.id!==''||e.proof!==''||e.epoch!==0)throw Error('CATEGORY_ROOT_INVALID');return null;}
   const matches=s.educationCategories.filter(c=>c.id===e.id),c=matches[0];
-  if(matches.length!==1||!c||categoryVisibilityFingerprint(c)!==e.proof||(c.scope==='private'?0:this.policy.chatRevision(s,c.scope))!==e.epoch||c.scope!=='private'&&!this.policy.canUseChat(s,c.scope,'navigation'))throw Error('CATEGORY_EDITOR_STALE');return c;
+  if(matches.length!==1||!c||categoryVisibilityFingerprint(c)!==e.proof||(c.scope==='private'?0:this.policy.chatRevision(s,c.scope))!==e.epoch||c.scope!=='private'&&!this.policy.canUseChat(s,c.scope,'navigation')||(e.kind==='TOPIC'||e.kind==='GENERAL')&&c.scope==='private')throw Error('CATEGORY_EDITOR_STALE');return c;
  }
  private valid(c:CallbackRecord,actor:string,now:number,ttl:number):boolean{return c.actorId===actor&&c.chatId==='private'&&c.policyVersion===0&&c.oneShot===true&&c.used===false&&c.revoked===false&&Number.isSafeInteger(c.expiresAt)&&c.expiresAt>now&&c.expiresAt<=now+ttl;}
  private parent(s:BotState,source:EducationCategory,value:string,rootMarker='0'):EducationCategory|null{
@@ -88,9 +92,11 @@ export class EducationCategoryEditor{
   const e=decode(JSON.parse(c.action.slice(INPUT.length)));if(!e)throw Error('CATEGORY_INPUT_INVALID');const source=this.current(s,e);
   const name=text.trim();if(!name||name.length>100||/[\u0000-\u001f\u007f\u202a-\u202e\u2066-\u2069]/u.test(name))throw Error('CATEGORY_NAME_INVALID');
   if(e.kind==='LANG'&&!validCategoryLanguage(name))throw Error('CATEGORY_LANGUAGE_INVALID');
+  if(e.kind==='GENERAL'&&!['تفعيل','إيقاف'].includes(name))throw Error('CATEGORY_GENERAL_INVALID');
+  const topic=e.kind==='TOPIC'?topicValue(name):null;if(e.kind==='TOPIC'&&(!topic||!source||!source.topicVisibility?.some(r=>r.topicId===topic.topicId)&&(source.topicVisibility?.length??0)>=100))throw Error('CATEGORY_TOPIC_INVALID');
   const target=e.kind==='PARENT'?this.parent(s,source!,name):null;
-  const ref='c_'+random();s.callbacks.push({ref,action:WRITE+JSON.stringify([encode(e),name,...(e.kind==='PARENT'?[target?categoryVisibilityFingerprint(target):'']:[])]),actorId:actor,chatId:'private',policyVersion:0,oneShot:true,used:false,revoked:false,expiresAt:now+120000});c.used=true;
-  return {name:e.kind==='PARENT'?(target?.title??'قسم رئيسي بلا أب'):name,kind:e.kind,ref};
+  const ref='c_'+random();s.callbacks.push({ref,action:WRITE+JSON.stringify([encode(e),e.kind==='GENERAL'?(name==='تفعيل'?'on':'off'):topic?topic.topicId+':'+(topic.enabled?'on':'off'):name,...(e.kind==='PARENT'?[target?categoryVisibilityFingerprint(target):'']:[])]),actorId:actor,chatId:'private',policyVersion:0,oneShot:true,used:false,revoked:false,expiresAt:now+120000});c.used=true;
+  return {name:e.kind==='GENERAL'?'ظهور المحادثة العامة: '+name:topic?'الموضوع '+topic.topicId+': '+(topic.enabled?'إظهار القسم':'إخفاء القسم'):e.kind==='PARENT'?(target?.title??'قسم رئيسي بلا أب'):name,kind:e.kind,ref};
  });}
  async confirm(actor:string,ref:string):Promise<{page:number;category:EducationCategory}|null>{return this.store.transaction(s=>{
   const now=this.auth(s,actor),matches=s.callbacks.filter(c=>c.ref===ref),c=matches[0];if(matches.length!==1||!c||!/^c_[A-Za-z0-9_-]{24}$/u.test(ref)||!this.valid(c,actor,now,120000)||!c.action.startsWith(WRITE))return null;
@@ -100,6 +106,11 @@ export class EducationCategoryEditor{
    const target=this.parent(s,cat!,v[1],v.length===4?'@root':'0');if(v[2]!==(v.length===4?this.parentChainProof(s,target):target?categoryVisibilityFingerprint(target):''))throw Error('CATEGORY_PARENT_STALE');
    const parentId=target?.id??null,peers=s.educationCategories.filter(c=>c.scope===cat!.scope&&c.parentId===parentId&&c.id!==cat!.id),order=peers.length?Math.max(...peers.map(c=>c.order))+1:0;
    if(!Number.isSafeInteger(order)||!Number.isSafeInteger((cat!.revision??0)+1))throw Error('CATEGORY_ORDER_INVALID');cat!.parentId=parentId;cat!.order=order;cat!.revision=(cat!.revision??0)+1;
+  }else if(e.kind==='GENERAL'){
+   if(!['on','off'].includes(v[1])||cat!.scope==='private'||!Number.isSafeInteger((cat!.revision??0)+1))throw Error('CATEGORY_GENERAL_INVALID');cat!.groupVisible=v[1]==='on';cat!.revision=(cat!.revision??0)+1;
+  }else if(e.kind==='TOPIC'){
+   const topic=topicValue(v[1],true);if(!topic||cat!.scope==='private'||!Number.isSafeInteger((cat!.revision??0)+1))throw Error('CATEGORY_TOPIC_INVALID');
+   const rules=(cat!.topicVisibility??[]).filter(r=>r.topicId!==topic.topicId);if(rules.length>=100)throw Error('CATEGORY_TOPIC_LIMIT');cat!.topicVisibility=[...rules,topic].sort((a,b)=>a.topicId-b.topicId);cat!.revision=(cat!.revision??0)+1;
   }else if(e.kind==='LANG'){
    if(!validCategoryLanguage(v[1])||!Number.isSafeInteger((cat!.revision??0)+1))throw Error('CATEGORY_LANGUAGE_INVALID');
    cat!.language=Intl.getCanonicalLocales(v[1])[0]!;cat!.revision=(cat!.revision??0)+1;

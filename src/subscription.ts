@@ -2,6 +2,7 @@ import { BotStore, type BotState } from './store.js';
 import { Policy } from './policy.js';
 import { ModerationService, type ModerationResult } from './moderation.js';
 import {isCanonicalSubscriptionRule,subscriptionRequirementMode} from './subscription-integrity.js';
+import {subscriptionConfigEpoch} from './subscription-config-epoch.js';
 
 export type Membership = 'MEMBER' | 'NOT_MEMBER' | 'UNKNOWN';
 export type SubscriptionDecision = { status: 'MEMBER' | 'NOT_MEMBER' | 'UNAVAILABLE' | 'NOT_REQUIRED' | 'DENIED'; channels: string[] };
@@ -18,10 +19,11 @@ export class FakeMembershipGateway implements MembershipGateway {
 }
 export class SubscriptionGate {
   constructor(private readonly store: BotStore, private readonly policy: Policy, private readonly membership: MembershipGateway, private readonly moderation: ModerationService, private readonly clock: () => number = Date.now) {}
-  async configure(actorId: string, chatId: string, channelIds: string[], mode: 'ALL' | 'ANY'): Promise<void> {
+  async configure(actorId: string, chatId: string, channelIds: string[], mode: 'ALL' | 'ANY' | 'AT_LEAST',expectedEpoch?:string,minimumCount?:number): Promise<void> {
     if (!this.policy.isOwner(actorId)) throw new Error('OWNER_ONLY');
-    if (!['ALL', 'ANY'].includes(mode) || channelIds.length > 10 || new Set(channelIds).size !== channelIds.length) throw new Error('INVALID_SUBSCRIPTION_CONFIG');
+    if (!isCanonicalSubscriptionRule({chatId,channelIds,mode,version:1,...(minimumCount!==undefined?{minimumCount}:{})})) throw new Error('INVALID_SUBSCRIPTION_CONFIG');
     const state = await this.store.snapshot();
+    if(expectedEpoch!==undefined&&(!this.policy.privateFeature(state,'owner.dashboard',actorId)||subscriptionConfigEpoch(state)!==expectedEpoch))throw Error('SUBSCRIPTION_CONFIG_STALE');
     if (!this.policy.canUseChat(state, chatId, 'verification')) throw new Error('GROUP_NOT_APPROVED');
     // Capture current authorization epochs *before* external checks. A
     // revoke + reapprove could restore the same scopes with a newer version;
@@ -32,14 +34,19 @@ export class SubscriptionGate {
     const priorRuleVersion=state.subscriptionRequirements.find(x=>x.chatId===chatId)?.version;
     for (const id of channelIds) {
       if (!/^-[0-9]+$/.test(id) || !this.policy.canUseChat(state, id, 'verification')) throw new Error('CHANNEL_NOT_APPROVED');
+    }
+    // At most ten independent read-only checks. Do not multiply the provider's
+    // timeout by the channel count while an inline callback is waiting.
+    await Promise.all(channelIds.map(async id=>{
       // The provider may reject or time out even while a saved local channel
       // grant remains valid. Never leak provider errors through an owner API.
       let permitted=false;
       try{permitted=await this.membership.canVerifyChannel(id);}
       catch{throw new Error('CHANNEL_UNVERIFIABLE');}
       if(!permitted)throw new Error('CHANNEL_UNVERIFIABLE');
-    }
+    }));
     await this.store.transaction(s => {
+      if(expectedEpoch!==undefined&&(!this.policy.privateFeature(s,'owner.dashboard',actorId)||subscriptionConfigEpoch(s)!==expectedEpoch))throw Error('SUBSCRIPTION_CONFIG_STALE');
       if (!this.policy.canUseChat(s, chatId, 'verification') ||
           s.chats.find(c=>c.id===chatId)?.version!==groupEpoch ||
           channelIds.some(id => !this.policy.canUseChat(s, id, 'verification') ||
@@ -49,6 +56,9 @@ export class SubscriptionGate {
       if(old?.version!==priorRuleVersion)throw new Error('SUBSCRIPTION_CONFIG_STALE');
       if (old) { old.channelIds = channelIds; old.mode = mode; old.version++; }
       else s.subscriptionRequirements.push({ chatId, channelIds, mode, version: 1 });
+      const saved=s.subscriptionRequirements.find(r=>r.chatId===chatId)!;
+      if(mode==='AT_LEAST')saved.minimumCount=minimumCount!;else delete saved.minimumCount;
+      if(expectedEpoch!==undefined)s.audit.push({actorId,updateKey:'subscription-editor:'+chatId+':'+(old?.version??1),decision:'ALLOW',reason:'SUBSCRIPTION_CONFIG_CONFIRMED',policyVersion:groupEpoch??0,at:this.clock()});
     });
   }
   /** A thin existing gate facade over the same owner-only atomic policy
@@ -99,6 +109,7 @@ export class SubscriptionGate {
         subscriptionRequirementMode(latest,chatId)==='INVALID' ||
         !current || current.version !== config.version ||
         current.mode!==config.mode ||
+        current.minimumCount!==config.minimumCount ||
         current.channelIds.length!==config.channelIds.length ||
         current.channelIds.some((id,i)=>id!==config.channelIds[i]) ||
         config.channelIds.some(id => !this.policy.canUseChat(latest, id, 'verification') ||
@@ -108,13 +119,11 @@ export class SubscriptionGate {
     // student. For ALL, even a known negative alongside an unavailable
     // channel is treated as UNAVAILABLE until all evidence is known.
     // For ANY, one verified MEMBER suffices independently of other unknowns.
-    const passing=config.mode==='ALL'
-     ?responses.every(x=>x==='MEMBER')
-     :responses.some(x=>x==='MEMBER');
+    const required=config.mode==='ALL'?responses.length:config.mode==='ANY'?1:config.minimumCount!;
+    const members=responses.filter(x=>x==='MEMBER').length;
+    const passing=members>=required;
     const complete=responses.every(x=>x!=='UNKNOWN');
-    const failing=complete&&(config.mode==='ALL'
-     ?responses.some(x=>x==='NOT_MEMBER')
-     :responses.every(x=>x==='NOT_MEMBER'));
+    const failing=complete&&members<required;
     return {status:passing?'MEMBER':failing?'NOT_MEMBER':'UNAVAILABLE',
      channels:[...config.channelIds]};
   }
@@ -136,7 +145,7 @@ export class SubscriptionGate {
       if(!rule)return !current;
       if(!current||!isCanonicalSubscriptionRule(rule)||
         !isCanonicalSubscriptionRule(current)||current.version!==rule.version||
-        current.mode!==rule.mode||current.channelIds.length!==rule.channelIds.length||
+        current.mode!==rule.mode||current.minimumCount!==rule.minimumCount||current.channelIds.length!==rule.channelIds.length||
         current.channelIds.some((id,i)=>id!==rule.channelIds[i]))return false;
       return rule.channelIds.every(id=>
         this.policy.canUseChat(s,id,'verification')&&

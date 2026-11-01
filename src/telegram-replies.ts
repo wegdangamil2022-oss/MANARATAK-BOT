@@ -8,6 +8,8 @@ import {isValidTelegramInlineKeyboard} from './telegram-inline-owner.js';
 import {validStudioNativeKeyboard} from './telegram-studio-rich.js';
 import {groupQuestionEpochDigest,groupMenuEpochDigest,privateGroupEpochDigest} from './telegram-group-access.js';
 import {privateLibraryEpoch} from './private-library-access.js';
+import {communityFolderEpoch} from './community-folder-access.js';
+import {validCommunityMessageMetadata,matchesCommunityClose} from './community-message-receipt.js';
 import {studioPreviewEpoch} from './studio-preview-access.js';
 import {subscriptionRequirementMode,acceptsActiveSubscriptionEvidence} from './subscription-integrity.js';
 import type {SubscriptionGate} from './subscription.js';
@@ -23,8 +25,9 @@ const validChat=(chat:string)=>/^(?:[1-9]\d{0,15}|-[1-9]\d{0,15})$/.test(chat)&&
 const validPlan=(p:unknown):p is TelegramReplyPlan=>{
  if(!p||typeof p!=='object'||Array.isArray(p))return false;
  const v=p as Record<string,unknown>;
- return (Object.keys(v).length===(3+(v.replyMarkup===undefined?0:1)+(v.inlineMarkup===undefined?0:1)+(v.studioMarkup===undefined?0:1)+(v.editMessageId===undefined?0:1)))&&
-  Object.keys(v).every(k=>['chatId','parseMode','text','replyMarkup','inlineMarkup','studioMarkup','editMessageId'].includes(k))&&
+ return (Object.keys(v).length===(3+(v.replyMarkup===undefined?0:1)+(v.inlineMarkup===undefined?0:1)+(v.studioMarkup===undefined?0:1)+(v.editMessageId===undefined?0:1)+(v.messageThreadId===undefined?0:1)))&&
+  Object.keys(v).every(k=>['chatId','parseMode','text','replyMarkup','inlineMarkup','studioMarkup','editMessageId','messageThreadId'].includes(k))&&
+  (v.messageThreadId===undefined||typeof v.chatId==='string'&&v.chatId.startsWith('-')&&Number.isSafeInteger(v.messageThreadId)&&Number(v.messageThreadId)>0&&Number(v.messageThreadId)<=2147483647)&&
   [v.replyMarkup,v.inlineMarkup,v.studioMarkup].filter(x=>x!==undefined).length<=1&&
   (v.replyMarkup===undefined||isValidTelegramReplyKeyboard(v.replyMarkup))&&
   (v.inlineMarkup===undefined||isValidTelegramInlineKeyboard(v.inlineMarkup))&&
@@ -55,6 +58,7 @@ export class TelegramBotApiTextSender implements TelegramReplySender {
     body:JSON.stringify({chat_id:plan.chatId,text:plan.text,parse_mode:'HTML',
      link_preview_options:{is_disabled:true},
      ...(plan.editMessageId===undefined?{protect_content:true}:{message_id:plan.editMessageId}),
+     ...(plan.editMessageId===undefined&&plan.messageThreadId!==undefined?{message_thread_id:plan.messageThreadId}:{}),
      ...(plan.studioMarkup?{reply_markup:plan.studioMarkup}:plan.inlineMarkup?{reply_markup:plan.inlineMarkup}:plan.replyMarkup?{reply_markup:plan.replyMarkup}:{})}),
     redirect:'error',signal:AbortSignal.timeout(8000)
    });
@@ -73,6 +77,7 @@ export class TelegramBotApiTextSender implements TelegramReplySender {
    const msg=v.result as Record<string,unknown>,chat=msg.chat;
    if(Number.isSafeInteger(msg.message_id)&&typeof msg.message_id==='number'&&msg.message_id>0&&
       (plan.editMessageId===undefined||plan.editMessageId===msg.message_id)&&
+      (plan.messageThreadId===undefined||plan.messageThreadId===msg.message_thread_id)&&
       chat&&typeof chat==='object'&&!Array.isArray(chat)&&
       (chat as Record<string,unknown>).id===Number(plan.chatId))
     return {status:'CONFIRMED',messageId:msg.message_id};
@@ -92,12 +97,15 @@ export class TelegramBotApiCallbackAcker {
   if(!/^[1-9]\d{4,12}:[A-Za-z0-9_-]{30,90}$/.test(token))
    throw new Error('INVALID_TELEGRAM_TOKEN');
  }
- async answer(callbackQueryId:string):Promise<void>{
+ async answer(callbackQueryId:string,outcome?:'APPLIED'|'DUPLICATE'|'DENIED'|'IGNORED'|'UNKNOWN'):Promise<void>{
   if(typeof callbackQueryId!=='string'||!(/^[A-Za-z0-9_-]{1,128}$/u.test(callbackQueryId)))return;
   try{
    await this.request('https://api.telegram.org/bot'+this.token+'/answerCallbackQuery',{
     method:'POST',headers:{'content-type':'application/json'},
-    body:JSON.stringify({callback_query_id:callbackQueryId}),
+    body:JSON.stringify({callback_query_id:callbackQueryId,cache_time:0,
+     ...(outcome==='DENIED'?{text:'هذا الزر غير متاح أو انتهت صلاحيته. افتح القائمة مجددًا وتحقق من صلاحيتك.',show_alert:true}:
+      outcome==='DUPLICATE'?{text:'عولج هذا الطلب سابقًا؛ لم تُكرر العملية.',show_alert:false}:
+      outcome==='UNKNOWN'?{text:'نتيجة الطلب غير مؤكدة؛ لن تُعاد العملية تلقائيًا.',show_alert:true}:{})}),
     redirect:'error',signal:AbortSignal.timeout(4000)
    });
   }catch{/* Callback acknowledgement is best effort and never retried. */}
@@ -143,6 +151,8 @@ export function validTelegramReplyJob(v:unknown):v is TelegramReplyJob{
  const j=v as Record<string,unknown>;
  return typeof j.updateKey==='string'&&/^b3-webhook:[a-zA-Z0-9_-]{1,80}:\d+$/.test(j.updateKey)&&
   knownStatus(j.status)&&
+  validCommunityMessageMetadata(v as TelegramReplyJob)&&
+  ((j.plan as TelegramReplyPlan|undefined)?.messageThreadId===undefined||j.groupReplyKind==='GENERAL'&&validGroupReplyAccess(j.groupMenuAccess))&&
   (j.status==='QUEUED'?validPlan(j.plan):(j.plan===undefined||validPlan(j.plan)))&&
   (j.queuedAt===undefined||(typeof j.queuedAt==='number'&&Number.isSafeInteger(j.queuedAt)&&j.queuedAt>=0))&&
   (j.startedAt===undefined||(typeof j.startedAt==='number'&&Number.isSafeInteger(j.startedAt)&&j.startedAt>=0))&&
@@ -161,18 +171,20 @@ export function validTelegramReplyJob(v:unknown):v is TelegramReplyJob{
   (j.privateReplyKind===undefined||
    (j.status==='QUEUED'&&validPlan(j.plan)&&
     !j.plan.chatId.startsWith('-')&&
-    (j.privateReplyKind==='LOCAL'||j.privateReplyKind==='GROUP_SCOPED'||j.privateReplyKind==='ADMIN_SCOPED'||j.privateReplyKind==='LIBRARY_SCOPED'||j.privateReplyKind==='STUDIO_SCOPED')&&
+    (j.privateReplyKind==='LOCAL'||j.privateReplyKind==='GROUP_SCOPED'||j.privateReplyKind==='ADMIN_SCOPED'||j.privateReplyKind==='LIBRARY_SCOPED'||j.privateReplyKind==='STUDIO_SCOPED'||j.privateReplyKind==='COMMUNITY_SCOPED')&&
     j.groupReplyKind===undefined&&j.groupQuestionAccess===undefined&&
     j.groupMenuAccess===undefined&&
     ((j.privateReplyKind==='LOCAL'&&j.privateGroupAccess===undefined&&j.adminUIAccess===undefined&&j.privateLibraryAccess===undefined)||
      ((j.privateReplyKind==='ADMIN_SCOPED'||j.privateReplyKind==='STUDIO_SCOPED')&&j.privateGroupAccess===undefined&&j.privateLibraryAccess===undefined&&validAdminUIAccess(j.adminUIAccess)&&j.plan.chatId===j.adminUIAccess.actorId)||
      (j.privateReplyKind==='LIBRARY_SCOPED'&&j.privateGroupAccess===undefined&&j.adminUIAccess===undefined&&validAdminUIAccess(j.privateLibraryAccess)&&j.plan.chatId===j.privateLibraryAccess.actorId)||
+     (j.privateReplyKind==='COMMUNITY_SCOPED'&&j.privateGroupAccess===undefined&&j.adminUIAccess===undefined&&j.privateLibraryAccess===undefined&&validAdminUIAccess(j.communityAccess)&&j.plan.chatId===j.communityAccess.actorId)||
      (j.privateReplyKind==='GROUP_SCOPED'&&j.adminUIAccess===undefined&&j.privateLibraryAccess===undefined&&
       validPrivateGroupAccess(j.privateGroupAccess)&&
       j.plan.chatId===j.privateGroupAccess.actorId))))&&
   (j.adminUIAccess===undefined||(j.status==='QUEUED'&&validPlan(j.plan)&&validAdminUIAccess(j.adminUIAccess)&&
    j.plan.chatId===j.adminUIAccess.actorId&&(j.privateReplyKind==='ADMIN_SCOPED'||j.privateReplyKind==='STUDIO_SCOPED')&&j.privateGroupAccess===undefined&&
    j.groupReplyKind===undefined&&j.groupQuestionAccess===undefined&&j.groupMenuAccess===undefined))&&
+  (j.communityAccess===undefined||(j.status==='QUEUED'&&validPlan(j.plan)&&validAdminUIAccess(j.communityAccess)&&j.plan.chatId===j.communityAccess.actorId&&j.privateReplyKind==='COMMUNITY_SCOPED'&&j.privateLibraryAccess===undefined&&j.adminUIAccess===undefined&&j.privateGroupAccess===undefined&&j.groupReplyKind===undefined&&j.groupQuestionAccess===undefined&&j.groupMenuAccess===undefined))&&
   (j.privateLibraryAccess===undefined||(j.status==='QUEUED'&&validPlan(j.plan)&&validAdminUIAccess(j.privateLibraryAccess)&&
    j.plan.chatId===j.privateLibraryAccess.actorId&&j.privateReplyKind==='LIBRARY_SCOPED'&&j.adminUIAccess===undefined&&j.privateGroupAccess===undefined&&
    j.groupReplyKind===undefined&&j.groupQuestionAccess===undefined&&j.groupMenuAccess===undefined))&&
@@ -251,7 +263,7 @@ export class TelegramReplyDispatcher {
       (kind==='FAQ'?this.policy.mayAskGroup(snap,groupId,actor,true):
        this.policy.canUseChat(snap,groupId,'navigation'))&&
       (kind==='FAQ'?groupQuestionEpochDigest(snap,groupId):
-       kind==='MENU'?groupMenuEpochDigest(snap,groupId):
+       kind==='MENU'?groupMenuEpochDigest(snap,groupId,job.plan!.messageThreadId):
        privateGroupEpochDigest(snap,groupId))===access.epoch){
     if(kind==='PRIVATE_GROUP'){
      if(!this.membership||await this.membership(groupId,actor)!=='VERIFIED')
@@ -293,6 +305,9 @@ export class TelegramReplyDispatcher {
     if(!allowed)return {status:'PAUSED' as const};
    }
    const plan=structuredClone(job.plan!);
+   // Serialize edits to a tracked message. An ambiguous earlier edit is
+   // quarantine evidence, not permission to try editing the same message again.
+   if(plan.editMessageId!==undefined&&(s.telegramReplyJobs??[]).some(other=>other!==job&&other.communityEditTarget?.chatId===plan.chatId&&other.communityEditTarget.messageId===plan.editMessageId))return {status:'UNKNOWN_OUTCOME' as const};
    const faq=job.groupQuestionAccess,menu=job.groupMenuAccess,dm=job.privateGroupAccess;
    const access=faq??menu??dm;
    const accessKind=faq?'FAQ':menu?'MENU':dm?'PRIVATE_GROUP':null;
@@ -313,7 +328,10 @@ export class TelegramReplyDispatcher {
    const libraryDenied=Boolean(library&&(library.actorId!==plan.chatId||!Number.isSafeInteger(job.queuedAt)||
     now<job.queuedAt!||now>=library.expiresAt||library.expiresAt>job.queuedAt!+ADMIN_UI_TTL_MS||
     privateLibraryEpoch(s,this.policy,library.actorId)!==library.epoch));
-   const forbidden=noGroupProof||noPrivateProvenance||adminDenied||libraryDenied||(!!access&&(
+   const community=job.communityAccess;
+   const communityDenied=Boolean(community&&(community.actorId!==plan.chatId||!Number.isSafeInteger(job.queuedAt)||now<job.queuedAt!||now>=community.expiresAt||community.expiresAt>job.queuedAt!+ADMIN_UI_TTL_MS||communityFolderEpoch(s,this.policy,community.actorId)!==community.epoch));
+   const closeDenied=Boolean(job.communityClose&&!matchesCommunityClose(s,this.policy,job.communityClose,now));
+   const forbidden=closeDenied||noGroupProof||noPrivateProvenance||adminDenied||libraryDenied||communityDenied||(!!access&&(
     !groupPrecheck?.allowed||
     groupPrecheck.kind!==accessKind||
     groupPrecheck.access.actorId!==access.actorId||
@@ -323,7 +341,7 @@ export class TelegramReplyDispatcher {
     !(faq?this.policy.mayAskGroup(s,accessScope,access.actorId,true):
       this.policy.canUseChat(s,accessScope,'navigation'))||
     (faq?groupQuestionEpochDigest(s,accessScope):
-      menu?groupMenuEpochDigest(s,accessScope):
+      menu?groupMenuEpochDigest(s,accessScope,plan.messageThreadId):
       privateGroupEpochDigest(s,accessScope))!==access.epoch));
    const groupUnavailable=plan.chatId.startsWith('-')&&
     !this.policy.canUseChat(s,plan.chatId,'navigation');
@@ -333,17 +351,23 @@ export class TelegramReplyDispatcher {
     // the owner report MUST NOT claim which external event occurred.
     job.accessDenialCode=noGroupProof||noPrivateProvenance?
      'LEGACY_UNVERIFIABLE':groupUnavailable?'GROUP_UNAVAILABLE':'ACCESS_RECHECK_FAILED';
-    job.status='FAILED_CONFIRMED';
-    delete job.plan;delete job.adminUIAccess;delete job.privateLibraryAccess;delete job.groupQuestionAccess;delete job.groupMenuAccess;delete job.privateGroupAccess;delete job.privateReplyKind;delete job.groupReplyKind;job.redactedAt=this.clock();
+    job.status='FAILED_CONFIRMED';delete job.communityClose;
+    delete job.plan;delete job.adminUIAccess;delete job.privateLibraryAccess;delete job.communityAccess;delete job.groupQuestionAccess;delete job.groupMenuAccess;delete job.privateGroupAccess;delete job.privateReplyKind;delete job.groupReplyKind;job.redactedAt=this.clock();
     return {status:'FAILED_CONFIRMED' as const};
    }
    const attemptId=randomUUID();
+   const communityReceipt=community&&plan.studioMarkup?.inline_keyboard.some(row=>row.some(b=>'url' in b))?{chatId:plan.chatId,epoch:community.epoch,expiresAt:community.expiresAt}:undefined;
+   if(plan.editMessageId!==undefined&&(community||job.communityClose||(s.telegramReplyJobs??[]).some(old=>old.communityMessage?.chatId===plan.chatId&&old.communityMessage.messageId===plan.editMessageId)))job.communityEditTarget={chatId:plan.chatId,messageId:plan.editMessageId};
+   // An attempted edit makes the old contents uncertain, even if its outcome
+   // is unknown. Retire its receipt before the call; never replay an edit.
+   if(plan.editMessageId!==undefined)for(const old of s.telegramReplyJobs??[])if(old.communityMessage?.chatId===plan.chatId&&old.communityMessage.messageId===plan.editMessageId)delete old.communityMessage;
    const at=this.clock();
    job.status='SENDING';job.attemptId=attemptId;job.startedAt=at;
    // Remove the durable body *before* the external call. The immediate local
    // copy goes to the sender, but a crash leaves no replayable payload.
-   delete job.plan;delete job.adminUIAccess;delete job.privateLibraryAccess;delete job.groupQuestionAccess;delete job.groupMenuAccess;delete job.privateGroupAccess;delete job.privateReplyKind;delete job.groupReplyKind;job.redactedAt=at;
-   return {status:'SEND' as const,attemptId,plan};
+   delete job.plan;delete job.adminUIAccess;delete job.privateLibraryAccess;delete job.communityAccess;delete job.groupQuestionAccess;delete job.groupMenuAccess;delete job.privateGroupAccess;delete job.privateReplyKind;delete job.groupReplyKind;job.redactedAt=at;
+   delete job.communityClose;
+   return {status:'SEND' as const,attemptId,plan,communityReceipt};
   });
   if(claim.status!=='SEND')return {status:claim.status};
   let result:TelegramSendResult;
@@ -359,7 +383,12 @@ export class TelegramReplyDispatcher {
    if(!job||job.status!=='SENDING'||job.attemptId!==claim.attemptId)
     throw new Error('REPLY_ATTEMPT_FENCED');
    job.status=terminal;
+   if(terminal!=='UNKNOWN_OUTCOME')delete job.communityEditTarget;
    if(result.status==='CONFIRMED')job.messageId=result.messageId;
+   if(result.status==='CONFIRMED'&&claim.communityReceipt){
+    for(const old of s.telegramReplyJobs??[])if(old.communityMessage?.chatId===claim.plan.chatId&&old.communityMessage.messageId===result.messageId)delete old.communityMessage;
+    job.communityMessage={...claim.communityReceipt,messageId:result.messageId};
+   }
   });
   return {status:result.status};
  }

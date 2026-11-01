@@ -11,6 +11,13 @@ import {validGroupPolicyStudioRoute} from './telegram-inline-group-templates.js'
 import {validOwnerGroupSettingsRoute} from './telegram-inline-group-settings.js';
 import {validOwnerGroupBulkRestrictRoute} from './telegram-inline-group-bulk-restrict.js';
 import {validOwnerNetworkRoute} from './telegram-inline-networks.js';
+import {validOwnerPreviewCancelRoute} from './telegram-owner-preview-cancel.js';
+import {validGroupLibraryInlineRoute} from './telegram-group-library-inline.js';
+import {validPublicNavigationRoute} from './telegram-public-navigation.js';
+import {validOwnerImportRoute} from './telegram-inline-imports.js';
+import {validOwnerUploadRoute} from './telegram-owner-upload.js';
+import {validSubscriptionConfigRoute} from './telegram-inline-subscription-config.js';
+import {validCommunityFolderRoute} from './telegram-community-folders.js';
 /** The approved 2026-10-23 owner catalogue from docs/أزرار_منارتك.md.
  * READ-ONLY navigation: do NOT treat a visible catalogue item as a permission
  * or operationally implemented action. Existing owner actions remain available
@@ -694,7 +701,7 @@ export function isValidTelegramInlineKeyboard(input:unknown):input is TelegramIn
      !/^mp:1:(?:h|p:(?:0|[1-9][0-9]{0,2})|d:(?:0|[1-9][0-9]{0,2}):[1-8]:[a-f0-9]{12})$/u.test(button.callback_data)&&
      !/^si:1:(?:h|p:(?:0|[1-9][0-9]{0,2})|c:(?:0|[1-9][0-9]{0,2}):[1-8]:[a-f0-9]{12}|l:(?:0|[1-9][0-9]{0,2}):[1-8]:[a-f0-9]{12}:(?:0|[1-9][0-9]{0,2})|r:(?:0|[1-9][0-9]{0,2}):[1-8]:[a-f0-9]{12}:(?:0|[1-9][0-9]{0,2}):[1-8]:[a-f0-9]{12})$/u.test(button.callback_data)&&
      !/^pq:1:(?:h|p:(?:0|[1-9][0-9]{0,2})|v:(?:0|[1-9][0-9]{0,2}):[1-8]:[a-f0-9]{16})$/u.test(button.callback_data)&&
-     protectionInlineRoute(button.callback_data)===null&&!validOwnerFAQInlineRoute(button.callback_data)&&!validOwnerLibraryInlineRoute(button.callback_data)&&!validStudioInlineRoute(button.callback_data)&&!validOwnerCategoryInlineRoute(button.callback_data)&&!validPrivateSettingsRoute(button.callback_data)&&!validDelegationEditRoute(button.callback_data)&&!validGroupSetupRoute(button.callback_data)&&!validGroupPolicyStudioRoute(button.callback_data)&&!validOwnerGroupSettingsRoute(button.callback_data)&&!validOwnerGroupBulkRestrictRoute(button.callback_data)&&!validOwnerNetworkRoute(button.callback_data)&&
+     protectionInlineRoute(button.callback_data)===null&&!validOwnerFAQInlineRoute(button.callback_data)&&!validOwnerLibraryInlineRoute(button.callback_data)&&!validStudioInlineRoute(button.callback_data)&&!validOwnerCategoryInlineRoute(button.callback_data)&&!validPrivateSettingsRoute(button.callback_data)&&!validDelegationEditRoute(button.callback_data)&&!validGroupSetupRoute(button.callback_data)&&!validGroupPolicyStudioRoute(button.callback_data)&&!validOwnerGroupSettingsRoute(button.callback_data)&&!validOwnerGroupBulkRestrictRoute(button.callback_data)&&!validOwnerNetworkRoute(button.callback_data)&&!validOwnerPreviewCancelRoute(button.callback_data)&&!validGroupLibraryInlineRoute(button.callback_data)&&!validPublicNavigationRoute(button.callback_data)&&!validOwnerImportRoute(button.callback_data)&&!validOwnerUploadRoute(button.callback_data)&&!validSubscriptionConfigRoute(button.callback_data)&&!validCommunityFolderRoute(button.callback_data)&&
      !/^pd:1:[cx]:[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}:[a-f0-9]{16}$/u.test(button.callback_data)&&
      !/^si:2:[ascuef]:(?:h|p:(?:0|[1-9][0-9]{0,2})|c:(?:0|[1-9][0-9]{0,2}):[1-8]:[a-f0-9]{12}|l:(?:0|[1-9][0-9]{0,2}):[1-8]:[a-f0-9]{12}:(?:0|[1-9][0-9]{0,2})|r:(?:0|[1-9][0-9]{0,2}):[1-8]:[a-f0-9]{12}:(?:0|[1-9][0-9]{0,2}):[1-8]:[a-f0-9]{12})$/u.test(button.callback_data))
     return false;
@@ -707,6 +714,21 @@ const navigation=(back:string,home=true)=>{
  if(home)row.push(callback('🏠 لوحة المالك','mi:1:h'));
  return row;
 };
+/** Catalogue availability, not evidence of live Telegram acceptance. Shared
+ * with the inventory so connected editors cannot silently become placeholders. */
+export function ownerInlineConnection(data:string):'EDITOR'|'VIEW'|'SPECIFICATION'|null{
+ const m=/^mi:1:i:([0-9]{2}):([0-9]{2})$/u.exec(data);if(!m||m[0]!==data)return null;
+ const section=ownerInlineSections[Number(m[1])-1];if(!section||Number(m[2])<1||Number(m[2])>section.items.length)return null;
+ if(/^mi:1:i:04:0[234]$/u.test(data)||data==='mi:1:i:13:04'||delegationOwnerEntry(data)||/^mi:1:i:01:(?:03|06|07|08|12)$/u.test(data)||data==='mi:1:i:10:16'||data==='mi:1:i:11:03'||studioOwnerEntry(data))return 'EDITOR';
+ if(ownerInlineLinkedReadOnly(data)!==null||/^mi:1:i:01:(?:09|10|11)$/u.test(data)||data==='mi:1:i:03:01'||data==='mi:1:i:02:01'||data==='mi:1:i:02:15'||data==='mi:1:i:02:16'||data==='mi:1:i:02:13'||/^mi:1:i:02:(?:0[5678]|12)$/u.test(data))return 'VIEW';
+ return 'SPECIFICATION';
+}
+/** Catalogue origin only; never an authorization token or a mutable action. */
+export function ownerInlineReturnRoute(data:string):string|null{
+ if(ownerInlineConnection(data)===null)return null;
+ const section=data.slice(7,9),item=Number(data.slice(10))-1;
+ return 'mi:1:s:'+section+':'+(section==='06'?(item<9?0:1):Math.floor(item/8));
+}
 function home(page:0|1):OwnerInlineScreen{
  const start=page*8;
  const rows=[] as {text:string;callback_data:string}[][];
@@ -734,10 +756,8 @@ function sectionScreen(sectionIndex:number,page:number):OwnerInlineScreen|null{
   rows.push(Array.from({length:Math.min(2,end-i)},(_,j)=>{
    const itemIndex=i+j;
    const selector='mi:1:i:'+number(sectionIndex+1)+':'+number(itemIndex+1);
-   const browsable=ownerInlineLinkedReadOnly(selector)!==null||/^mi:1:i:01:(?:09|10|11)$/u.test(selector)||selector==='mi:1:i:03:01'||selector==='mi:1:i:02:01'||selector==='mi:1:i:02:15'||selector==='mi:1:i:02:16'||selector==='mi:1:i:02:13'||/^mi:1:i:02:(?:0[5678]|12)$/u.test(selector);
-   // Read-only connected views are different from design-only placeholders.
-   const editing=delegationOwnerEntry(selector)||/^mi:1:i:01:(?:03|06|07|08|12)$/u.test(selector)||selector==='mi:1:i:10:16'||selector==='mi:1:i:11:03'||studioOwnerEntry(selector);
-   return callback((editing?'🛠️ ':browsable?'👁️ ':'⌛ ')+section.items[itemIndex],selector);
+   const connection=ownerInlineConnection(selector);
+   return callback((connection==='EDITOR'?'🛠️ ':connection==='VIEW'?'👁️ ':'⌛ ')+section.items[itemIndex],selector);
   }));
  }
  const controls=[] as {text:string;callback_data:string}[];
@@ -768,9 +788,9 @@ export function ownerInlineRender(data:string):OwnerInlineScreen|null{
  if(data==='mi:1:h'||data==='mi:1:p:0')return home(0);
  if(data==='mi:1:p:1')return home(1);
  let m=/^mi:1:s:(0[1-9]|1[0-6]):([0-2])$/u.exec(data);
- if(m)return sectionScreen(Number(m[1])-1,Number(m[2]));
+ if(m&&m[0]===data)return sectionScreen(Number(m[1])-1,Number(m[2]));
  m=/^mi:1:i:(0[1-9]|1[0-6]):(0[1-9]|1[0-7])$/u.exec(data);
- if(m){
+ if(m&&m[0]===data){
   const sectionIndex=Number(m[1])-1,itemIndex=Number(m[2])-1;
   if(itemIndex>=ownerInlineSections[sectionIndex]!.items.length)return null;
   return itemScreen(sectionIndex,itemIndex);

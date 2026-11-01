@@ -34,8 +34,9 @@ export function groupQuestionEpochDigest(state:BotState,groupId:string):string{
   .update(groupQuestionSubscriptionEpoch(state,groupId)).digest('hex');
 }
 
-export function groupMenuEpochDigest(state:BotState,groupId:string):string{
+export function groupMenuEpochDigest(state:BotState,groupId:string,topicId?:number):string{
  return createHash('sha256').update('MANARATAK:B6:GROUP-MENU:DISPATCH:v2:')
+  .update(topicId===undefined?'':'TOPIC:'+topicId+':')
   .update(groupQuestionSubscriptionEpoch(state,groupId)).digest('hex');
 }
 
