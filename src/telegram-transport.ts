@@ -23,7 +23,7 @@ import {OwnerTelegramMenu,isOwnerMenuText} from './telegram-owner-menu.js';
 import {ownerInlineHome,ownerInlineRender,ownerInlineLinkedReadOnly,type TelegramInlineKeyboard} from './telegram-inline-owner.js';
 import {renderOwnerInlineImports} from './telegram-inline-imports.js';
 import {renderOwnerUpload,claimOwnerUpload,cancelOwnerUpload} from './telegram-owner-upload.js';
-import {renderSubscriptionConfig} from './telegram-inline-subscription-config.js';
+import {renderSubscriptionConfig,cancelSubscriptionConfig} from './telegram-inline-subscription-config.js';
 import {renderOwnerInlineFAQ} from './telegram-inline-faq.js';
 import {renderOwnerInlineLibrary} from './telegram-inline-library.js';
 import {renderOwnerInlineStudio,studioOwnerEntry,studioDraftScreen} from './telegram-inline-studio.js';
@@ -362,6 +362,7 @@ export class TelegramUpdateApplication {
       event.actorId,event.chatId,event.text,event.entities,'b3-webhook:'+this.opts.botId+':'+event.updateId,false);
      return {status:'IGNORED',reason:'PROTECTION_EDIT_MONITOR_ONLY'};
     }
+    if(event.kind==='private'&&this.opts.policy.isOwner(event.actorId)&&!event.callbackData?.startsWith('sc:1:')&&event.callbackData!=='mi:1:i:04:02'&&event.callbackData!=='mi:1:i:04:04')await cancelSubscriptionConfig(this.opts.store,event.actorId);
     if(event.document)return this.handleDocument(event);
     const {actorId,chatId,kind,text}=event;
     if(kind==='private'&&this.opts.policy.isOwner(actorId)&&!event.callbackData?.startsWith('ou:1:'))await cancelOwnerUpload(this.opts.store,actorId);

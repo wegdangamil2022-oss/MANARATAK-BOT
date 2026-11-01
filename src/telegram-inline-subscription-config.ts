@@ -16,6 +16,12 @@ function validStep(v:unknown):v is Step{
  if(!v||typeof v!=='object'||Array.isArray(v))return false;const a=v as Record<string,unknown>;
  return Object.keys(a).length===5&&['groups','edit','review','confirm'].includes(String(a.kind))&&Number.isSafeInteger(a.page)&&Number(a.page)>=0&&Number(a.page)<=999&&typeof a.group==='string'&&(a.group===''||canonical(a.group))&&Array.isArray(a.channels)&&a.channels.length<=10&&a.channels.every(c=>typeof c==='string'&&canonical(c))&&new Set(a.channels).size===a.channels.length&&(a.mode==='ALL'||a.mode==='ANY')&&(a.kind==='groups'?a.group===''&&a.channels.length===0:a.group!=='');
 }
+export async function cancelSubscriptionConfig(store:BotStore,actor:string):Promise<void>{
+ await store.transaction(s=>{
+  for(const c of s.callbacks)if(c.actorId===actor&&c.ref.startsWith(PREFIX))c.revoked=true;
+  for(const w of s.wizards)if(w.userId===actor&&w.chatId===actor&&w.flow.startsWith(PREFIX))w.status='CANCELLED';
+ });
+}
 export async function renderSubscriptionConfig(store:BotStore,policy:Policy,gate:SubscriptionGate|undefined,actor:string,data:string,clock:()=>number):Promise<(OwnerInlineScreen&{access:AdminUIAccess})|null>{
  if(!policy.isOwner(actor))return null;
  const root=data==='mi:1:i:04:02'||data==='mi:1:i:04:04'||data==='sc:1:h';
@@ -64,6 +70,8 @@ export async function renderSubscriptionConfig(store:BotStore,policy:Policy,gate
   }
   rows.push([{text:'↩️ إلغاء / مجموعات الاشتراك',callback_data:'sc:1:h'},{text:'↩️ قسم الانضمام',callback_data:'mi:1:s:04:0'}]);
   const remove=new Set(previous.slice(0,Math.max(0,previous.length+created-128)).map(c=>c.ref));s.callbacks=s.callbacks.filter(c=>!remove.has(c.ref));
+  s.wizards=s.wizards.filter(w=>w.key!==PREFIX+actor);
+  if(gate)s.wizards.push({key:PREFIX+actor,userId:actor,chatId:actor,topicId:'',flow:PREFIX+'view:'+randomBytes(12).toString('hex'),step:0,version:1,policyVersion:0,expiresAt:now+TTL,status:'ACTIVE'});
   const proof=protectionUIEpoch(s,policy,actor,now);if(!proof)return null;
   return {text,keyboard:{inline_keyboard:rows},access:{actorId:actor,epoch:proof,expiresAt:now+TTL}};
  });

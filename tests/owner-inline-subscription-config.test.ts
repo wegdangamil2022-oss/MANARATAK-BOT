@@ -70,4 +70,11 @@ for(const engine of ['json','sqlite'] as const){
    assert.ok(r.plan!.inlineMarkup!.inline_keyboard.flat().every(b=>Buffer.byteLength(b.callback_data)<=64));
   }finally{await f.close();}
  });
+ test(engine+' leaving the editor revokes pending confirmations and withholds queued previews even without source changes',async()=>{
+  const f=await fixture();try{
+   let r=await f.click('sc:1:h');r=await f.click(choose(r,'👥 '+GROUP));r=await f.click(choose(r,'▫️ -100200'));r=await f.click(choose(r,'👁️ معاينة'));const route=choose(r,'✅ حفظ'),queued=r.deliveryKey!;
+   await f.click('mi:1:h');assert.equal((await f.click(route)).status,'DENIED');assert.equal((await f.store.snapshot()).subscriptionRequirements.length,0);
+   let sent=0;const dispatcher=new TelegramReplyDispatcher(f.store,f.policy,{send:async()=>{sent++;return {status:'CONFIRMED',messageId:55};}},()=>NOW);assert.equal((await dispatcher.dispatch(queued)).status,'FAILED_CONFIRMED');assert.equal(sent,0);
+  }finally{await f.close();}
+ });
 }
