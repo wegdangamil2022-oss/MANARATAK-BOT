@@ -12,7 +12,7 @@ const ui=(text:string,rows:{text:string;callback_data:string}[][]):OwnerInlineSc
 const prefix='private.settings:';
 export function validPrivateSettingsRoute(data:string):boolean{
  if(typeof data!=='string'||Buffer.byteLength(data)>64)return false;
- const m=/^(?:ps:1:h|ps:1:r:[esvud]:[01]:[a-f0-9]{16}|ps:1:r:a:(?:OFF|STAFF_ONLY|ALL_OPT_IN):[a-f0-9]{16}|ps:1:c:[A-Za-z0-9_-]{24})$/u.exec(data);return m?.[0]===data;
+ const m=/^(?:ps:1:h|ps:1:r:[esvud]:[01]:[a-f0-9]{16}|ps:1:r:a:(?:OFF|STAFF_ONLY|ALL_OPT_IN):[a-f0-9]{16}|ps:1:[ck]:[A-Za-z0-9_-]{24})$/u.exec(data);return m?.[0]===data;
 }
 function stateProof(s:BotState):string|null{
  if(!s.privateFeatures||typeof s.privateFeatures!=='object'||Array.isArray(s.privateFeatures)||!modes.includes(s.privateAI)||!Number.isSafeInteger(s.privateSettingsRevision??0)||(s.privateSettingsRevision??0)<0||(s.privateSettingsRevision??0)>=Number.MAX_SAFE_INTEGER-1)return null;
@@ -31,6 +31,17 @@ export async function renderPrivateSettings(store:BotStore,policy:Policy,actor:s
  if(!policy.isOwner(actor)||data!=='mi:1:i:11:03'&&!validPrivateSettingsRoute(data))return null;
  try{
   const now=clock();if(!Number.isSafeInteger(now)||now<0||now>8640000000000000-120000)return null;
+  if(data.startsWith('ps:1:k:')){
+   const cancelled=await store.transaction(s=>{
+    if(!policy.isOwner(actor))return false;
+    const ref='c_'+data.slice(7),rows=s.callbacks.filter(c=>c.ref===ref),c=rows[0];
+    if(rows.length!==1||!c||c.actorId!==actor||c.chatId!=='private'||c.policyVersion!==0||c.oneShot!==true||c.used!==false||c.revoked!==false||!Number.isSafeInteger(c.expiresAt)||c.expiresAt<=now||c.expiresAt>now+120000||!c.action.startsWith(prefix))return false;
+    const value:unknown=JSON.parse(c.action.slice(prefix.length));
+    if(!Array.isArray(value)||value.length!==3||typeof value[0]!=='string'||!/^([esvuda])$/u.test(value[0])||typeof value[2]!=='string'||!/^[a-f0-9]{16}$/u.test(value[2])||(value[0]==='a'?!modes.includes(value[1] as PrivateAIMode):typeof value[1]!=='boolean'))return false;
+    c.revoked=true;
+    s.audit.push({actorId:actor,updateKey:'private-settings-cancel:'+ref,decision:'NOOP',reason:'PRIVATE_SETTING_PREVIEW_CANCELLED',policyVersion:s.privateSettingsRevision??0,at:now});return true;
+   });if(!cancelled)return null;data='ps:1:h';
+  }
   if(data.startsWith('ps:1:c:')){
    const result=await store.transaction(s=>{
     if(!policy.isOwner(actor))return false;
@@ -53,7 +64,7 @@ export async function renderPrivateSettings(store:BotStore,policy:Policy,actor:s
     const ref='c_'+randomBytes(18).toString('base64url');s.callbacks.push({ref,action:prefix+JSON.stringify([review.key,review.target,review.proof]),actorId:actor,chatId:'private',policyVersion:0,oneShot:true,used:false,revoked:false,expiresAt:now+120000});return ref;
    });if(!ref)return null;
    const s=await store.snapshot();if(stateProof(s)!==review.proof)return null;
-   return ui('<b>معاينة إعداد الخاص</b>\n'+title(review.key)+': '+description(review.key,actual(s,review.key))+' ← '+description(review.key,review.target)+'\nالتغيير لهذا المفتاح فقط. تنتهي المعاينة بعد دقيقتين.'+(review.key==='d'&&review.target===false?'\nلاستعادة اللوحة لاحقًا استخدم /ownerrecover في خاص البوت.':''),[[line('✅ تأكيد','ps:1:c:'+ref.slice(2))],[line('إلغاء','ps:1:h')]]);
+   return ui('<b>معاينة إعداد الخاص</b>\n'+title(review.key)+': '+description(review.key,actual(s,review.key))+' ← '+description(review.key,review.target)+'\nالتغيير لهذا المفتاح فقط. تنتهي المعاينة بعد دقيقتين.'+(review.key==='d'&&review.target===false?'\nلاستعادة اللوحة لاحقًا استخدم /ownerrecover في خاص البوت.':''),[[line('✅ تأكيد','ps:1:c:'+ref.slice(2))],[line('إلغاء','ps:1:k:'+ref.slice(2))]]);
   }
   if(data!=='ps:1:h'&&data!=='mi:1:i:11:03')return null;
   const s=await store.snapshot(),proof=stateProof(s);if(!proof)return null;

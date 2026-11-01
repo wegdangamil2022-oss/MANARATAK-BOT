@@ -79,4 +79,30 @@ for(const engine of ['json','sqlite'] as const){
    assert.equal((await f.app().handle(event(55,'ps:1:h',300))).status,'DENIED');assert.equal((await f.app().handle(event(56,'ps:1:h',100,true))).status,'DENIED');
   }finally{await f.close();}
  });
+ test('cancelling private settings review revokes only its own confirmation ('+engine+')',async()=>{
+  const f=await fixture();try{
+   const page=await f.app().handle(event(100,'ps:1:h'));
+   const education=await f.app().handle(event(101,select(page,'تصفح التعليم'))),support=await f.app().handle(event(102,select(page,'الدعم')));
+   const confirm=select(education,'تأكيد'),cancel=select(education,'إلغاء');
+   assert.equal((await f.app().handle(event(103,cancel,300))).status,'DENIED');
+   assert.equal((await f.app().handle(event(104,cancel))).status,'APPLIED');
+   assert.equal((await f.app().handle(event(105,confirm))).status,'DENIED');
+   assert.equal((await f.app().handle(event(106,cancel))).status,'DENIED');
+   assert.equal((await f.app().handle(event(107,select(support,'تأكيد')))).status,'APPLIED');
+   const state=await f.store.snapshot();assert.equal(state.privateFeatures['education.navigate'],true);assert.equal(state.privateFeatures['support.use'],false);
+   assert.equal(state.audit.filter(a=>a.reason==='PRIVATE_SETTING_PREVIEW_CANCELLED').length,1);
+  }finally{await f.close();}
+ });
+ test('private settings cancellation checks context, expiry and recovery state ('+engine+')',async()=>{
+  const f=await fixture();try{
+   const page=await f.app().handle(event(110,'ps:1:h')),review=await f.app().handle(event(111,select(page,'الدعم'))),cancel=select(review,'إلغاء');
+   assert.equal((await f.app().handle(event(112,cancel,100,true))).status,'DENIED');
+   f.time(1700000120000);assert.equal((await f.app().handle(event(113,cancel))).status,'DENIED');
+   await f.store.transaction(s=>{s.privateFeatures['owner.dashboard']=false;});
+   const recovery=await f.app().handle(message(114,'/ownerrecover')),restore=await f.app().handle(event(115,select(recovery,'إعادة تفعيل')));
+   assert.equal((await f.app().handle(event(116,select(restore,'إلغاء')))).status,'APPLIED');
+   assert.equal((await f.app().handle(event(117,select(restore,'تأكيد')))).status,'DENIED');
+   const state=await f.store.snapshot();assert.equal(state.privateFeatures['owner.dashboard'],false);assert.equal(state.privateFeatures['support.use'],true);
+  }finally{await f.close();}
+ });
 }
