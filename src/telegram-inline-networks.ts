@@ -18,6 +18,7 @@ const remove=new RegExp('^nw:1:x:'+net+'$','u');
 const pick=new RegExp('^nw:1:g:'+net+':'+page+'$','u');
 const stalePage=new RegExp('^nw:1:s:'+net+':'+page+'$','u');
 const stalePick=new RegExp('^nw:1:q:'+net+':'+revision+':'+group+':'+revision+':'+page+'$','u');
+const staleBatch=new RegExp('^nw:1:b:'+net+':'+revision+':'+page+'$','u');
 const toggle=new RegExp('^nw:1:t:'+net+':'+revision+':'+group+':'+revision+':'+page+'$','u');
 const confirm=/^nw:1:c:([A-Za-z0-9_-]{24})$/u,cancel=/^nw:1:k:([A-Za-z0-9_-]{24})$/u;
 const historyPage=new RegExp('^nw:1:r:p:'+page+'$','u');
@@ -32,7 +33,7 @@ const validClock=(value:number)=>Number.isSafeInteger(value)&&value>=0&&value<=8
 export function validOwnerNetworkRoute(data:unknown):boolean{
  if(typeof data!=='string'||Buffer.byteLength(data,'utf8')>64)return false;
  return data==='mi:1:i:01:03'||home.test(data)||begin.test(data)||
-  [list,detail,rename,remove,pick,toggle,stalePage,stalePick,confirm,cancel,historyPage,historyView].some(re=>re.test(data));
+  [list,detail,rename,remove,pick,toggle,stalePage,stalePick,staleBatch,confirm,cancel,historyPage,historyView].some(re=>re.test(data));
 }
 function approved(s:BotState,policy:Policy,actor:string,now:number):Chat[]{
  const counts=new Map<string,number>();
@@ -150,6 +151,7 @@ export class OwnerNetworkEditor{
   if(p>0)nav.push(btn('⬅️ السابق','nw:1:s:'+n.id+':'+(p-1)));
   if(p+1<pages)nav.push(btn('➡️ التالي','nw:1:s:'+n.id+':'+(p+1)));
   if(nav.length)rows.push(nav);
+  rows.push([btn('🧹 تنظيف الصفحة (حتى 8)','nw:1:b:'+n.id+':'+n.revision+':'+p)]);
   rows.push([btn('↩️ بطاقة الشبكة','nw:1:d:'+n.id)]);
   return ui('<b>🧹 الارتباطات القديمة — '+escape(n.name)+'</b>\n'+
    'عدد الارتباطات التي تحتاج مراجعة: '+stale.length+
@@ -177,6 +179,35 @@ export class OwnerNetworkEditor{
     'المجموعة: <code>'+escape(groupId)+'</code> · إصدار الارتباط: '+memberVersion+'\n'+
     'لن تُسحب موافقة المجموعة الحالية أو أي صلاحية Telegram. سيتوقف التأكيد إذا تغيرت الحالة.',
     [[btn('✅ تأكيد الفصل','nw:1:c:'+ref.slice(2))],
+     [btn('✖ إلغاء المعاينة','nw:1:k:'+ref.slice(2))]]);
+  });
+ }
+
+ /** Preview at most eight stale links; no Telegram rights, sends, or policy updates.
+  * The signed server-side receipt captures exact page membership and approval state. */
+ private async previewBatch(actor:string,id:string,revision:number,p:number):Promise<OwnerInlineScreen|null>{
+  return this.store.transaction(s=>{
+   const now=this.clock();
+   if(!this.auth(s,actor,now))return null;
+   const n=this.find(s,id);
+   if(!n||n.revision!==revision||n.revision>=9_999_999_999)return null;
+   const current=approved(s,this.policy,actor,now);
+   const selection=staleLinks(n,current).slice(p*SIZE,(p+1)*SIZE);
+   if(selection.length===0||selection.length>SIZE)return null;
+   const captured=selection.map(m=>[m.chatId,m.version] as [string,number]);
+   const ref='c_'+randomBytes(18).toString('base64url');
+   if(s.callbacks.some(c=>c.ref===ref))return null;
+   s.callbacks.push({ref,
+    action:PREFIX+'clean-batch:'+JSON.stringify([id,revision,p,captured,groupProof(s,n,current)]),
+    actorId:actor,chatId:'private',policyVersion:0,oneShot:true,used:false,
+    revoked:false,expiresAt:now+TTL});
+   return ui('<b>🔎 معاينة تنظيف جماعي للارتباطات القديمة</b>\n'+
+    'الشبكة: '+escape(n.name)+' · الإصدار: '+n.revision+'\n'+
+    'النطاق: '+selection.length+(selection.length===1?' ارتباط':' ارتباطات')+'\n'+
+    selection.map(m=>'• <code>'+escape(m.chatId)+'</code> · v'+m.version).join('\n')+'\n'+
+    'التنظيف محلي فقط. لا يتغير اعتماد المجموعات أو سياسات الحماية أو Telegram.\n'+
+    'إذا تغيرت أي عضوية أو موافقة أو إعداد، يُرفض التنظيف بالكامل.',
+    [[btn('✅ تأكيد التنظيف','nw:1:c:'+ref.slice(2))],
      [btn('✖ إلغاء المعاينة','nw:1:k:'+ref.slice(2))]]);
   });
  }
@@ -371,6 +402,40 @@ export class OwnerNetworkEditor{
      [[btn('📋 قائمة الشبكات','nw:1:p:0'),
        btn('🏠 لوحة المالك','mi:1:h')]]);
    }
+   if(receipt.action.startsWith(PREFIX+'clean-batch:')){
+    try{data=JSON.parse(receipt.action.slice((PREFIX+'clean-batch:').length));}
+    catch{return null;}
+    if(!Array.isArray(data)||data.length!==5||
+     typeof data[0]!=='string'||!/^[a-f0-9]{12}$/u.test(data[0])||
+     !Number.isSafeInteger(data[1])||data[1]<1||data[1]>=9_999_999_999||
+     !Number.isSafeInteger(data[2])||data[2]<0||data[2]>999||
+     !Array.isArray(data[3])||data[3].length===0||data[3].length>SIZE||
+     data[3].some((row:unknown)=>!Array.isArray(row)||row.length!==2||
+      typeof row[0]!=='string'||!validId(row[0])||
+      !Number.isSafeInteger(row[1])||row[1]<1||row[1]>9_999_999_999)||
+     new Set(data[3].map((row:[string,number])=>row[0])).size!==data[3].length||
+     typeof data[4]!=='string'||!/^[a-f0-9]{64}$/u.test(data[4]))return null;
+    const [id,version,p,captured,digest]=data as
+     [string,number,number,[string,number][],string];
+    const n=this.find(s,id);
+    if(!n||n.revision!==version)return null;
+    const current=approved(s,this.policy,actor,now);
+    const selected=staleLinks(n,current).slice(p*SIZE,(p+1)*SIZE)
+     .map(m=>[m.chatId,m.version] as [string,number]);
+    if(selected.length===0||JSON.stringify(captured)!==JSON.stringify(selected)||
+     groupProof(s,n,current)!==digest)return null;
+    const ids=new Set(captured.map(row=>row[0]));
+    n.members=n.members.filter(m=>!ids.has(m.chatId));
+    n.revision++;n.updatedAt=now;receipt.used=true;
+    s.audit.push({actorId:actor,updateKey:'owner-network:'+nonce,decision:'ALLOW',
+     reason:'OWNER_NETWORK_STALE_MEMBERS_PRUNED',policyVersion:n.revision,at:now});
+    return ui('<b>✅ اكتمل التنظيف الجماعي المحلي</b>\n'+
+     'الشبكة: '+escape(n.name)+'\n'+
+     'الارتباطات القديمة المفصولة: '+captured.length+'\n'+
+     'لم يتغير اعتماد المجموعات أو صلاحيات Telegram.',
+     [[btn('🌐 بطاقة الشبكة','nw:1:d:'+id)],
+      ...(staleLinks(n,current).length?[[btn('🧹 بقية الارتباطات القديمة','nw:1:s:'+id+':0')]]:[])]);
+   }
    if(receipt.action.startsWith(PREFIX+'clean:')){
     try{data=JSON.parse(receipt.action.slice((PREFIX+'clean:').length));}catch{return null;}
     if(!Array.isArray(data)||data.length!==6||
@@ -466,7 +531,7 @@ export class OwnerNetworkEditor{
  }[]{
   const reasons=new Set(['OWNER_NETWORK_CREATED','OWNER_NETWORK_RENAMED',
    'OWNER_NETWORK_DELETED','OWNER_NETWORK_MEMBER_ADDED','OWNER_NETWORK_MEMBER_REMOVED',
-   'OWNER_NETWORK_STALE_MEMBER_REMOVED']);
+   'OWNER_NETWORK_STALE_MEMBER_REMOVED','OWNER_NETWORK_STALE_MEMBERS_PRUNED']);
   const entries:{nonce:string;reason:string;at:number;description:string}[]=[];
   for(const a of s.audit){
    if(!reasons.has(a.reason))continue;
@@ -486,6 +551,7 @@ export class OwnerNetworkEditor{
    else if(c.action.startsWith(PREFIX+'delete:'))prefix=PREFIX+'delete:';
    else if(c.action.startsWith(PREFIX+'toggle:'))prefix=PREFIX+'toggle:';
    else if(c.action.startsWith(PREFIX+'clean:'))prefix=PREFIX+'clean:';
+   else if(c.action.startsWith(PREFIX+'clean-batch:'))prefix=PREFIX+'clean-batch:';
    else continue;
    try{values=JSON.parse(c.action.slice(prefix.length));}catch{continue;}
    if(!Array.isArray(values))continue;
@@ -527,6 +593,21 @@ export class OwnerNetworkEditor{
     typeof values[5]==='string'&&/^[a-f0-9]{64}$/u.test(values[5])){
     description='الشبكة: '+values[0]+' · الارتباط القديم: '+values[2];
    }
+   if(description===null&&prefix===PREFIX+'clean-batch:'&&
+    a.reason==='OWNER_NETWORK_STALE_MEMBERS_PRUNED'&&values.length===5&&
+    typeof values[0]==='string'&&/^[a-f0-9]{12}$/u.test(values[0])&&
+    Number.isSafeInteger(values[1])&&values[1]>=1&&values[1]<9_999_999_999&&
+    a.policyVersion===values[1]+1&&
+    Number.isSafeInteger(values[2])&&values[2]>=0&&values[2]<=999&&
+    Array.isArray(values[3])&&values[3].length>=1&&values[3].length<=SIZE&&
+    values[3].every((row:unknown)=>Array.isArray(row)&&row.length===2&&
+     typeof row[0]==='string'&&validId(row[0])&&
+     Number.isSafeInteger(row[1])&&row[1]>=1&&row[1]<=9_999_999_999)&&
+    new Set(values[3].map((row:[string,number])=>row[0])).size===values[3].length&&
+    typeof values[4]==='string'&&/^[a-f0-9]{64}$/u.test(values[4])){
+    description='الشبكة: '+values[0]+' · العدد: '+values[3].length+
+     ' · الارتباطات القديمة: '+values[3].map((row:[string,number])=>row[0]).join('، ');
+   }
    if(description!==null)entries.push({nonce:matched[1]!,reason:a.reason,at:a.at,description});
   }
   entries.sort((a,b)=>b.at-a.at||b.nonce.localeCompare(a.nonce));
@@ -542,7 +623,8 @@ export class OwnerNetworkEditor{
     e.reason==='OWNER_NETWORK_RENAMED'?'إعادة تسمية':
     e.reason==='OWNER_NETWORK_DELETED'?'حذف':
     e.reason==='OWNER_NETWORK_MEMBER_ADDED'?'ربط مجموعة':
-    e.reason==='OWNER_NETWORK_STALE_MEMBER_REMOVED'?'تنظيف ارتباط قديم':'فصل مجموعة')+
+    e.reason==='OWNER_NETWORK_STALE_MEMBER_REMOVED'?'تنظيف ارتباط قديم':
+    e.reason==='OWNER_NETWORK_STALE_MEMBERS_PRUNED'?'تنظيف جماعي':'فصل مجموعة')+
     ' · '+new Date(e.at).toISOString().slice(0,16).replace('T',' '),
     'nw:1:r:v:'+e.nonce)]);
   const nav:{text:string;callback_data:string}[]=[];
@@ -593,6 +675,8 @@ export class OwnerNetworkEditor{
   const sq=stalePick.exec(data);
   if(sq)return this.previewStale(actor,sq[1]!,Number(sq[2]),sq[3]!,
    Number(sq[4]),Number(sq[5]));
+  const sb=staleBatch.exec(data);
+  if(sb)return this.previewBatch(actor,sb[1]!,Number(sb[2]),Number(sb[3]));
   const t=toggle.exec(data);
   if(t)return this.togglePreview(actor,t[1]!,Number(t[2]),t[3]!,Number(t[4]),Number(t[5]));
   return null;
