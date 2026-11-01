@@ -275,6 +275,19 @@ for(const engine of ['json','sqlite'] as const){
    assert.equal((await f.app().handle(cb(123,'gs:1:l:'+GROUP+':2:0'))).status,'DENIED');
   }finally{await f.close();}
  });
+ test('group setting history names each confirmed AI and monitor value ('+engine+')',async()=>{
+  const f=await fixture(engine);try{
+   await f.approve();assert.equal((await f.save()).status,'SAVED');
+   let version=1,seq=300;
+   for(const mode of ['m','f','o','s','a','x']){
+    const preview=await f.app().handle(cb(seq++,'gs:1:v:'+GROUP+':'+version+':0:'+mode));assert.equal(preview.status,'APPLIED');
+    const done=await f.app().handle(cb(seq++,key(preview,'تأكيد التعديل')));assert.equal(done.status,'APPLIED');
+    if(!['m','f'].includes(mode))version++;
+   }
+   const history=await f.app().handle(cb(seq++,'gs:1:l:'+GROUP+':'+version+':0'));assert.equal(history.status,'APPLIED');
+   for(const label of ['الحماية: مراقبة فقط','الحماية: متوقفة','المساعد: يجيب للمالك عند الإشارة','المساعد: يجيب للمشرفين عند الإشارة','المساعد: يجيب للجميع عند الإشارة','المساعد: متوقف'])assert.ok(history.plan!.text.includes(label),label);
+  }finally{await f.close();}
+ });
  test('settings history has bounded paging and no live side effects ('+engine+')',async()=>{
   const f=await fixture(engine);try{
    await f.approve();
