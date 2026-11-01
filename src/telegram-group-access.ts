@@ -27,7 +27,7 @@ export function groupQuestionSubscriptionEpoch(s:BotState,groupId:string):string
  const resources=s.educationResources.filter(r=>r.scope===groupId).sort(byId);
  const faq=s.faqEntries.filter(q=>q.scope===groupId).sort(byId);
  return JSON.stringify([subscriptionRequirementMode(s,groupId),rules,approvals,
-  categories,resources,faq]);
+  categories,resources,faq,...(s.audit.some(a=>a.updateKey.startsWith('moderation:rules:published:'+groupId+':'))?[s.audit.filter(a=>a.updateKey.startsWith('moderation:rules:published:'+groupId+':'))]:[])]);
 }
 export function groupQuestionEpochDigest(state:BotState,groupId:string):string{
  return createHash('sha256').update('MANARATAK:B6:GROUP-FAQ:DISPATCH:v2:')

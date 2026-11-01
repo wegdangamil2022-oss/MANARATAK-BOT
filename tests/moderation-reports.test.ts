@@ -1,3 +1,4 @@
+import {TelegramReplyDispatcher} from '../src/telegram-replies.js';
 import {TelegramUpdateApplication} from '../src/telegram-transport.js';
 import {EducationService} from '../src/education.js';
 import {EducationAdminFacade} from '../src/education-admin.js';
@@ -16,7 +17,7 @@ const NOW=1700000000000,CHAT='-100123';
 const reply=(id=1)=>({message_id:id,chat:{id:Number(CHAT),type:'supergroup'},from:{id:400,is_bot:false},text:'PRIVATE_CONTENT_NEVER_STORE'});
 const route=(s:OwnerInlineScreen|null,prefix:string)=>{assert.ok(s&&isValidTelegramInlineKeyboard(s.keyboard));const b=s?.keyboard.inline_keyboard.flat().find(b=>b.callback_data.startsWith(prefix));assert.ok(b,prefix);return b.callback_data;};
 for(const engine of ['json','sqlite'] as const){
- async function fixture(){const dir=await mkdtemp(join(tmpdir(),'reports-')),store=new BotStore(join(dir,'state.'+engine),{engine}),policy=new Policy(store,'100',()=>NOW);await policy.approveChat('100',CHAT,['moderation']);await policy.grant('100','301','chat.manage',CHAT,NOW+600000);return {store,policy,ui:new TelegramModerationReports(store,policy,()=>NOW),close:()=>rm(dir,{recursive:true,force:true})};}
+ async function fixture(){const dir=await mkdtemp(join(tmpdir(),'reports-')),store=new BotStore(join(dir,'state.'+engine),{engine}),policy=new Policy(store,'100',()=>NOW);await policy.approveChat('100',CHAT,['moderation','navigation']);await policy.grant('100','301','chat.manage',CHAT,NOW+600000);return {store,policy,ui:new TelegramModerationReports(store,policy,()=>NOW),close:()=>rm(dir,{recursive:true,force:true})};}
  test(engine+' reports persist only metadata, deduplicate, stay private and require a fresh independent close confirmation',async()=>{
   const f=await fixture();try{
    assert.equal(await f.ui.submit('300',CHAT,10,reply()),'RECORDED');assert.equal(await f.ui.submit('300',CHAT,11,reply()),'DUPLICATE');assert.equal(JSON.stringify(await f.store.snapshot()).includes('PRIVATE_CONTENT_NEVER_STORE'),false);
@@ -29,7 +30,7 @@ for(const engine of ['json','sqlite'] as const){
  test(engine+' transport accepts only a direct group report and keeps all review callbacks private',async()=>{
   const f=await fixture();try{
    const education=new EducationService(f.store,f.policy,()=>NOW),app=new TelegramUpdateApplication({store:f.store,policy:f.policy,education,admin:new EducationAdminFacade(f.store,f.policy,education,()=>NOW),faq:new ApprovedAnswerService(f.store,f.policy,()=>NOW),links:new ResourceLinkService(f.store,f.policy,()=>NOW),clock:()=>NOW,botId:'reports',botUsername:'ManaratakBot',ownerMenuMode:'inline',studentMenuMode:'inline',membership:async()=>{throw Error('NETWORK_FORBIDDEN');}});
-   const result=await app.handle({update_id:1,message:{message_id:10,chat:{id:Number(CHAT),type:'supergroup'},from:{id:300,is_bot:false},text:'/report',reply_to_message:reply()}});assert.equal(result.reason,'MODERATION_REPORT_RECORDED');assert.ok(result.plan);assert.equal(result.plan.text.includes('400'),false);
+   const result=await app.handle({update_id:1,message:{message_id:10,chat:{id:Number(CHAT),type:'supergroup'},from:{id:300,is_bot:false},text:'/report',reply_to_message:reply()}});assert.equal(result.reason,'MODERATION_REPORT_RECORDED');assert.ok(result.plan);assert.equal(result.plan.text.includes('400'),false);let sends=0;const dispatcher=new TelegramReplyDispatcher(f.store,f.policy,{send:async()=>{sends++;return {status:'CONFIRMED',messageId:99};}},()=>NOW);assert.equal((await dispatcher.dispatch(result.deliveryKey!)).status,'CONFIRMED');assert.equal(sends,1);
    const inbox=await app.handle({update_id:2,message:{message_id:11,chat:{id:301,type:'private'},from:{id:301,is_bot:false},text:'/reports'}});assert.ok(inbox.plan?.inlineMarkup);const queue=inbox.plan.inlineMarkup.inline_keyboard.flat().find(b=>b.callback_data==='rp:1:r:0');assert.ok(queue);
    const callback=(id:number,group:boolean)=>({update_id:id,callback_query:{id:'report-'+id,from:{id:301,is_bot:false},data:'rp:1:r:0',message:{message_id:20,from:{id:999,is_bot:true},chat:{id:group?Number(CHAT):301,type:group?'supergroup':'private'}}}});
    assert.equal((await app.handle(callback(3,true))).reason,'PRIVATE_CALLBACK_ONLY');const view=await app.handle(callback(4,false));assert.equal(view.reason,'MODERATION_REPORT_VIEW');assert.ok(view.plan?.inlineMarkup);

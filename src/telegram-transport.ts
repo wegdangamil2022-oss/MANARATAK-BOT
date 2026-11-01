@@ -1,3 +1,4 @@
+import {TelegramGroupRules} from './telegram-group-rules.js';
 import {TelegramModerationReports} from './telegram-moderation-reports.js';
 import {TelegramModerationAppeals} from './telegram-moderation-appeals.js';
 import {protectionMediaFromMessage,type ProtectionMedia} from './telegram-protection-media.js';
@@ -387,9 +388,23 @@ export class TelegramUpdateApplication {
      return {status:'IGNORED',reason:'PROTECTION_EDIT_MONITOR_ONLY'};
     }
     if(event.kind==='private'&&this.opts.policy.isOwner(event.actorId)&&!event.callbackData?.startsWith('sc:1:')&&event.callbackData!=='mi:1:i:04:02'&&event.callbackData!=='mi:1:i:04:04')await cancelSubscriptionConfig(this.opts.store,event.actorId);
+    if(event.kind==='private'&&!event.callbackData?.startsWith('rl:1:c:')&&!event.callbackData?.startsWith('rl:1:x:'))await new TelegramGroupRules(this.opts.store,this.opts.policy,this.clock).cancel(event.actorId);
+    if(event.kind==='group'&&(event.text==='/rules'||event.text.toLowerCase()==='/rules@'+this.opts.botUsername.toLowerCase())){
+     const rules=await new TelegramGroupRules(this.opts.store,this.opts.policy,this.clock).publishedView(event.chatId,event.topicId);
+     return rules?{status:'APPLIED',reason:'GROUP_RULES_VIEW',groupMenuAccess:{actorId:event.actorId,epoch:rules.epoch,expiresAt:this.clock()+120000},plan:{...this.plan(event.chatId,rules.text),...(event.topicId!==undefined?{messageThreadId:event.topicId}:{})}}:{status:'DENIED',reason:'GROUP_RULES_UNAVAILABLE'};
+    }
+    if(event.kind==='private'&&event.text.startsWith('/setrules')){
+     const view=await new TelegramGroupRules(this.opts.store,this.opts.policy,this.clock).preview(event.actorId,event.text);
+     return view?{status:'APPLIED',reason:'GROUP_RULES_PREVIEW',adminUIAccess:view.access,plan:this.plan(event.actorId,view.text,undefined,view.keyboard)}:{status:'DENIED',reason:'GROUP_RULES_INPUT_REJECTED'};
+    }
+    if(event.kind==='private'&&event.text==='/grouprules'){
+     const view=await new TelegramGroupRules(this.opts.store,this.opts.policy,this.clock).handle(event.actorId,'rl:1:h:0');
+     return view?{status:'APPLIED',reason:'GROUP_RULES_VIEW',adminUIAccess:view.access,plan:this.plan(event.actorId,view.text,undefined,view.keyboard)}:{status:'DENIED',reason:'GROUP_RULES_UNAVAILABLE'};
+    }
     if(event.kind==='group'&&(event.text==='/report'||event.text.toLowerCase()==='/report@'+this.opts.botUsername.toLowerCase())){
      const status=await new TelegramModerationReports(this.opts.store,this.opts.policy,this.clock).submit(event.actorId,event.chatId,event.messageId,event.replyTo);
-     return {status:status==='RECORDED'?'APPLIED':'DENIED',reason:'MODERATION_REPORT_'+status,...(status==='RECORDED'?{plan:this.plan(event.chatId,'سُجل البلاغ للمراجعة الخاصة دون عقوبة. يمكنك متابعة الحالة عبر /reports في خاص البوت.')}:{})};
+     const reportState=status==='RECORDED'?await this.opts.store.snapshot():null;
+     return {status:status==='RECORDED'?'APPLIED':'DENIED',reason:'MODERATION_REPORT_'+status,...(reportState?{groupMenuAccess:{actorId:event.actorId,epoch:groupMenuEpochDigest(reportState,event.chatId,event.topicId),expiresAt:this.clock()+120000}}:{}),...(status==='RECORDED'?{plan:{...this.plan(event.chatId,'سُجل البلاغ للمراجعة الخاصة دون عقوبة. يمكنك متابعة الحالة عبر /reports في خاص البوت.'),...(event.topicId!==undefined?{messageThreadId:event.topicId}:{})}}:{})};
     }
     if(event.kind==='private'&&event.text==='/reports'){
      const view=await new TelegramModerationReports(this.opts.store,this.opts.policy,this.clock).handle(event.actorId,'rp:1:h:0');
@@ -411,6 +426,10 @@ export class TelegramUpdateApplication {
      // Reauthorize the real sender at every tap. Never dispatch a privileged
      // command from untrusted callback_data or from a group context.
      if(kind!=='private'||actorId!==chatId)return {status:'DENIED',reason:'PRIVATE_CALLBACK_ONLY'};
+     if(event.callbackData.startsWith('rl:1:')||event.callbackData==='mi:1:i:02:11'){
+      const view=await new TelegramGroupRules(this.opts.store,this.opts.policy,this.clock).handle(actorId,event.callbackData);
+      return view?{status:'APPLIED',reason:'GROUP_RULES_VIEW',adminUIAccess:view.access,plan:this.plan(actorId,view.text,undefined,view.keyboard,event.callbackMessageId)}:{status:'DENIED',reason:'GROUP_RULES_STALE_OR_UNAUTHORIZED'};
+     }
      if(event.callbackData.startsWith('rp:1:')){
       const view=await new TelegramModerationReports(this.opts.store,this.opts.policy,this.clock).handle(actorId,event.callbackData);
       return view?{status:'APPLIED',reason:'MODERATION_REPORT_VIEW',...(view.access?{adminUIAccess:view.access}:{}),plan:this.plan(actorId,view.text,undefined,view.keyboard,event.callbackMessageId)}:{status:'DENIED',reason:'MODERATION_REPORT_STALE_OR_UNAUTHORIZED'};

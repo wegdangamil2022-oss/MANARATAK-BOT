@@ -24,6 +24,7 @@ export function protectionUIEpoch(state:BotState,policy:Policy,actor:string,now:
   state.warnings.filter(w=>chats.some(c=>c.id===w.chatId)),state.moderationReasons.filter(r=>chats.some(c=>c.id===r.chatId)),state.moderationOperations.filter(o=>chats.some(c=>c.id===o.chatId)),
   ...(state.audit.some(a=>a.updateKey.startsWith('moderation:appeal:'))?[state.audit.filter(a=>a.updateKey.startsWith('moderation:appeal:')),state.privateFeatures['support.use']]:[]),
   ...(state.audit.some(a=>a.updateKey.startsWith('moderation:report:'))?[state.audit.filter(a=>a.updateKey.startsWith('moderation:report:')),state.privateFeatures['support.use']]:[]),
+  ...(state.audit.some(a=>a.updateKey.startsWith('moderation:rules:'))?[state.audit.filter(a=>a.updateKey.startsWith('moderation:rules:'))]:[]),
   ...(state.groupPermissionJobs===undefined?[]:[state.groupPermissionJobs]),
   ...(policy.isOwner(actor)&&state.privateSettingsRevision!==undefined?[state.privateSettingsRevision]:[]),
   ...(policy.isOwner(actor)?[state.importRuns,state.educationCategories,state.educationResources,subscriptionConfigEpoch(state),...(state.communityFolders!==undefined?[state.communityFolders]:[])]:[])

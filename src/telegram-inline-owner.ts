@@ -1,3 +1,4 @@
+import {validGroupRulesRoute} from './telegram-group-rules.js';
 import {validModerationReportRoute} from './telegram-moderation-reports.js';
 import {validModerationAppealRoute} from './telegram-moderation-appeals.js';
 import {protectionInlineRoute} from './protection-inline-route.js';
@@ -704,6 +705,7 @@ export function isValidTelegramInlineKeyboard(input:unknown):input is TelegramIn
      !validModerationCaseRoute(button.callback_data)&&
      !validModerationAppealRoute(button.callback_data)&&
      !validModerationReportRoute(button.callback_data)&&
+     !validGroupRulesRoute(button.callback_data)&&
      !/^ms:1:(?:h|p:(?:0|[1-9][0-9]{0,2})|g:-[1-9][0-9]{0,18}:[1-9][0-9]{0,9}:(?:0|[1-9][0-9]{0,2}))$/u.test(button.callback_data)&&
      !/^ms:1:o:-[1-9][0-9]{0,18}:[1-9][0-9]{0,9}:(?:0|[1-9][0-9]{0,2}):(?:0|[1-9][0-9]{0,2}):[a-f0-9]{12}$/u.test(button.callback_data)&&
      !/^mr:1:(?:h|p:(?:0|[1-9][0-9]{0,2})|d:(?:0|[1-9][0-9]{0,2}):[1-8]:[a-f0-9]{12}|v:(?:0|[1-9][0-9]{0,2}):[1-8]:[a-f0-9]{12}:[ae])$/u.test(button.callback_data)&&
