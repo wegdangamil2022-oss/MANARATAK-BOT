@@ -713,4 +713,30 @@ for(const engine of ['json','sqlite'] as const){
    assert.equal((await f.store.snapshot()).protectionPolicies,undefined);
   }finally{await f.close();}
  });
+ test('fraud entry creates a disabled two-phrase rule, tests samples, and supports navigation ('+engine+')',async()=>{
+  const f=await fixture();try{
+   const home=await f.app().handle(cb(1,'mi:1:i:02:09'));
+   assert.equal(home.status,'APPLIED');const group=await f.app().handle(cb(2,route(home,'pr:1:g:')));
+   const input=await f.app().handle(cb(3,route(group,'pr:1:X:')));assert.match(input.plan!.text,/ادعاء الهوية/u);
+   assert.equal((await f.app().handle(msg(4,'عبارة واحدة'))).reason,'PROTECTION_EDITOR_INPUT_REJECTED');
+   const saved=await f.app().handle(msg(5,'ممثل منارتك | رسوم التسجيل'));assert.equal(saved.status,'APPLIED');
+   const rule=(await f.store.snapshot()).protectionPolicies![0]!.policy.rules[0]!;
+   assert.equal(rule.kind,'FRAUD');assert.equal(rule.enabled,false);assert.equal(rule.action,'REVIEW');
+   const testStep=await f.app().handle(cb(6,route(saved,'pr:1:t:')));assert.equal(testStep.status,'APPLIED');
+   const sample=await f.app().handle(msg(7,'أنا ممثل منارتك وأطلب رسوم التسجيل'));
+   assert.match(sample.plan!.text,/اجتماع عبارتي الادعاء والدفع/u);
+   assert.equal(JSON.stringify(await f.store.snapshot()).includes('أنا ممثل منارتك وأطلب'),false);
+   const reopened=await f.app().handle(cb(8,'pr:1:h'));const again=await f.app().handle(cb(9,route(reopened,'pr:1:g:')));
+   const list=await f.app().handle(cb(10,route(again,'pr:1:l:')));const details=await f.app().handle(cb(11,route(list,'pr:1:r:')));
+   assert.ok(route(details,'pr:1:l:'));assert.ok(route(details,'pr:1:e:'));assert.ok(route(details,'pr:1:d:'));
+   assert.equal((await f.app().handle(cb(12,'mi:1:i:02:09',200))).status,'DENIED');
+   const service=new GroupProtectionPolicyService(f.store,f.policy,()=>NOW),old=(await f.store.snapshot()).protectionPolicies![0]!.policy;
+   assert.equal((await service.save('100',{...old,revision:old.revision+1,mode:'MONITOR',rules:old.rules.map(r=>({...r,enabled:true}))},f.policy.chatRevision(await f.store.snapshot(),CHAT),old.revision)).status,'SAVED');
+   await f.app().handle({update_id:13,message:{message_id:13,chat:{id:Number(CHAT),type:'supergroup'},from:{id:300,is_bot:false},text:'ممثل منارتك يطلب رسوم التسجيل'}});
+   const state=await f.store.snapshot();assert.ok(state.audit.some(a=>a.reason.startsWith('PROTECTION_MONITOR_MATCH:')));assert.equal(JSON.stringify(state).includes('ممثل منارتك يطلب رسوم التسجيل'),false);
+   const h=await f.app().handle(cb(14,'pr:1:h')),g=await f.app().handle(cb(15,route(h,'pr:1:g:'))),l=await f.app().handle(cb(16,route(g,'pr:1:l:'))),d=await f.app().handle(cb(17,route(l,'pr:1:r:')));
+   assert.ok(await f.app().handle(cb(18,route(d,'pr:1:v:'))));assert.equal((await f.app().handle(msg(19,'مندوب منارتك | تحويل الرسوم'))).status,'APPLIED');
+   const changed=(await f.store.snapshot()).protectionPolicies![0]!.policy.rules[0]!;assert.equal(changed.kind,'FRAUD');assert.equal(changed.enabled,true);assert.equal(changed.id,rule.id);
+  }finally{await f.close();}
+ });
 }

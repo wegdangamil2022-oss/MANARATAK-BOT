@@ -4,7 +4,7 @@ import {isValidFloodPolicy,type FloodPolicy} from './protection-flood.js';
 export type ProtectionAction='REVIEW'|'WARN'|'DELETE'|'MUTE';
 export type ProtectionMessageType='TEXT'|'PHOTO'|'VIDEO'|'ANIMATION'|'STICKER'|'DOCUMENT'|'AUDIO'|'VOICE'|'VIDEO_NOTE'|'CONTACT'|'LOCATION'|'POLL';
 type BaseRule={id:string;enabled:boolean;action:ProtectionAction};
-export type ProtectionRule=BaseRule & ({kind:'WORD';value:string;match?:'PARTIAL'}|{kind:'PHRASE';value:string}|{kind:'TYPE';type:ProtectionMessageType}|{kind:'LINK';hosts:'*'|string[]}|{kind:'FORWARD'}|{kind:'LIMIT';metric:'MENTIONS'|'HASHTAGS'|'LENGTH'|'QUOTES';maximum:number});
+export type ProtectionRule=BaseRule & ({kind:'WORD';value:string;match?:'PARTIAL'}|{kind:'PHRASE';value:string}|{kind:'FRAUD';identity:string;payment:string}|{kind:'TYPE';type:ProtectionMessageType}|{kind:'LINK';hosts:'*'|string[]}|{kind:'FORWARD'}|{kind:'LIMIT';metric:'MENTIONS'|'HASHTAGS'|'LENGTH'|'QUOTES';maximum:number});
 export interface ProtectionPolicy{chatId:string;revision:number;mode:'OFF'|'MONITOR'|'ENFORCE';rules:ProtectionRule[];allowedDomains:string[];allowedPhrases:string[];exemptMemberIds:string[];flood?:FloodPolicy;joinRaid?:{enabled:boolean;minimumMembers:number;windowMs:number;lockSeconds:number};night?:{enabled:boolean;startMinute:number;endMinute:number;offsetMinutes:number};raid?:{enabled:boolean;minimumMembers:number;minimumMessages:number;lockSeconds:number};escalation?:{enabled:boolean;afterWarnings:number;windowMs:number};temporaryExemptions?:{memberId:string;createdAt:number;expiresAt:number}[];}
 export interface ProtectionMessage{chatId:string;memberId:string;type:ProtectionMessageType;text?:string;caption?:string;links?:string[];forwarded?:boolean;mentionCount?:number;quoteCount?:number;}
 export interface ProtectionEvaluation{status:'INVALID_POLICY'|'INVALID_MESSAGE'|'OFF'|'EXEMPT'|'CLEAR'|'MATCH';matchedRuleIds:string[];proposedAction:ProtectionAction|null;authorizedToSend:false;}
@@ -63,6 +63,7 @@ export function isValidProtectionPolicy(v:unknown):v is ProtectionPolicy{
   seen.add(r.id);
   if(r.kind==='WORD'||r.kind==='PHRASE')return keys(r,['id','enabled','action','kind','value',...(Object.hasOwn(r,'match')?['match']:[])])&&(!Object.hasOwn(r,'match')||r.kind==='WORD'&&r.match==='PARTIAL')&&phrase(r.value)&&
    (r.kind!=='WORD'||!normalizeProtectionText(r.value).includes(' '));
+  if(r.kind==='FRAUD')return keys(r,['id','enabled','action','kind','identity','payment'])&&phrase(r.identity)&&phrase(r.payment)&&normalizeProtectionText(r.identity)!==normalizeProtectionText(r.payment);
   if(r.kind==='LIMIT')return keys(r,['id','enabled','action','kind','metric','maximum'])&&typeof r.metric==='string'&&['MENTIONS','HASHTAGS','LENGTH','QUOTES'].includes(r.metric)&&typeof r.maximum==='number'&&Number.isSafeInteger(r.maximum)&&r.maximum>=1&&r.maximum<=(r.metric==='LENGTH'?4096:100);
   if(r.kind==='FORWARD')return keys(r,['id','enabled','action','kind']);
   if(r.kind==='TYPE')return keys(r,['id','enabled','action','kind','type'])&&typeof r.type==='string'&&typeNames.includes(r.type);
@@ -106,6 +107,7 @@ export function evaluateProtectionRules(config:unknown,input:unknown,now:number=
   if(!r.enabled)return false;
   if(r.kind==='WORD'&&r.match==='PARTIAL')return lexicalBody.includes(normalizeProtectionText(r.value));
   if(r.kind==='WORD'||r.kind==='PHRASE')return contains(lexicalBody,r.value);
+  if(r.kind==='FRAUD')return contains(lexicalBody,r.identity)&&contains(lexicalBody,r.payment);
   if(r.kind==='LIMIT'){
    const count=r.metric==='QUOTES'?(input.quoteCount??0):r.metric==='LENGTH'?Array.from(body).length:r.metric==='MENTIONS'?Math.max(input.mentionCount??0,[...body.matchAll(/(?<![\p{L}\p{N}_])@[A-Za-z][A-Za-z0-9_]{4,31}(?![A-Za-z0-9_])/gu)].length):[...body.matchAll(/(?<![\p{L}\p{N}_])#[\p{L}\p{N}_]+/gu)].length;
    return count>r.maximum;

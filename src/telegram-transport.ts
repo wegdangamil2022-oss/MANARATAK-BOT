@@ -524,8 +524,8 @@ export class TelegramUpdateApplication {
       const view=await cancelOwnerPreview(this.opts.store,this.opts.policy,actorId,event.callbackData,this.clock);
       return view?{status:'APPLIED',reason:'RESPONSE_PLANNED_ONLY',plan:this.plan(chatId,view.text,undefined,view.keyboard,event.callbackMessageId)}:{status:'DENIED',reason:'OWNER_PREVIEW_CANCEL_DENIED'};
      }
-     if(event.callbackData.startsWith('pr:1:')||/^mi:1:i:02:(?:0[5678]|12)$/u.test(event.callbackData)){
-      if(/^mi:1:i:02:(?:0[5678]|12)$/u.test(event.callbackData)&&!this.opts.policy.isOwner(actorId))return {status:'DENIED',reason:'OWNER_ONLY'};
+     if(event.callbackData.startsWith('pr:1:')||/^mi:1:i:02:(?:0[56789]|12)$/u.test(event.callbackData)){
+      if(/^mi:1:i:02:(?:0[56789]|12)$/u.test(event.callbackData)&&!this.opts.policy.isOwner(actorId))return {status:'DENIED',reason:'OWNER_ONLY'};
       const view=await new TelegramProtectionEditor(this.opts.store,this.opts.policy,this.clock,this.opts.protectionEnforcer).handle(event.callbackData,actorId);
       if(!view)return {status:'DENIED',reason:'PROTECTION_EDITOR_NOT_ACCESSIBLE'};
       return {status:'APPLIED',reason:'RESPONSE_PLANNED_ONLY',plan:this.plan(chatId,view.text,undefined,view.keyboard,event.callbackMessageId)};
@@ -1414,7 +1414,7 @@ export class TelegramUpdateApplication {
      }
     }
     if(event.kind==='private'&&event.callbackData&&!event.callbackData.startsWith('pr:1:')&&
-     !/^mi:1:i:02:(?:0[5678]|12)$/u.test(event.callbackData)&&handled.plan){
+     !/^mi:1:i:02:(?:0[56789]|12)$/u.test(event.callbackData)&&handled.plan){
      await new TelegramProtectionEditor(this.opts.store,this.opts.policy,this.clock,this.opts.protectionEnforcer).cancelNavigation(event.actorId);
     }
     if(handled.plan&&!handled.plan.chatId.startsWith('-')&&handled.plan.inlineMarkup?.inline_keyboard.flat().some(b=>b.callback_data.startsWith('pr:1:'))){
