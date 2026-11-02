@@ -84,4 +84,36 @@ for(const engine of ['json','sqlite'] as const){
    for(const text of ['/setrules -100\n','/setrules -100\n فقرة','/setrules -100\nنفس\nنفس','/setrules -100\n'+'ع'.repeat(121),'/setrules -100\n'+Array.from({length:21},(_,i)=>'فقرة '+i).join('\n')])assert.equal(await f.ui.preview('301',text),null);
   }finally{await f.close();}
  });
+ test(engine+' weekly rule report aggregates current and historical paragraphs privately with working return',async()=>{
+  const f=await fixture();try{
+   let draft=await f.ui.preview('301','/setrules -100\nالفقرة الأولى\nلا <إعلان>');await f.ui.handle('301',route(draft,'rl:1:c:'));
+   await f.store.transaction(s=>{s.warnings.push(
+    {chatId:CHAT,memberId:'400',reference:'law_v1_p2_m1',actorId:'301',at:NOW-1000,active:true},
+    {chatId:CHAT,memberId:'401',reference:'law_v1_p2_m2',actorId:'301',at:NOW-2000,active:false},
+    {chatId:CHAT,memberId:'402',reference:'law_v1_p1_m3',actorId:'301',at:NOW-8*86400000,active:true},
+    {chatId:CHAT,memberId:'403',reference:'law_v7_p1_m4',actorId:'301',at:NOW-1000,active:true},
+    {chatId:'-200',memberId:'404',reference:'law_v1_p2_m5',actorId:'301',at:NOW-1000,active:true},
+    {chatId:CHAT,memberId:'406',reference:'law_v1_p2_m7',actorId:'301',at:NOW-1000,active:true},
+    {chatId:CHAT,memberId:'406',reference:'law_v1_p2_m7',actorId:'301',at:NOW-8*86400000,active:true},
+    {chatId:CHAT,memberId:'9007199254740992',reference:'law_v1_p2_m8',actorId:'301',at:NOW-1000,active:true},
+    {chatId:CHAT,memberId:'407',reference:'law_v1_p2_m9007199254740992',actorId:'301',at:NOW-1000,active:true},
+    {chatId:CHAT,memberId:'408',reference:'law_v1_p2_m9',actorId:'301\n',at:NOW-1000,active:true}
+   );});
+   draft=await f.ui.preview('301','/setrules -100\nفقرة جديدة');await f.ui.handle('301',route(draft,'rl:1:c:'));
+   await f.store.transaction(s=>{s.warnings.push({chatId:CHAT,memberId:'405',reference:'law_v2_p1_m6',actorId:'301',at:NOW-3000,active:true});});
+   const home=await f.ui.handle('301','rl:1:h:0'),details=await f.ui.handle('301',route(home,'rl:1:g:'));const reportRoute=route(details,'rl:1:r:');
+   assert.equal(await f.ui.handle('300',reportRoute),null);const report=await f.ui.handle('301',reportRoute);assert.ok(report);assert.match(report.text,/الأسبوع/u);assert.match(report.text,/الإصدار 1.*الفقرة 2.*2/u);assert.match(report.text,/&lt;إعلان&gt;/u);assert.match(report.text,/الإصدار 2.*الفقرة 1.*1/u);assert.match(report.text,/لا يمكن الجزم/u);for(const id of ['400','401','402','403','404','405'])assert.equal(report.text.includes(id),false);
+   const back=await f.ui.handle('301',route(report,'rl:1:g:'));assert.ok(back);assert.match(back.text,/setrules/u);
+   await f.store.transaction(s=>{s.grants[0]!.revoked=true;});assert.equal(await f.ui.handle('301',reportRoute),null);
+  }finally{await f.close();}
+ });
+ test(engine+' weekly report stays within Telegram text limits even for long escaped paragraphs',async()=>{
+  const f=await fixture();try{
+   for(let i=1;i<=10;i++){
+    const draft=await f.ui.preview('301','/setrules -100\n'+'<'.repeat(118)+i);assert.ok(draft);assert.ok(await f.ui.handle('301',route(draft,'rl:1:c:')));
+    await f.store.transaction(s=>{s.warnings.push({chatId:CHAT,memberId:String(500+i),reference:'law_v'+i+'_p1_m'+i,actorId:'301',at:NOW-1000,active:true});});
+   }
+   const home=await f.ui.handle('301','rl:1:h:0'),details=await f.ui.handle('301',route(home,'rl:1:g:')),report=await f.ui.handle('301',route(details,'rl:1:r:'));assert.ok(report);assert.ok(report.text.length<=4096);assert.match(report.text,/تُعرض/u);assert.ok(await f.ui.handle('301',route(report,'rl:1:g:')));
+  }finally{await f.close();}
+ });
 }
