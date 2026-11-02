@@ -1,7 +1,7 @@
 export type ProtectionUIRoute={kind:'home';page:number}|{kind:'cancel';nonce:string}|
- {kind:'g'|'w'|'f'|'t'|'m'|'o'|'l'|'r'|'e'|'d'|'x'|'a'|'v'|'b'|'j'|'y'|'n'|'c'|'u'|'s'|'q'|'k'|'S'|'F'|'T'|'A'|'H'|'I'|'E'|'B'|'C'|'D'|'J'|'K'|'L'|'N'|'O'|'P'|'Q'|'R'|'U'|'V'|'W'|'X';page:number;slot:number;digest:string;nonce?:string;rulePage?:number;ruleSlot?:number;listKind?:'d'|'p'|'e';action?:'REVIEW'|'WARN'|'DELETE'|'MUTE'};
+ {kind:'g'|'w'|'f'|'t'|'m'|'o'|'l'|'r'|'e'|'d'|'x'|'a'|'v'|'b'|'j'|'y'|'n'|'c'|'u'|'s'|'q'|'k'|'S'|'F'|'T'|'A'|'H'|'I'|'E'|'B'|'C'|'D'|'J'|'K'|'L'|'N'|'O'|'P'|'Q'|'R'|'U'|'V'|'W'|'X'|'Y';page:number;slot:number;digest:string;nonce?:string;rulePage?:number;ruleSlot?:number;listKind?:'d'|'p'|'e';action?:'REVIEW'|'WARN'|'DELETE'|'MUTE'};
 const p='(0|[1-9][0-9]{0,2})',s='([1-8])',d='([a-f0-9]{16})';
-const simple=new RegExp('^pr:1:([gwftmobjcuSFTHEBCDNOPQJKLUVWX]):'+p+':'+s+':'+d+'$','u');
+const simple=new RegExp('^pr:1:([gwftmobjcuSFTHEBCDNOPQJKLUVWXY]):'+p+':'+s+':'+d+'$','u');
 const list=new RegExp('^pr:1:([ly]):'+p+':'+s+':'+d+':'+p+'$','u');
 const rule=new RegExp('^pr:1:([redxvnsR]):'+p+':'+s+':'+d+':'+p+':'+s+'$','u');
 const action=new RegExp('^pr:1:(a):'+p+':'+s+':'+d+':'+p+':'+s+':([rwdm])$','u');

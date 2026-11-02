@@ -739,4 +739,22 @@ for(const engine of ['json','sqlite'] as const){
    const changed=(await f.store.snapshot()).protectionPolicies![0]!.policy.rules[0]!;assert.equal(changed.kind,'FRAUD');assert.equal(changed.enabled,true);assert.equal(changed.id,rule.id);
   }finally{await f.close();}
  });
+ test('lookalike domain rule validates, tests, edits and returns to its group ('+engine+')',async()=>{
+  const f=await fixture();try{
+   const home=await f.app().handle(cb(1,'mi:1:i:02:09')),group=await f.app().handle(cb(2,route(home,'pr:1:g:')));
+   assert.equal((await f.app().handle(cb(3,route(group,'pr:1:Y:')))).status,'APPLIED');
+   assert.equal((await f.app().handle(msg(4,'https://example.org'))).reason,'PROTECTION_EDITOR_INPUT_REJECTED');
+   const saved=await f.app().handle(msg(5,'example.org'));assert.equal(saved.status,'APPLIED');
+   const rule=(await f.store.snapshot()).protectionPolicies![0]!.policy.rules[0]!;assert.equal(rule.kind,'LOOKALIKE');assert.equal(rule.enabled,false);assert.equal(rule.action,'REVIEW');
+   await f.app().handle(cb(6,route(saved,'pr:1:t:')));const sample=await f.app().handle(msg(7,'https://examp1e.org'));assert.match(sample.plan!.text,/نطاق مشابه للمرجع/u);
+   const h=await f.app().handle(cb(8,'pr:1:h')),g=await f.app().handle(cb(9,route(h,'pr:1:g:'))),l=await f.app().handle(cb(10,route(g,'pr:1:l:'))),d=await f.app().handle(cb(11,route(l,'pr:1:r:')));
+   assert.ok(route(d,'pr:1:l:'));assert.ok(route(d,'pr:1:e:'));assert.ok(route(d,'pr:1:d:'));
+   await f.app().handle(cb(12,route(d,'pr:1:v:')));assert.equal((await f.app().handle(msg(13,'school.edu'))).status,'APPLIED');
+   const edited=(await f.store.snapshot()).protectionPolicies![0]!.policy.rules[0]!;assert.equal(edited.kind,'LOOKALIKE');if(edited.kind==='LOOKALIKE')assert.equal(edited.domain,'school.edu');assert.equal(edited.id,rule.id);
+   const old=(await f.store.snapshot()).protectionPolicies![0]!.policy,service=new GroupProtectionPolicyService(f.store,f.policy,()=>NOW);
+   assert.equal((await service.save('100',{...old,revision:old.revision+1,mode:'MONITOR',rules:old.rules.map(r=>({...r,enabled:true}))},f.policy.chatRevision(await f.store.snapshot(),CHAT),old.revision)).status,'SAVED');
+   await f.app().handle({update_id:14,message:{message_id:14,chat:{id:Number(CHAT),type:'supergroup'},from:{id:300,is_bot:false},text:'زيارة',entities:[{type:'text_link',offset:0,length:5,url:'https://sch0ol.edu'}]}});
+   const state=await f.store.snapshot();assert.ok(state.audit.some(a=>a.reason.startsWith('PROTECTION_MONITOR_MATCH:')));assert.equal(JSON.stringify(state).includes('sch0ol.edu'),false);
+  }finally{await f.close();}
+ });
 }

@@ -4,7 +4,7 @@ import {isValidFloodPolicy,type FloodPolicy} from './protection-flood.js';
 export type ProtectionAction='REVIEW'|'WARN'|'DELETE'|'MUTE';
 export type ProtectionMessageType='TEXT'|'PHOTO'|'VIDEO'|'ANIMATION'|'STICKER'|'DOCUMENT'|'AUDIO'|'VOICE'|'VIDEO_NOTE'|'CONTACT'|'LOCATION'|'POLL';
 type BaseRule={id:string;enabled:boolean;action:ProtectionAction};
-export type ProtectionRule=BaseRule & ({kind:'WORD';value:string;match?:'PARTIAL'}|{kind:'PHRASE';value:string}|{kind:'FRAUD';identity:string;payment:string}|{kind:'TYPE';type:ProtectionMessageType}|{kind:'LINK';hosts:'*'|string[]}|{kind:'FORWARD'}|{kind:'LIMIT';metric:'MENTIONS'|'HASHTAGS'|'LENGTH'|'QUOTES';maximum:number});
+export type ProtectionRule=BaseRule & ({kind:'WORD';value:string;match?:'PARTIAL'}|{kind:'PHRASE';value:string}|{kind:'FRAUD';identity:string;payment:string}|{kind:'LOOKALIKE';domain:string}|{kind:'TYPE';type:ProtectionMessageType}|{kind:'LINK';hosts:'*'|string[]}|{kind:'FORWARD'}|{kind:'LIMIT';metric:'MENTIONS'|'HASHTAGS'|'LENGTH'|'QUOTES';maximum:number});
 export interface ProtectionPolicy{chatId:string;revision:number;mode:'OFF'|'MONITOR'|'ENFORCE';rules:ProtectionRule[];allowedDomains:string[];allowedPhrases:string[];exemptMemberIds:string[];flood?:FloodPolicy;joinRaid?:{enabled:boolean;minimumMembers:number;windowMs:number;lockSeconds:number};night?:{enabled:boolean;startMinute:number;endMinute:number;offsetMinutes:number};raid?:{enabled:boolean;minimumMembers:number;minimumMessages:number;lockSeconds:number};escalation?:{enabled:boolean;afterWarnings:number;windowMs:number};temporaryExemptions?:{memberId:string;createdAt:number;expiresAt:number}[];}
 export interface ProtectionMessage{chatId:string;memberId:string;type:ProtectionMessageType;text?:string;caption?:string;links?:string[];forwarded?:boolean;mentionCount?:number;quoteCount?:number;}
 export interface ProtectionEvaluation{status:'INVALID_POLICY'|'INVALID_MESSAGE'|'OFF'|'EXEMPT'|'CLEAR'|'MATCH';matchedRuleIds:string[];proposedAction:ProtectionAction|null;authorizedToSend:false;}
@@ -21,6 +21,9 @@ const phrase=(v:unknown):v is string=>typeof v==='string'&&v.length>=1&&v.length
 function host(v:unknown):v is string{
  if(typeof v!=='string'||v.length<1||v.length>253||v!==v.toLowerCase()||!/^[a-z0-9.-]+$/u.test(v)||v.endsWith('.'))return false;
  try{const u=new URL('https://'+v);return u.hostname===v&&u.port===''&&u.username===''&&u.password===''&&u.pathname==='/';}catch{return false;}
+}
+function referenceDomain(v:unknown):v is string{
+ return host(v)&&v.length>=5&&v.includes('.')&&/\.[a-z][a-z0-9-]{1,62}$/u.test(v)&&!/^\d+(?:\.\d+)+$/u.test(v);
 }
 const stringList=(v:unknown,check:(x:unknown)=>boolean,max:number):v is string[]=>Array.isArray(v)&&v.length<=max&&new Set(v).size===v.length&&v.every(check);
 function validJoinRaid(v:unknown):boolean{return object(v)&&keys(v,['enabled','minimumMembers','windowMs','lockSeconds'])&&typeof v.enabled==='boolean'&&[v.minimumMembers,v.windowMs,v.lockSeconds].every(n=>typeof n==='number'&&Number.isSafeInteger(n))&&Number(v.minimumMembers)>=3&&Number(v.minimumMembers)<=100&&Number(v.windowMs)>=5000&&Number(v.windowMs)<=60000&&Number(v.lockSeconds)>=60&&Number(v.lockSeconds)<=600;}
@@ -64,6 +67,7 @@ export function isValidProtectionPolicy(v:unknown):v is ProtectionPolicy{
   if(r.kind==='WORD'||r.kind==='PHRASE')return keys(r,['id','enabled','action','kind','value',...(Object.hasOwn(r,'match')?['match']:[])])&&(!Object.hasOwn(r,'match')||r.kind==='WORD'&&r.match==='PARTIAL')&&phrase(r.value)&&
    (r.kind!=='WORD'||!normalizeProtectionText(r.value).includes(' '));
   if(r.kind==='FRAUD')return keys(r,['id','enabled','action','kind','identity','payment'])&&phrase(r.identity)&&phrase(r.payment)&&normalizeProtectionText(r.identity)!==normalizeProtectionText(r.payment);
+  if(r.kind==='LOOKALIKE')return keys(r,['id','enabled','action','kind','domain'])&&referenceDomain(r.domain);
   if(r.kind==='LIMIT')return keys(r,['id','enabled','action','kind','metric','maximum'])&&typeof r.metric==='string'&&['MENTIONS','HASHTAGS','LENGTH','QUOTES'].includes(r.metric)&&typeof r.maximum==='number'&&Number.isSafeInteger(r.maximum)&&r.maximum>=1&&r.maximum<=(r.metric==='LENGTH'?4096:100);
   if(r.kind==='FORWARD')return keys(r,['id','enabled','action','kind']);
   if(r.kind==='TYPE')return keys(r,['id','enabled','action','kind','type'])&&typeof r.type==='string'&&typeNames.includes(r.type);
@@ -92,6 +96,23 @@ function containsSeparate(normalized:string,first:string,second:string):boolean{
  const firstA=text.indexOf(' '+a+' '),lastA=text.lastIndexOf(' '+a+' '),firstB=text.indexOf(' '+b+' '),lastB=text.lastIndexOf(' '+b+' ');
  return firstA>=0&&firstB>=0&&(firstA+1+a.length<=lastB+1||firstB+1+b.length<=lastA+1);
 }
+/** A bounded ASCII host comparison, not a verdict about the site's owner. */
+function oneEdit(a:string,b:string):boolean{
+ if(Math.abs(a.length-b.length)>1||a===b)return false;
+ if(a.length===b.length){
+  const differences:number[]=[];for(let i=0;i<a.length;i++)if(a[i]!==b[i])differences.push(i);
+  return differences.length===1||differences.length===2&&differences[1]===differences[0]!+1&&a[differences[0]!]===b[differences[1]!]&&a[differences[1]!]===b[differences[0]!];
+ }
+ const shorter=a.length<b.length?a:b,longer=a.length<b.length?b:a;
+ let i=0;while(i<shorter.length&&shorter[i]===longer[i])i++;
+ return shorter.slice(i)===longer.slice(i+1);
+}
+function resemblesDomain(candidate:string,official:string):boolean{
+ if(candidate===official||candidate.endsWith('.'+official))return false;
+ if((' '+candidate+'.').includes(' '+official+'.')||candidate.includes('.'+official+'.'))return true;
+ const labels=candidate.split('.'),count=official.split('.').length;
+ return labels.length>=count&&oneEdit(labels.slice(-count).join('.'),official);
+}
 const severity:Readonly<Record<ProtectionAction,number>>={REVIEW:0,WARN:1,DELETE:2,MUTE:3};
 export function evaluateProtectionRules(config:unknown,input:unknown,now:number=Date.now()):ProtectionEvaluation{
  const result=(status:ProtectionEvaluation['status'],ids:string[]=[],action:ProtectionAction|null=null):ProtectionEvaluation=>({status,matchedRuleIds:ids,proposedAction:action,authorizedToSend:false});
@@ -115,6 +136,7 @@ export function evaluateProtectionRules(config:unknown,input:unknown,now:number=
   if(r.kind==='WORD'&&r.match==='PARTIAL')return lexicalBody.includes(normalizeProtectionText(r.value));
   if(r.kind==='WORD'||r.kind==='PHRASE')return contains(lexicalBody,r.value);
   if(r.kind==='FRAUD')return containsSeparate(lexicalBody,r.identity,r.payment);
+  if(r.kind==='LOOKALIKE')return [...hosts].some(h=>!config.allowedDomains.includes(h)&&resemblesDomain(h,r.domain));
   if(r.kind==='LIMIT'){
    const count=r.metric==='QUOTES'?(input.quoteCount??0):r.metric==='LENGTH'?Array.from(body).length:r.metric==='MENTIONS'?Math.max(input.mentionCount??0,[...body.matchAll(/(?<![\p{L}\p{N}_])@[A-Za-z][A-Za-z0-9_]{4,31}(?![A-Za-z0-9_])/gu)].length):[...body.matchAll(/(?<![\p{L}\p{N}_])#[\p{L}\p{N}_]+/gu)].length;
    return count>r.maximum;

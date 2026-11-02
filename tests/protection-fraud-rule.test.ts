@@ -20,3 +20,16 @@ test('fraud rule requires both distinct configured phrases and only proposes rev
  assert.equal(evaluateProtectionRules(overlap,{chatId:'-100123',memberId:'300',type:'TEXT',text:'ممثل منارتك لمنارتك'},1700000000000).status,'CLEAR');
  assert.equal(evaluateProtectionRules(overlap,{chatId:'-100123',memberId:'300',type:'TEXT',text:'ممثل منارتك منارتك'},1700000000000).status,'MATCH');
 });
+
+test('lookalike rule respects exact trusted domains and flags bounded host imitation without fetching links',()=>{
+ const rule={id:'look1',kind:'LOOKALIKE' as const,domain:'example.org',enabled:true,action:'REVIEW' as const};
+ const policy={chatId:'-100123',revision:1,mode:'MONITOR' as const,rules:[rule],allowedDomains:[],allowedPhrases:[],exemptMemberIds:[]};
+ const check=(url:string)=>evaluateProtectionRules(policy,{chatId:'-100123',memberId:'300',type:'TEXT',text:url},1700000000000).status;
+ assert.equal(check('https://example.org/login'),'CLEAR');assert.equal(check('https://apply.example.org'),'CLEAR');
+ assert.equal(check('https://examp1e.org'),'MATCH');assert.equal(check('https://exmaple.org'),'MATCH');
+ assert.equal(check('https://example.org.evil.net'),'MATCH');assert.equal(check('https://account.example.org.evil.net'),'MATCH');
+ assert.equal(check('https://example.net'),'CLEAR');
+ assert.equal(evaluateProtectionRules(policy,{chatId:'-100123',memberId:'300',type:'TEXT',text:'اضغط هنا',links:['https://examp1e.org']},1700000000000).status,'MATCH');
+ assert.equal(evaluateProtectionRules({...policy,allowedDomains:['examp1e.org']},{chatId:'-100123',memberId:'300',type:'TEXT',text:'https://examp1e.org'},1700000000000).status,'CLEAR');
+ for(const domain of ['https://example.org','EXAMPLE.ORG','localhost','127.0.0.1','example.org/path'])assert.equal(isValidProtectionPolicy({...policy,rules:[{...rule,domain}]}),false);
+});
