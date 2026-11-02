@@ -6,11 +6,40 @@ import {join} from 'node:path';
 import {BotStore} from '../src/store.js';
 import {Policy} from '../src/policy.js';
 import {TelegramModerationReports} from '../src/telegram-moderation-reports.js';
-import {ModerationReportNoticeDispatcher} from '../src/moderation-report-notices.js';
+import {ModerationReportNoticeDispatcher,setReportNoticePreference} from '../src/moderation-report-notices.js';
 import type {OwnerInlineScreen} from '../src/telegram-inline-owner.js';
 import type {TelegramReplyPlan} from '../src/telegram-transport.js';
 
 for(const engine of ['json','sqlite'] as const){
+ for(const change of ['revoke','disable','close','replace-job','alter-start','duplicate-start','outcome','cancel','invalid-clock'] as const){
+ test(engine+' pending report notice rechecks '+change+' after the asynchronous delivery gate',async()=>{
+  const dir=await mkdtemp(join(tmpdir(),'report-notice-race-'));let now=1700000000000;
+  try{
+   const store=new BotStore(join(dir,'state.'+engine),{engine}),policy=new Policy(store,'100',()=>now),ui=new TelegramModerationReports(store,policy,()=>now);
+   await policy.approveChat('100','-100123',['moderation','navigation']);await policy.grant('100','301','chat.manage','-100123',now+600000);
+   assert.equal(await store.transaction(s=>setReportNoticePreference(s,policy,'301','-100123',now)),true);
+   now+=1000;assert.equal(await ui.submit('300','-100123',101,{message_id:1,chat:{id:-100123,type:'supergroup'},from:{id:400,is_bot:false}}),'RECORDED');
+   let sends=0,checks=0;
+   const dispatcher=new ModerationReportNoticeDispatcher(store,policy,{send:async()=>{sends++;return {status:'CONFIRMED',messageId:7};}},()=>now,async()=>{
+    if(++checks===2)await store.transaction(s=>{
+     const job=s.audit.find(a=>a.reason.startsWith('REPORT_NOTICE_JOB:'))!,started=s.audit.find(a=>a.updateKey===job.updateKey+':started')!;
+     if(change==='revoke')s.grants=[];
+     if(change==='disable'){now++;assert.equal(setReportNoticePreference(s,policy,'301','-100123',now),true);}
+     if(change==='close'){const report=s.audit.find(a=>a.reason.startsWith('MODERATION_REPORT:'))!;s.audit.push({...report,updateKey:report.updateKey+':closed'});}
+     if(change==='replace-job')job.at--;
+     if(change==='alter-start')started.actorId='302';
+     if(change==='duplicate-start')s.audit.push({...started});
+     if(change==='outcome')s.audit.push({...started,updateKey:job.updateKey+':outcome',reason:'REPORT_NOTICE_UNKNOWN_OUTCOME'});
+     if(change==='cancel')s.audit.push({...started,updateKey:job.updateKey+':cancelled',reason:'REPORT_NOTICE_CANCELLED'});
+     if(change==='invalid-clock')now=Number.NaN;
+    });
+    return true;
+   });
+   assert.equal(await dispatcher.drain(),0);assert.equal(sends,0);assert.equal(await dispatcher.drain(),0);assert.equal(sends,0);
+   const snapshot=await store.snapshot();assert.equal(snapshot.audit.filter(a=>a.updateKey.endsWith(':outcome')).length,1);
+  }finally{await rm(dir,{recursive:true,force:true});}
+ });
+ }
  test(engine+' report notices require opt-in, preserve privacy, and never retry an ambiguous send',async()=>{
   const dir=await mkdtemp(join(tmpdir(),'report-notices-'));let now=1700000000000;
   try{

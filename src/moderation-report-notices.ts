@@ -76,9 +76,14 @@ export function enqueueReportNotices(s:BotState,policy:Policy,chat:string,report
  }
 }
 function eligible(s:BotState,policy:Policy,j:Notice,now:number):boolean{
+ if(!Number.isSafeInteger(now)||now<0)return false;
  const reports=s.audit.filter(a=>a.updateKey==='moderation:report:'+j.report);
  const report=reports.length===1&&reports[0]!.reason.startsWith('MODERATION_REPORT:')?parse(reports[0]!.reason.slice('MODERATION_REPORT:'.length)):null;
  return !!report&&typeof report==='object'&&!Array.isArray(report)&&(report as Record<string,unknown>).chat===j.chat&&now>=j.at&&now-j.at<=120000&&j.version===policy.chatRevision(s,j.chat)&&epoch(s,policy,j.actor,j.chat,now)===j.epoch&&!s.audit.some(a=>a.updateKey==='moderation:report:'+j.report+':closed');
+}
+function intactAttempt(s:BotState,j:Notice,now:number):boolean{
+ const current=notices(s).find(x=>x.key===j.key),started=s.audit.filter(a=>a.updateKey===j.key+':started');
+ return current!==undefined&&JSON.stringify(current)===JSON.stringify(j)&&started.length===1&&started[0]!.actorId===j.actor&&started[0]!.policyVersion===j.version&&started[0]!.decision==='ALLOW'&&started[0]!.reason==='REPORT_NOTICE_STARTED'&&Number.isSafeInteger(started[0]!.at)&&started[0]!.at>=j.at&&started[0]!.at<=now&&!s.audit.some(a=>a.updateKey===j.key+':cancelled'||a.updateKey===j.key+':outcome');
 }
 /** Each attempt has durable intent before sending; ambiguous attempts are never retried. */
 export class ModerationReportNoticeDispatcher{
@@ -95,8 +100,10 @@ export class ModerationReportNoticeDispatcher{
     const ok=eligible(s,this.policy,j,now);s.audit.push({actorId:j.actor,updateKey:j.key+(ok?':started':':cancelled'),decision:ok?'ALLOW':'NOOP',reason:ok?'REPORT_NOTICE_STARTED':'REPORT_NOTICE_CANCELLED',policyVersion:j.version,at:now});return ok?j:'CANCELLED' as const;
    });
    if(!job)break;if(job==='CANCELLED')continue;
-   const state=await this.store.snapshot();
-   if(!await this.safety()||!eligible(state,this.policy,job,this.clock())||state.audit.filter(a=>a.updateKey===job.key+':started').length!==1){await this.finish(job,'FAILED_CONFIRMED');continue;}
+   // The safety gate may wait while consent, authority or attempt evidence changes.
+   // Read the latest state after that wait, with no further await before sending.
+   const running=await this.safety(),state=await this.store.snapshot(),now=this.clock();
+   if(!running||!eligible(state,this.policy,job,now)||!intactAttempt(state,job,now)){await this.finish(job,'FAILED_CONFIRMED');continue;}
    let result:TelegramSendResult;
    try{result=await this.sender.send({chatId:job.actor,parseMode:'HTML',text:'يوجد بلاغ جديد في مجموعة مخوّل بمراجعتها. افتح صندوق البلاغات.',inlineMarkup:{inline_keyboard:[[{text:'📨 صندوق البلاغات',callback_data:'rp:1:r:0'}]]}});}catch{result={status:'UNKNOWN_OUTCOME'};}
    const status=result.status==='CONFIRMED'&&Number.isSafeInteger(result.messageId)&&result.messageId>0?'CONFIRMED':result.status==='FAILED_CONFIRMED'?'FAILED_CONFIRMED':'UNKNOWN_OUTCOME';
@@ -106,9 +113,7 @@ export class ModerationReportNoticeDispatcher{
  }
  private async finish(job:Notice,status:'CONFIRMED'|'FAILED_CONFIRMED'|'UNKNOWN_OUTCOME'):Promise<void>{
   await this.store.transaction(s=>{
-   const now=this.clock(),started=s.audit.filter(a=>a.updateKey===job.key+':started');
-   const current=notices(s).find(x=>x.key===job.key);
-   const safe=started.length===1&&started[0]!.actorId===job.actor&&current!==undefined&&JSON.stringify(current)===JSON.stringify(job)&&eligible(s,this.policy,job,now);
+   const now=this.clock(),safe=intactAttempt(s,job,now)&&eligible(s,this.policy,job,now);
    if(s.audit.some(a=>a.updateKey===job.key+':outcome'))return;
    s.audit.push({actorId:job.actor,updateKey:job.key+':outcome',decision:'NOOP',reason:'REPORT_NOTICE_'+(safe?status:'UNKNOWN_OUTCOME'),policyVersion:job.version,at:Number.isSafeInteger(now)&&now>=0?now:job.at});
   });
