@@ -74,6 +74,8 @@ export interface RollingMessageMeta {
 }
 export interface PurgeFilter {
   limit:number; beforeMessageId?:number; senderId?:string; linksOnly?:boolean; mediaOnly?:boolean; commandsOnly?:boolean;
+  /** Inclusive lower and exclusive upper bound on original message send time. */
+  sentAfter?:number; sentBefore?:number;
 }
 export type PurgeItemStatus='QUEUED'|'SENDING'|'ACKNOWLEDGED'|'FAILED_CONFIRMED'|'UNKNOWN_OUTCOME'|'SKIPPED_UNVERIFIED'|'CANCELLED';
 export interface PurgeItem {

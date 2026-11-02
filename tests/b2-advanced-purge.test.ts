@@ -33,6 +33,17 @@ async function seed(f:Awaited<ReturnType<typeof fixture>>,count:number){
  for(let i=1;i<=count;i++)await f.observe(i);
 }
 for(const engine of ['json','sqlite'] as const){
+ test(`B2-advanced ${engine}: time filters use original send time and remain bound to the reviewed plan`,async()=>{
+  const f=await fixture(engine);try{
+   await f.observe(1,{sentAt:now0-3600000});await f.observe(2,{sentAt:now0-600000});await f.observe(3,{sentAt:now0-300000,pinned:true});await f.observe(4,{sentAt:now0-1000});
+   const filter={limit:25,sentAfter:now0-600000,sentBefore:now0-1000};
+   const job=await f.service().preview(OWNER,GROUP,filter);assert.deepEqual(job.items.map(i=>i.messageId),[2]);assert.equal(job.excluded.protected,1);
+   for(const extra of [{sentAfter:-1},{sentBefore:NaN},{sentBefore:8640000000000001},{sentAfter:now0,sentBefore:now0},{sentAfter:now0,sentBefore:now0-1},{senderId:'300\n'}])await assert.rejects(f.service().preview(OWNER,GROUP,{limit:1,...extra}),/INVALID_PURGE_FILTER/);
+   const reopened=await f.store.snapshot();assert.deepEqual(reopened.purgeJobs[0]!.filter,filter);
+   await f.store.transaction(s=>{s.purgeJobs[0]!.filter.sentAfter=now0-600000+1;});
+   await assert.rejects(f.service().confirm(OWNER,job.id),/PREVIEW_STALE/);assert.equal(f.gateway.calls.length,0);
+  }finally{await f.close();}
+ });
  test(`B2-advanced ${engine}: only approved groups acquire metadata; texts never enter the rolling index`,async()=>{
   const f=await fixture(engine);try {
    await f.observe(1);

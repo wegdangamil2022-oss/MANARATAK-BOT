@@ -115,6 +115,17 @@ const terminalItem=(s:PurgeItem['status'])=>s==='ACKNOWLEDGED'||s==='CANCELLED'|
 const protectedMessage=(m:RollingMessageMeta)=>m.pinned||m.linkedChannel||m.adminLog||m.approvedAnnouncement;
 const validId=(v:unknown)=>typeof v==='number'&&Number.isSafeInteger(v)&&v>0;
 const validTime=(v:unknown)=>typeof v==='number'&&Number.isSafeInteger(v)&&v>=0;
+export function isValidPurgeFilter(value:unknown):value is PurgeFilter{
+ if(!value||typeof value!=='object'||Array.isArray(value))return false;
+ const f=value as PurgeFilter;
+ return Number.isSafeInteger(f.limit)&&f.limit>=1&&f.limit<=MAX_PREVIEW&&
+   (f.beforeMessageId===undefined||validId(f.beforeMessageId))&&
+   (f.senderId===undefined||typeof f.senderId==='string'&&/^\d+$/u.exec(f.senderId)?.[0]===f.senderId)&&
+   [f.sentAfter,f.sentBefore].every(t=>t===undefined||validTime(t)&&t<=8640000000000000)&&
+   (f.sentAfter===undefined||f.sentBefore===undefined||f.sentAfter<f.sentBefore)&&
+   ['linksOnly','mediaOnly','commandsOnly'].every(k=>f[k as keyof PurgeFilter]===undefined||typeof f[k as keyof PurgeFilter]==='boolean')&&
+   Object.keys(f).every(k=>['limit','beforeMessageId','senderId','linksOnly','mediaOnly','commandsOnly','sentAfter','sentBefore'].includes(k));
+}
 const validActor=(v:unknown)=>typeof v==='string'&&/^\d+$/.test(v)&&v!=='0';
 const day=(n:number)=>Math.floor(n/(24*60*60*1000));
 const recent=(m:RollingMessageMeta,now:number)=>m.sentAt>now-WINDOW_MS&&m.sentAt<=now;
@@ -133,6 +144,8 @@ function validMeta(value:RollingMessageMeta):boolean{
 }
 function matches(m:RollingMessageMeta,f:PurgeFilter):boolean{
  return (f.senderId===undefined||m.senderId===f.senderId)&&
+   (f.sentAfter===undefined||m.sentAt>=f.sentAfter)&&
+   (f.sentBefore===undefined||m.sentAt<f.sentBefore)&&
    (f.linksOnly!==true||m.hasLinks)&&
    (f.mediaOnly!==true||m.contentType==='MEDIA')&&
    (f.commandsOnly!==true||m.contentType==='COMMAND')&&
@@ -142,6 +155,7 @@ function allowed(s:BotState,policy:Policy,actor:string,chat:string,now:number):b
  return validActor(actor)&&policy.canUseChat(s,chat,'moderation')&&policy.has(s,actor,'chat.manage',chat,now);
 }
 function available(s:BotState,job:PurgeJob,now:number):boolean{
+ if(!isValidPurgeFilter(job.filter))return false;
  return job.items.every(item=>{
   const current=s.rollingMessageMeta.find(m=>m.chatId===job.chatId&&m.messageId===item.messageId);
   return current&&recent(current,now)&&!protectedMessage(current)&&
@@ -196,11 +210,7 @@ export class ModerationPurgeService {
  }
  async preview(actor:string,chatId:string,filter:PurgeFilter,sourceCurrent?:(s:BotState)=>boolean,automatic=false):Promise<PurgeJob>{
   if(automatic&&(!sourceCurrent||filter?.limit!==1))throw Error('AUTOMATIC_PURGE_PROOF_REQUIRED');
-  if(!filter||!Number.isSafeInteger(filter.limit)||filter.limit<1||filter.limit>MAX_PREVIEW||
-    (filter.beforeMessageId!==undefined&&!validId(filter.beforeMessageId))||
-    (filter.senderId!==undefined&&(typeof filter.senderId!=='string'||!/^\d+$/.test(filter.senderId)))||
-    ['linksOnly','mediaOnly','commandsOnly'].some(k=>filter[k as keyof PurgeFilter]!==undefined&&typeof filter[k as keyof PurgeFilter]!=='boolean')||
-    Object.keys(filter).some(k=>!['limit','beforeMessageId','senderId','linksOnly','mediaOnly','commandsOnly'].includes(k)))
+  if(!isValidPurgeFilter(filter))
    throw new Error('INVALID_PURGE_FILTER');
   return this.store.transaction(s=>{
    if(sourceCurrent&&!sourceCurrent(s)||!allowed(s,this.policy,actor,chatId,this.clock()))throw new Error('MANAGE_DENIED');

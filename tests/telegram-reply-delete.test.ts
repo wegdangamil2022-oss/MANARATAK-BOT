@@ -140,6 +140,18 @@ for(const engine of ['json','sqlite'] as const){
    assert.equal((await f.app().handle(tap(6,'mi:1:i:02:13',200))).status,'DENIED');
   }finally{await f.close();}
  });
+ test('filtered cleanup is reachable through real private transport buttons and navigation revokes approval ('+engine+')',async()=>{
+  const f=await fixture();try{
+   const choose=(result:Awaited<ReturnType<TelegramUpdateApplication['handle']>>,label:string)=>{assert.equal(result.status,'APPLIED');const button=result.plan?.inlineMarkup?.inline_keyboard.flat().find(b=>b.text.includes(label));assert.ok(button);return button.callback_data;};
+   let id=1000,screen=await f.app().handle(tap(id++,'mi:1:i:02:13'));
+   const create=choose(screen,'إنشاء معاينة مفلترة');assert.equal((await f.app().handle(tap(id++,create,100,true))).status,'DENIED');assert.equal((await f.app().handle(tap(id++,create,200))).status,'DENIED');
+   screen=await f.app().handle(tap(id++,create));screen=await f.app().handle(tap(id++,choose(screen,CHAT)));screen=await f.app().handle(tap(id++,choose(screen,'معاينة العدد')));
+   const confirm=choose(screen,'اعتماد الخطة');assert.equal(screen.plan?.chatId,OWNER);assert.equal(f.gateway.calls.length,0);
+   screen=await f.app().handle(tap(id++,choose(screen,'معاينات الحذف')));assert.equal((await f.app().handle(tap(id++,confirm))).status,'DENIED');assert.equal(f.gateway.calls.length,0);
+   screen=await f.app().handle(tap(id++,choose(screen,'معاينة ·')));screen=await f.app().handle(tap(id++,choose(screen,'إدارة الخطة المفلترة')));screen=await f.app().handle(tap(id++,choose(screen,'اعتماد الخطة')));
+   assert.equal(f.gateway.calls.length,0);screen=await f.app().handle(tap(id++,choose(screen,'تنفيذ الرسالة التالية')));assert.match(screen.plan?.text??'',/طلبات مقبولة: 1/u);assert.equal(f.gateway.calls.length,1);
+  }finally{await f.close();}
+ });
  test('cleanup list paginates and refuses out-of-range or malformed selectors ('+engine+')',async()=>{
   const f=await fixture();try{
    await f.app().handle(command(1));

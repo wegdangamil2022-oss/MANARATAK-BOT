@@ -50,6 +50,7 @@ export async function renderOwnerPurgeQueue(store:BotStore,policy:Policy,actor:s
    button('✅ تأكيد حذف الرسالة','pd:1:c:'+job.id+':'+purgeReviewDigest(job)),
    button('↩️ إلغاء الحذف','pd:1:x:'+job.id+':'+purgeReviewDigest(job))
   ]);
+  if(configured&&!Object.hasOwn(job,'automatic')&&job.actorId===actor)rows.push([button('🧹 إدارة الخطة المفلترة','pc:1:j:'+job.id+':'+purgeReviewDigest(job))]);
   rows.push([button('↩️ معاينات الحذف','pq:1:p:'+pageNumber)],back);
   return {text:'<b>🧹 تفاصيل خطة الحذف المحلية</b>\n'
    +(job.automatic?'المصدر: قاعدة حماية آلية؛ لا تعاد من شاشة المعاينات.\n':'')+'الحالة: '+states[job.status]+'\nالرسائل المحددة: '+job.items.length+'\n'
@@ -58,6 +59,7 @@ export async function renderOwnerPurgeQueue(store:BotStore,policy:Policy,actor:s
    +'إقرار الطلب لا يثبت الحذف المادي، ولا تعاد العملية المجهولة تلقائيًا.',keyboard:{inline_keyboard:rows}};
  }
  const rows:ReturnType<typeof button>[][]=[];
+ if(configured)rows.push([button('➕ إنشاء معاينة مفلترة','pc:1:h')]);
  for(let i=0;i<current.length;i++)rows.push([button('📋 '+states[current[i]!.status]+' · '+current[i]!.items.length+' رسالة',
   'pq:1:v:'+pageNumber+':'+(i+1)+':'+digest(current[i]!))]);
  const nav:ReturnType<typeof button>[]=[];
@@ -69,5 +71,5 @@ export async function renderOwnerPurgeQueue(store:BotStore,policy:Policy,actor:s
   +'الخطط المحلية المتاحة: '+all.length+'\nصفحة '+(pageNumber+1)+' من '+totalPages+'\n'
   +'موصل الحذف: '+(configured?'مهيأ في التطبيق؛ التنفيذ يخضع لبوابته وصلاحياته':'غير مهيأ في التطبيق؛ العرض فقط')+'\n'
   +(all.length?'اختر خطة لعرض حالتها.':'لا توجد معاينات متاحة حاليًا.')+'\n'
-  +'ينشئ /delete بالرد معاينة خاصة لرسالة ملاحظة مسبقًا، دون جلب تاريخ المجموعة.',keyboard:{inline_keyboard:rows}};
+  +'يمكن اختيار المجموعة والمرسل والنوع والفترة والعدد من إنشاء المعاينة المفلترة. ينشئ /delete بالرد معاينة خاصة لرسالة ملاحظة مسبقًا، دون جلب تاريخ المجموعة.',keyboard:{inline_keyboard:rows}};
 }
