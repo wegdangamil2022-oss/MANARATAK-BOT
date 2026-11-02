@@ -85,6 +85,13 @@ function urlHost(raw:string):string|null{
  try{const u=new URL(/^https?:\/\//iu.test(raw)?raw:'https://'+raw);return ['https:','http:'].includes(u.protocol)&&u.hostname?u.hostname.toLowerCase():null;}catch{return null;}
 }
 const contains=(normalized:string,value:string)=>(' '+normalized+' ').includes(' '+normalizeProtectionText(value)+' ');
+/** Two separate word-boundary spans are required: one configured phrase
+ * contained inside the other is not independent evidence of a payment claim. */
+function containsSeparate(normalized:string,first:string,second:string):boolean{
+ const text=' '+normalized+' ',a=normalizeProtectionText(first),b=normalizeProtectionText(second);
+ const firstA=text.indexOf(' '+a+' '),lastA=text.lastIndexOf(' '+a+' '),firstB=text.indexOf(' '+b+' '),lastB=text.lastIndexOf(' '+b+' ');
+ return firstA>=0&&firstB>=0&&(firstA+1+a.length<=lastB+1||firstB+1+b.length<=lastA+1);
+}
 const severity:Readonly<Record<ProtectionAction,number>>={REVIEW:0,WARN:1,DELETE:2,MUTE:3};
 export function evaluateProtectionRules(config:unknown,input:unknown,now:number=Date.now()):ProtectionEvaluation{
  const result=(status:ProtectionEvaluation['status'],ids:string[]=[],action:ProtectionAction|null=null):ProtectionEvaluation=>({status,matchedRuleIds:ids,proposedAction:action,authorizedToSend:false});
@@ -107,7 +114,7 @@ export function evaluateProtectionRules(config:unknown,input:unknown,now:number=
   if(!r.enabled)return false;
   if(r.kind==='WORD'&&r.match==='PARTIAL')return lexicalBody.includes(normalizeProtectionText(r.value));
   if(r.kind==='WORD'||r.kind==='PHRASE')return contains(lexicalBody,r.value);
-  if(r.kind==='FRAUD')return contains(lexicalBody,r.identity)&&contains(lexicalBody,r.payment);
+  if(r.kind==='FRAUD')return containsSeparate(lexicalBody,r.identity,r.payment);
   if(r.kind==='LIMIT'){
    const count=r.metric==='QUOTES'?(input.quoteCount??0):r.metric==='LENGTH'?Array.from(body).length:r.metric==='MENTIONS'?Math.max(input.mentionCount??0,[...body.matchAll(/(?<![\p{L}\p{N}_])@[A-Za-z][A-Za-z0-9_]{4,31}(?![A-Za-z0-9_])/gu)].length):[...body.matchAll(/(?<![\p{L}\p{N}_])#[\p{L}\p{N}_]+/gu)].length;
    return count>r.maximum;

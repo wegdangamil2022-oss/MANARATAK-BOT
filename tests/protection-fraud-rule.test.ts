@@ -15,4 +15,8 @@ test('fraud rule requires both distinct configured phrases and only proposes rev
  assert.equal(isValidProtectionPolicy({...policy,rules:[{...rule,payment:'ممثل منارتك'}]}),false);
  assert.equal(evaluateProtectionRules({...policy,rules:[{...rule,enabled:false}]},{chatId:'-100123',memberId:'300',type:'TEXT',text:'ممثل منارتك رسوم التسجيل'},1700000000000).status,'CLEAR');
  assert.equal(evaluateProtectionRules({...policy,allowedPhrases:['ممثل منارتك']},{chatId:'-100123',memberId:'300',type:'TEXT',text:'ممثل منارتك رسوم التسجيل'},1700000000000).status,'CLEAR');
+ const overlap={...policy,rules:[{...rule,identity:'منارتك',payment:'ممثل منارتك'}]};
+ assert.equal(evaluateProtectionRules(overlap,{chatId:'-100123',memberId:'300',type:'TEXT',text:'ممثل منارتك'},1700000000000).status,'CLEAR');
+ assert.equal(evaluateProtectionRules(overlap,{chatId:'-100123',memberId:'300',type:'TEXT',text:'ممثل منارتك لمنارتك'},1700000000000).status,'CLEAR');
+ assert.equal(evaluateProtectionRules(overlap,{chatId:'-100123',memberId:'300',type:'TEXT',text:'ممثل منارتك منارتك'},1700000000000).status,'MATCH');
 });
