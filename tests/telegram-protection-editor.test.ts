@@ -757,4 +757,33 @@ for(const engine of ['json','sqlite'] as const){
    const state=await f.store.snapshot();assert.ok(state.audit.some(a=>a.reason.startsWith('PROTECTION_MONITOR_MATCH:')));assert.equal(JSON.stringify(state).includes('sch0ol.edu'),false);
   }finally{await f.close();}
  });
+ test('protected name rule checks the observed sender and never stores the observed name ('+engine+')',async()=>{
+  const f=await fixture();try{
+   const home=await f.app().handle(cb(1,'mi:1:i:02:09')),group=await f.app().handle(cb(2,route(home,'pr:1:g:')));
+   assert.equal((await f.app().handle(cb(3,route(group,'pr:1:Z:')))).status,'APPLIED');
+   assert.equal((await f.app().handle(msg(4,'إدارة منارتك | 0'))).reason,'PROTECTION_EDITOR_INPUT_REJECTED');
+   const saved=await f.app().handle(msg(5,'إدارة منارتك | 123456'));assert.equal(saved.status,'APPLIED');
+   const rule=(await f.store.snapshot()).protectionPolicies![0]!.policy.rules[0]!;assert.equal(rule.kind,'NAME');assert.equal(rule.enabled,false);assert.equal(rule.action,'REVIEW');
+   await f.app().handle(cb(6,route(saved,'pr:1:t:')));const sample=await f.app().handle(msg(7,'اسم: ادارة منارتك'));assert.match(sample.plan!.text,/تطابق الاسم مع رقم مختلف/u);
+   const old=(await f.store.snapshot()).protectionPolicies![0]!.policy,service=new GroupProtectionPolicyService(f.store,f.policy,()=>NOW);
+   assert.equal((await service.save('100',{...old,revision:old.revision+1,mode:'MONITOR',rules:old.rules.map(r=>({...r,enabled:true}))},f.policy.chatRevision(await f.store.snapshot(),CHAT),old.revision)).status,'SAVED');
+   const send=async(id:number,member:number,first:string,last:string)=>f.app().handle({update_id:id,message:{message_id:id,chat:{id:Number(CHAT),type:'supergroup'},from:{id:member,is_bot:false,first_name:first,last_name:last},text:'مرحبا'}});
+   await send(8,123456,'ادارة','منارتك');assert.equal((await f.store.snapshot()).audit.filter(a=>a.reason.startsWith('PROTECTION_MONITOR_MATCH:')).length,0);
+   await send(9,300,'ادارة','منارتك');let state=await f.store.snapshot();assert.equal(state.audit.filter(a=>a.reason.startsWith('PROTECTION_MONITOR_MATCH:')).length,1);assert.equal(JSON.stringify(state).includes('ادارة منارتك'),false);
+   await f.app().handle({update_id:10,message:{message_id:10,chat:{id:Number(CHAT),type:'supergroup'},from:{id:301,is_bot:false,first_name:'ادارة',last_name:'منارتك'},photo:[{file_id:'test',file_unique_id:'one',width:10,height:10}]}});
+   state=await f.store.snapshot();assert.equal(state.audit.filter(a=>a.reason.startsWith('PROTECTION_MONITOR_MATCH:')).length,2);
+   const h=await f.app().handle(cb(11,'pr:1:h')),g=await f.app().handle(cb(12,route(h,'pr:1:g:'))),l=await f.app().handle(cb(13,route(g,'pr:1:l:'))),d=await f.app().handle(cb(14,route(l,'pr:1:r:')));
+   assert.ok(route(d,'pr:1:l:'));assert.ok(route(d,'pr:1:e:'));assert.ok(route(d,'pr:1:d:'));assert.ok(route(d,'pr:1:v:'));
+   await f.app().handle(cb(15,route(d,'pr:1:v:')));assert.equal((await f.app().handle(msg(16,'إدارة الفريق | 123457'))).status,'APPLIED');
+   const changed=(await f.store.snapshot()).protectionPolicies![0]!.policy.rules[0]!;assert.equal(changed.kind,'NAME');assert.equal(changed.id,rule.id);assert.equal(changed.enabled,true);
+   const current=await f.app().handle(cb(17,'pr:1:h')),card=await f.app().handle(cb(18,route(current,'pr:1:g:')));
+   await f.app().handle(cb(19,route(card,'pr:1:Z:')));
+   assert.equal((await f.app().handle(msg(20,'ادارة الفريق | 777'))).reason,'PROTECTION_EDITOR_INPUT_REJECTED');
+   await f.app().handle(cb(21,'pr:1:h'));await f.app().handle(msg(22,'اسم غير محفوظ | 888'));
+   assert.equal((await f.store.snapshot()).protectionPolicies![0]!.policy.rules.length,1);
+   const finalHome=await f.app().handle(cb(23,'pr:1:h')),finalCard=await f.app().handle(cb(24,route(finalHome,'pr:1:g:')));
+   await f.app().handle(cb(25,route(finalCard,'pr:1:t:')));
+   const unavailable=await f.app().handle(msg(26,'اسم: '+'س'.repeat(129)));assert.equal(unavailable.reason,'PROTECTION_DRY_RUN_UNAVAILABLE');assert.doesNotMatch(unavailable.plan!.text,/لا مطابقة/u);
+  }finally{await f.close();}
+ });
 }

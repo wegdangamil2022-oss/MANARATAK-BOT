@@ -33,3 +33,15 @@ test('lookalike rule respects exact trusted domains and flags bounded host imita
  assert.equal(evaluateProtectionRules({...policy,allowedDomains:['examp1e.org']},{chatId:'-100123',memberId:'300',type:'TEXT',text:'https://examp1e.org'},1700000000000).status,'CLEAR');
  for(const domain of ['https://example.org','EXAMPLE.ORG','localhost','127.0.0.1','example.org/path','example..org','-example.org','example-.org'])assert.equal(isValidProtectionPolicy({...policy,rules:[{...rule,domain}]}),false);
 });
+
+test('protected display-name rule compares current sender name with an explicitly trusted account',()=>{
+ const rule={id:'name1',kind:'NAME' as const,name:'إدارة منارتك',trustedId:'123456',enabled:true,action:'REVIEW' as const};
+ const policy={chatId:'-100123',revision:1,mode:'MONITOR' as const,rules:[rule],allowedDomains:[],allowedPhrases:[],exemptMemberIds:[]};
+ const check=(memberId:string,displayName?:string)=>evaluateProtectionRules(policy,{chatId:'-100123',memberId,type:'TEXT',text:'اهلا',...(displayName?{displayName}:{})},1700000000000);
+ assert.equal(check('123456','إدارة منارتك').status,'CLEAR');
+ assert.equal(check('300','ادارة منارتك').status,'MATCH');
+ assert.equal(check('300','ادارة جامعة').status,'CLEAR');assert.equal(check('300').status,'CLEAR');
+ assert.equal(check('300','ادارة منارتك').authorizedToSend,false);
+ for(const trustedId of ['0','123 456','-123','99999999999999999'])assert.equal(isValidProtectionPolicy({...policy,rules:[{...rule,trustedId}]}),false);
+ assert.equal(isValidProtectionPolicy({...policy,rules:[rule,{...rule,id:'name2',name:'ادارة منارتك',trustedId:'999'}]}),false);
+});

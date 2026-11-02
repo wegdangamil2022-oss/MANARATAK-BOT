@@ -4,9 +4,9 @@ import {isValidFloodPolicy,type FloodPolicy} from './protection-flood.js';
 export type ProtectionAction='REVIEW'|'WARN'|'DELETE'|'MUTE';
 export type ProtectionMessageType='TEXT'|'PHOTO'|'VIDEO'|'ANIMATION'|'STICKER'|'DOCUMENT'|'AUDIO'|'VOICE'|'VIDEO_NOTE'|'CONTACT'|'LOCATION'|'POLL';
 type BaseRule={id:string;enabled:boolean;action:ProtectionAction};
-export type ProtectionRule=BaseRule & ({kind:'WORD';value:string;match?:'PARTIAL'}|{kind:'PHRASE';value:string}|{kind:'FRAUD';identity:string;payment:string}|{kind:'LOOKALIKE';domain:string}|{kind:'TYPE';type:ProtectionMessageType}|{kind:'LINK';hosts:'*'|string[]}|{kind:'FORWARD'}|{kind:'LIMIT';metric:'MENTIONS'|'HASHTAGS'|'LENGTH'|'QUOTES';maximum:number});
+export type ProtectionRule=BaseRule & ({kind:'WORD';value:string;match?:'PARTIAL'}|{kind:'PHRASE';value:string}|{kind:'FRAUD';identity:string;payment:string}|{kind:'LOOKALIKE';domain:string}|{kind:'NAME';name:string;trustedId:string}|{kind:'TYPE';type:ProtectionMessageType}|{kind:'LINK';hosts:'*'|string[]}|{kind:'FORWARD'}|{kind:'LIMIT';metric:'MENTIONS'|'HASHTAGS'|'LENGTH'|'QUOTES';maximum:number});
 export interface ProtectionPolicy{chatId:string;revision:number;mode:'OFF'|'MONITOR'|'ENFORCE';rules:ProtectionRule[];allowedDomains:string[];allowedPhrases:string[];exemptMemberIds:string[];flood?:FloodPolicy;joinRaid?:{enabled:boolean;minimumMembers:number;windowMs:number;lockSeconds:number};night?:{enabled:boolean;startMinute:number;endMinute:number;offsetMinutes:number};raid?:{enabled:boolean;minimumMembers:number;minimumMessages:number;lockSeconds:number};escalation?:{enabled:boolean;afterWarnings:number;windowMs:number};temporaryExemptions?:{memberId:string;createdAt:number;expiresAt:number}[];}
-export interface ProtectionMessage{chatId:string;memberId:string;type:ProtectionMessageType;text?:string;caption?:string;links?:string[];forwarded?:boolean;mentionCount?:number;quoteCount?:number;}
+export interface ProtectionMessage{chatId:string;memberId:string;type:ProtectionMessageType;text?:string;caption?:string;links?:string[];forwarded?:boolean;mentionCount?:number;quoteCount?:number;displayName?:string;}
 export interface ProtectionEvaluation{status:'INVALID_POLICY'|'INVALID_MESSAGE'|'OFF'|'EXEMPT'|'CLEAR'|'MATCH';matchedRuleIds:string[];proposedAction:ProtectionAction|null;authorizedToSend:false;}
 const object=(v:unknown):v is Record<string,unknown>=>v!==null&&typeof v==='object'&&!Array.isArray(v);
 const keys=(v:Record<string,unknown>,expected:string[])=>Object.keys(v).length===expected.length&&expected.every(k=>Object.hasOwn(v,k));
@@ -60,7 +60,7 @@ export function isValidProtectionPolicy(v:unknown):v is ProtectionPolicy{
   !Number.isSafeInteger(v.revision)||typeof v.revision!=='number'||v.revision<1||(typeof v.mode!=='string'||!['OFF','MONITOR','ENFORCE'].includes(v.mode))||
   !stringList(v.allowedDomains,host,100)||!stringList(v.allowedPhrases,phrase,100)||!stringList(v.exemptMemberIds,member,100)||
   Object.hasOwn(v,'joinRaid')&&!validJoinRaid(v.joinRaid)||Object.hasOwn(v,'night')&&!validNight(v.night)||Object.hasOwn(v,'raid')&&(!validRaid(v.raid)||(v.raid as {enabled:boolean}).enabled&&!(v.flood as FloodPolicy|undefined)?.enabled)||Object.hasOwn(v,'escalation')&&!validEscalation(v.escalation)||Object.hasOwn(v,'temporaryExemptions')&&!validTemporaryExemptions(v.temporaryExemptions)||!Array.isArray(v.rules)||v.rules.length>100)return false;
- const seen=new Set<string>();
+ const seen=new Set<string>(),protectedNames=new Set<string>();
  return v.rules.every(r=>{
   if(!object(r)||typeof r.id!=='string'||!/^[A-Za-z0-9][A-Za-z0-9_-]{0,47}$/u.test(r.id)||seen.has(r.id)||
    typeof r.enabled!=='boolean'||(typeof r.action!=='string'||!actions.includes(r.action)))return false;
@@ -69,6 +69,11 @@ export function isValidProtectionPolicy(v:unknown):v is ProtectionPolicy{
    (r.kind!=='WORD'||!normalizeProtectionText(r.value).includes(' '));
   if(r.kind==='FRAUD')return keys(r,['id','enabled','action','kind','identity','payment'])&&phrase(r.identity)&&phrase(r.payment)&&normalizeProtectionText(r.identity)!==normalizeProtectionText(r.payment);
   if(r.kind==='LOOKALIKE')return keys(r,['id','enabled','action','kind','domain'])&&referenceDomain(r.domain);
+  if(r.kind==='NAME'){
+   if(!keys(r,['id','enabled','action','kind','name','trustedId'])||!phrase(r.name)||!member(r.trustedId))return false;
+   const name=normalizeProtectionText(r.name);if(protectedNames.has(name))return false;
+   protectedNames.add(name);return true;
+  }
   if(r.kind==='LIMIT')return keys(r,['id','enabled','action','kind','metric','maximum'])&&typeof r.metric==='string'&&['MENTIONS','HASHTAGS','LENGTH','QUOTES'].includes(r.metric)&&typeof r.maximum==='number'&&Number.isSafeInteger(r.maximum)&&r.maximum>=1&&r.maximum<=(r.metric==='LENGTH'?4096:100);
   if(r.kind==='FORWARD')return keys(r,['id','enabled','action','kind']);
   if(r.kind==='TYPE')return keys(r,['id','enabled','action','kind','type'])&&typeof r.type==='string'&&typeNames.includes(r.type);
@@ -77,11 +82,12 @@ export function isValidProtectionPolicy(v:unknown):v is ProtectionPolicy{
  });
 }
 function validMessage(v:unknown,chatId:string):v is ProtectionMessage{
- if(!object(v)||Object.keys(v).some(k=>!['chatId','memberId','type','text','caption','links','forwarded','mentionCount','quoteCount'].includes(k))||v.chatId!==chatId||
+ if(!object(v)||Object.keys(v).some(k=>!['chatId','memberId','type','text','caption','links','forwarded','mentionCount','quoteCount','displayName'].includes(k))||v.chatId!==chatId||
   !member(v.memberId)||typeof v.type!=='string'||!typeNames.includes(v.type)||v.text!==undefined&&v.caption!==undefined)return false;
  if(v.quoteCount!==undefined&&(typeof v.quoteCount!=='number'||!Number.isSafeInteger(v.quoteCount)||v.quoteCount<0||v.quoteCount>100))return false;
  if(v.mentionCount!==undefined&&(typeof v.mentionCount!=='number'||!Number.isSafeInteger(v.mentionCount)||v.mentionCount<0||v.mentionCount>100))return false;
  if(v.forwarded!==undefined&&typeof v.forwarded!=='boolean')return false;
+ if(v.displayName!==undefined&&(typeof v.displayName!=='string'||v.displayName.length>128||v.displayName.length===0||/[\u0000-\u001f\u007f]/u.test(v.displayName)))return false;
  if(v.text!==undefined&&(v.type!=='TEXT'||typeof v.text!=='string'||v.text.length>4096||v.text.includes('\0')))return false;
  if(v.caption!==undefined&&(v.type==='TEXT'||typeof v.caption!=='string'||v.caption.length>4096||v.caption.includes('\0')))return false;
  return v.links===undefined||stringList(v.links,x=>typeof x==='string'&&x.length>=1&&x.length<=2048&&urlHost(x)!==null,100);
@@ -138,6 +144,7 @@ export function evaluateProtectionRules(config:unknown,input:unknown,now:number=
   if(r.kind==='WORD'||r.kind==='PHRASE')return contains(lexicalBody,r.value);
   if(r.kind==='FRAUD')return containsSeparate(lexicalBody,r.identity,r.payment);
   if(r.kind==='LOOKALIKE')return [...hosts].some(h=>!config.allowedDomains.includes(h)&&resemblesDomain(h,r.domain));
+  if(r.kind==='NAME')return input.memberId!==r.trustedId&&input.displayName!==undefined&&normalizeProtectionText(input.displayName)===normalizeProtectionText(r.name);
   if(r.kind==='LIMIT'){
    const count=r.metric==='QUOTES'?(input.quoteCount??0):r.metric==='LENGTH'?Array.from(body).length:r.metric==='MENTIONS'?Math.max(input.mentionCount??0,[...body.matchAll(/(?<![\p{L}\p{N}_])@[A-Za-z][A-Za-z0-9_]{4,31}(?![A-Za-z0-9_])/gu)].length):[...body.matchAll(/(?<![\p{L}\p{N}_])#[\p{L}\p{N}_]+/gu)].length;
    return count>r.maximum;

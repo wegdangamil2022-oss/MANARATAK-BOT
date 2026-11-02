@@ -98,8 +98,8 @@ export class GroupProtectionPolicyService{
  }
  /** Record-only incoming TEXT monitor. Authorization precedes body/entity
   * evaluation; observations retain no sender identity or message contents. */
- async observeIncomingText(member:string,chat:string,text:string,entities:unknown,updateKey:string,countTraffic=true,delivery?:ProtectionDelivery):Promise<string>{
-  return this.observeIncomingMessage({chatId:chat,memberId:member,type:'TEXT',text},entities,updateKey,countTraffic,delivery);
+ async observeIncomingText(member:string,chat:string,text:string,entities:unknown,updateKey:string,countTraffic=true,delivery?:ProtectionDelivery,displayName?:string):Promise<string>{
+  return this.observeIncomingMessage({chatId:chat,memberId:member,type:'TEXT',text,...(displayName?{displayName}:{})},entities,updateKey,countTraffic,delivery);
  }
  async observeIncomingMessage(message:ProtectionMessage,entities:unknown,updateKey:string,countTraffic=true,delivery?:ProtectionDelivery):Promise<string>{
   const {chatId:chat,memberId:member}=message;
