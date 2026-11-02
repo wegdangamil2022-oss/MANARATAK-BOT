@@ -31,5 +31,5 @@ test('lookalike rule respects exact trusted domains and flags bounded host imita
  assert.equal(check('https://example.net'),'CLEAR');
  assert.equal(evaluateProtectionRules(policy,{chatId:'-100123',memberId:'300',type:'TEXT',text:'اضغط هنا',links:['https://examp1e.org']},1700000000000).status,'MATCH');
  assert.equal(evaluateProtectionRules({...policy,allowedDomains:['examp1e.org']},{chatId:'-100123',memberId:'300',type:'TEXT',text:'https://examp1e.org'},1700000000000).status,'CLEAR');
- for(const domain of ['https://example.org','EXAMPLE.ORG','localhost','127.0.0.1','example.org/path'])assert.equal(isValidProtectionPolicy({...policy,rules:[{...rule,domain}]}),false);
+ for(const domain of ['https://example.org','EXAMPLE.ORG','localhost','127.0.0.1','example.org/path','example..org','-example.org','example-.org'])assert.equal(isValidProtectionPolicy({...policy,rules:[{...rule,domain}]}),false);
 });

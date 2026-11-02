@@ -23,7 +23,8 @@ function host(v:unknown):v is string{
  try{const u=new URL('https://'+v);return u.hostname===v&&u.port===''&&u.username===''&&u.password===''&&u.pathname==='/';}catch{return false;}
 }
 function referenceDomain(v:unknown):v is string{
- return host(v)&&v.length>=5&&v.includes('.')&&/\.[a-z][a-z0-9-]{1,62}$/u.test(v)&&!/^\d+(?:\.\d+)+$/u.test(v);
+ return host(v)&&v.length>=5&&v.includes('.')&&/\.[a-z][a-z0-9-]{1,62}$/u.test(v)&&!/^\d+(?:\.\d+)+$/u.test(v)&&
+  v.split('.').every(label=>label.length<=63&&/^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/u.test(label));
 }
 const stringList=(v:unknown,check:(x:unknown)=>boolean,max:number):v is string[]=>Array.isArray(v)&&v.length<=max&&new Set(v).size===v.length&&v.every(check);
 function validJoinRaid(v:unknown):boolean{return object(v)&&keys(v,['enabled','minimumMembers','windowMs','lockSeconds'])&&typeof v.enabled==='boolean'&&[v.minimumMembers,v.windowMs,v.lockSeconds].every(n=>typeof n==='number'&&Number.isSafeInteger(n))&&Number(v.minimumMembers)>=3&&Number(v.minimumMembers)<=100&&Number(v.windowMs)>=5000&&Number(v.windowMs)<=60000&&Number(v.lockSeconds)>=60&&Number(v.lockSeconds)<=600;}
