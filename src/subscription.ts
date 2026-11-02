@@ -88,21 +88,10 @@ export class SubscriptionGate {
     const groupEpoch=s.chats.find(c=>c.id===chatId)?.version;
     const channelEpochs=new Map(config.channelIds.map(id=>
       [id,s.chats.find(c=>c.id===id)?.version] as const));
-    const responses: Membership[] = [];
-    for (const channel of config.channelIds) {
-      if (!this.policy.canUseChat(s, channel, 'verification'))
-       return {status:'UNAVAILABLE',channels:[]};
-      let verifiable=false;
-      try{verifiable=await this.membership.canVerifyChannel(channel);}
-      catch{return {status:'UNAVAILABLE',channels:[]};}
-      if(!verifiable)return {status:'UNAVAILABLE',channels:[]};
-      let response: Membership;
-      try{
-       const received=await this.membership.getMember(channel,userId);
-       response=received==='MEMBER'||received==='NOT_MEMBER'?received:'UNKNOWN';
-      }catch{response='UNKNOWN';}
-      responses.push(response);
-    }
+    if(config.channelIds.some(channel=>!this.policy.canUseChat(s,channel,'verification')))return {status:'UNAVAILABLE',channels:[]};
+    const verifiable=await Promise.all(config.channelIds.map(async channel=>{try{return await this.membership.canVerifyChannel(channel)===true;}catch{return false;}}));
+    if(!verifiable.every(Boolean))return {status:'UNAVAILABLE',channels:[]};
+    const responses:Membership[]=await Promise.all(config.channelIds.map(async channel=>{try{const received=await this.membership.getMember(channel,userId);return received==='MEMBER'||received==='NOT_MEMBER'?received:'UNKNOWN';}catch{return 'UNKNOWN' as const;}}));
     // Revalidation protects changes made while external checks were in flight.
     const latest = await this.store.snapshot();
     const current = latest.subscriptionRequirements.find(x => x.chatId === chatId);
@@ -146,6 +135,19 @@ export class SubscriptionGate {
   async synchronizeAutomatic(chat:string,member:string):Promise<{decision:SubscriptionDecision;effect?:ModerationResult|SubscriptionDecision;verified?:number;unknown?:number;total?:number}>{
     if(await this.automaticMode(chat)==='UNAVAILABLE')return {decision:{status:'DENIED',channels:[]}};
     let decision:SubscriptionDecision={status:'UNAVAILABLE',channels:[]},responses:Membership[]=[];const effect=await this.syncSubscriptionRestriction(chat,member,(d,r)=>{decision=structuredClone(d);responses=r;});return {decision,effect,verified:responses.filter(r=>r==='MEMBER').length,unknown:responses.filter(r=>r==='UNKNOWN').length,total:decision.channels.length};
+  }
+  async tickAutomatic(enabled=false,safetyGate:()=>Promise<boolean>=async()=>false,limit=5):Promise<{status:'DISABLED'|'INVALID'|'STOPPED'|'RAN';checked:number;changed:number;unresolved:number}>{
+    const result={checked:0,changed:0,unresolved:0};if(enabled!==true||!this.supportsAutomaticEnforcement())return {status:'DISABLED',...result};
+    const now=this.clock();if(!Number.isSafeInteger(now)||now<0||now>8640000000000000-5000||!Number.isSafeInteger(limit)||limit<1||limit>10)return {status:'INVALID',...result};
+    const permitted=async()=>{try{return await safetyGate()===true;}catch{return false;}};if(!await permitted())return {status:'STOPPED',...result};
+    const state=await this.store.snapshot(),seen=new Set<string>();
+    const targets=state.moderationReasons.filter(r=>{const key=r.chatId+':'+r.memberId;if(r.source!=='SUBSCRIPTION'||!r.active||r.reference!=='subscription-gate'||seen.has(key)||!subscriptionEnforcementConsent(state,this.policy,r.chatId,now))return false;seen.add(key);if(state.moderationOperations.some(o=>o.chatId===r.chatId&&o.memberId===r.memberId&&['INTENT','STARTED','UNKNOWN_OUTCOME'].includes(o.status))){result.unresolved++;return false;}return true;}).sort((a,b)=>a.chatId.localeCompare(b.chatId)||a.memberId.localeCompare(b.memberId));
+    const offset=targets.length?Math.floor(now/15000)*limit%targets.length:0;
+    for(let i=0;i<Math.min(limit,targets.length);i++){
+      if(!await permitted())return {status:'STOPPED',...result};const r=targets[(offset+i)%targets.length]!,outcome=await this.synchronizeAutomatic(r.chatId,r.memberId);result.checked++;
+      if(outcome.effect?.status==='APPLIED')result.changed++;if(outcome.effect?.status==='UNKNOWN_OUTCOME'||outcome.effect?.status==='BLOCKED_UNKNOWN')result.unresolved++;
+    }
+    return {status:'RAN',...result};
   }
   async syncSubscriptionRestriction(chatId: string, memberId: string,capture?:(decision:SubscriptionDecision,responses:Membership[])=>void): Promise<ModerationResult | SubscriptionDecision> {
     // The public verify() response contains no durable proof. Keep a private

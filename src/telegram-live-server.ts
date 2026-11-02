@@ -195,6 +195,7 @@ export async function createLiveTelegramServer(config:LiveTelegramConfig,
   const cleanup=startProtectionMaintenance(async()=>{
    const result=await protection.cleanupFloodWindows();
    if(phase3)await phase3.tick(check.phase3TimersEnabled===true);
+   if(phase3&&check.phase3TimersEnabled===true){const verified=await subscription.tickAutomatic(true,safetyGate);if(verified.status==='INVALID')throw Error('SUBSCRIPTION_MAINTENANCE_INVALID');}
    if(result.status==='CLOCK_UNTRUSTED')throw Error('PROTECTION_CLOCK_UNTRUSTED');
   },undefined,()=>process.stderr.write('PROTECTION_MAINTENANCE_FAILED\n'));
   protectionMaintenanceStops.set(server,cleanup.stop);

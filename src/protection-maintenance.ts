@@ -4,8 +4,8 @@ const scheduleInterval:Schedule=tick=>{
  const timer=setInterval(tick,PROTECTION_MAINTENANCE_INTERVAL_MS);timer.unref();
  return ()=>clearInterval(timer);
 };
-/** Local data cleanup only. No overlapping transactions, outbound requests,
- * secret-bearing error messages or new work after shutdown begins. */
+/** Serialized maintenance: default callers clean local data; explicit runtime
+ * opt-ins may add guarded effects. No overlapping ticks or work after drain. */
 export function startProtectionMaintenance(cleanup:()=>Promise<void>,schedule:Schedule=scheduleInterval,onFailure:()=>void=()=>{}):{stop:()=>Promise<void>}{
  let stopped=false,pending:Promise<void>|undefined;
  const tick=()=>{

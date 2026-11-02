@@ -87,6 +87,15 @@ for(const engine of ['json','sqlite'] as const){
    const root=await tap('sc:1:h'),edit=await tap(pick(root,CHAT)),review=await tap(pick(edit,'معاينة إيقاف التقييد'));assert.ok(await tap(pick(review,'تعطيل التقييد والسماح')));assert.equal(await f.gate.automaticMode(CHAT),'OFF');f.membership.verifiable=false;assert.equal((await f.gate.synchronizeAutomatic(CHAT,'300')).effect!.status,'APPLIED');assert.equal(f.target().status,'member');
   }finally{await f.close();}
  });
+ test(engine+' periodic checks stay off by default, honor STOP, release only active owned reasons and skip unknown receipts',async()=>{
+  const f=await fixture();try{
+   await f.consent();f.membership.set('-200','300','NOT_MEMBER');assert.equal((await f.gate.synchronizeAutomatic(CHAT,'300')).effect!.status,'APPLIED');f.time(NOW+1000);f.membership.set('-200','300','MEMBER');
+   assert.equal((await f.gate.tickAutomatic()).status,'DISABLED');assert.equal((await f.gate.tickAutomatic(true,async()=>false)).status,'STOPPED');assert.equal(f.writes.length,1);
+   const ran=await f.gate.tickAutomatic(true,async()=>true);assert.equal(ran.checked,1);assert.equal(ran.changed,1);assert.equal(f.target().status,'member');assert.equal((await f.gate.tickAutomatic(true,async()=>true)).checked,0);
+   f.time(NOW+2000);f.membership.set('-200','300','NOT_MEMBER');assert.equal((await f.gate.synchronizeAutomatic(CHAT,'300')).effect!.status,'APPLIED');f.time(NOW+3000);f.membership.set('-200','300','MEMBER');f.lost();assert.equal((await f.gate.tickAutomatic(true,async()=>true)).unresolved,1);const writes=f.writes.length;
+   const blocked=await f.gate.tickAutomatic(true,async()=>true);assert.equal(blocked.checked,0);assert.equal(blocked.unresolved,1);assert.equal(f.writes.length,writes);
+  }finally{await f.close();}
+ });
  test(engine+' consent is invalid after rule, approval or private-setting revision changes and future receipts cannot authorize',async()=>{
   const f=await fixture();try{await f.consent();assert.ok(subscriptionEnforcementConsent(await f.store.snapshot(),f.policy,CHAT,NOW));assert.equal(subscriptionEnforcementConsent(await f.store.snapshot(),f.policy,CHAT,NOW-1),null);await f.store.transaction(s=>{s.subscriptionRequirements[0]!.version++;});assert.equal(subscriptionEnforcementConsent(await f.store.snapshot(),f.policy,CHAT,NOW),null);}finally{await f.close();}
  });
