@@ -4,8 +4,10 @@ import type {Policy} from './policy.js';
 import type {OwnerInlineScreen} from './telegram-inline-owner.js';
 import {protectionUIEpoch,type AdminUIAccess} from './protection-ui-access.js';
 import {parseReplyModerationCommand} from './telegram-moderation-commands.js';
+import {enqueueReportNotices,reportNoticeEnabled,setReportNoticePreference} from './moderation-report-notices.js';
 const ROUTE=/^rp:1:([hr]):(0|[1-9][0-9]{0,2})$|^rp:1:([dxc]):([or]):(0|[1-9][0-9]{0,2}):([1-8]):([a-f0-9]{16})$/u;
-export const validModerationReportRoute=(data:string)=>ROUTE.exec(data)?.[0]===data;
+const PREF_ROUTE=/^rp:1:t:(0|[1-9][0-9]{0,2})$|^rp:1:o:(0|[1-9][0-9]{0,2}):([1-8]):([a-f0-9]{16})$/u;
+export const validModerationReportRoute=(data:string)=>ROUTE.exec(data)?.[0]===data||PREF_ROUTE.exec(data)?.[0]===data;
 const ROOT='moderation:report:',PREFIX='MODERATION_REPORT:';
 type Report={id:string;actor:string;chat:string;member:string;message:number;at:number;version:number;closed:boolean};
 const b=(text:string,callback_data:string)=>({text,callback_data});
@@ -35,10 +37,28 @@ export class TelegramModerationReports{
    const now=this.clock();if(!Number.isSafeInteger(now)||now<0||now>8640000000000000-120000||!this.policy.canUseChat(s,chat,'moderation')||!this.policy.privateFeature(s,'support.use',actor))return 'DENIED';
    const all=records(s);if(all.some(r=>r.actor===actor&&r.chat===chat&&r.message===message))return 'DUPLICATE';
    if(all.some(r=>r.actor===actor&&r.at>now)||all.filter(r=>r.actor===actor&&r.at>now-86400000).length>=3||all.filter(r=>r.chat===chat&&!r.closed).length>=200)return 'LIMIT';
-   s.audit.push({actorId:actor,updateKey:ROOT+randomBytes(18).toString('base64url'),decision:'ALLOW',reason:PREFIX+Buffer.from(JSON.stringify({chat,member,message})).toString('base64url'),policyVersion:this.policy.chatRevision(s,chat),at:now});return 'RECORDED';
+   const id=randomBytes(18).toString('base64url');s.audit.push({actorId:actor,updateKey:ROOT+id,decision:'ALLOW',reason:PREFIX+Buffer.from(JSON.stringify({chat,member,message})).toString('base64url'),policyVersion:this.policy.chatRevision(s,chat),at:now});enqueueReportNotices(s,this.policy,chat,id,now);return 'RECORDED';
   });
  }
  async handle(actor:string,data:string):Promise<(OwnerInlineScreen&{access?:AdminUIAccess})|null>{
+  const preference=PREF_ROUTE.exec(data);
+  if(preference&&preference[0]===data){
+   if(!/^[1-9][0-9]{0,15}$/u.test(actor)||!Number.isSafeInteger(Number(actor)))return null;
+   return this.store.transaction(s=>{
+    const now=this.clock();if(!Number.isSafeInteger(now)||now<0||now>8640000000000000-120000)return null;
+    const access=protectionUIEpoch(s,this.policy,actor,now);if(!access)return null;
+    const groups=s.chats.filter(c=>this.manager(s,actor,c.id)).sort((a,b)=>a.id.localeCompare(b.id));
+    const page=Number(preference[1]??preference[2]);if(page>=Math.max(1,Math.ceil(groups.length/8)))return null;
+    const proof=hash([actor,groups,s.grants,s.privateFeatures,s.privateSettingsRevision,s.audit.filter(a=>/^moderation:report:notice-pref:[A-Za-z0-9_-]{24}$/u.test(a.updateKey))]);
+    if(preference[4]!==undefined){const group=groups[page*8+Number(preference[3])-1];if(preference[4]!==proof||!group||!setReportNoticePreference(s,this.policy,actor,group.id,now))return null;}
+    const nextProof=hash([actor,groups,s.grants,s.privateFeatures,s.privateSettingsRevision,s.audit.filter(a=>/^moderation:report:notice-pref:[A-Za-z0-9_-]{24}$/u.test(a.updateKey))]);
+    const rows=groups.slice(page*8,page*8+8).map((c,i)=>[b((reportNoticeEnabled(s,this.policy,actor,c.id,now)?'🔔 مفعّل · ':'🔕 متوقف · ')+c.id,'rp:1:o:'+page+':'+(i+1)+':'+nextProof)]);
+    if(page>0)rows.push([b('⬅️ السابق','rp:1:t:'+(page-1))]);if((page+1)*8<groups.length)rows.push([b('➡️ التالي','rp:1:t:'+(page+1))]);
+    rows.push([b('↩️ بلاغات المجموعات','rp:1:r:0')]);
+    const updated=protectionUIEpoch(s,this.policy,actor,now);if(!updated)return null;
+    return {text:'تنبيهات البلاغات الخاصة لكل مجموعة. اضغط لتفعيل التنبيه أو إيقافه؛ يلزم تشغيل المرحلة الثالثة وتوفر صلاحيتك عند الإرسال. قد لا يصل التنبيه إذا توقف البوت أو تعذر الإرسال.',keyboard:{inline_keyboard:rows},access:{actorId:actor,epoch:updated,expiresAt:now+120000}};
+   });
+  }
   const route=ROUTE.exec(data);
   if(!route||route[0]!==data||!/^[1-9][0-9]{0,15}$/u.test(actor)||!Number.isSafeInteger(Number(actor)))return null;
   return this.store.transaction(s=>{
@@ -53,7 +73,8 @@ export class TelegramModerationReports{
     const rows=entries.slice(page*8,page*8+8).map((r,i)=>[b((r.closed?'✅ مغلق':'📨 مفتوح')+' · '+r.chat,'rp:1:d:'+(review?'r':'o')+':'+page+':'+(i+1)+':'+proof)]);
     if(page>0)rows.push([b('⬅️ السابق','rp:1:'+(review?'r':'h')+':'+(page-1))]);if((page+1)*8<entries.length)rows.push([b('➡️ التالي','rp:1:'+(review?'r':'h')+':'+(page+1))]);
     if(!review&&s.chats.some(c=>this.manager(s,actor,c.id)))rows.push([b('🛡 بلاغات المجموعات المخولة','rp:1:r:0')]);
-    rows.push([b('🏠 الرئيسية','pn:1:h')]);return screen((review?'بلاغات المجموعات المخولة':'بلاغاتي')+' — صفحة '+(page+1)+'\nللإبلاغ استخدم /report بالرد المباشر على رسالة العضو في المجموعة. لا يُحفظ نص الرسالة ولا ينفذ البلاغ عقوبة. التنبيه الخارجي للفريق غير موصول بعد.',rows);
+    if(review)rows.push([b('🔔 إعداد تنبيهات البلاغات','rp:1:t:0')]);
+    rows.push([b('🏠 الرئيسية','pn:1:h')]);return screen((review?'بلاغات المجموعات المخولة':'بلاغاتي')+' — صفحة '+(page+1)+'\nللإبلاغ استخدم /report بالرد المباشر على رسالة العضو في المجموعة. لا يُحفظ نص الرسالة ولا ينفذ البلاغ عقوبة.',rows);
    }
    const r=entries[page*8+slot-1];if(!r||r.at>now)return null;
    const stem='r:'+page+':'+slot+':'+proof;

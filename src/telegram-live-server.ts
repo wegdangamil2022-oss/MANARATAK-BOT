@@ -17,6 +17,7 @@ import {TelegramBotApiDocumentDownloader} from './telegram-document-download.js'
 import {SubscriptionGate} from './subscription.js';
 import {ModerationService,FakeModerationGateway} from './moderation.js';
 import {readTelegramSafetySwitch,createTelegramSafetyGate} from './telegram-safety-switch.js';
+import {ModerationReportNoticeDispatcher} from './moderation-report-notices.js';
 
 export interface LiveTelegramConfig{
  ownerId:string;botId:string;botUsername:string;stateFile:string;
@@ -188,6 +189,7 @@ export async function createLiveTelegramServer(config:LiveTelegramConfig,
  const dispatcher=new TelegramReplyDispatcher(store,policy,
   new TelegramBotApiTextSender(check.token,request),Date.now,safetyGate,subscription,
   (chatId,actorId)=>membership.verifyMembership(chatId,actorId));
+ const notices=phase3?new ModerationReportNoticeDispatcher(store,policy,new TelegramBotApiTextSender(check.token,request),Date.now,safetyGate):undefined;
  const server=createServer(telegramWebhookListener(app,check.webhookSecret,dispatcher,{},safetyGate,
   new TelegramBotApiCallbackAcker(check.token,request)));
  server.once('listening',()=>{
@@ -196,6 +198,7 @@ export async function createLiveTelegramServer(config:LiveTelegramConfig,
    const result=await protection.cleanupFloodWindows();
    if(phase3)await phase3.tick(check.phase3TimersEnabled===true);
    if(phase3&&check.phase3TimersEnabled===true){const verified=await subscription.tickAutomatic(true,safetyGate);if(verified.status==='INVALID')throw Error('SUBSCRIPTION_MAINTENANCE_INVALID');}
+   if(notices)await notices.drain();
    if(result.status==='CLOCK_UNTRUSTED')throw Error('PROTECTION_CLOCK_UNTRUSTED');
   },undefined,()=>process.stderr.write('PROTECTION_MAINTENANCE_FAILED\n'));
   protectionMaintenanceStops.set(server,cleanup.stop);
