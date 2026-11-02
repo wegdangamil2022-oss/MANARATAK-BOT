@@ -2,7 +2,7 @@ import type {BotState,ModerationOperation} from './store.js';
 
 /** Conservative, unconditional offline/online sanction rate fuse.
  *
- * Limits apply to *new* BAN/MUTE dispatch attempts. No separate counters,
+ * Limits apply to *new* BAN/MUTE/KICK dispatch attempts. No separate counters,
  * timers, TTL resets or external locks: immutable intent/attempt records in the
  * shared durable ModerationOperation ledger are the reservation authority.
  * The store transaction serializes the check AND new INTENT creation.
@@ -28,7 +28,7 @@ export const moderationRateDenial=(code:ModerationRateBlock):string=>
  'MODERATION_RATE_LIMIT_INVALID_CLOCK';
 
 const sanction=(o:ModerationOperation):boolean=>
- (o.kind==='BAN'||o.kind==='MUTE')&&o.status!=='CANCELLED';
+ (o.kind==='BAN'||o.kind==='MUTE'||o.action==='KICK')&&o.status!=='CANCELLED';
 
 /** Pure projection; no private identities, personal data or raw evidence
  * should be included in UI logs. The caller must not treat null as permission:

@@ -16,7 +16,7 @@ export async function renderOwnerModerationRateStatus(store:BotStore,policy:Poli
  const enabled=new Set(snapshot.chats.filter(c=>c.approved&&
   c.scopes.includes('moderation')).map(c=>c.id));
  const considered=snapshot.moderationOperations.filter(o=>
-  enabled.has(o.chatId)&&(o.kind==='BAN'||o.kind==='MUTE')&&
+  enabled.has(o.chatId)&&(o.kind==='BAN'||o.kind==='MUTE'||o.action==='KICK')&&
   o.status!=='CANCELLED');
  const ten=considered.filter(o=>o.createdAt>now-MODERATION_RATE_LIMITS.tenMinutesMs).length;
  const day=considered.filter(o=>o.createdAt>now-MODERATION_RATE_LIMITS.dayMs).length;

@@ -50,9 +50,9 @@ const digestOf=(x:PendingEntry):string=>createHash('sha256')
  .update(JSON.stringify([x.chat.id,x.chat.approved,x.chat.version,x.chat.scopes,
   x.op.id,x.op.chatId,x.op.memberId,x.op.actorId,x.op.kind,
   x.op.reasonFingerprint,x.op.policyVersion,x.op.createdAt,
-  x.op.status,x.op.attemptGateway??null]))
+  x.op.status,x.op.attemptGateway??null,...(x.op.untilDate===undefined?[]:[{untilDate:x.op.untilDate}]),...(x.op.baselineMode===undefined?[]:[{baselineMode:x.op.baselineMode}]),...(x.op.reverses===undefined?[]:[{reverses:x.op.reverses}]),...(x.op.action===undefined?[]:[{action:x.op.action}]),...(x.op.caseReference===undefined?[]:[{caseReference:x.op.caseReference}])]))
  .digest('hex').slice(0,12);
-const label=(op:ModerationOperation)=>op.kind==='BAN'?'حظر':
+const label=(op:ModerationOperation)=>op.action==='KICK'?'طرد':op.kind==='BAN'?'حظر':
  op.kind==='MUTE'?'كتم':'رفع قيد (سجل محلي)';
 const button=(text:string,callback_data:string)=>({text,callback_data});
 const screen=(text:string,rows:readonly (readonly {text:string;callback_data:string}[])[]):OwnerInlineScreen=>({

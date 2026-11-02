@@ -1,3 +1,4 @@
+import {subscriptionVerificationEpoch} from './subscription-verification-access.js';
 import {validAdminUIAccess,protectionUIEpoch,ADMIN_UI_TTL_MS} from './protection-ui-access.js';
 import {randomUUID} from 'node:crypto';
 import {BotStore,type TelegramReplyJob} from './store.js';
@@ -171,14 +172,14 @@ export function validTelegramReplyJob(v:unknown):v is TelegramReplyJob{
   (j.privateReplyKind===undefined||
    (j.status==='QUEUED'&&validPlan(j.plan)&&
     !j.plan.chatId.startsWith('-')&&
-    (j.privateReplyKind==='LOCAL'||j.privateReplyKind==='GROUP_SCOPED'||j.privateReplyKind==='ADMIN_SCOPED'||j.privateReplyKind==='LIBRARY_SCOPED'||j.privateReplyKind==='STUDIO_SCOPED'||j.privateReplyKind==='COMMUNITY_SCOPED')&&
+    (j.privateReplyKind==='LOCAL'||j.privateReplyKind==='GROUP_SCOPED'||j.privateReplyKind==='VERIFICATION_SCOPED'||j.privateReplyKind==='ADMIN_SCOPED'||j.privateReplyKind==='LIBRARY_SCOPED'||j.privateReplyKind==='STUDIO_SCOPED'||j.privateReplyKind==='COMMUNITY_SCOPED')&&
     j.groupReplyKind===undefined&&j.groupQuestionAccess===undefined&&
     j.groupMenuAccess===undefined&&
     ((j.privateReplyKind==='LOCAL'&&j.privateGroupAccess===undefined&&j.adminUIAccess===undefined&&j.privateLibraryAccess===undefined)||
      ((j.privateReplyKind==='ADMIN_SCOPED'||j.privateReplyKind==='STUDIO_SCOPED')&&j.privateGroupAccess===undefined&&j.privateLibraryAccess===undefined&&validAdminUIAccess(j.adminUIAccess)&&j.plan.chatId===j.adminUIAccess.actorId)||
      (j.privateReplyKind==='LIBRARY_SCOPED'&&j.privateGroupAccess===undefined&&j.adminUIAccess===undefined&&validAdminUIAccess(j.privateLibraryAccess)&&j.plan.chatId===j.privateLibraryAccess.actorId)||
      (j.privateReplyKind==='COMMUNITY_SCOPED'&&j.privateGroupAccess===undefined&&j.adminUIAccess===undefined&&j.privateLibraryAccess===undefined&&validAdminUIAccess(j.communityAccess)&&j.plan.chatId===j.communityAccess.actorId)||
-     (j.privateReplyKind==='GROUP_SCOPED'&&j.adminUIAccess===undefined&&j.privateLibraryAccess===undefined&&
+     ((j.privateReplyKind==='GROUP_SCOPED'||j.privateReplyKind==='VERIFICATION_SCOPED')&&j.adminUIAccess===undefined&&j.privateLibraryAccess===undefined&&
       validPrivateGroupAccess(j.privateGroupAccess)&&
       j.plan.chatId===j.privateGroupAccess.actorId))))&&
   (j.adminUIAccess===undefined||(j.status==='QUEUED'&&validPlan(j.plan)&&validAdminUIAccess(j.adminUIAccess)&&
@@ -241,7 +242,7 @@ export class TelegramReplyDispatcher {
   */
  private async checkGroupEligibility(updateKey:string):Promise<
   {access:NonNullable<TelegramReplyJob['groupQuestionAccess']>;
-   kind:'FAQ'|'MENU'|'PRIVATE_GROUP';allowed:boolean}|undefined>{
+   kind:'FAQ'|'MENU'|'PRIVATE_GROUP'|'PRIVATE_VERIFICATION';allowed:boolean}|undefined>{
   const snap=await this.store.snapshot();
   const matches=snap.telegramReplyJobs?.filter(j=>j.updateKey===updateKey)??[];
   // Never initiate remote membership reads from an ambiguous restored key.
@@ -250,11 +251,11 @@ export class TelegramReplyDispatcher {
   if(job.status!=='QUEUED')return undefined;
   if(!validTelegramReplyJob(job))throw Error('INVALID_REPLY_JOB');
   const kind=job.groupQuestionAccess?'FAQ' as const:
-   job.groupMenuAccess?'MENU' as const:job.privateGroupAccess?'PRIVATE_GROUP' as const:null;
+   job.groupMenuAccess?'MENU' as const:job.privateGroupAccess?(job.privateReplyKind==='VERIFICATION_SCOPED'?'PRIVATE_VERIFICATION' as const:'PRIVATE_GROUP' as const):null;
   if(!kind)return undefined;
   const access=structuredClone((kind==='FAQ'?job.groupQuestionAccess:
    kind==='MENU'?job.groupMenuAccess:job.privateGroupAccess)!);
-  const groupId=kind==='PRIVATE_GROUP'?
+  const groupId=kind==='PRIVATE_GROUP'||kind==='PRIVATE_VERIFICATION'?
    (access as NonNullable<TelegramReplyJob['privateGroupAccess']>).scope:
    job.plan!.chatId,actor=access.actorId;
   let allowed=false;
@@ -264,13 +265,14 @@ export class TelegramReplyDispatcher {
        this.policy.canUseChat(snap,groupId,'navigation'))&&
       (kind==='FAQ'?groupQuestionEpochDigest(snap,groupId):
        kind==='MENU'?groupMenuEpochDigest(snap,groupId,job.plan!.messageThreadId):
-       privateGroupEpochDigest(snap,groupId))===access.epoch){
-    if(kind==='PRIVATE_GROUP'){
+       kind==='PRIVATE_VERIFICATION'?subscriptionVerificationEpoch(snap,this.policy,actor,groupId,this.clock()):privateGroupEpochDigest(snap,groupId))===access.epoch){
+    if(kind==='PRIVATE_GROUP'||kind==='PRIVATE_VERIFICATION'){
      if(!this.membership||await this.membership(groupId,actor)!=='VERIFIED')
       return {access,kind,allowed:false};
     }
     const mode=subscriptionRequirementMode(snap,groupId);
-    if(mode==='NONE'||mode==='PAUSED')allowed=true;
+    if(kind==='PRIVATE_VERIFICATION')allowed=true;
+    else if(mode==='NONE'||mode==='PAUSED')allowed=true;
     else if(mode==='ACTIVE'&&this.subscription){
      const proof=await this.subscription.verify(groupId,actor);
      allowed=acceptsActiveSubscriptionEvidence(proof.status,this.policy.isOwner(actor));
@@ -310,7 +312,8 @@ export class TelegramReplyDispatcher {
    if(plan.editMessageId!==undefined&&(s.telegramReplyJobs??[]).some(other=>other!==job&&other.communityEditTarget?.chatId===plan.chatId&&other.communityEditTarget.messageId===plan.editMessageId))return {status:'UNKNOWN_OUTCOME' as const};
    const faq=job.groupQuestionAccess,menu=job.groupMenuAccess,dm=job.privateGroupAccess;
    const access=faq??menu??dm;
-   const accessKind=faq?'FAQ':menu?'MENU':dm?'PRIVATE_GROUP':null;
+   const verification=job.privateReplyKind==='VERIFICATION_SCOPED';
+   const accessKind=faq?'FAQ':menu?'MENU':dm?verification?'PRIVATE_VERIFICATION':'PRIVATE_GROUP':null;
    const accessScope=dm?.scope??plan.chatId;
    // Unknown legacy group origins, plus GENERAL plans created before the
    // menu witness existed, cannot prove original actor/subscription authority.
@@ -342,7 +345,7 @@ export class TelegramReplyDispatcher {
       this.policy.canUseChat(s,accessScope,'navigation'))||
     (faq?groupQuestionEpochDigest(s,accessScope):
       menu?groupMenuEpochDigest(s,accessScope,plan.messageThreadId):
-      privateGroupEpochDigest(s,accessScope))!==access.epoch));
+      verification?subscriptionVerificationEpoch(s,this.policy,access.actorId,accessScope,this.clock()):privateGroupEpochDigest(s,accessScope))!==access.epoch));
    const groupUnavailable=plan.chatId.startsWith('-')&&
     !this.policy.canUseChat(s,plan.chatId,'navigation');
    if(forbidden||groupUnavailable){

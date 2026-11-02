@@ -24,7 +24,7 @@ export function groupModerationOperations(s:BotState,id:string):ModerationOperat
 export function moderationAuditDigest(ops:readonly ModerationOperation[]):string{
  return createHash('sha256').update('MANARATAK:MODERATION:STATUS:V1:')
   .update(JSON.stringify(ops.map(o=>[o.id,o.chatId,o.memberId,o.actorId,o.kind,
-   o.reasonFingerprint,o.policyVersion,o.status,o.createdAt])))
+   o.reasonFingerprint,o.policyVersion,o.status,o.createdAt,...(o.untilDate===undefined?[]:[{untilDate:o.untilDate}]),...(o.baselineMode===undefined?[]:[{baselineMode:o.baselineMode}]),...(o.reverses===undefined?[]:[{reverses:o.reverses}]),...(o.action===undefined?[]:[{action:o.action}]),...(o.caseReference===undefined?[]:[{caseReference:o.caseReference}])])))
   .digest('hex').slice(0,12);
 }
 export const moderationAuditKey=(chat:Chat,page:number,opPage:number,digest:string)=>
@@ -38,7 +38,7 @@ export function renderStaffModerationAudit(chat:Chat,groupPage:number,opPage:num
  for(const o of ops){if(Object.hasOwn(counters,o.status))counters[o.status]++;}
  const visible=ops.slice(opPage*8,(opPage+1)*8);
  const lines=visible.map((o,index)=>{
-  const kind=o.kind==='BAN'?'حظر':o.kind==='MUTE'?'كتم':'رفع قيد (سجل محلي)';
+  const kind=o.action==='KICK'?'طرد':o.kind==='BAN'?'حظر':o.kind==='MUTE'?'كتم':'رفع قيد (سجل محلي)';
   return '• '+(opPage*8+index+1)+'. '+kind+' — '+
    (statusLabels[o.status]??'حالة غير معروفة');
  });

@@ -713,4 +713,77 @@ for(const engine of ['json','sqlite'] as const){
    assert.equal((await f.store.snapshot()).protectionPolicies,undefined);
   }finally{await f.close();}
  });
+ test('fraud entry creates a disabled two-phrase rule, tests samples, and supports navigation ('+engine+')',async()=>{
+  const f=await fixture();try{
+   const home=await f.app().handle(cb(1,'mi:1:i:02:09'));
+   assert.equal(home.status,'APPLIED');const group=await f.app().handle(cb(2,route(home,'pr:1:g:')));
+   const input=await f.app().handle(cb(3,route(group,'pr:1:X:')));assert.match(input.plan!.text,/ادعاء الهوية/u);
+   assert.equal((await f.app().handle(msg(4,'عبارة واحدة'))).reason,'PROTECTION_EDITOR_INPUT_REJECTED');
+   const saved=await f.app().handle(msg(5,'ممثل منارتك | رسوم التسجيل'));assert.equal(saved.status,'APPLIED');
+   const rule=(await f.store.snapshot()).protectionPolicies![0]!.policy.rules[0]!;
+   assert.equal(rule.kind,'FRAUD');assert.equal(rule.enabled,false);assert.equal(rule.action,'REVIEW');
+   const testStep=await f.app().handle(cb(6,route(saved,'pr:1:t:')));assert.equal(testStep.status,'APPLIED');
+   const sample=await f.app().handle(msg(7,'أنا ممثل منارتك وأطلب رسوم التسجيل'));
+   assert.match(sample.plan!.text,/اجتماع عبارتي الادعاء والدفع/u);
+   assert.equal(JSON.stringify(await f.store.snapshot()).includes('أنا ممثل منارتك وأطلب'),false);
+   const reopened=await f.app().handle(cb(8,'pr:1:h'));const again=await f.app().handle(cb(9,route(reopened,'pr:1:g:')));
+   const list=await f.app().handle(cb(10,route(again,'pr:1:l:')));const details=await f.app().handle(cb(11,route(list,'pr:1:r:')));
+   assert.ok(route(details,'pr:1:l:'));assert.ok(route(details,'pr:1:e:'));assert.ok(route(details,'pr:1:d:'));
+   assert.equal((await f.app().handle(cb(12,'mi:1:i:02:09',200))).status,'DENIED');
+   const service=new GroupProtectionPolicyService(f.store,f.policy,()=>NOW),old=(await f.store.snapshot()).protectionPolicies![0]!.policy;
+   assert.equal((await service.save('100',{...old,revision:old.revision+1,mode:'MONITOR',rules:old.rules.map(r=>({...r,enabled:true}))},f.policy.chatRevision(await f.store.snapshot(),CHAT),old.revision)).status,'SAVED');
+   await f.app().handle({update_id:13,message:{message_id:13,chat:{id:Number(CHAT),type:'supergroup'},from:{id:300,is_bot:false},text:'ممثل منارتك يطلب رسوم التسجيل'}});
+   const state=await f.store.snapshot();assert.ok(state.audit.some(a=>a.reason.startsWith('PROTECTION_MONITOR_MATCH:')));assert.equal(JSON.stringify(state).includes('ممثل منارتك يطلب رسوم التسجيل'),false);
+   const h=await f.app().handle(cb(14,'pr:1:h')),g=await f.app().handle(cb(15,route(h,'pr:1:g:'))),l=await f.app().handle(cb(16,route(g,'pr:1:l:'))),d=await f.app().handle(cb(17,route(l,'pr:1:r:')));
+   assert.ok(await f.app().handle(cb(18,route(d,'pr:1:v:'))));assert.equal((await f.app().handle(msg(19,'مندوب منارتك | تحويل الرسوم'))).status,'APPLIED');
+   const changed=(await f.store.snapshot()).protectionPolicies![0]!.policy.rules[0]!;assert.equal(changed.kind,'FRAUD');assert.equal(changed.enabled,true);assert.equal(changed.id,rule.id);
+  }finally{await f.close();}
+ });
+ test('lookalike domain rule validates, tests, edits and returns to its group ('+engine+')',async()=>{
+  const f=await fixture();try{
+   const home=await f.app().handle(cb(1,'mi:1:i:02:09')),group=await f.app().handle(cb(2,route(home,'pr:1:g:')));
+   assert.equal((await f.app().handle(cb(3,route(group,'pr:1:Y:')))).status,'APPLIED');
+   assert.equal((await f.app().handle(msg(4,'https://example.org'))).reason,'PROTECTION_EDITOR_INPUT_REJECTED');
+   const saved=await f.app().handle(msg(5,'example.org'));assert.equal(saved.status,'APPLIED');
+   const rule=(await f.store.snapshot()).protectionPolicies![0]!.policy.rules[0]!;assert.equal(rule.kind,'LOOKALIKE');assert.equal(rule.enabled,false);assert.equal(rule.action,'REVIEW');
+   await f.app().handle(cb(6,route(saved,'pr:1:t:')));const sample=await f.app().handle(msg(7,'https://examp1e.org'));assert.match(sample.plan!.text,/نطاق مشابه للمرجع/u);
+   const h=await f.app().handle(cb(8,'pr:1:h')),g=await f.app().handle(cb(9,route(h,'pr:1:g:'))),l=await f.app().handle(cb(10,route(g,'pr:1:l:'))),d=await f.app().handle(cb(11,route(l,'pr:1:r:')));
+   assert.ok(route(d,'pr:1:l:'));assert.ok(route(d,'pr:1:e:'));assert.ok(route(d,'pr:1:d:'));
+   await f.app().handle(cb(12,route(d,'pr:1:v:')));assert.equal((await f.app().handle(msg(13,'school.edu'))).status,'APPLIED');
+   const edited=(await f.store.snapshot()).protectionPolicies![0]!.policy.rules[0]!;assert.equal(edited.kind,'LOOKALIKE');if(edited.kind==='LOOKALIKE')assert.equal(edited.domain,'school.edu');assert.equal(edited.id,rule.id);
+   const old=(await f.store.snapshot()).protectionPolicies![0]!.policy,service=new GroupProtectionPolicyService(f.store,f.policy,()=>NOW);
+   assert.equal((await service.save('100',{...old,revision:old.revision+1,mode:'MONITOR',rules:old.rules.map(r=>({...r,enabled:true}))},f.policy.chatRevision(await f.store.snapshot(),CHAT),old.revision)).status,'SAVED');
+   await f.app().handle({update_id:14,message:{message_id:14,chat:{id:Number(CHAT),type:'supergroup'},from:{id:300,is_bot:false},text:'زيارة',entities:[{type:'text_link',offset:0,length:5,url:'https://sch0ol.edu'}]}});
+   const state=await f.store.snapshot();assert.ok(state.audit.some(a=>a.reason.startsWith('PROTECTION_MONITOR_MATCH:')));assert.equal(JSON.stringify(state).includes('sch0ol.edu'),false);
+  }finally{await f.close();}
+ });
+ test('protected name rule checks the observed sender and never stores the observed name ('+engine+')',async()=>{
+  const f=await fixture();try{
+   const home=await f.app().handle(cb(1,'mi:1:i:02:09')),group=await f.app().handle(cb(2,route(home,'pr:1:g:')));
+   assert.equal((await f.app().handle(cb(3,route(group,'pr:1:Z:')))).status,'APPLIED');
+   assert.equal((await f.app().handle(msg(4,'إدارة منارتك | 0'))).reason,'PROTECTION_EDITOR_INPUT_REJECTED');
+   const saved=await f.app().handle(msg(5,'إدارة منارتك | 123456'));assert.equal(saved.status,'APPLIED');
+   const rule=(await f.store.snapshot()).protectionPolicies![0]!.policy.rules[0]!;assert.equal(rule.kind,'NAME');assert.equal(rule.enabled,false);assert.equal(rule.action,'REVIEW');
+   await f.app().handle(cb(6,route(saved,'pr:1:t:')));const sample=await f.app().handle(msg(7,'اسم: ادارة منارتك'));assert.match(sample.plan!.text,/تطابق الاسم مع رقم مختلف/u);
+   const old=(await f.store.snapshot()).protectionPolicies![0]!.policy,service=new GroupProtectionPolicyService(f.store,f.policy,()=>NOW);
+   assert.equal((await service.save('100',{...old,revision:old.revision+1,mode:'MONITOR',rules:old.rules.map(r=>({...r,enabled:true}))},f.policy.chatRevision(await f.store.snapshot(),CHAT),old.revision)).status,'SAVED');
+   const send=async(id:number,member:number,first:string,last:string)=>f.app().handle({update_id:id,message:{message_id:id,chat:{id:Number(CHAT),type:'supergroup'},from:{id:member,is_bot:false,first_name:first,last_name:last},text:'مرحبا'}});
+   await send(8,123456,'ادارة','منارتك');assert.equal((await f.store.snapshot()).audit.filter(a=>a.reason.startsWith('PROTECTION_MONITOR_MATCH:')).length,0);
+   await send(9,300,'ادارة','منارتك');let state=await f.store.snapshot();assert.equal(state.audit.filter(a=>a.reason.startsWith('PROTECTION_MONITOR_MATCH:')).length,1);assert.equal(JSON.stringify(state).includes('ادارة منارتك'),false);
+   await f.app().handle({update_id:10,message:{message_id:10,chat:{id:Number(CHAT),type:'supergroup'},from:{id:301,is_bot:false,first_name:'ادارة',last_name:'منارتك'},photo:[{file_id:'test',file_unique_id:'one',width:10,height:10}]}});
+   state=await f.store.snapshot();assert.equal(state.audit.filter(a=>a.reason.startsWith('PROTECTION_MONITOR_MATCH:')).length,2);
+   const h=await f.app().handle(cb(11,'pr:1:h')),g=await f.app().handle(cb(12,route(h,'pr:1:g:'))),l=await f.app().handle(cb(13,route(g,'pr:1:l:'))),d=await f.app().handle(cb(14,route(l,'pr:1:r:')));
+   assert.ok(route(d,'pr:1:l:'));assert.ok(route(d,'pr:1:e:'));assert.ok(route(d,'pr:1:d:'));assert.ok(route(d,'pr:1:v:'));
+   await f.app().handle(cb(15,route(d,'pr:1:v:')));assert.equal((await f.app().handle(msg(16,'إدارة الفريق | 123457'))).status,'APPLIED');
+   const changed=(await f.store.snapshot()).protectionPolicies![0]!.policy.rules[0]!;assert.equal(changed.kind,'NAME');assert.equal(changed.id,rule.id);assert.equal(changed.enabled,true);
+   const current=await f.app().handle(cb(17,'pr:1:h')),card=await f.app().handle(cb(18,route(current,'pr:1:g:')));
+   await f.app().handle(cb(19,route(card,'pr:1:Z:')));
+   assert.equal((await f.app().handle(msg(20,'ادارة الفريق | 777'))).reason,'PROTECTION_EDITOR_INPUT_REJECTED');
+   await f.app().handle(cb(21,'pr:1:h'));await f.app().handle(msg(22,'اسم غير محفوظ | 888'));
+   assert.equal((await f.store.snapshot()).protectionPolicies![0]!.policy.rules.length,1);
+   const finalHome=await f.app().handle(cb(23,'pr:1:h')),finalCard=await f.app().handle(cb(24,route(finalHome,'pr:1:g:')));
+   await f.app().handle(cb(25,route(finalCard,'pr:1:t:')));
+   const unavailable=await f.app().handle(msg(26,'اسم: '+'س'.repeat(129)));assert.equal(unavailable.reason,'PROTECTION_DRY_RUN_UNAVAILABLE');assert.doesNotMatch(unavailable.plan!.text,/لا مطابقة/u);
+  }finally{await f.close();}
+ });
 }

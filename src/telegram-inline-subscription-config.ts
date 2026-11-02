@@ -1,3 +1,4 @@
+import {recordSubscriptionEnforcementConsent,subscriptionEnforcementConsent} from './subscription-enforcement-policy.js';
 import {randomBytes} from 'node:crypto';
 import type {BotStore,BotState} from './store.js';
 import type {Policy} from './policy.js';
@@ -7,7 +8,7 @@ import {subscriptionConfigEpoch} from './subscription-config-epoch.js';
 import type {OwnerInlineScreen} from './telegram-inline-owner.js';
 import {protectionUIEpoch,type AdminUIAccess} from './protection-ui-access.js';
 const PREFIX='subscription-editor:',TTL=120000;
-type Step={kind:'groups'|'edit'|'review'|'confirm';page:number;group:string;channels:string[];mode:'ALL'|'ANY'|'AT_LEAST';minimumCount?:number};
+type Step={kind:'groups'|'edit'|'review'|'confirm'|'enforcementReview'|'enforcementEnable'|'enforcementOffReview'|'enforcementDisable';page:number;group:string;channels:string[];mode:'ALL'|'ANY'|'AT_LEAST';minimumCount?:number};
 const initial:Step={kind:'groups',page:0,group:'',channels:[],mode:'ALL'};
 const basicMode=(step:Step,mode:'ALL'|'ANY'):Step=>{const next={...step,mode};delete next.minimumCount;return next;};
 const canonical=(id:string)=>/^-[1-9][0-9]{0,15}$/u.test(id)&&Number.isSafeInteger(Number(id));
@@ -15,7 +16,7 @@ const available=(s:BotState,p:Policy)=>s.chats.filter(c=>canonical(c.id)&&s.chat
 export const validSubscriptionConfigRoute=(data:string):boolean=>data==='sc:1:h'||/^sc:1:[A-Za-z0-9_-]{24}$/u.exec(data)?.[0]===data;
 function validStep(v:unknown):v is Step{
  if(!v||typeof v!=='object'||Array.isArray(v))return false;const a=v as Record<string,unknown>;
- return Object.keys(a).length===(Object.hasOwn(a,'minimumCount')?6:5)&&['groups','edit','review','confirm'].includes(String(a.kind))&&Number.isSafeInteger(a.page)&&Number(a.page)>=0&&Number(a.page)<=999&&typeof a.group==='string'&&(a.group===''||canonical(a.group))&&Array.isArray(a.channels)&&a.channels.length<=10&&a.channels.every(c=>typeof c==='string'&&canonical(c))&&new Set(a.channels).size===a.channels.length&&((a.mode==='ALL'||a.mode==='ANY')?!Object.hasOwn(a,'minimumCount'):a.mode==='AT_LEAST'&&Number.isSafeInteger(a.minimumCount)&&Number(a.minimumCount)>=1&&Number(a.minimumCount)<=a.channels.length)&&(a.kind==='groups'?a.group===''&&a.channels.length===0:a.group!=='');
+ return Object.keys(a).length===(Object.hasOwn(a,'minimumCount')?6:5)&&['groups','edit','review','confirm','enforcementReview','enforcementEnable','enforcementOffReview','enforcementDisable'].includes(String(a.kind))&&Number.isSafeInteger(a.page)&&Number(a.page)>=0&&Number(a.page)<=999&&typeof a.group==='string'&&(a.group===''||canonical(a.group))&&Array.isArray(a.channels)&&a.channels.length<=10&&a.channels.every(c=>typeof c==='string'&&canonical(c))&&new Set(a.channels).size===a.channels.length&&((a.mode==='ALL'||a.mode==='ANY')?!Object.hasOwn(a,'minimumCount'):a.mode==='AT_LEAST'&&Number.isSafeInteger(a.minimumCount)&&Number(a.minimumCount)>=1&&Number(a.minimumCount)<=a.channels.length)&&(a.kind==='groups'?a.group===''&&a.channels.length===0:a.group!=='');
 }
 export async function cancelSubscriptionConfig(store:BotStore,actor:string):Promise<void>{
  await store.transaction(s=>{
@@ -36,12 +37,14 @@ export async function renderSubscriptionConfig(store:BotStore,policy:Policy,gate
   if(!Array.isArray(v)||v.length!==2||!validStep(v[0])||v[1]!==subscriptionConfigEpoch(s))return null;c.used=true;return {step:v[0],epoch:v[1] as string};
  });
  if(!request)return null;let step=request.step,saved=false;
+ if(step.kind==='enforcementEnable'&&(!gate||!await gate.validateEnforcementConfiguration(actor,step.group,request.epoch)))return null;
  if(step.kind==='confirm'){
   if(!gate)return null;
   try{await gate.configure(actor,step.group,[...step.channels],step.mode,request.epoch,step.minimumCount);saved=true;step={...step,kind:'edit',page:0};}catch{return null;}
  }
  return store.transaction(s=>{
   const now=clock();if(!Number.isSafeInteger(now)||now<0||now>8640000000000000-TTL||!policy.privateFeature(s,'owner.dashboard',actor)||!saved&&subscriptionConfigEpoch(s)!==request.epoch)return null;
+  if(step.kind==='enforcementEnable'||step.kind==='enforcementDisable'){const rule=s.subscriptionRequirements.find(r=>r.chatId===step.group);if(!gate?.supportsAutomaticEnforcement()||!rule||JSON.stringify(rule.channelIds)!==JSON.stringify(step.channels)||rule.mode!==step.mode||rule.minimumCount!==step.minimumCount||!recordSubscriptionEnforcementConsent(s,policy,actor,step.group,step.kind==='enforcementEnable',now))return null;saved=true;step={...step,kind:'edit'};}
   const epoch=subscriptionConfigEpoch(s),chats=available(s,policy),groups=chats.filter(c=>policy.canUseChat(s,c.id,'navigation'));
   s.callbacks=s.callbacks.filter(c=>!c.ref.startsWith(PREFIX)||c.expiresAt>now);const previous=s.callbacks.filter(c=>c.ref.startsWith(PREFIX)&&c.actorId===actor);let created=0;
   const b=(text:string,next:Step)=>{const nonce=randomBytes(18).toString('base64url');created++;s.callbacks.push({ref:PREFIX+nonce,actorId:actor,chatId:'private',policyVersion:0,oneShot:true,used:false,revoked:false,expiresAt:now+TTL,action:PREFIX+JSON.stringify([next,epoch])});return {text,callback_data:'sc:1:'+nonce};};
@@ -58,7 +61,11 @@ export async function renderSubscriptionConfig(store:BotStore,policy:Policy,gate
   }else{
    if(!groups.some(c=>c.id===step.group))return null;
    const channels=chats.filter(c=>c.id!==step.group);if(step.channels.some(id=>!channels.some(c=>c.id===id)))return null;
-   if(step.kind==='review'){
+   if(step.kind==='enforcementReview'||step.kind==='enforcementOffReview'){
+    const rule=s.subscriptionRequirements.find(r=>r.chatId===step.group);if(!gate?.supportsAutomaticEnforcement()||!rule||JSON.stringify(rule.channelIds)!==JSON.stringify(step.channels)||rule.mode!==step.mode||rule.minimumCount!==step.minimumCount)return null;
+    const enable=step.kind==='enforcementReview';text='<b>معاينة '+(enable?'تفعيل':'تعطيل')+' تقييد الاشتراك</b>\nالمجموعة: '+step.group+'\n'+(enable?'بعد رسالة بشرية واردة، غياب الاشتراك المؤكد قد يضيف كتم الاشتراك. بعد تحقق حديث يسمح بفك سبب الاشتراك المنفرد المطابق من سجل المحول الرسمي لعضو كان عاديًا. لا يفتح أسبابًا مستقلة أو سجلاً غامضًا. قد يتعذر تمييز قيد خارجي مطابق متزامن؛ راجع ذلك قبل الاعتماد.':'يوقف التقييد الجديد ويسمح بفك سبب الاشتراك المنفرد المطابق عند التحقق التالي من العضو. لا يرفع أسبابًا مستقلة ولا يستأنف محاولة مجهولة.')+'\nيظل التشغيل الحقيقي خاضعًا لاختيار المشغل وSTOP. تغيير الشرط أو اعتماد الجهات يبطل هذا القرار؛ لا تُفعّل العقوبات بمجرد حفظ جهات الاشتراك.';
+    rows.push([b(enable?'✅ اعتماد التقييد والفك المطابق':'✅ تعطيل التقييد والسماح بالفك المطابق',{...step,kind:enable?'enforcementEnable':'enforcementDisable'})]);rows.push([b('↩️ رجوع دون تغيير',{...step,kind:'edit'})]);
+   }else if(step.kind==='review'){
     text='<b>معاينة شرط الاشتراك</b>\nالمجموعة: <code>'+step.group+'</code>\nالقاعدة: '+(step.channels.length?(step.mode==='ALL'?'جميع الجهات المختارة':step.mode==='ANY'?'جهة واحدة على الأقل':'حد أدنى '+step.minimumCount+' من '+step.channels.length):'تعطيل الشرط')+'\nالمختار: '+step.channels.join('، ')+'\nيتحقق الحفظ من قابلية فحص الجهات المختارة؛ لا يغير عضوية أحد أو ينفذ عقوبة.';
     rows.push([b('✅ حفظ والتحقق من الصلاحيات',{...step,kind:'confirm'})]);
    }else{
@@ -70,6 +77,8 @@ export async function renderSubscriptionConfig(store:BotStore,policy:Policy,gate
     rows.push([b('☑️ جميع القنوات',basicMode(step,'ALL')),b('🔘 قناة واحدة على الأقل',basicMode(step,'ANY'))]);
     if(step.channels.length>=2)rows.push([b('🔢 حد أدنى (الافتراضي 2)',{...step,mode:'AT_LEAST',minimumCount:2})]);
     if(step.mode==='AT_LEAST')for(let n=1;n<=step.channels.length;n+=3)rows.push(Array.from({length:Math.min(3,step.channels.length-n+1)},(_,i)=>b('🔢 '+(n+i)+' من '+step.channels.length,{...step,minimumCount:n+i})));
+    const enforcement=subscriptionEnforcementConsent(s,policy,step.group,now);text+='\nتقييد الاشتراك: '+(enforcement?.enabled?'قرار تفعيل محفوظ':'غير مفعل');
+    if(gate?.supportsAutomaticEnforcement()){if(!enforcement?.enabled&&step.channels.length)rows.push([b('🔒 معاينة تفعيل التقييد',{...step,kind:'enforcementReview'})]);rows.push([b('⏹ معاينة إيقاف التقييد والفك المطابق',{...step,kind:'enforcementOffReview'})]);}
     rows.push([b('👁️ معاينة '+(step.mode==='ALL'?'الكل':step.mode==='ANY'?'واحدة':step.minimumCount+' من '+step.channels.length),{...step,kind:'review'}),b('⏸️ معاينة تعطيل الشرط',{...basicMode(step,step.mode==='ANY'?'ANY':'ALL'),kind:'review',channels:[]})]);
    }
   }

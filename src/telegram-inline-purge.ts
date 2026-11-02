@@ -44,20 +44,22 @@ export async function renderOwnerPurgeQueue(store:BotStore,policy:Policy,actor:s
   const unknown=job.items.filter(i=>i.status==='UNKNOWN_OUTCOME').length;
   const acknowledged=job.items.filter(i=>i.status==='ACKNOWLEDGED').length;
   const rows:ReturnType<typeof button>[][]=[];
-  const canConfirm=configured&&job.status==='PREVIEW'&&job.actorId===actor&&job.items.length===1&&
+  const canConfirm=configured&&!Object.hasOwn(job,'automatic')&&job.status==='PREVIEW'&&job.actorId===actor&&job.items.length===1&&
    now>=job.createdAt&&now<=job.expiresAt&&policy.chatRevision(state,job.chatId)===job.scopeVersion;
   if(canConfirm)rows.push([
    button('✅ تأكيد حذف الرسالة','pd:1:c:'+job.id+':'+purgeReviewDigest(job)),
    button('↩️ إلغاء الحذف','pd:1:x:'+job.id+':'+purgeReviewDigest(job))
   ]);
+  if(configured&&!Object.hasOwn(job,'automatic')&&job.actorId===actor)rows.push([button('🧹 إدارة الخطة المفلترة','pc:1:j:'+job.id+':'+purgeReviewDigest(job))]);
   rows.push([button('↩️ معاينات الحذف','pq:1:p:'+pageNumber)],back);
   return {text:'<b>🧹 تفاصيل خطة الحذف المحلية</b>\n'
-   +'الحالة: '+states[job.status]+'\nالرسائل المحددة: '+job.items.length+'\n'
+   +(job.automatic?'المصدر: قاعدة حماية آلية؛ لا تعاد من شاشة المعاينات.\n':'')+'الحالة: '+states[job.status]+'\nالرسائل المحددة: '+job.items.length+'\n'
    +'طلبات مقبولة في السجل: '+acknowledged+'\nمجهولة النتيجة: '+unknown+'\n'
    +(canConfirm?'التأكيد يرسل طلب رسالة واحدة بعد إعادة التحقق من المراجعة والصلاحيات.\n':'هذه الشاشة للعرض؛ لا تأكيد متاح لهذه الخطة في حالتها الحالية.\n')
    +'إقرار الطلب لا يثبت الحذف المادي، ولا تعاد العملية المجهولة تلقائيًا.',keyboard:{inline_keyboard:rows}};
  }
  const rows:ReturnType<typeof button>[][]=[];
+ if(configured)rows.push([button('➕ إنشاء معاينة مفلترة','pc:1:h')]);
  for(let i=0;i<current.length;i++)rows.push([button('📋 '+states[current[i]!.status]+' · '+current[i]!.items.length+' رسالة',
   'pq:1:v:'+pageNumber+':'+(i+1)+':'+digest(current[i]!))]);
  const nav:ReturnType<typeof button>[]=[];
@@ -69,5 +71,5 @@ export async function renderOwnerPurgeQueue(store:BotStore,policy:Policy,actor:s
   +'الخطط المحلية المتاحة: '+all.length+'\nصفحة '+(pageNumber+1)+' من '+totalPages+'\n'
   +'موصل الحذف: '+(configured?'مهيأ في التطبيق؛ التنفيذ يخضع لبوابته وصلاحياته':'غير مهيأ في التطبيق؛ العرض فقط')+'\n'
   +(all.length?'اختر خطة لعرض حالتها.':'لا توجد معاينات متاحة حاليًا.')+'\n'
-  +'ينشئ /delete بالرد معاينة خاصة لرسالة ملاحظة مسبقًا، دون جلب تاريخ المجموعة.',keyboard:{inline_keyboard:rows}};
+  +'يمكن اختيار المجموعة والمرسل والنوع والفترة والعدد من إنشاء المعاينة المفلترة. ينشئ /delete بالرد معاينة خاصة لرسالة ملاحظة مسبقًا، دون جلب تاريخ المجموعة.',keyboard:{inline_keyboard:rows}};
 }

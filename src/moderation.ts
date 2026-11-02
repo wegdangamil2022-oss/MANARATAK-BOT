@@ -1,3 +1,4 @@
+import {subscriptionEnforcementConsent} from './subscription-enforcement-policy.js';
 import { randomUUID } from 'node:crypto';
 import { BotStore, type BotState, type ModerationReason, type ModerationOperation, type RestrictionKind, type ModerationDispatchGateway } from './store.js';
 import { Policy } from './policy.js';
@@ -7,19 +8,22 @@ import {TelegramBotApiModerationGateway} from './telegram-moderation-gateway.js'
 
 export type RestrictionOutcome = 'CONFIRMED' | 'FAILED_CONFIRMED' | 'UNKNOWN_OUTCOME';
 export type ModerationResult = { status: 'APPLIED' | 'NO_CHANGE' | 'DENIED' | 'BLOCKED_PENDING' | 'BLOCKED_UNKNOWN' | 'FAILED_CONFIRMED' | 'UNKNOWN_OUTCOME'; reason: string };
+type ReviewedReleaseContext={original:ModerationOperation;reference:string;reviewedAt:number;expiresAt:number;source?:'SUBSCRIPTION'};
+type KickContext={reference:string;initialReview:(s:BotState)=>boolean};
 export interface ModerationGateway {
   /** Local adapter identifier only: never a Telegram enforcement receipt. */
   readonly attemptGateway?:ModerationDispatchGateway;
   canRestrict(chatId: string, memberId: string): Promise<boolean>;
   isProtected(chatId: string, memberId: string): Promise<boolean>;
   setRestriction(chatId: string, memberId: string, kind: RestrictionKind,
-    verifyCurrentAuthority?:()=>Promise<boolean>): Promise<RestrictionOutcome>;
+    verifyCurrentAuthority?:()=>Promise<boolean>,untilDate?:number): Promise<RestrictionOutcome>;
+  kickMember?(chatId:string,memberId:string,verifyCurrentAuthority:()=>Promise<boolean>):Promise<RestrictionOutcome>;
 }
 export class FakeModerationGateway implements ModerationGateway {
   readonly attemptGateway='SIMULATION' as const;
   rights = true;
   protectedMembers = new Set<string>();
-  calls: { chatId: string; memberId: string; kind: RestrictionKind }[] = [];
+  calls: { chatId: string; memberId: string; kind: RestrictionKind; action?:'KICK' }[] = [];
   throwAfterSend = false;
   outcome: RestrictionOutcome = 'CONFIRMED';
   async canRestrict(_chatId: string, _memberId: string): Promise<boolean> { return this.rights; }
@@ -29,11 +33,18 @@ export class FakeModerationGateway implements ModerationGateway {
     if (this.throwAfterSend) throw new Error('network timeout with ambiguous delivery');
     return this.outcome;
   }
+  async kickMember(chatId:string,memberId:string,verifyCurrentAuthority:()=>Promise<boolean>):Promise<RestrictionOutcome>{
+    if(!await verifyCurrentAuthority())return 'FAILED_CONFIRMED';
+    this.calls.push({chatId,memberId,kind:'NONE',action:'KICK'});
+    if(this.throwAfterSend)throw Error('Ambiguous kick delivery');return this.outcome;
+  }
 }
 const byTarget = (r: {chatId: string; memberId: string}, chatId: string, memberId: string): boolean => r.chatId === chatId && r.memberId === memberId;
-const fingerprint = (s: BotState, chatId: string, memberId: string): string =>
+export const moderationReasonFingerprint = (s: BotState, chatId: string, memberId: string): string =>
   JSON.stringify(s.moderationReasons.filter(x => byTarget(x, chatId, memberId) && x.active)
-    .map(x => [x.source, x.reference, x.kind]).sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b))));
+    .map(x => [x.source, x.reference, x.kind,...(x.expiresAt===undefined?[]:[{expiresAt:x.expiresAt}])]).sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b))));
+
+const fingerprint=moderationReasonFingerprint;
 
 /** Match a durable operation's immutable dispatch identity. Terminal status
  * or owner review metadata is not evidence that a different payload may be
@@ -44,7 +55,7 @@ function sameModerationAttempt(a:ModerationOperation,b:ModerationOperation):bool
   a.actorId===b.actorId&&a.kind===b.kind&&
   a.reasonFingerprint===b.reasonFingerprint&&
   a.policyVersion===b.policyVersion&&a.createdAt===b.createdAt&&
-  a.attemptGateway===b.attemptGateway;
+  a.attemptGateway===b.attemptGateway&&a.untilDate===b.untilDate&&a.baselineMode===b.baselineMode&&a.reverses===b.reverses&&a.action===b.action&&a.caseReference===b.caseReference;
 }
 /** Snapshot only the original target's OTHER durable operations.
  * This prevents an in-flight sanction from ignoring a different writer's
@@ -64,7 +75,7 @@ function targetOperationHistory(s:BotState,chatId:string,memberId:string,
  * match: never select an arbitrary tail and dispatch on that basis.
  */
 function latestConfirmedKind(operations:ModerationOperation[]):
- {status:'CLEAR';kind:RestrictionKind}|{status:'AMBIGUOUS'}{
+ {status:'CLEAR';kind:RestrictionKind;untilDate?:number}|{status:'AMBIGUOUS'}{
  const confirmed=operations.filter(o=>o.status==='CONFIRMED');
  if(!confirmed.length)return {status:'CLEAR',kind:'NONE'};
  // Avoid Math.max(...largeArray) argument overflow for restored histories
@@ -72,7 +83,7 @@ function latestConfirmedKind(operations:ModerationOperation[]):
  const lastTime=confirmed.reduce((time,o)=>Math.max(time,o.createdAt),0);
  const latest=confirmed.filter(o=>o.createdAt===lastTime);
  return latest.length===1?
-  {status:'CLEAR',kind:latest[0]!.kind}:{status:'AMBIGUOUS'};
+  {status:'CLEAR',kind:latest[0]!.kind,...(latest[0]!.untilDate===undefined?{}:{untilDate:latest[0]!.untilDate})}:{status:'AMBIGUOUS'};
 }
 
 /** Preserve BOTH conflicting evidence and an unresolved lock for the
@@ -114,6 +125,14 @@ export class ModerationService {
   effective(s: BotState, chatId: string, memberId: string): RestrictionKind {
     const reasons = s.moderationReasons.filter(r => byTarget(r, chatId, memberId) && r.active);
     return reasons.some(r => r.kind === 'BAN') ? 'BAN' : reasons.some(r => r.kind === 'MUTE') ? 'MUTE' : 'NONE';
+  }
+  private reasonsCurrent(s:BotState,chatId:string,memberId:string):boolean{
+    const now=this.clock();return Number.isSafeInteger(now)&&now>=0&&s.moderationReasons.filter(r=>byTarget(r,chatId,memberId)&&r.active).every(r=>r.expiresAt===undefined||(this.gateway instanceof FakeModerationGateway||TelegramBotApiModerationGateway.usesOfficialDispatch(this.gateway))&&r.expiresAt>now);
+  }
+  private untilDate(s:BotState,chatId:string,memberId:string,kind:RestrictionKind):number|undefined{
+    const reasons=s.moderationReasons.filter(r=>byTarget(r,chatId,memberId)&&r.active&&r.kind===kind);
+    if(!reasons.length||reasons.some(r=>r.expiresAt===undefined))return undefined;
+    return Math.ceil(Math.max(...reasons.map(r=>r.expiresAt!))/1000);
   }
   private authorized(s: BotState, actorId: string, chatId: string, memberId: string): boolean {
     // Locally delegated chat managers are protected targets even if Telegram
@@ -177,12 +196,53 @@ export class ModerationService {
     return this.authorized(await this.store.snapshot(), actorId, chatId, memberId) &&
       await this.gateway.canRestrict(chatId, memberId) && !await this.gateway.isProtected(chatId, memberId);
   }
-  async addManualReason(actorId: string, chatId: string, memberId: string, reference: string, kind: 'MUTE' | 'BAN'): Promise<ModerationResult> {
+  private releaseSource(s:BotState,actor:string,chat:string,member:string,reference:string,kind:'BAN'|'MUTE',reasonSource:'MANUAL'|'SUBSCRIPTION'='MANUAL'):ModerationOperation|null{
+    if(!this.policy.isOwner(actor)||!this.policy.privateFeature(s,'owner.dashboard',actor)||!TelegramBotApiModerationGateway.usesOfficialDispatch(this.gateway)||!this.authorized(s,actor,chat,member)||this.unresolved(s,chat,member))return null;
+    const reasons=s.moderationReasons.filter(r=>byTarget(r,chat,member)&&r.active);
+    if(reasonSource==='SUBSCRIPTION'&&!subscriptionEnforcementConsent(s,this.policy,chat,this.clock()))return null;
+    if(reasons.length!==1||reasons[0]!.source!==reasonSource||reasons[0]!.reference!==reference||reasons[0]!.kind!==kind)return null;
+    const ops=s.moderationOperations.filter(o=>byTarget(o,chat,member)&&o.status==='CONFIRMED');
+    const at=ops.reduce((n,o)=>Math.max(n,o.createdAt),0),latest=ops.filter(o=>o.createdAt===at),op=latest[0];
+    return latest.length===1&&op?.kind===kind&&op.attemptGateway==='TELEGRAM_API'&&op.baselineMode==='INHERIT_GROUP_DEFAULTS'&&op.policyVersion===this.policy.chatRevision(s,chat)&&op.reasonFingerprint===fingerprint(s,chat,member)?structuredClone(op):null;
+  }
+  private releaseCurrent(s:BotState,actor:string,chat:string,member:string,context:ReviewedReleaseContext):boolean{
+    const now=this.clock(),original=s.moderationOperations.filter(o=>o.id===context.original.id),confirmed=s.moderationOperations.filter(o=>byTarget(o,chat,member)&&o.status==='CONFIRMED');
+    const at=confirmed.reduce((n,o)=>Math.max(n,o.createdAt),0),latest=confirmed.filter(o=>o.createdAt===at);
+    const reasons=s.moderationReasons.filter(r=>byTarget(r,chat,member)&&r.active);
+    return Number.isSafeInteger(now)&&now>=context.reviewedAt&&now<context.expiresAt&&this.policy.isOwner(actor)&&this.policy.privateFeature(s,'owner.dashboard',actor)&&TelegramBotApiModerationGateway.usesOfficialDispatch(this.gateway)&&
+      this.authorized(s,actor,chat,member)&&reasons.length===1&&reasons[0]!.source===(context.source??'MANUAL')&&(context.source!=='SUBSCRIPTION'||subscriptionEnforcementConsent(s,this.policy,chat)!==null)&&reasons[0]!.reference===context.reference&&reasons[0]!.kind===context.original.kind&&fingerprint(s,chat,member)===context.original.reasonFingerprint&&original.length===1&&original[0]!.status==='CONFIRMED'&&sameModerationAttempt(original[0]!,context.original)&&
+      original[0]!.baselineMode==='INHERIT_GROUP_DEFAULTS'&&original[0]!.attemptGateway==='TELEGRAM_API'&&original[0]!.policyVersion===this.policy.chatRevision(s,chat)&&latest.length===1&&latest[0]!.id===context.original.id;
+  }
+  supportsSubscriptionEnforcement():boolean{return TelegramBotApiModerationGateway.usesOfficialDispatch(this.gateway);}
+  async canReviewCommand(actorId:string,chatId:string,memberId:string,release?:{reference:string;kind:'BAN'|'MUTE'}):Promise<boolean>{
+    if(await this.priorPending(actorId,chatId,memberId))return false;
+    if(await this.check(actorId,chatId,memberId))return true;
+    const source=release?this.releaseSource(await this.store.snapshot(),actorId,chatId,memberId,release.reference,release.kind):null;
+    return source!==null&&await (this.gateway as TelegramBotApiModerationGateway).canRestoreReviewed(chatId,memberId,{kind:source.kind as 'BAN'|'MUTE',...(source.untilDate===undefined?{}:{untilDate:source.untilDate})});
+  }
+  async canReviewKick(actor:string,chat:string,member:string):Promise<boolean>{
+    return !!this.gateway.kickMember&&(this.gateway instanceof FakeModerationGateway||TelegramBotApiModerationGateway.usesOfficialDispatch(this.gateway))&&await this.canReviewCommand(actor,chat,member)&&this.effective(await this.store.snapshot(),chat,member)==='NONE';
+  }
+  async kickMember(actor:string,chat:string,member:string,reference:string,initialReview?: (s:BotState)=>boolean,expiresAt?:number):Promise<ModerationResult>{
+    const now=this.clock();if(!Number.isSafeInteger(now)||now<0||!initialReview||expiresAt===undefined||!Number.isSafeInteger(expiresAt)||expiresAt<=now||expiresAt>now+120000||expiresAt>8640000000000000||/^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/u.exec(reference)?.[0]!==reference||!this.gateway.kickMember||!(this.gateway instanceof FakeModerationGateway||TelegramBotApiModerationGateway.usesOfficialDispatch(this.gateway)))return {status:'DENIED',reason:'KICK_REQUIRES_REVIEW'};
+    const before=await this.store.snapshot();if(!initialReview(before)||!this.authorized(before,actor,chat,member)||this.effective(before,chat,member)!=='NONE')return {status:'DENIED',reason:'KICK_SOURCE_STALE'};
+    const source=(s:BotState)=>JSON.stringify([s.chats.filter(c=>c.id===chat),s.grants,s.privateFeatures,s.privateSettingsRevision,s.warnings.filter(w=>byTarget(w,chat,member)),s.moderationReasons.filter(r=>byTarget(r,chat,member))]),epoch=source(before);
+    const current=(s:BotState)=>{const at=this.clock();return Number.isSafeInteger(at)&&at>=now&&at<expiresAt&&source(s)===epoch&&this.effective(s,chat,member)==='NONE'&&(!this.policy.isOwner(actor)||this.policy.privateFeature(s,'owner.dashboard',actor));};
+    return this.reconcileInternal(actor,chat,member,current,undefined,{reference,initialReview});
+  }
+  async addManualReason(actorId: string, chatId: string, memberId: string, reference: string, kind: 'MUTE' | 'BAN',stillCurrent?:(s:BotState)=>boolean,durationSeconds?:number,dispatchCurrent?:(s:BotState)=>boolean): Promise<ModerationResult> {
     if (!reference || reference.length > 80 || !['MUTE', 'BAN'].includes(kind)) throw new Error('Invalid reason');
+    if(durationSeconds!==undefined&&(!Number.isSafeInteger(durationSeconds)||durationSeconds<60||durationSeconds>2592000))return {status:'DENIED',reason:'INVALID_DURATION'};
+    // An unbranded custom adapter might ignore the optional deadline argument.
+    // Never silently turn a timed request into a permanent Telegram sanction.
+    if(durationSeconds!==undefined&&!(this.gateway instanceof FakeModerationGateway)&&!TelegramBotApiModerationGateway.usesOfficialDispatch(this.gateway))return {status:'DENIED',reason:'DURATION_PROVIDER_UNSUPPORTED'};
     const preflight=await this.priorPending(actorId,chatId,memberId);
     if(preflight)return preflight;
     if (!await this.check(actorId, chatId, memberId)) return { status: 'DENIED', reason: 'NOT_AUTHORIZED_OR_BOT_RIGHTS' };
     const added = await this.store.transaction(s => {
+      if(stillCurrent&&!stillCurrent(s))return 'DENIED' as const;
+      const deadline=durationSeconds===undefined?undefined:this.clock()+durationSeconds*1000;
+      if(deadline!==undefined&&(!Number.isSafeInteger(this.clock())||this.clock()<0||!Number.isSafeInteger(deadline)||deadline>8640000000000000))return 'DENIED' as const;
       if (!this.authorized(s, actorId, chatId, memberId))
         return ambiguousModerationChatIds(s).has(chatId)?'DENIED' as const:false;
       const pending=this.unresolved(s,chatId,memberId);
@@ -191,8 +251,8 @@ export class ModerationService {
       if (existing?.active) { if (existing.kind !== kind) throw new Error('REASON_CONFLICT'); return false; }
       const limit=moderationRateFuse(s,actorId,chatId,this.clock());
       if(limit)return limit;
-      if (existing) { existing.kind = kind; existing.active = true; existing.createdBy = actorId; }
-      else s.moderationReasons.push({ chatId, memberId, source: 'MANUAL', reference, kind, createdBy: actorId, active: true });
+      if (existing) { existing.kind = kind; existing.active = true; existing.createdBy = actorId;delete existing.expiresAt;if(deadline!==undefined)existing.expiresAt=deadline; }
+      else s.moderationReasons.push({ chatId, memberId, source: 'MANUAL', reference, kind, createdBy: actorId, active: true,...(deadline===undefined?{}:{expiresAt:deadline}) });
       return true;
     });
     if(added==='BLOCKED_UNKNOWN'||added==='BLOCKED_PENDING')
@@ -200,34 +260,70 @@ export class ModerationService {
     if(added==='DENIED')return {status:'DENIED',reason:'NOT_AUTHORIZED_OR_BOT_RIGHTS'};
     if(typeof added==='string')return {status:'DENIED',reason:moderationRateDenial(added)};
     if (!added) return { status: 'NO_CHANGE', reason: 'DUPLICATE_OR_REVOKED' };
-    return this.reconcile(actorId, chatId, memberId);
+    return this.reconcile(actorId, chatId, memberId,dispatchCurrent);
   }
-  async removeManualReason(actorId: string, chatId: string, memberId: string, reference: string): Promise<ModerationResult> {
+  async removeManualReason(actorId: string, chatId: string, memberId: string, reference: string,expectedKind?:'BAN'|'MUTE',stillCurrent?:(s:BotState)=>boolean,reviewedUntil?:number): Promise<ModerationResult> {
+    if(expectedKind!==undefined&&expectedKind!=='BAN'&&expectedKind!=='MUTE')return {status:'DENIED',reason:'INVALID_REASON_KIND'};
     const preflight=await this.priorPending(actorId,chatId,memberId);
     if(preflight)return preflight;
-    if (!await this.check(actorId, chatId, memberId)) return { status: 'DENIED', reason: 'NOT_AUTHORIZED_OR_BOT_RIGHTS' };
+    if (!await this.check(actorId, chatId, memberId)) return expectedKind&&stillCurrent&&reviewedUntil!==undefined?
+      this.releaseReviewed(actorId,chatId,memberId,reference,expectedKind,stillCurrent,reviewedUntil):{ status: 'DENIED', reason: 'NOT_AUTHORIZED_OR_BOT_RIGHTS' };
     const changed = await this.store.transaction(s => {
+      if(stillCurrent&&!stillCurrent(s))return 'DENIED' as const;
       if (!this.authorized(s, actorId, chatId, memberId))
         return ambiguousModerationChatIds(s).has(chatId)?'DENIED' as const:false;
       const pending=this.unresolved(s,chatId,memberId);
       if(pending)return pending.status;
       const found = s.moderationReasons.find(x => byTarget(x, chatId, memberId) && x.source === 'MANUAL' && x.reference === reference && x.active);
       if (!found) return false;
+      // Check the requested release kind in the same transaction as removal.
+      // An unmute must never deactivate a ban that happens to share its case ID.
+      if(expectedKind!==undefined&&found.kind!==expectedKind)return 'KIND_MISMATCH' as const;
       found.active = false; return true;
     });
     if(changed==='BLOCKED_UNKNOWN'||changed==='BLOCKED_PENDING')
       return {status:changed,reason:'NO_SAFE_DISPATCH'};
     if(changed==='DENIED')return {status:'DENIED',reason:'NOT_AUTHORIZED_OR_BOT_RIGHTS'};
+    if(changed==='KIND_MISMATCH')return {status:'DENIED',reason:'REASON_KIND_MISMATCH'};
     return changed ? this.reconcile(actorId, chatId, memberId) : { status: 'NO_CHANGE', reason: 'NOT_ACTIVE' };
+  }
+  private async releaseReviewed(actor:string,chat:string,member:string,reference:string,kind:'BAN'|'MUTE',stillCurrent:(s:BotState)=>boolean,expiresAt:number,reasonSource:'MANUAL'|'SUBSCRIPTION'='MANUAL'):Promise<ModerationResult>{
+    const now=this.clock();if(!Number.isSafeInteger(expiresAt)||expiresAt<=now||expiresAt>now+120000)return {status:'DENIED',reason:'RELEASE_REVIEW_EXPIRED'};
+    const original=this.releaseSource(await this.store.snapshot(),actor,chat,member,reference,kind,reasonSource);
+    if(!original||!await (this.gateway as TelegramBotApiModerationGateway).canRestoreReviewed(chat,member,{kind,...(original.untilDate===undefined?{}:{untilDate:original.untilDate})}))return {status:'DENIED',reason:'RELEASE_SOURCE_UNAVAILABLE'};
+    const context=await this.store.transaction(s=>{
+      const at=this.clock(),fresh=this.releaseSource(s,actor,chat,member,reference,kind,reasonSource);
+      if(at<now||at>=expiresAt||!stillCurrent(s)||!fresh||!sameModerationAttempt(fresh,original))return null;
+      // Keep the local reason active until the remote release and its readback
+      // are confirmed. A denial must not erase the operator's recovery path.
+      return {original,reference,reviewedAt:at,expiresAt,...(reasonSource==='SUBSCRIPTION'?{source:'SUBSCRIPTION' as const}:{})};
+    });
+    if(!context)return {status:'DENIED',reason:'RELEASE_REVIEW_STALE'};
+    return this.reconcileInternal(actor,chat,member,s=>this.releaseCurrent(s,actor,chat,member,context),context);
+  }
+  async expireManualReasons(actorId:string,chatId:string,memberId:string):Promise<ModerationResult>{
+    const pending=await this.priorPending(actorId,chatId,memberId);if(pending)return pending;
+    if(!await this.check(actorId,chatId,memberId))return {status:'DENIED',reason:'NOT_AUTHORIZED_OR_BOT_RIGHTS'};
+    const changed=await this.store.transaction(s=>{
+      const now=this.clock();if(!Number.isSafeInteger(now)||now<0||!this.authorized(s,actorId,chatId,memberId))return 'DENIED' as const;
+      const blocked=this.unresolved(s,chatId,memberId);if(blocked)return blocked.status;
+      const expired=s.moderationReasons.filter(r=>byTarget(r,chatId,memberId)&&r.source==='MANUAL'&&r.active&&r.expiresAt!==undefined&&r.expiresAt<=now);
+      if(!expired.length)return false;for(const r of expired)r.active=false;
+      s.audit.push({actorId,updateKey:'moderation-expiry:'+randomUUID(),decision:'ALLOW',reason:'MODERATION_REASONS_EXPIRED',policyVersion:this.policy.chatRevision(s,chatId),at:now});return true;
+    });
+    if(changed==='DENIED')return {status:'DENIED',reason:'NOT_AUTHORIZED_OR_BOT_RIGHTS'};
+    if(changed==='BLOCKED_UNKNOWN'||changed==='BLOCKED_PENDING')return {status:changed,reason:'NO_SAFE_DISPATCH'};
+    return changed?this.reconcile(actorId,chatId,memberId):{status:'NO_CHANGE',reason:'NO_EXPIRED_REASON'};
   }
   /** Invoked only by SubscriptionGate's trusted membership reconciliation; never expose as a user command. */
   async setSubscriptionReason(chatId: string, memberId: string, reference: string, active: boolean,
     stillCurrent?: (state:BotState)=>boolean): Promise<ModerationResult> {
     if (!reference || reference.length > 80)return {status:'DENIED',reason:'NOT_AUTHORIZED_OR_BOT_RIGHTS'};
+    if(TelegramBotApiModerationGateway.usesOfficialDispatch(this.gateway)){const consent=subscriptionEnforcementConsent(await this.store.snapshot(),this.policy,chatId,this.clock());if(!consent||active&&!consent.enabled||!stillCurrent)return {status:'DENIED',reason:'SUBSCRIPTION_ENFORCEMENT_NOT_APPROVED'};const upstream=stillCurrent;stillCurrent=s=>JSON.stringify(subscriptionEnforcementConsent(s,this.policy,chatId,this.clock()))===JSON.stringify(consent)&&upstream(s);}
     const preflight=await this.priorPending(this.policy.ownerId,chatId,memberId);
     if(preflight)return preflight;
     if(!await this.check(this.policy.ownerId, chatId, memberId))
-      return {status:'DENIED',reason:'NOT_AUTHORIZED_OR_BOT_RIGHTS'};
+      return !active&&stillCurrent&&TelegramBotApiModerationGateway.usesOfficialDispatch(this.gateway)?this.releaseReviewed(this.policy.ownerId,chatId,memberId,reference,'MUTE',stillCurrent,this.clock()+5000,'SUBSCRIPTION'):{status:'DENIED',reason:'NOT_AUTHORIZED_OR_BOT_RIGHTS'};
     const change = await this.store.transaction(s => {
       if (!this.authorized(s, this.policy.ownerId, chatId, memberId) ||
           (stillCurrent && !stillCurrent(s)))return 'STALE' as const;
@@ -249,13 +345,14 @@ export class ModerationService {
       ?this.reconcile(this.policy.ownerId,chatId,memberId,stillCurrent)
       :{status:'NO_CHANGE',reason:'REASON_UNCHANGED'};
   }
-  async issueWarning(actorId: string, chatId: string, memberId: string, reference: string): Promise<{ status: 'ADDED' | 'NO_CHANGE'; count: number } | { status: 'DENIED'; count: null }> {
+  async issueWarning(actorId: string, chatId: string, memberId: string, reference: string,stillCurrent?:(s:BotState)=>boolean): Promise<{ status: 'ADDED' | 'NO_CHANGE'; count: number } | { status: 'DENIED'; count: null }> {
     if (!reference || reference.length > 80) throw new Error('Invalid warning reference');
     // A local warning must not target a Telegram administrator or bypass
     // missing bot authority. Recheck internal authorization in the transaction
     // after these awaited external reads, just as sanction reason writes do.
     if (!await this.check(actorId,chatId,memberId))return {status:'DENIED',count:null};
     return this.store.transaction(s => {
+      if(stillCurrent&&!stillCurrent(s))return {status:'DENIED' as const,count:null};
       const count = () => s.warnings.filter(w => byTarget(w, chatId, memberId) && w.active).length;
       if (!this.authorized(s, actorId, chatId, memberId)) return { status: 'DENIED' as const, count: null };
       const existing = s.warnings.find(w => byTarget(w, chatId, memberId) && w.reference === reference);
@@ -264,8 +361,9 @@ export class ModerationService {
       return { status: 'ADDED' as const, count: count() };
     });
   }
-  async removeWarning(actorId: string, chatId: string, memberId: string, reference: string): Promise<{ status: 'REVOKED' | 'NO_CHANGE'; count: number } | { status: 'DENIED'; count: null }> {
+  async removeWarning(actorId: string, chatId: string, memberId: string, reference: string,stillCurrent?:(s:BotState)=>boolean): Promise<{ status: 'REVOKED' | 'NO_CHANGE'; count: number } | { status: 'DENIED'; count: null }> {
     return this.store.transaction(s => {
+      if(stillCurrent&&!stillCurrent(s))return {status:'DENIED' as const,count:null};
       const count = () => s.warnings.filter(w => byTarget(w, chatId, memberId) && w.active).length;
       if (!this.authorized(s, actorId, chatId, memberId)) return { status: 'DENIED' as const, count: null };
       const existing = s.warnings.find(w => byTarget(w, chatId, memberId) && w.reference === reference && w.active);
@@ -276,25 +374,34 @@ export class ModerationService {
   }
   async reconcile(actorId: string, chatId: string, memberId: string,
     stillCurrent?: (state:BotState)=>boolean): Promise<ModerationResult> {
+    return this.reconcileInternal(actorId,chatId,memberId,stillCurrent);
+  }
+  private async reconcileInternal(actorId:string,chatId:string,memberId:string,stillCurrent?: (state:BotState)=>boolean,release?:ReviewedReleaseContext,kick?:KickContext):Promise<ModerationResult>{
+    const dispatchFingerprint=(s:BotState)=>fingerprint(release?{...s,moderationReasons:s.moderationReasons.map(r=>byTarget(r,chatId,memberId)&&r.source===(release.source??'MANUAL')&&r.reference===release.reference?{...r,active:false}:r)}:s,chatId,memberId);
     const preflight=await this.priorPending(actorId,chatId,memberId);
     if(preflight)return preflight;
-    if (!await this.check(actorId, chatId, memberId)) return { status: 'DENIED', reason: 'NOT_AUTHORIZED_OR_BOT_RIGHTS' };
+    const releaseSource=release?{kind:release.original.kind as 'BAN'|'MUTE',...(release.original.untilDate===undefined?{}:{untilDate:release.original.untilDate})}:undefined;
+    if (releaseSource?!await (this.gateway as TelegramBotApiModerationGateway).canRestoreReviewed(chatId,memberId,releaseSource):!await this.check(actorId, chatId, memberId)) return { status: 'DENIED', reason: 'NOT_AUTHORIZED_OR_BOT_RIGHTS' };
     const candidate = await this.store.transaction(s => {
       if (!this.authorized(s, actorId, chatId, memberId) ||
           (stillCurrent && !stillCurrent(s)))return {status:'DENIED' as const};
+      if(!this.reasonsCurrent(s,chatId,memberId))return {status:'DENIED' as const};
+      if(kick&&(!kick.initialReview(s)||this.effective(s,chatId,memberId)!=='NONE'))return {status:'DENIED' as const};
       const pending=this.unresolved(s,chatId,memberId);
       if(pending)return {status:pending.status};
       const operations = s.moderationOperations.filter(x => byTarget(x, chatId, memberId));
-      const desired = this.effective(s, chatId, memberId);
+      if(kick){const used=operations.find(o=>o.action==='KICK'&&o.caseReference===kick.reference&&o.status!=='CANCELLED');if(used)return {status:used.status==='CONFIRMED'?'NO_CHANGE' as const:'DENIED' as const};}
+      const desired = release?'NONE':this.effective(s, chatId, memberId);
       const confirmed=latestConfirmedKind(operations);
       if(confirmed.status==='AMBIGUOUS')
        return {status:'BLOCKED_UNKNOWN' as const};
-      if(desired===confirmed.kind)return {status:'NO_CHANGE' as const};
-      if(desired!=='NONE'){
+      const untilDate=this.untilDate(s,chatId,memberId,desired);
+      if(!kick&&desired===confirmed.kind&&untilDate===confirmed.untilDate)return {status:'NO_CHANGE' as const};
+      if(desired!=='NONE'||kick){
        const limit=moderationRateFuse(s,actorId,chatId,this.clock());
        if(limit)return {status:'RATE_LIMIT' as const,reason:moderationRateDenial(limit)};
       }
-      const op: ModerationOperation = { id: randomUUID(), chatId, memberId, actorId, kind: desired, reasonFingerprint: fingerprint(s, chatId, memberId), policyVersion: this.policy.chatRevision(s, chatId), status: 'INTENT', createdAt: this.clock() };
+      const op: ModerationOperation = { id: randomUUID(), chatId, memberId, actorId, kind: desired, reasonFingerprint: dispatchFingerprint(s), policyVersion: this.policy.chatRevision(s, chatId), status: 'INTENT', createdAt: this.clock(),...(untilDate===undefined?{}:{untilDate}),...(desired!=='NONE'&&TelegramBotApiModerationGateway.usesOfficialDispatch(this.gateway)?{baselineMode:'INHERIT_GROUP_DEFAULTS' as const}:{}),...(release?{reverses:release.original.id}:{}),...(kick?{action:'KICK' as const,caseReference:kick.reference}:{}) };
       s.moderationOperations.push(op);
       return {status:'READY' as const,id:op.id,intent:{...op},
        targetHistory:targetOperationHistory(s,chatId,memberId,op.id)};
@@ -309,7 +416,7 @@ export class ModerationService {
     let rights:boolean;
     try{
       if(this.beforeDispatch)await this.beforeDispatch();
-      rights=await this.gateway.canRestrict(chatId,memberId)&&
+      rights=releaseSource?await (this.gateway as TelegramBotApiModerationGateway).canRestoreReviewed(chatId,memberId,releaseSource):await this.gateway.canRestrict(chatId,memberId)&&
         !await this.gateway.isProtected(chatId,memberId);
     }catch{
       const stopped=await this.closePrestartedIntent(candidate.intent);
@@ -347,10 +454,10 @@ export class ModerationService {
         quarantineModerationAttempt(s,candidate.intent);
         return {status:'BLOCKED_UNKNOWN' as const};
       }
-      const valid = rights && this.authorized(s, actorId, chatId, memberId) &&
+      const valid = rights && this.reasonsCurrent(s,chatId,memberId) && this.authorized(s, actorId, chatId, memberId) &&
         (!stillCurrent||stillCurrent(s)) &&
         this.policy.chatRevision(s, chatId) === op.policyVersion &&
-        fingerprint(s, chatId, memberId) === op.reasonFingerprint;
+        dispatchFingerprint(s) === op.reasonFingerprint;
       if (!valid) { op.status = 'CANCELLED'; return {status:'DENIED' as const}; }
       // The attempt label is a local provenance hint, not remote proof.
       op.attemptGateway=TelegramBotApiModerationGateway.usesOfficialDispatch(this.gateway)?
@@ -384,17 +491,17 @@ export class ModerationService {
           targetOperationHistory(s,chatId,memberId,candidate.id)===
             candidate.targetHistory&&
           op?.status==='STARTED'&&sameModerationAttempt(op,started.receipt)&&
-          this.authorized(s,actorId,chatId,memberId)&&
+          this.reasonsCurrent(s,chatId,memberId)&&this.authorized(s,actorId,chatId,memberId)&&
           (!stillCurrent||stillCurrent(s))&&
           this.policy.chatRevision(s,chatId)===op.policyVersion&&
-          fingerprint(s,chatId,memberId)===op.reasonFingerprint;
+          dispatchFingerprint(s)===op.reasonFingerprint;
       }catch{return false;}
     };
     let outcome: RestrictionOutcome;
     try{
-      outcome=await this.gateway.setRestriction(
+      outcome=kick?await this.gateway.kickMember!(started.receipt.chatId,started.receipt.memberId,verifyCurrentAuthority):releaseSource?await (this.gateway as TelegramBotApiModerationGateway).restoreFromReviewedDecision(started.receipt.chatId,started.receipt.memberId,releaseSource,verifyCurrentAuthority):started.receipt.kind==='NONE'&&TelegramBotApiModerationGateway.usesOfficialDispatch(this.gateway)?await (this.gateway as TelegramBotApiModerationGateway).confirmUnrestricted(started.receipt.chatId,started.receipt.memberId,verifyCurrentAuthority):await this.gateway.setRestriction(
         started.receipt.chatId,started.receipt.memberId,
-        started.receipt.kind,verifyCurrentAuthority);
+        started.receipt.kind,verifyCurrentAuthority,started.receipt.untilDate);
     }catch{outcome='UNKNOWN_OUTCOME';}
     // A structurally typed JavaScript gateway may return arbitrary strings
     // at runtime. Never write an unrecognized terminal state to the ledger.
@@ -433,15 +540,20 @@ export class ModerationService {
       if(outcome!=='FAILED_CONFIRMED'){
         let stillAuthorized=false;
         try{
-          stillAuthorized=this.authorized(s,actorId,chatId,memberId)&&
+          stillAuthorized=this.reasonsCurrent(s,chatId,memberId)&&this.authorized(s,actorId,chatId,memberId)&&
             (!stillCurrent||stillCurrent(s))&&
             this.policy.chatRevision(s,chatId)===started.receipt.policyVersion&&
-            fingerprint(s,chatId,memberId)===started.receipt.reasonFingerprint;
+            dispatchFingerprint(s)===started.receipt.reasonFingerprint;
         }catch{/* Unreliable witness/clock/policy fails closed. */}
         if(!stillAuthorized){
           quarantineModerationAttempt(s,started.receipt);
           return 'BLOCKED_UNKNOWN' as const;
         }
+      }
+      if(outcome==='CONFIRMED'&&release){
+        const reason=s.moderationReasons.find(r=>byTarget(r,chatId,memberId)&&r.active&&r.source===(release.source??'MANUAL')&&r.reference===release.reference);
+        if(!reason){quarantineModerationAttempt(s,started.receipt);return 'BLOCKED_UNKNOWN' as const;}
+        reason.active=false;
       }
       op.status=outcome;
       return outcome;

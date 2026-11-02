@@ -1,4 +1,10 @@
+import {validSubscriptionVerificationRoute} from './subscription-verification-access.js';
+import {validGroupRulesRoute} from './telegram-group-rules.js';
+import {validModerationReportRoute} from './telegram-moderation-reports.js';
+import {validModerationAppealRoute} from './telegram-moderation-appeals.js';
 import {protectionInlineRoute} from './protection-inline-route.js';
+import {validGroupPermissionRoute} from './telegram-group-permission-lock.js';
+import {validModerationCaseRoute} from './telegram-moderation-cases.js';
 import {validOwnerFAQInlineRoute} from './telegram-inline-faq.js';
 import {validOwnerLibraryInlineRoute} from './telegram-inline-library.js';
 import {validStudioInlineRoute,studioOwnerEntry} from './telegram-inline-studio.js';
@@ -17,6 +23,7 @@ import {validPublicNavigationRoute} from './telegram-public-navigation.js';
 import {validOwnerImportRoute} from './telegram-inline-imports.js';
 import {validOwnerUploadRoute} from './telegram-owner-upload.js';
 import {validSubscriptionConfigRoute} from './telegram-inline-subscription-config.js';
+import {validPurgeEditorRoute} from './telegram-purge-editor.js';
 import {validCommunityFolderRoute} from './telegram-community-folders.js';
 /** The approved 2026-10-23 owner catalogue from docs/أزرار_منارتك.md.
  * READ-ONLY navigation: do NOT treat a visible catalogue item as a permission
@@ -695,12 +702,19 @@ export function isValidTelegramInlineKeyboard(input:unknown):input is TelegramIn
      !/^mi:1:g:[sno]:(?:0|[1-9][0-9]{0,2})$/u.test(button.callback_data)&&
      !/^gp:1:p:-[1-9][0-9]{0,15}:[1-9][0-9]{0,9}$/u.test(button.callback_data)&&
      !/^c_[A-Za-z0-9_-]{24}$/u.test(button.callback_data)&&
+     !/^mc:1:[cx]:[A-Za-z0-9_-]{24}$/u.test(button.callback_data)&&
+     !validGroupPermissionRoute(button.callback_data)&&
+     !validModerationCaseRoute(button.callback_data)&&
+     !validModerationAppealRoute(button.callback_data)&&
+     !validModerationReportRoute(button.callback_data)&&
+     !validGroupRulesRoute(button.callback_data)&&
+     !validSubscriptionVerificationRoute(button.callback_data)&&
      !/^ms:1:(?:h|p:(?:0|[1-9][0-9]{0,2})|g:-[1-9][0-9]{0,18}:[1-9][0-9]{0,9}:(?:0|[1-9][0-9]{0,2}))$/u.test(button.callback_data)&&
      !/^ms:1:o:-[1-9][0-9]{0,18}:[1-9][0-9]{0,9}:(?:0|[1-9][0-9]{0,2}):(?:0|[1-9][0-9]{0,2}):[a-f0-9]{12}$/u.test(button.callback_data)&&
      !/^mr:1:(?:h|p:(?:0|[1-9][0-9]{0,2})|d:(?:0|[1-9][0-9]{0,2}):[1-8]:[a-f0-9]{12}|v:(?:0|[1-9][0-9]{0,2}):[1-8]:[a-f0-9]{12}:[ae])$/u.test(button.callback_data)&&
      !/^mp:1:(?:h|p:(?:0|[1-9][0-9]{0,2})|d:(?:0|[1-9][0-9]{0,2}):[1-8]:[a-f0-9]{12})$/u.test(button.callback_data)&&
      !/^si:1:(?:h|p:(?:0|[1-9][0-9]{0,2})|c:(?:0|[1-9][0-9]{0,2}):[1-8]:[a-f0-9]{12}|l:(?:0|[1-9][0-9]{0,2}):[1-8]:[a-f0-9]{12}:(?:0|[1-9][0-9]{0,2})|r:(?:0|[1-9][0-9]{0,2}):[1-8]:[a-f0-9]{12}:(?:0|[1-9][0-9]{0,2}):[1-8]:[a-f0-9]{12})$/u.test(button.callback_data)&&
-     !/^pq:1:(?:h|p:(?:0|[1-9][0-9]{0,2})|v:(?:0|[1-9][0-9]{0,2}):[1-8]:[a-f0-9]{16})$/u.test(button.callback_data)&&
+     !/^pq:1:(?:h|p:(?:0|[1-9][0-9]{0,2})|v:(?:0|[1-9][0-9]{0,2}):[1-8]:[a-f0-9]{16})$/u.test(button.callback_data)&&!validPurgeEditorRoute(button.callback_data)&&
      protectionInlineRoute(button.callback_data)===null&&!validOwnerFAQInlineRoute(button.callback_data)&&!validOwnerLibraryInlineRoute(button.callback_data)&&!validStudioInlineRoute(button.callback_data)&&!validOwnerCategoryInlineRoute(button.callback_data)&&!validPrivateSettingsRoute(button.callback_data)&&!validDelegationEditRoute(button.callback_data)&&!validGroupSetupRoute(button.callback_data)&&!validGroupPolicyStudioRoute(button.callback_data)&&!validOwnerGroupSettingsRoute(button.callback_data)&&!validOwnerGroupBulkRestrictRoute(button.callback_data)&&!validOwnerNetworkRoute(button.callback_data)&&!validOwnerPreviewCancelRoute(button.callback_data)&&!validGroupLibraryInlineRoute(button.callback_data)&&!validPublicNavigationRoute(button.callback_data)&&!validOwnerImportRoute(button.callback_data)&&!validOwnerUploadRoute(button.callback_data)&&!validSubscriptionConfigRoute(button.callback_data)&&!validCommunityFolderRoute(button.callback_data)&&
      !/^pd:1:[cx]:[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}:[a-f0-9]{16}$/u.test(button.callback_data)&&
      !/^si:2:[ascuef]:(?:h|p:(?:0|[1-9][0-9]{0,2})|c:(?:0|[1-9][0-9]{0,2}):[1-8]:[a-f0-9]{12}|l:(?:0|[1-9][0-9]{0,2}):[1-8]:[a-f0-9]{12}:(?:0|[1-9][0-9]{0,2})|r:(?:0|[1-9][0-9]{0,2}):[1-8]:[a-f0-9]{12}:(?:0|[1-9][0-9]{0,2}):[1-8]:[a-f0-9]{12})$/u.test(button.callback_data))
@@ -719,8 +733,8 @@ const navigation=(back:string,home=true)=>{
 export function ownerInlineConnection(data:string):'EDITOR'|'VIEW'|'SPECIFICATION'|null{
  const m=/^mi:1:i:([0-9]{2}):([0-9]{2})$/u.exec(data);if(!m||m[0]!==data)return null;
  const section=ownerInlineSections[Number(m[1])-1];if(!section||Number(m[2])<1||Number(m[2])>section.items.length)return null;
- if(/^mi:1:i:04:0[234]$/u.test(data)||data==='mi:1:i:13:04'||delegationOwnerEntry(data)||/^mi:1:i:01:(?:03|06|07|08|12)$/u.test(data)||data==='mi:1:i:10:16'||data==='mi:1:i:11:03'||studioOwnerEntry(data))return 'EDITOR';
- if(ownerInlineLinkedReadOnly(data)!==null||/^mi:1:i:01:(?:09|10|11)$/u.test(data)||data==='mi:1:i:03:01'||data==='mi:1:i:02:01'||data==='mi:1:i:02:15'||data==='mi:1:i:02:16'||data==='mi:1:i:02:13'||/^mi:1:i:02:(?:0[5678]|12)$/u.test(data))return 'VIEW';
+ if(/^mi:1:i:02:0[234]$/u.test(data)||/^mi:1:i:04:0[234]$/u.test(data)||data==='mi:1:i:13:04'||delegationOwnerEntry(data)||/^mi:1:i:01:(?:03|06|07|08|12)$/u.test(data)||data==='mi:1:i:10:16'||data==='mi:1:i:11:03'||studioOwnerEntry(data))return 'EDITOR';
+ if(ownerInlineLinkedReadOnly(data)!==null||/^mi:1:i:01:(?:09|10|11)$/u.test(data)||data==='mi:1:i:03:01'||data==='mi:1:i:02:01'||data==='mi:1:i:02:15'||data==='mi:1:i:02:16'||data==='mi:1:i:02:13'||/^mi:1:i:02:(?:0[56789]|12)$/u.test(data))return 'VIEW';
  return 'SPECIFICATION';
 }
 /** Catalogue origin only; never an authorization token or a mutable action. */

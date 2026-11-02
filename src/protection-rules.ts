@@ -4,9 +4,9 @@ import {isValidFloodPolicy,type FloodPolicy} from './protection-flood.js';
 export type ProtectionAction='REVIEW'|'WARN'|'DELETE'|'MUTE';
 export type ProtectionMessageType='TEXT'|'PHOTO'|'VIDEO'|'ANIMATION'|'STICKER'|'DOCUMENT'|'AUDIO'|'VOICE'|'VIDEO_NOTE'|'CONTACT'|'LOCATION'|'POLL';
 type BaseRule={id:string;enabled:boolean;action:ProtectionAction};
-export type ProtectionRule=BaseRule & ({kind:'WORD'|'PHRASE';value:string}|{kind:'TYPE';type:ProtectionMessageType}|{kind:'LINK';hosts:'*'|string[]}|{kind:'FORWARD'});
-export interface ProtectionPolicy{chatId:string;revision:number;mode:'OFF'|'MONITOR'|'ENFORCE';rules:ProtectionRule[];allowedDomains:string[];allowedPhrases:string[];exemptMemberIds:string[];flood?:FloodPolicy;}
-export interface ProtectionMessage{chatId:string;memberId:string;type:ProtectionMessageType;text?:string;caption?:string;links?:string[];forwarded?:boolean;}
+export type ProtectionRule=BaseRule & ({kind:'WORD';value:string;match?:'PARTIAL'}|{kind:'PHRASE';value:string}|{kind:'FRAUD';identity:string;payment:string}|{kind:'LOOKALIKE';domain:string}|{kind:'NAME';name:string;trustedId:string}|{kind:'TYPE';type:ProtectionMessageType}|{kind:'LINK';hosts:'*'|string[]}|{kind:'FORWARD'}|{kind:'LIMIT';metric:'MENTIONS'|'HASHTAGS'|'LENGTH'|'QUOTES';maximum:number});
+export interface ProtectionPolicy{chatId:string;revision:number;mode:'OFF'|'MONITOR'|'ENFORCE';rules:ProtectionRule[];allowedDomains:string[];allowedPhrases:string[];exemptMemberIds:string[];flood?:FloodPolicy;joinRaid?:{enabled:boolean;minimumMembers:number;windowMs:number;lockSeconds:number};night?:{enabled:boolean;startMinute:number;endMinute:number;offsetMinutes:number};raid?:{enabled:boolean;minimumMembers:number;minimumMessages:number;lockSeconds:number};escalation?:{enabled:boolean;afterWarnings:number;windowMs:number};temporaryExemptions?:{memberId:string;createdAt:number;expiresAt:number}[];}
+export interface ProtectionMessage{chatId:string;memberId:string;type:ProtectionMessageType;text?:string;caption?:string;links?:string[];forwarded?:boolean;mentionCount?:number;quoteCount?:number;displayName?:string;}
 export interface ProtectionEvaluation{status:'INVALID_POLICY'|'INVALID_MESSAGE'|'OFF'|'EXEMPT'|'CLEAR'|'MATCH';matchedRuleIds:string[];proposedAction:ProtectionAction|null;authorizedToSend:false;}
 const object=(v:unknown):v is Record<string,unknown>=>v!==null&&typeof v==='object'&&!Array.isArray(v);
 const keys=(v:Record<string,unknown>,expected:string[])=>Object.keys(v).length===expected.length&&expected.every(k=>Object.hasOwn(v,k));
@@ -22,19 +22,59 @@ function host(v:unknown):v is string{
  if(typeof v!=='string'||v.length<1||v.length>253||v!==v.toLowerCase()||!/^[a-z0-9.-]+$/u.test(v)||v.endsWith('.'))return false;
  try{const u=new URL('https://'+v);return u.hostname===v&&u.port===''&&u.username===''&&u.password===''&&u.pathname==='/';}catch{return false;}
 }
+function referenceDomain(v:unknown):v is string{
+ return host(v)&&v.length>=5&&v.includes('.')&&/\.[a-z][a-z0-9-]{1,62}$/u.test(v)&&!/^\d+(?:\.\d+)+$/u.test(v)&&
+  v.split('.').every(label=>label.length<=63&&/^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/u.test(label));
+}
 const stringList=(v:unknown,check:(x:unknown)=>boolean,max:number):v is string[]=>Array.isArray(v)&&v.length<=max&&new Set(v).size===v.length&&v.every(check);
+function validJoinRaid(v:unknown):boolean{return object(v)&&keys(v,['enabled','minimumMembers','windowMs','lockSeconds'])&&typeof v.enabled==='boolean'&&[v.minimumMembers,v.windowMs,v.lockSeconds].every(n=>typeof n==='number'&&Number.isSafeInteger(n))&&Number(v.minimumMembers)>=3&&Number(v.minimumMembers)<=100&&Number(v.windowMs)>=5000&&Number(v.windowMs)<=60000&&Number(v.lockSeconds)>=60&&Number(v.lockSeconds)<=600;}
+function validNight(v:unknown):boolean{
+ return object(v)&&keys(v,['enabled','startMinute','endMinute','offsetMinutes'])&&typeof v.enabled==='boolean'&&
+  [v.startMinute,v.endMinute,v.offsetMinutes].every(n=>typeof n==='number'&&Number.isSafeInteger(n))&&
+  Number(v.startMinute)>=0&&Number(v.startMinute)<1440&&Number(v.endMinute)>=0&&Number(v.endMinute)<1440&&v.startMinute!==v.endMinute&&Number(v.offsetMinutes)>=-720&&Number(v.offsetMinutes)<=840;
+}
+function validRaid(v:unknown):boolean{
+ return object(v)&&keys(v,['enabled','minimumMembers','minimumMessages','lockSeconds'])&&typeof v.enabled==='boolean'&&
+  [v.minimumMembers,v.minimumMessages,v.lockSeconds].every(n=>typeof n==='number'&&Number.isSafeInteger(n))&&
+  Number(v.minimumMembers)>=2&&Number(v.minimumMembers)<=100&&Number(v.minimumMessages)>=Number(v.minimumMembers)&&Number(v.minimumMessages)<=1000&&Number(v.lockSeconds)>=60&&Number(v.lockSeconds)<=600;
+}
+function validEscalation(v:unknown):boolean{
+ return object(v)&&keys(v,['enabled','afterWarnings','windowMs'])&&typeof v.enabled==='boolean'&&typeof v.afterWarnings==='number'&&
+  Number.isSafeInteger(v.afterWarnings)&&v.afterWarnings>=1&&v.afterWarnings<=20&&typeof v.windowMs==='number'&&
+  Number.isSafeInteger(v.windowMs)&&v.windowMs>=60000&&v.windowMs<=86400000;
+}
+function validTemporaryExemptions(v:unknown):boolean{
+ if(!Array.isArray(v)||v.length>100)return false;
+ const seen=new Set<string>();return v.every(e=>{
+  if(!object(e)||!keys(e,['memberId','createdAt','expiresAt'])||!member(e.memberId)||seen.has(e.memberId)||
+   typeof e.createdAt!=='number'||!Number.isSafeInteger(e.createdAt)||e.createdAt<0||typeof e.expiresAt!=='number'||
+   !Number.isSafeInteger(e.expiresAt)||e.expiresAt>8640000000000000||e.expiresAt<e.createdAt+60000||e.expiresAt>e.createdAt+86400000)return false;
+  seen.add(e.memberId);return true;
+ });
+}
+export function protectionMemberExempt(config:ProtectionPolicy,memberId:string,now:number):boolean{
+ return config.exemptMemberIds.includes(memberId)||Boolean(config.temporaryExemptions?.some(e=>e.memberId===memberId&&now>=e.createdAt&&now<e.expiresAt));
+}
 export function isValidProtectionPolicy(v:unknown):v is ProtectionPolicy{
- if(!object(v)||!keys(v,['chatId','revision','mode','rules','allowedDomains','allowedPhrases','exemptMemberIds',...(Object.hasOwn(v,'flood')?['flood']:[])])||Object.hasOwn(v,'flood')&&!isValidFloodPolicy(v.flood)||!group(v.chatId)||
+ if(!object(v)||!keys(v,['chatId','revision','mode','rules','allowedDomains','allowedPhrases','exemptMemberIds',...(Object.hasOwn(v,'flood')?['flood']:[]),...(Object.hasOwn(v,'temporaryExemptions')?['temporaryExemptions']:[]),...(Object.hasOwn(v,'escalation')?['escalation']:[]),...(Object.hasOwn(v,'raid')?['raid']:[]),...(Object.hasOwn(v,'night')?['night']:[]),...(Object.hasOwn(v,'joinRaid')?['joinRaid']:[])])||Object.hasOwn(v,'flood')&&!isValidFloodPolicy(v.flood)||!group(v.chatId)||
   !Number.isSafeInteger(v.revision)||typeof v.revision!=='number'||v.revision<1||(typeof v.mode!=='string'||!['OFF','MONITOR','ENFORCE'].includes(v.mode))||
   !stringList(v.allowedDomains,host,100)||!stringList(v.allowedPhrases,phrase,100)||!stringList(v.exemptMemberIds,member,100)||
-  !Array.isArray(v.rules)||v.rules.length>100)return false;
- const seen=new Set<string>();
+  Object.hasOwn(v,'joinRaid')&&!validJoinRaid(v.joinRaid)||Object.hasOwn(v,'night')&&!validNight(v.night)||Object.hasOwn(v,'raid')&&(!validRaid(v.raid)||(v.raid as {enabled:boolean}).enabled&&!(v.flood as FloodPolicy|undefined)?.enabled)||Object.hasOwn(v,'escalation')&&!validEscalation(v.escalation)||Object.hasOwn(v,'temporaryExemptions')&&!validTemporaryExemptions(v.temporaryExemptions)||!Array.isArray(v.rules)||v.rules.length>100)return false;
+ const seen=new Set<string>(),protectedNames=new Set<string>();
  return v.rules.every(r=>{
   if(!object(r)||typeof r.id!=='string'||!/^[A-Za-z0-9][A-Za-z0-9_-]{0,47}$/u.test(r.id)||seen.has(r.id)||
    typeof r.enabled!=='boolean'||(typeof r.action!=='string'||!actions.includes(r.action)))return false;
   seen.add(r.id);
-  if(r.kind==='WORD'||r.kind==='PHRASE')return keys(r,['id','enabled','action','kind','value'])&&phrase(r.value)&&
+  if(r.kind==='WORD'||r.kind==='PHRASE')return keys(r,['id','enabled','action','kind','value',...(Object.hasOwn(r,'match')?['match']:[])])&&(!Object.hasOwn(r,'match')||r.kind==='WORD'&&r.match==='PARTIAL')&&phrase(r.value)&&
    (r.kind!=='WORD'||!normalizeProtectionText(r.value).includes(' '));
+  if(r.kind==='FRAUD')return keys(r,['id','enabled','action','kind','identity','payment'])&&phrase(r.identity)&&phrase(r.payment)&&normalizeProtectionText(r.identity)!==normalizeProtectionText(r.payment);
+  if(r.kind==='LOOKALIKE')return keys(r,['id','enabled','action','kind','domain'])&&referenceDomain(r.domain);
+  if(r.kind==='NAME'){
+   if(!keys(r,['id','enabled','action','kind','name','trustedId'])||!phrase(r.name)||!member(r.trustedId))return false;
+   const name=normalizeProtectionText(r.name);if(protectedNames.has(name))return false;
+   protectedNames.add(name);return true;
+  }
+  if(r.kind==='LIMIT')return keys(r,['id','enabled','action','kind','metric','maximum'])&&typeof r.metric==='string'&&['MENTIONS','HASHTAGS','LENGTH','QUOTES'].includes(r.metric)&&typeof r.maximum==='number'&&Number.isSafeInteger(r.maximum)&&r.maximum>=1&&r.maximum<=(r.metric==='LENGTH'?4096:100);
   if(r.kind==='FORWARD')return keys(r,['id','enabled','action','kind']);
   if(r.kind==='TYPE')return keys(r,['id','enabled','action','kind','type'])&&typeof r.type==='string'&&typeNames.includes(r.type);
   return r.kind==='LINK'&&keys(r,['id','enabled','action','kind','hosts'])&&
@@ -42,9 +82,12 @@ export function isValidProtectionPolicy(v:unknown):v is ProtectionPolicy{
  });
 }
 function validMessage(v:unknown,chatId:string):v is ProtectionMessage{
- if(!object(v)||Object.keys(v).some(k=>!['chatId','memberId','type','text','caption','links','forwarded'].includes(k))||v.chatId!==chatId||
+ if(!object(v)||Object.keys(v).some(k=>!['chatId','memberId','type','text','caption','links','forwarded','mentionCount','quoteCount','displayName'].includes(k))||v.chatId!==chatId||
   !member(v.memberId)||typeof v.type!=='string'||!typeNames.includes(v.type)||v.text!==undefined&&v.caption!==undefined)return false;
+ if(v.quoteCount!==undefined&&(typeof v.quoteCount!=='number'||!Number.isSafeInteger(v.quoteCount)||v.quoteCount<0||v.quoteCount>100))return false;
+ if(v.mentionCount!==undefined&&(typeof v.mentionCount!=='number'||!Number.isSafeInteger(v.mentionCount)||v.mentionCount<0||v.mentionCount>100))return false;
  if(v.forwarded!==undefined&&typeof v.forwarded!=='boolean')return false;
+ if(v.displayName!==undefined&&(typeof v.displayName!=='string'||v.displayName.length>128||v.displayName.length===0||/[\u0000-\u001f\u007f]/u.test(v.displayName)))return false;
  if(v.text!==undefined&&(v.type!=='TEXT'||typeof v.text!=='string'||v.text.length>4096||v.text.includes('\0')))return false;
  if(v.caption!==undefined&&(v.type==='TEXT'||typeof v.caption!=='string'||v.caption.length>4096||v.caption.includes('\0')))return false;
  return v.links===undefined||stringList(v.links,x=>typeof x==='string'&&x.length>=1&&x.length<=2048&&urlHost(x)!==null,100);
@@ -53,13 +96,37 @@ function urlHost(raw:string):string|null{
  try{const u=new URL(/^https?:\/\//iu.test(raw)?raw:'https://'+raw);return ['https:','http:'].includes(u.protocol)&&u.hostname?u.hostname.toLowerCase():null;}catch{return null;}
 }
 const contains=(normalized:string,value:string)=>(' '+normalized+' ').includes(' '+normalizeProtectionText(value)+' ');
+/** Two separate word-boundary spans are required: one configured phrase
+ * contained inside the other is not independent evidence of a payment claim. */
+function containsSeparate(normalized:string,first:string,second:string):boolean{
+ const text=' '+normalized+' ',a=normalizeProtectionText(first),b=normalizeProtectionText(second);
+ const firstA=text.indexOf(' '+a+' '),lastA=text.lastIndexOf(' '+a+' '),firstB=text.indexOf(' '+b+' '),lastB=text.lastIndexOf(' '+b+' ');
+ return firstA>=0&&firstB>=0&&(firstA+1+a.length<=lastB+1||firstB+1+b.length<=lastA+1);
+}
+/** A bounded ASCII host comparison, not a verdict about the site's owner. */
+function oneEdit(a:string,b:string):boolean{
+ if(Math.abs(a.length-b.length)>1||a===b)return false;
+ if(a.length===b.length){
+  const differences:number[]=[];for(let i=0;i<a.length;i++)if(a[i]!==b[i])differences.push(i);
+  return differences.length===1||differences.length===2&&differences[1]===differences[0]!+1&&a[differences[0]!]===b[differences[1]!]&&a[differences[1]!]===b[differences[0]!];
+ }
+ const shorter=a.length<b.length?a:b,longer=a.length<b.length?b:a;
+ let i=0;while(i<shorter.length&&shorter[i]===longer[i])i++;
+ return shorter.slice(i)===longer.slice(i+1);
+}
+function resemblesDomain(candidate:string,official:string):boolean{
+ if(candidate===official||candidate.endsWith('.'+official))return false;
+ if((' '+candidate+'.').includes(' '+official+'.')||candidate.includes('.'+official+'.'))return true;
+ const labels=candidate.split('.'),count=official.split('.').length;
+ return labels.length>=count&&oneEdit(labels.slice(-count).join('.'),official);
+}
 const severity:Readonly<Record<ProtectionAction,number>>={REVIEW:0,WARN:1,DELETE:2,MUTE:3};
-export function evaluateProtectionRules(config:unknown,input:unknown):ProtectionEvaluation{
+export function evaluateProtectionRules(config:unknown,input:unknown,now:number=Date.now()):ProtectionEvaluation{
  const result=(status:ProtectionEvaluation['status'],ids:string[]=[],action:ProtectionAction|null=null):ProtectionEvaluation=>({status,matchedRuleIds:ids,proposedAction:action,authorizedToSend:false});
  if(!isValidProtectionPolicy(config))return result('INVALID_POLICY');
- if(!validMessage(input,config.chatId))return result('INVALID_MESSAGE');
+ if(!Number.isSafeInteger(now)||now<0||now>8640000000000000||!validMessage(input,config.chatId))return result('INVALID_MESSAGE');
  if(config.mode==='OFF')return result('OFF');
- if(config.exemptMemberIds.includes(input.memberId))return result('EXEMPT');
+ if(protectionMemberExempt(config,input.memberId,now))return result('EXEMPT');
  const body=input.text??input.caption??'',normalized=normalizeProtectionText(body);
  // Mask only the reviewed phrase span, never unrelated words elsewhere.
  let lexicalBody=' '+normalized+' ';
@@ -73,7 +140,15 @@ export function evaluateProtectionRules(config:unknown,input:unknown):Protection
  const hosts=new Set([...extracted,...(input.links??[])].map(urlHost).filter((h):h is string=>h!==null));
  const matches=config.rules.filter(r=>{
   if(!r.enabled)return false;
+  if(r.kind==='WORD'&&r.match==='PARTIAL')return lexicalBody.includes(normalizeProtectionText(r.value));
   if(r.kind==='WORD'||r.kind==='PHRASE')return contains(lexicalBody,r.value);
+  if(r.kind==='FRAUD')return containsSeparate(lexicalBody,r.identity,r.payment);
+  if(r.kind==='LOOKALIKE')return [...hosts].some(h=>!config.allowedDomains.includes(h)&&resemblesDomain(h,r.domain));
+  if(r.kind==='NAME')return input.memberId!==r.trustedId&&input.displayName!==undefined&&normalizeProtectionText(input.displayName)===normalizeProtectionText(r.name);
+  if(r.kind==='LIMIT'){
+   const count=r.metric==='QUOTES'?(input.quoteCount??0):r.metric==='LENGTH'?Array.from(body).length:r.metric==='MENTIONS'?Math.max(input.mentionCount??0,[...body.matchAll(/(?<![\p{L}\p{N}_])@[A-Za-z][A-Za-z0-9_]{4,31}(?![A-Za-z0-9_])/gu)].length):[...body.matchAll(/(?<![\p{L}\p{N}_])#[\p{L}\p{N}_]+/gu)].length;
+   return count>r.maximum;
+  }
   if(r.kind==='FORWARD')return input.forwarded===true;
   if(r.kind==='TYPE')return r.type===input.type;
   if(r.kind!=='LINK')return false;

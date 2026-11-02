@@ -56,6 +56,19 @@ export class TelegramBotApiMembershipGateway implements MembershipGateway {
   return envelope.result;
  }
  /** A successful bot administrator check is required before a student lookup. */
+ /** Read an existing join target from the approved chat's own API record.
+  * Never creates an invite link or resolves an operator-supplied URL. */
+ async joinURL(channelId:string):Promise<string|null>{
+  if(!channel(channelId)||!await this.canVerifyChannel(channelId))return null;
+  try{
+   const response=await this.request('https://api.telegram.org/bot'+this.token+'/getChat',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({chat_id:channelId}),redirect:'error',signal:AbortSignal.timeout(8000)});
+   if(!response.ok||response.status!==200)return null;const type=response.headers.get('content-type');if(type!==null&&!/^application\/json(?:\s*;.*)?$/iu.test(type))return null;
+   const declared=response.headers.get('content-length');if(declared!==null&&(!/^[0-9]+$/u.test(declared)||Number(declared)>16384))return null;const text=await response.text();if(Buffer.byteLength(text)>16384)return null;const v:unknown=JSON.parse(text);if(!v||typeof v!=='object'||Array.isArray(v))return null;const record=v as Record<string,unknown>,r=record.result;if(record.ok!==true||!r||typeof r!=='object'||Array.isArray(r))return null;const chat=r as Record<string,unknown>;
+   if(chat.id!==Number(channelId)||!['group','supergroup','channel'].includes(String(chat.type)))return null;
+   if(typeof chat.username==='string'&&/^[A-Za-z][A-Za-z0-9_]{4,31}$/u.exec(chat.username)?.[0]===chat.username)return 'https://t.me/'+chat.username;
+   return typeof chat.invite_link==='string'&&/^https:\/\/t\.me\/(?:\+[A-Za-z0-9_-]{10,128}|joinchat\/[A-Za-z0-9_-]{10,128})$/u.exec(chat.invite_link)?.[0]===chat.invite_link?chat.invite_link:null;
+  }catch{return null;}
+ }
  async canVerifyChannel(channelId:string):Promise<boolean>{
   const record=await this.query(channelId,String(this.botId));
   return record!==null&&['administrator','creator'].includes(record.status);

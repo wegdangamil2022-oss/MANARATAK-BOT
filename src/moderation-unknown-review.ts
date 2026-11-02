@@ -47,7 +47,7 @@ const opDigest=(o:ModerationOperation,s:BotState)=>createHash('sha256')
  .update('MANARATAK:UNKNOWN:OWNER:REVIEW:V2:')
  .update(JSON.stringify([
   o.id,o.chatId,o.memberId,o.actorId,o.kind,o.reasonFingerprint,
-  o.policyVersion,o.createdAt,o.status,o.attemptGateway??null,o.review??null,
+  o.policyVersion,o.createdAt,o.status,o.attemptGateway??null,o.review??null,...(o.untilDate===undefined?[]:[{untilDate:o.untilDate}]),...(o.baselineMode===undefined?[]:[{baselineMode:o.baselineMode}]),...(o.reverses===undefined?[]:[{reverses:o.reverses}]),...(o.action===undefined?[]:[{action:o.action}]),...(o.caseReference===undefined?[]:[{caseReference:o.caseReference}]),
   ...(()=>{
    const chat=s.chats.find(c=>c.id===o.chatId);
    return [chat?.id??null,chat?.approved??null,
@@ -189,7 +189,7 @@ export class ModerationUnknownOwnerReview {
      [button('↩️ قائمة المراجعة','mr:1:p:'+page),button('🏠 لوحة المالك','mi:1:h')]];
    return menu('<b>عملية عقوبة مجهولة — سجل محلي</b>\n'
     +'المجموعة: <code>'+safe(op.chatId)+'</code>\n'
-    +'الإجراء المسجل: '+(op.kind==='BAN'?'حظر':op.kind==='MUTE'?'كتم':'رفع قيد')+'\n'
+    +'الإجراء المسجل: '+(op.action==='KICK'?'طرد':op.kind==='BAN'?'حظر':op.kind==='MUTE'?'كتم':'رفع قيد')+'\n'
     +'النتيجة: UNKNOWN_OUTCOME (غير محسومة)\n'
     +'المراجعة: '+(op.review?
      op.review.decision==='ESCALATED'?'تم التصعيد':'إقرار بالمراجعة دون حسم':

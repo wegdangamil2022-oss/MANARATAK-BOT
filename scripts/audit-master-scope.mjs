@@ -3,7 +3,9 @@ import {readFile,writeFile} from 'node:fs/promises';
 import {createHash} from 'node:crypto';
 import {ownerInlineSections} from '../dist/src/telegram-inline-owner.js';
 const source='docs/MANARATAK_BOT_MASTER_v1.2.1_AR.md';
-const raw=await readFile(new URL('../'+source,import.meta.url),'utf8'),lines=raw.split('\n');
+// Git may check the document out with CRLF on Windows. Compare the same
+// canonical text on both platforms; content and every registry row stay exact.
+const raw=(await readFile(new URL('../'+source,import.meta.url),'utf8')).replace(/\r\n/gu,'\n'),lines=raw.split('\n');
 // Explicit engineering allocation under the current phase-order introduction.
 // These are parent screens, never an assertion that a feature is implemented.
 const owners={1:[1,16],2:[3],3:[2],4:[2],5:[4],6:[4],7:[9],8:[9],9:[1],10:[5,6],11:[10],12:[11],13:[12],14:[9],15:[13],16:[15],17:[16],18:[16],19:[6],20:[2],21:[2],22:[8],23:[8],24:[8],25:[9],26:[8,9],27:[10],28:[9,11],29:[4],30:[2],31:[7,15],32:[14],33:[16],34:[5],35:[5,12],36:[16],37:[9],38:[8],39:[5],40:[1],41:[4],42:[12,16],43:[16],44:[3],45:[5,10],46:[10],47:[9,12],48:[10],49:[10],50:[10],51:[9],52:[10],53:[10],54:[3],55:[8],56:[9],57:[12],58:[1],59:[2],60:[2],61:[7],62:[9],63:[9],64:[2],65:[2],66:[2],67:[15],68:[15],69:[4,9],70:[2],71:[6,9],72:[16],73:[9,10]};

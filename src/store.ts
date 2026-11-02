@@ -1,6 +1,7 @@
 import {isValidFloodWindow,type FloodWindow} from './protection-flood.js';
 import {validGroupNetworks,type GroupNetwork} from './group-network-model.js';
 import {validCommunityFolders,type CommunityFolder} from './community-folder-model.js';
+import {validGroupPermissionJobs,type GroupPermissionJob} from './group-permission-model.js';
 import {validCommunityMessageMetadata,type CommunityMessageReceipt} from './community-message-receipt.js';
 import {validAdminUIAccess,type AdminUIAccess} from './protection-ui-access.js';
 import {validStudioState,type StudioState} from './button-studio-model.js';
@@ -30,8 +31,8 @@ export interface ImportRun { id: string; scope: string; uploadedBy: string; orig
 export type RestrictionKind = 'NONE' | 'MUTE' | 'BAN';
 /** Local adapter classification, not proof of remote sanction authorship. */
 export type ModerationDispatchGateway='SIMULATION'|'TELEGRAM_API'|'UNSPECIFIED';
-export interface ModerationReason { chatId: string; memberId: string; source: 'MANUAL' | 'SUBSCRIPTION'; reference: string; kind: 'MUTE' | 'BAN'; createdBy: string; active: boolean; }
-export interface ModerationOperation { id: string; chatId: string; memberId: string; actorId: string; kind: RestrictionKind; reasonFingerprint: string; policyVersion: number; status: OperationStatus; createdAt: number; /** Gateway used when the attempt entered STARTED. Absent on legacy/undispatched rows. */ attemptGateway?:ModerationDispatchGateway; /** Owner triage never alters status or authorizes retry. */ review?:{decision:'ACKNOWLEDGED_UNRESOLVED'|'ESCALATED';reviewedBy:string;reviewedAt:number;/** Approval epoch at review time; optional for legacy records. */policyVersion?:number;/** Immutable local attempt evidence binding; absent on legacy reviews. */evidenceDigest?:string}; }
+export interface ModerationReason { chatId: string; memberId: string; source: 'MANUAL' | 'SUBSCRIPTION'; reference: string; kind: 'MUTE' | 'BAN'; createdBy: string; active: boolean; expiresAt?:number; }
+export interface ModerationOperation { id: string; chatId: string; memberId: string; actorId: string; kind: RestrictionKind; reasonFingerprint: string; policyVersion: number; status: OperationStatus; createdAt: number; untilDate?:number; baselineMode?:'INHERIT_GROUP_DEFAULTS'; reverses?:string; action?:'KICK'; caseReference?:string; /** Gateway used when the attempt entered STARTED. Absent on legacy/undispatched rows. */ attemptGateway?:ModerationDispatchGateway; /** Owner triage never alters status or authorizes retry. */ review?:{decision:'ACKNOWLEDGED_UNRESOLVED'|'ESCALATED';reviewedBy:string;reviewedAt:number;/** Approval epoch at review time; optional for legacy records. */policyVersion?:number;/** Immutable local attempt evidence binding; absent on legacy reviews. */evidenceDigest?:string}; }
 export interface Warning { chatId: string; memberId: string; reference: string; actorId: string; at: number; active: boolean; }
 export interface SubscriptionRequirement { chatId: string; channelIds: string[]; mode: 'ALL' | 'ANY' | 'AT_LEAST'; minimumCount?:number; version: number; }
 export interface FAQEntry { id: string; scope: string; question: string; aliases: string[]; answer: string; sourceResourceId: string; createdBy: string; approvedBy?: string; status: 'DRAFT' | 'APPROVED' | 'ARCHIVED'; createdAt: number; }
@@ -73,6 +74,8 @@ export interface RollingMessageMeta {
 }
 export interface PurgeFilter {
   limit:number; beforeMessageId?:number; senderId?:string; linksOnly?:boolean; mediaOnly?:boolean; commandsOnly?:boolean;
+  /** Inclusive lower and exclusive upper bound on original message send time. */
+  sentAfter?:number; sentBefore?:number;
 }
 export type PurgeItemStatus='QUEUED'|'SENDING'|'ACKNOWLEDGED'|'FAILED_CONFIRMED'|'UNKNOWN_OUTCOME'|'SKIPPED_UNVERIFIED'|'CANCELLED';
 export interface PurgeItem {
@@ -84,7 +87,7 @@ export interface PurgeItem {
 /** Separate explicit review required before any mock delete request. */
 export interface PurgeJob {
   id:string; chatId:string; actorId:string; scopeVersion:number; createdAt:number; expiresAt:number;
-  filter:PurgeFilter; excluded:{protected:number;expired:number};
+  filter:PurgeFilter; automatic?:true; excluded:{protected:number;expired:number};
   status:'PREVIEW'|'READY'|'PAUSED'|'CANCELLED'|'COMPLETED';
   confirmedBy?:string; confirmedAt?:number; rateLimitedUntil?:number; items:PurgeItem[];
 }
@@ -117,7 +120,7 @@ export interface TelegramReplyJob {
  /** New private replies declare origin; pre-v0.7.56 private QUEUED rows
   * without either this or privateGroupAccess are quarantine-only on dispatch.
   */
- privateReplyKind?:'LOCAL'|'GROUP_SCOPED'|'ADMIN_SCOPED'|'LIBRARY_SCOPED'|'STUDIO_SCOPED'|'COMMUNITY_SCOPED';
+ privateReplyKind?:'LOCAL'|'GROUP_SCOPED'|'VERIFICATION_SCOPED'|'ADMIN_SCOPED'|'LIBRARY_SCOPED'|'STUDIO_SCOPED'|'COMMUNITY_SCOPED';
  /** Ephemeral administrative view witness, removed before any outbound attempt. */
  adminUIAccess?:AdminUIAccess;
  /** Short-lived witness for private inline library contents. */
@@ -158,6 +161,7 @@ export interface B6BudgetAttempt {
   operatorReview?:{reviewedBy:string;reviewedAt:number};
 }
 export interface BotState {
+  groupPermissionJobs?:GroupPermissionJob[];
   communityFolders?:CommunityFolder[];
   buttonStudio?:StudioState;
   /** Local owner network folders; never evidence of Telegram rights. */
@@ -247,6 +251,8 @@ export class BotStore {
     if (previous.schemaVersion !== 8 ||
       (previous.groupNetworks!==undefined&&!validGroupNetworks(previous.groupNetworks))||
       (previous.communityFolders!==undefined&&!validCommunityFolders(previous.communityFolders))||
+      (previous.groupPermissionJobs!==undefined&&!validGroupPermissionJobs(previous.groupPermissionJobs))||
+      (Array.isArray(previous.moderationReasons)&&previous.moderationReasons.some((r:Record<string,unknown>)=>r&&typeof r==='object'&&Object.hasOwn(r,'expiresAt')&&(r.source!=='MANUAL'||!Number.isSafeInteger(r.expiresAt)||Number(r.expiresAt)<=0||Number(r.expiresAt)>8640000000000000)))||
       (previous.privateSettingsRevision!==undefined&&(typeof previous.privateSettingsRevision!=='number'||!Number.isSafeInteger(previous.privateSettingsRevision)||previous.privateSettingsRevision<0||previous.privateSettingsRevision>=Number.MAX_SAFE_INTEGER))||
       (previous.buttonStudio!==undefined&&!validStudioState(previous.buttonStudio))||
       (previous.protectionFloodWindows!==undefined&&(!Array.isArray(previous.protectionFloodWindows)||
@@ -393,9 +399,9 @@ export class BotStore {
             !Number.isSafeInteger(Number(plan.chatId))||
             job.groupReplyKind!==undefined||
             job.groupMenuAccess!==undefined||job.groupQuestionAccess!==undefined||
-            (job.privateReplyKind!=='LOCAL'&&job.privateReplyKind!=='GROUP_SCOPED'&&job.privateReplyKind!=='ADMIN_SCOPED'&&job.privateReplyKind!=='LIBRARY_SCOPED'&&job.privateReplyKind!=='STUDIO_SCOPED'&&job.privateReplyKind!=='COMMUNITY_SCOPED')||
+            (job.privateReplyKind!=='LOCAL'&&job.privateReplyKind!=='GROUP_SCOPED'&&job.privateReplyKind!=='VERIFICATION_SCOPED'&&job.privateReplyKind!=='ADMIN_SCOPED'&&job.privateReplyKind!=='LIBRARY_SCOPED'&&job.privateReplyKind!=='STUDIO_SCOPED'&&job.privateReplyKind!=='COMMUNITY_SCOPED')||
             (job.privateReplyKind==='LOCAL'&&(job.privateGroupAccess!==undefined||job.adminUIAccess!==undefined||job.privateLibraryAccess!==undefined))||
-            (job.privateReplyKind==='GROUP_SCOPED'&&(job.privateGroupAccess===undefined||job.adminUIAccess!==undefined||job.privateLibraryAccess!==undefined))||
+            ((job.privateReplyKind==='GROUP_SCOPED'||job.privateReplyKind==='VERIFICATION_SCOPED')&&(job.privateGroupAccess===undefined||job.adminUIAccess!==undefined||job.privateLibraryAccess!==undefined))||
             ((job.privateReplyKind==='ADMIN_SCOPED'||job.privateReplyKind==='STUDIO_SCOPED')&&(job.adminUIAccess===undefined||job.privateGroupAccess!==undefined||job.privateLibraryAccess!==undefined))||
             (job.privateReplyKind==='LIBRARY_SCOPED'&&(job.privateLibraryAccess===undefined||job.privateGroupAccess!==undefined||job.adminUIAccess!==undefined))||
             (job.privateReplyKind==='COMMUNITY_SCOPED'&&(job.communityAccess===undefined||job.privateLibraryAccess!==undefined||job.privateGroupAccess!==undefined||job.adminUIAccess!==undefined)))
@@ -730,20 +736,21 @@ export class BotStore {
     groupQuestionAccess?:TelegramReplyJob['groupQuestionAccess'],
     groupMenuAccess?:TelegramReplyJob['groupMenuAccess'],
     privateGroupAccess?:TelegramReplyJob['privateGroupAccess'],
-    adminUIAccess?:TelegramReplyJob['adminUIAccess'],privateLibraryAccess?:TelegramReplyJob['privateLibraryAccess'],studioScoped=false,communityAccess?:TelegramReplyJob['communityAccess'],communityClose?:CommunityMessageReceipt): Promise<void> {
+    adminUIAccess?:TelegramReplyJob['adminUIAccess'],privateLibraryAccess?:TelegramReplyJob['privateLibraryAccess'],studioScoped=false,communityAccess?:TelegramReplyJob['communityAccess'],communityClose?:CommunityMessageReceipt,verificationScoped=false): Promise<void> {
     await this.transaction(s => {
       const update = s.updates.find(x => x.key === key);
       if (!update || update.status !== 'CLAIMED') throw new Error('Update not claimed');
       const statuses = s.operations.filter(o => o.updateKey === key).map(o => o.status);
       update.status = statuses.includes('UNKNOWN_OUTCOME') ? 'UNKNOWN' : 'DONE';
       if (!s.audit.some(a => a.updateKey === key)) s.audit.push(decision); // no tokens or raw inbound messages
+      if(verificationScoped&&(!reply||reply.chatId.startsWith('-')||!privateGroupAccess||adminUIAccess||privateLibraryAccess||communityAccess))throw Error('INVALID_VERIFICATION_REPLY_SCOPE');
       if(reply && update.status==='DONE') {
         s.telegramReplyJobs??=[];
         if(!s.telegramReplyJobs.some(j=>j.updateKey===key))
          s.telegramReplyJobs.push({updateKey:key,plan:structuredClone(reply),status:'QUEUED',queuedAt:decision.at,
           ...(reply.chatId.startsWith('-')
            ?{groupReplyKind:groupQuestionAccess?'REVIEWED_FAQ' as const:'GENERAL' as const}
-           :{privateReplyKind:communityAccess?'COMMUNITY_SCOPED' as const:adminUIAccess?(studioScoped?'STUDIO_SCOPED' as const:'ADMIN_SCOPED' as const):privateGroupAccess?'GROUP_SCOPED' as const:privateLibraryAccess?'LIBRARY_SCOPED' as const:'LOCAL' as const}),
+           :{privateReplyKind:verificationScoped?'VERIFICATION_SCOPED' as const:communityAccess?'COMMUNITY_SCOPED' as const:adminUIAccess?(studioScoped?'STUDIO_SCOPED' as const:'ADMIN_SCOPED' as const):privateGroupAccess?'GROUP_SCOPED' as const:privateLibraryAccess?'LIBRARY_SCOPED' as const:'LOCAL' as const}),
           ...(groupQuestionAccess?{groupQuestionAccess:structuredClone(groupQuestionAccess)}:{}),
           ...(groupMenuAccess?{groupMenuAccess:structuredClone(groupMenuAccess)}:{}),
           ...(privateGroupAccess?{privateGroupAccess:structuredClone(privateGroupAccess)}:{}),
