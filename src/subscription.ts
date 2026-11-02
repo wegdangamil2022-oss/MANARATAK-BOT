@@ -1,3 +1,4 @@
+import {subscriptionEnforcementConsent,subscriptionEnforcementStamp} from './subscription-enforcement-policy.js';
 import { BotStore, type BotState } from './store.js';
 import { Policy } from './policy.js';
 import { ModerationService, type ModerationResult } from './moderation.js';
@@ -9,6 +10,7 @@ export type SubscriptionDecision = { status: 'MEMBER' | 'NOT_MEMBER' | 'UNAVAILA
 export interface MembershipGateway {
   canVerifyChannel(channelId: string): Promise<boolean>;
   getMember(channelId: string, userId: string): Promise<Membership>;
+  joinURL?(channelId:string):Promise<string|null>;
 }
 export class FakeMembershipGateway implements MembershipGateway {
   verifiable = true;
@@ -69,7 +71,7 @@ export class SubscriptionGate {
     return this.policy.removeSubscriptionChannelAtRevision(actorId,chatId,channelId,
      expectedChatRevision,expectedRequirementRevision);
   }
-  async verify(chatId: string, userId: string): Promise<SubscriptionDecision> {
+  async verify(chatId: string, userId: string,capture?:(responses:Membership[])=>void): Promise<SubscriptionDecision> {
     const s = await this.store.snapshot();
     if (!userId || !this.policy.canUseChat(s, chatId, 'verification')) return { status: 'DENIED', channels: [] };
     const mode=subscriptionRequirementMode(s,chatId);
@@ -124,21 +126,40 @@ export class SubscriptionGate {
     const passing=members>=required;
     const complete=responses.every(x=>x!=='UNKNOWN');
     const failing=complete&&members<required;
+    capture?.([...responses]);
     return {status:passing?'MEMBER':failing?'NOT_MEMBER':'UNAVAILABLE',
      channels:[...config.channelIds]};
   }
-  async syncSubscriptionRestriction(chatId: string, memberId: string): Promise<ModerationResult | SubscriptionDecision> {
+  async verifyWithProgress(chat:string,member:string):Promise<{decision:SubscriptionDecision;verified:number;unknown:number;total:number}>{let responses:Membership[]=[];const decision=await this.verify(chat,member,r=>{responses=r;});return {decision,verified:responses.filter(r=>r==='MEMBER').length,unknown:responses.filter(r=>r==='UNKNOWN').length,total:decision.channels.length};}
+  async joinTargets(chat:string):Promise<{id:string;url:string|null}[]>{
+    const before=await this.store.snapshot(),rows=before.subscriptionRequirements.filter(r=>r.chatId===chat),rule=rows[0];if(rows.length!==1||!rule||!isCanonicalSubscriptionRule(rule)||!this.policy.canUseChat(before,chat,'verification')||rule.channelIds.some(id=>!this.policy.canUseChat(before,id,'verification')))return [];
+    const epoch=subscriptionConfigEpoch(before),values=await Promise.all(rule.channelIds.map(async id=>{let url:string|null=null;try{url=await this.membership.joinURL?.(id)??null;}catch{/* unavailable links are never guessed */}if(url!==null&&(typeof url!=='string'||/^https:\/\/t\.me\/(?:[A-Za-z][A-Za-z0-9_]{4,31}|\+[A-Za-z0-9_-]{10,128}|joinchat\/[A-Za-z0-9_-]{10,128})$/u.exec(url)?.[0]!==url))url=null;return {id,url};}));
+    return subscriptionConfigEpoch(await this.store.snapshot())===epoch?values:[];
+  }
+  supportsAutomaticEnforcement():boolean{return this.moderation.supportsSubscriptionEnforcement();}
+  async automaticMode(chat:string):Promise<'ON'|'OFF'|'UNAVAILABLE'>{if(!this.supportsAutomaticEnforcement())return 'UNAVAILABLE';const c=subscriptionEnforcementConsent(await this.store.snapshot(),this.policy,chat,this.clock());return c?c.enabled?'ON':'OFF':'UNAVAILABLE';}
+  async validateEnforcementConfiguration(actor:string,chat:string,expectedEpoch:string):Promise<boolean>{
+    const s=await this.store.snapshot(),rule=s.subscriptionRequirements.find(r=>r.chatId===chat);if(!this.policy.isOwner(actor)||!this.supportsAutomaticEnforcement()||subscriptionConfigEpoch(s)!==expectedEpoch||!subscriptionEnforcementStamp(s,this.policy,chat)||!rule||!rule.channelIds.length)return false;
+    try{if(!(await Promise.all(rule.channelIds.map(id=>this.membership.canVerifyChannel(id)))).every(Boolean))return false;}catch{return false;}
+    return subscriptionConfigEpoch(await this.store.snapshot())===expectedEpoch;
+  }
+  async synchronizeAutomatic(chat:string,member:string):Promise<{decision:SubscriptionDecision;effect?:ModerationResult|SubscriptionDecision;verified?:number;unknown?:number;total?:number}>{
+    if(await this.automaticMode(chat)==='UNAVAILABLE')return {decision:{status:'DENIED',channels:[]}};
+    let decision:SubscriptionDecision={status:'UNAVAILABLE',channels:[]},responses:Membership[]=[];const effect=await this.syncSubscriptionRestriction(chat,member,(d,r)=>{decision=structuredClone(d);responses=r;});return {decision,effect,verified:responses.filter(r=>r==='MEMBER').length,unknown:responses.filter(r=>r==='UNKNOWN').length,total:decision.channels.length};
+  }
+  async syncSubscriptionRestriction(chatId: string, memberId: string,capture?:(decision:SubscriptionDecision,responses:Membership[])=>void): Promise<ModerationResult | SubscriptionDecision> {
     // The public verify() response contains no durable proof. Keep a private
     // pre-check epoch and require the SAME saved rule/group/channel epochs in
     // ModerationService's atomic reason-write and immediately before dispatch.
     // This closes the window *after* verify() revalidation but *before*
     // moderation's external rights check and Telegram-effect intent.
-    const before=await this.store.snapshot();
+    const before=await this.store.snapshot(),verifiedAt=this.clock(),official=this.supportsAutomaticEnforcement(),consent=subscriptionEnforcementConsent(before,this.policy,chatId,verifiedAt);
     const groupEpoch=this.policy.chatRevision(before,chatId);
     const rule=before.subscriptionRequirements.find(x=>x.chatId===chatId);
     const channelEpochs=new Map((rule?.channelIds??[]).map(id=>
       [id,this.policy.chatRevision(before,id)] as const));
     const stillCurrent=(s:BotState):boolean=>{
+      const now=this.clock();if(official&&(!Number.isSafeInteger(now)||now<verifiedAt||now>=verifiedAt+5000||JSON.stringify(subscriptionEnforcementConsent(s,this.policy,chatId,now))!==JSON.stringify(consent)))return false;
       if(!this.policy.canUseChat(s,chatId,'verification')||
         this.policy.chatRevision(s,chatId)!==groupEpoch)return false;
       const current=s.subscriptionRequirements.find(x=>x.chatId===chatId);
@@ -151,7 +172,7 @@ export class SubscriptionGate {
         this.policy.canUseChat(s,id,'verification')&&
         this.policy.chatRevision(s,id)===channelEpochs.get(id));
     };
-    const result=await this.verify(chatId,memberId);
+    let responses:Membership[]=[];const result:SubscriptionDecision=official&&consent&&!consent.enabled?{status:'NOT_REQUIRED',channels:[]}:await this.verify(chatId,memberId,r=>{responses=r;});capture?.(result,responses);
     if(result.status==='MEMBER'||result.status==='NOT_REQUIRED')
       return this.moderation.setSubscriptionReason(chatId,memberId,'subscription-gate',false,stillCurrent);
     if(result.status==='NOT_MEMBER')

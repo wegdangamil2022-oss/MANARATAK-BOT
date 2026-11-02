@@ -1,3 +1,4 @@
+import {subscriptionEnforcementConsent} from './subscription-enforcement-policy.js';
 import { randomUUID } from 'node:crypto';
 import { BotStore, type BotState, type ModerationReason, type ModerationOperation, type RestrictionKind, type ModerationDispatchGateway } from './store.js';
 import { Policy } from './policy.js';
@@ -7,7 +8,7 @@ import {TelegramBotApiModerationGateway} from './telegram-moderation-gateway.js'
 
 export type RestrictionOutcome = 'CONFIRMED' | 'FAILED_CONFIRMED' | 'UNKNOWN_OUTCOME';
 export type ModerationResult = { status: 'APPLIED' | 'NO_CHANGE' | 'DENIED' | 'BLOCKED_PENDING' | 'BLOCKED_UNKNOWN' | 'FAILED_CONFIRMED' | 'UNKNOWN_OUTCOME'; reason: string };
-type ReviewedReleaseContext={original:ModerationOperation;reference:string;reviewedAt:number;expiresAt:number};
+type ReviewedReleaseContext={original:ModerationOperation;reference:string;reviewedAt:number;expiresAt:number;source?:'SUBSCRIPTION'};
 type KickContext={reference:string;initialReview:(s:BotState)=>boolean};
 export interface ModerationGateway {
   /** Local adapter identifier only: never a Telegram enforcement receipt. */
@@ -195,10 +196,11 @@ export class ModerationService {
     return this.authorized(await this.store.snapshot(), actorId, chatId, memberId) &&
       await this.gateway.canRestrict(chatId, memberId) && !await this.gateway.isProtected(chatId, memberId);
   }
-  private releaseSource(s:BotState,actor:string,chat:string,member:string,reference:string,kind:'BAN'|'MUTE'):ModerationOperation|null{
+  private releaseSource(s:BotState,actor:string,chat:string,member:string,reference:string,kind:'BAN'|'MUTE',reasonSource:'MANUAL'|'SUBSCRIPTION'='MANUAL'):ModerationOperation|null{
     if(!this.policy.isOwner(actor)||!this.policy.privateFeature(s,'owner.dashboard',actor)||!TelegramBotApiModerationGateway.usesOfficialDispatch(this.gateway)||!this.authorized(s,actor,chat,member)||this.unresolved(s,chat,member))return null;
     const reasons=s.moderationReasons.filter(r=>byTarget(r,chat,member)&&r.active);
-    if(reasons.length!==1||reasons[0]!.source!=='MANUAL'||reasons[0]!.reference!==reference||reasons[0]!.kind!==kind)return null;
+    if(reasonSource==='SUBSCRIPTION'&&!subscriptionEnforcementConsent(s,this.policy,chat,this.clock()))return null;
+    if(reasons.length!==1||reasons[0]!.source!==reasonSource||reasons[0]!.reference!==reference||reasons[0]!.kind!==kind)return null;
     const ops=s.moderationOperations.filter(o=>byTarget(o,chat,member)&&o.status==='CONFIRMED');
     const at=ops.reduce((n,o)=>Math.max(n,o.createdAt),0),latest=ops.filter(o=>o.createdAt===at),op=latest[0];
     return latest.length===1&&op?.kind===kind&&op.attemptGateway==='TELEGRAM_API'&&op.baselineMode==='INHERIT_GROUP_DEFAULTS'&&op.policyVersion===this.policy.chatRevision(s,chat)&&op.reasonFingerprint===fingerprint(s,chat,member)?structuredClone(op):null;
@@ -208,9 +210,10 @@ export class ModerationService {
     const at=confirmed.reduce((n,o)=>Math.max(n,o.createdAt),0),latest=confirmed.filter(o=>o.createdAt===at);
     const reasons=s.moderationReasons.filter(r=>byTarget(r,chat,member)&&r.active);
     return Number.isSafeInteger(now)&&now>=context.reviewedAt&&now<context.expiresAt&&this.policy.isOwner(actor)&&this.policy.privateFeature(s,'owner.dashboard',actor)&&TelegramBotApiModerationGateway.usesOfficialDispatch(this.gateway)&&
-      this.authorized(s,actor,chat,member)&&reasons.length===1&&reasons[0]!.source==='MANUAL'&&reasons[0]!.reference===context.reference&&reasons[0]!.kind===context.original.kind&&fingerprint(s,chat,member)===context.original.reasonFingerprint&&original.length===1&&original[0]!.status==='CONFIRMED'&&sameModerationAttempt(original[0]!,context.original)&&
+      this.authorized(s,actor,chat,member)&&reasons.length===1&&reasons[0]!.source===(context.source??'MANUAL')&&(context.source!=='SUBSCRIPTION'||subscriptionEnforcementConsent(s,this.policy,chat)!==null)&&reasons[0]!.reference===context.reference&&reasons[0]!.kind===context.original.kind&&fingerprint(s,chat,member)===context.original.reasonFingerprint&&original.length===1&&original[0]!.status==='CONFIRMED'&&sameModerationAttempt(original[0]!,context.original)&&
       original[0]!.baselineMode==='INHERIT_GROUP_DEFAULTS'&&original[0]!.attemptGateway==='TELEGRAM_API'&&original[0]!.policyVersion===this.policy.chatRevision(s,chat)&&latest.length===1&&latest[0]!.id===context.original.id;
   }
+  supportsSubscriptionEnforcement():boolean{return TelegramBotApiModerationGateway.usesOfficialDispatch(this.gateway);}
   async canReviewCommand(actorId:string,chatId:string,memberId:string,release?:{reference:string;kind:'BAN'|'MUTE'}):Promise<boolean>{
     if(await this.priorPending(actorId,chatId,memberId))return false;
     if(await this.check(actorId,chatId,memberId))return true;
@@ -284,16 +287,16 @@ export class ModerationService {
     if(changed==='KIND_MISMATCH')return {status:'DENIED',reason:'REASON_KIND_MISMATCH'};
     return changed ? this.reconcile(actorId, chatId, memberId) : { status: 'NO_CHANGE', reason: 'NOT_ACTIVE' };
   }
-  private async releaseReviewed(actor:string,chat:string,member:string,reference:string,kind:'BAN'|'MUTE',stillCurrent:(s:BotState)=>boolean,expiresAt:number):Promise<ModerationResult>{
+  private async releaseReviewed(actor:string,chat:string,member:string,reference:string,kind:'BAN'|'MUTE',stillCurrent:(s:BotState)=>boolean,expiresAt:number,reasonSource:'MANUAL'|'SUBSCRIPTION'='MANUAL'):Promise<ModerationResult>{
     const now=this.clock();if(!Number.isSafeInteger(expiresAt)||expiresAt<=now||expiresAt>now+120000)return {status:'DENIED',reason:'RELEASE_REVIEW_EXPIRED'};
-    const original=this.releaseSource(await this.store.snapshot(),actor,chat,member,reference,kind);
+    const original=this.releaseSource(await this.store.snapshot(),actor,chat,member,reference,kind,reasonSource);
     if(!original||!await (this.gateway as TelegramBotApiModerationGateway).canRestoreReviewed(chat,member,{kind,...(original.untilDate===undefined?{}:{untilDate:original.untilDate})}))return {status:'DENIED',reason:'RELEASE_SOURCE_UNAVAILABLE'};
     const context=await this.store.transaction(s=>{
-      const at=this.clock(),fresh=this.releaseSource(s,actor,chat,member,reference,kind);
+      const at=this.clock(),fresh=this.releaseSource(s,actor,chat,member,reference,kind,reasonSource);
       if(at<now||at>=expiresAt||!stillCurrent(s)||!fresh||!sameModerationAttempt(fresh,original))return null;
       // Keep the local reason active until the remote release and its readback
       // are confirmed. A denial must not erase the operator's recovery path.
-      return {original,reference,reviewedAt:at,expiresAt};
+      return {original,reference,reviewedAt:at,expiresAt,...(reasonSource==='SUBSCRIPTION'?{source:'SUBSCRIPTION' as const}:{})};
     });
     if(!context)return {status:'DENIED',reason:'RELEASE_REVIEW_STALE'};
     return this.reconcileInternal(actor,chat,member,s=>this.releaseCurrent(s,actor,chat,member,context),context);
@@ -316,10 +319,11 @@ export class ModerationService {
   async setSubscriptionReason(chatId: string, memberId: string, reference: string, active: boolean,
     stillCurrent?: (state:BotState)=>boolean): Promise<ModerationResult> {
     if (!reference || reference.length > 80)return {status:'DENIED',reason:'NOT_AUTHORIZED_OR_BOT_RIGHTS'};
+    if(TelegramBotApiModerationGateway.usesOfficialDispatch(this.gateway)){const consent=subscriptionEnforcementConsent(await this.store.snapshot(),this.policy,chatId,this.clock());if(!consent||active&&!consent.enabled||!stillCurrent)return {status:'DENIED',reason:'SUBSCRIPTION_ENFORCEMENT_NOT_APPROVED'};const upstream=stillCurrent;stillCurrent=s=>JSON.stringify(subscriptionEnforcementConsent(s,this.policy,chatId,this.clock()))===JSON.stringify(consent)&&upstream(s);}
     const preflight=await this.priorPending(this.policy.ownerId,chatId,memberId);
     if(preflight)return preflight;
     if(!await this.check(this.policy.ownerId, chatId, memberId))
-      return {status:'DENIED',reason:'NOT_AUTHORIZED_OR_BOT_RIGHTS'};
+      return !active&&stillCurrent&&TelegramBotApiModerationGateway.usesOfficialDispatch(this.gateway)?this.releaseReviewed(this.policy.ownerId,chatId,memberId,reference,'MUTE',stillCurrent,this.clock()+5000,'SUBSCRIPTION'):{status:'DENIED',reason:'NOT_AUTHORIZED_OR_BOT_RIGHTS'};
     const change = await this.store.transaction(s => {
       if (!this.authorized(s, this.policy.ownerId, chatId, memberId) ||
           (stillCurrent && !stillCurrent(s)))return 'STALE' as const;
@@ -373,7 +377,7 @@ export class ModerationService {
     return this.reconcileInternal(actorId,chatId,memberId,stillCurrent);
   }
   private async reconcileInternal(actorId:string,chatId:string,memberId:string,stillCurrent?: (state:BotState)=>boolean,release?:ReviewedReleaseContext,kick?:KickContext):Promise<ModerationResult>{
-    const dispatchFingerprint=(s:BotState)=>fingerprint(release?{...s,moderationReasons:s.moderationReasons.map(r=>byTarget(r,chatId,memberId)&&r.source==='MANUAL'&&r.reference===release.reference?{...r,active:false}:r)}:s,chatId,memberId);
+    const dispatchFingerprint=(s:BotState)=>fingerprint(release?{...s,moderationReasons:s.moderationReasons.map(r=>byTarget(r,chatId,memberId)&&r.source===(release.source??'MANUAL')&&r.reference===release.reference?{...r,active:false}:r)}:s,chatId,memberId);
     const preflight=await this.priorPending(actorId,chatId,memberId);
     if(preflight)return preflight;
     const releaseSource=release?{kind:release.original.kind as 'BAN'|'MUTE',...(release.original.untilDate===undefined?{}:{untilDate:release.original.untilDate})}:undefined;
@@ -547,7 +551,7 @@ export class ModerationService {
         }
       }
       if(outcome==='CONFIRMED'&&release){
-        const reason=s.moderationReasons.find(r=>byTarget(r,chatId,memberId)&&r.active&&r.source==='MANUAL'&&r.reference===release.reference);
+        const reason=s.moderationReasons.find(r=>byTarget(r,chatId,memberId)&&r.active&&r.source===(release.source??'MANUAL')&&r.reference===release.reference);
         if(!reason){quarantineModerationAttempt(s,started.receipt);return 'BLOCKED_UNKNOWN' as const;}
         reason.active=false;
       }

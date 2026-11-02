@@ -118,7 +118,7 @@ export interface TelegramReplyJob {
  /** New private replies declare origin; pre-v0.7.56 private QUEUED rows
   * without either this or privateGroupAccess are quarantine-only on dispatch.
   */
- privateReplyKind?:'LOCAL'|'GROUP_SCOPED'|'ADMIN_SCOPED'|'LIBRARY_SCOPED'|'STUDIO_SCOPED'|'COMMUNITY_SCOPED';
+ privateReplyKind?:'LOCAL'|'GROUP_SCOPED'|'VERIFICATION_SCOPED'|'ADMIN_SCOPED'|'LIBRARY_SCOPED'|'STUDIO_SCOPED'|'COMMUNITY_SCOPED';
  /** Ephemeral administrative view witness, removed before any outbound attempt. */
  adminUIAccess?:AdminUIAccess;
  /** Short-lived witness for private inline library contents. */
@@ -397,9 +397,9 @@ export class BotStore {
             !Number.isSafeInteger(Number(plan.chatId))||
             job.groupReplyKind!==undefined||
             job.groupMenuAccess!==undefined||job.groupQuestionAccess!==undefined||
-            (job.privateReplyKind!=='LOCAL'&&job.privateReplyKind!=='GROUP_SCOPED'&&job.privateReplyKind!=='ADMIN_SCOPED'&&job.privateReplyKind!=='LIBRARY_SCOPED'&&job.privateReplyKind!=='STUDIO_SCOPED'&&job.privateReplyKind!=='COMMUNITY_SCOPED')||
+            (job.privateReplyKind!=='LOCAL'&&job.privateReplyKind!=='GROUP_SCOPED'&&job.privateReplyKind!=='VERIFICATION_SCOPED'&&job.privateReplyKind!=='ADMIN_SCOPED'&&job.privateReplyKind!=='LIBRARY_SCOPED'&&job.privateReplyKind!=='STUDIO_SCOPED'&&job.privateReplyKind!=='COMMUNITY_SCOPED')||
             (job.privateReplyKind==='LOCAL'&&(job.privateGroupAccess!==undefined||job.adminUIAccess!==undefined||job.privateLibraryAccess!==undefined))||
-            (job.privateReplyKind==='GROUP_SCOPED'&&(job.privateGroupAccess===undefined||job.adminUIAccess!==undefined||job.privateLibraryAccess!==undefined))||
+            ((job.privateReplyKind==='GROUP_SCOPED'||job.privateReplyKind==='VERIFICATION_SCOPED')&&(job.privateGroupAccess===undefined||job.adminUIAccess!==undefined||job.privateLibraryAccess!==undefined))||
             ((job.privateReplyKind==='ADMIN_SCOPED'||job.privateReplyKind==='STUDIO_SCOPED')&&(job.adminUIAccess===undefined||job.privateGroupAccess!==undefined||job.privateLibraryAccess!==undefined))||
             (job.privateReplyKind==='LIBRARY_SCOPED'&&(job.privateLibraryAccess===undefined||job.privateGroupAccess!==undefined||job.adminUIAccess!==undefined))||
             (job.privateReplyKind==='COMMUNITY_SCOPED'&&(job.communityAccess===undefined||job.privateLibraryAccess!==undefined||job.privateGroupAccess!==undefined||job.adminUIAccess!==undefined)))
@@ -734,20 +734,21 @@ export class BotStore {
     groupQuestionAccess?:TelegramReplyJob['groupQuestionAccess'],
     groupMenuAccess?:TelegramReplyJob['groupMenuAccess'],
     privateGroupAccess?:TelegramReplyJob['privateGroupAccess'],
-    adminUIAccess?:TelegramReplyJob['adminUIAccess'],privateLibraryAccess?:TelegramReplyJob['privateLibraryAccess'],studioScoped=false,communityAccess?:TelegramReplyJob['communityAccess'],communityClose?:CommunityMessageReceipt): Promise<void> {
+    adminUIAccess?:TelegramReplyJob['adminUIAccess'],privateLibraryAccess?:TelegramReplyJob['privateLibraryAccess'],studioScoped=false,communityAccess?:TelegramReplyJob['communityAccess'],communityClose?:CommunityMessageReceipt,verificationScoped=false): Promise<void> {
     await this.transaction(s => {
       const update = s.updates.find(x => x.key === key);
       if (!update || update.status !== 'CLAIMED') throw new Error('Update not claimed');
       const statuses = s.operations.filter(o => o.updateKey === key).map(o => o.status);
       update.status = statuses.includes('UNKNOWN_OUTCOME') ? 'UNKNOWN' : 'DONE';
       if (!s.audit.some(a => a.updateKey === key)) s.audit.push(decision); // no tokens or raw inbound messages
+      if(verificationScoped&&(!reply||reply.chatId.startsWith('-')||!privateGroupAccess||adminUIAccess||privateLibraryAccess||communityAccess))throw Error('INVALID_VERIFICATION_REPLY_SCOPE');
       if(reply && update.status==='DONE') {
         s.telegramReplyJobs??=[];
         if(!s.telegramReplyJobs.some(j=>j.updateKey===key))
          s.telegramReplyJobs.push({updateKey:key,plan:structuredClone(reply),status:'QUEUED',queuedAt:decision.at,
           ...(reply.chatId.startsWith('-')
            ?{groupReplyKind:groupQuestionAccess?'REVIEWED_FAQ' as const:'GENERAL' as const}
-           :{privateReplyKind:communityAccess?'COMMUNITY_SCOPED' as const:adminUIAccess?(studioScoped?'STUDIO_SCOPED' as const:'ADMIN_SCOPED' as const):privateGroupAccess?'GROUP_SCOPED' as const:privateLibraryAccess?'LIBRARY_SCOPED' as const:'LOCAL' as const}),
+           :{privateReplyKind:verificationScoped?'VERIFICATION_SCOPED' as const:communityAccess?'COMMUNITY_SCOPED' as const:adminUIAccess?(studioScoped?'STUDIO_SCOPED' as const:'ADMIN_SCOPED' as const):privateGroupAccess?'GROUP_SCOPED' as const:privateLibraryAccess?'LIBRARY_SCOPED' as const:'LOCAL' as const}),
           ...(groupQuestionAccess?{groupQuestionAccess:structuredClone(groupQuestionAccess)}:{}),
           ...(groupMenuAccess?{groupMenuAccess:structuredClone(groupMenuAccess)}:{}),
           ...(privateGroupAccess?{privateGroupAccess:structuredClone(privateGroupAccess)}:{}),

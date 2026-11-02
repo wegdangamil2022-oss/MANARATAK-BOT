@@ -1,3 +1,6 @@
+import {subscriptionConfigEpoch} from './subscription-config-epoch.js';
+import {subscriptionVerificationEpoch,validSubscriptionVerificationRoute} from './subscription-verification-access.js';
+import {subscriptionEnforcementConsent} from './subscription-enforcement-policy.js';
 import {observeProtectionJoins} from './protection-join-raid.js';
 import {TelegramGroupRules} from './telegram-group-rules.js';
 import {TelegramModerationReports} from './telegram-moderation-reports.js';
@@ -111,7 +114,7 @@ type ProcessedReply={status:TelegramResult['status'];reason:string;plan?:Telegra
  groupMenuAccess?:TelegramReplyJob['groupMenuAccess'];
  privateGroupAccess?:TelegramReplyJob['privateGroupAccess'];
  adminUIAccess?:TelegramReplyJob['adminUIAccess'];
- privateLibraryAccess?:TelegramReplyJob['privateLibraryAccess'];communityAccess?:TelegramReplyJob['communityAccess'];communityClose?:TelegramReplyJob['communityClose']};
+ privateLibraryAccess?:TelegramReplyJob['privateLibraryAccess'];communityAccess?:TelegramReplyJob['communityAccess'];communityClose?:TelegramReplyJob['communityClose'];verificationScoped?:true};
 export interface TelegramApplicationOptions {
   store: BotStore; policy: Policy; education: EducationService; admin: EducationAdminFacade;
   faq: ApprovedAnswerService; links: ResourceLinkService; membership: MembershipPort;
@@ -372,6 +375,22 @@ export class TelegramUpdateApplication {
    const planned=this.plan(event.chatId,screen.text,undefined,markup,event.callbackMessageId),{inlineMarkup:_,...base}=planned;
    return {status:'APPLIED',reason:'RESPONSE_PLANNED_ONLY',plan:plain?planned:{...base,studioMarkup:screen.keyboard},...(screen.public?{communityAccess:screen.access}:{adminUIAccess:screen.access})};
   }
+  private async subscriptionVerification(event:Event,group:string,revision?:number,observed?:Awaited<ReturnType<SubscriptionGate['synchronizeAutomatic']>>):Promise<ProcessedReply>{
+   const gate=this.opts.subscription,actor=event.actorId,before=await this.opts.store.snapshot(),at=this.clock(),initial=subscriptionVerificationEpoch(before,this.opts.policy,actor,group,at);
+   if(!gate||!initial||revision!==undefined&&revision!==this.opts.policy.chatRevision(before,group)||event.kind==='group'&&event.chatId!==group)return {status:'DENIED',reason:'SUBSCRIPTION_VERIFICATION_UNAVAILABLE'};
+   let member=false;try{member=await this.opts.membership(group,actor)==='VERIFIED';}catch{/* no inferred membership */}
+   if(!member||subscriptionConfigEpoch(await this.opts.store.snapshot())!==subscriptionConfigEpoch(before))return {status:'DENIED',reason:'SUBSCRIPTION_VERIFICATION_MEMBERSHIP_UNAVAILABLE'};
+   const mode=await gate.automaticMode(group);let result=observed??(mode==='UNAVAILABLE'?await gate.verifyWithProgress(group,actor):await gate.synchronizeAutomatic(group,actor));
+   if(mode==='OFF'){const checked=await gate.verifyWithProgress(group,actor);result={...result,...checked};}
+   const targets=await gate.joinTargets(group),state=await this.opts.store.snapshot(),now=this.clock(),epoch=subscriptionVerificationEpoch(state,this.opts.policy,actor,group,now);
+   if(!epoch||now<at||now>=at+120000||now>8640000000000000-120000||subscriptionConfigEpoch(state)!==subscriptionConfigEpoch(before))return {status:'DENIED',reason:'SUBSCRIPTION_VERIFICATION_STALE'};
+   const decision=result.decision,rule=state.subscriptionRequirements.find(r=>r.chatId===group),required=rule?(rule.mode==='ANY'?1:rule.mode==='AT_LEAST'?rule.minimumCount??0:rule.channelIds.length):0;
+   const label={MEMBER:'✅ اكتمل شرط الاشتراك في هذا الفحص.',NOT_MEMBER:'لم يكتمل شرط الاشتراك.',NOT_REQUIRED:'لا يلزم اشتراك وفق نتيجة هذا الفحص.',UNAVAILABLE:'تعذر إكمال الفحص؛ لا يُعد ذلك مخالفة.',DENIED:'التحقق غير متاح لهذا النطاق.'}[decision.status];
+   const effect='effect' in result?result.effect:undefined;
+   const text='<b>التحقق من الاشتراك</b>\n'+label+(decision.channels.length?'\nالمتحقق: '+(result.verified??0)+' من '+decision.channels.length+' · المطلوب: '+required+' · غير المحسوم: '+(result.unknown??0):'')+'\n'+(effect?.status==='APPLIED'?'حُدّث سبب الاشتراك وفُحصت نتيجة العملية.':effect?.status==='UNKNOWN_OUTCOME'||effect?.status==='BLOCKED_UNKNOWN'?'نتيجة تغيير القيد غير محسومة؛ يلزم المشرف، ولا إعادة تلقائية.':effect&&effect.status!=='NO_CHANGE'?'لم يُؤكد تغيير القيد؛ القيود المستقلة تبقى محفوظة.':mode==='UNAVAILABLE'?'هذا الفحص لا يغيّر القيود.':'لا تغيير جديد في سبب الاشتراك.')+'\nروابط الجهات تُقرأ من بيانات Telegram الحالية؛ ما لم يتوفر له رابط موثوق لا يُخمن.';
+   const rows:import('./telegram-studio-rich.js').StudioNativeButton[][]=targets.filter(t=>t.url!==null).map((t,i)=>[{text:'🔗 فتح الجهة '+(i+1),url:t.url!}]);rows.push([{text:'✅ إعادة التحقق',callback_data:'sv:1:'+group+':'+this.opts.policy.chatRevision(state,group)}],[{text:'🏠 الرئيسية',callback_data:'pn:1:h'}]);
+   return {status:'APPLIED',reason:'SUBSCRIPTION_VERIFICATION_VIEW',privateGroupAccess:{actorId:actor,scope:group,epoch,expiresAt:now+120000},verificationScoped:true,plan:{chatId:actor,parseMode:'HTML',text,studioMarkup:{inline_keyboard:rows},...(event.kind==='private'&&event.callbackMessageId!==undefined?{editMessageId:event.callbackMessageId}:{})}};
+  }
   private delivery(event:Event){return event.messageId!==undefined&&event.sentAt!==undefined?{messageId:event.messageId,sentAt:event.sentAt}:undefined;}
   private async process(event:Event):Promise<ProcessedReply> {
     if(this.opts.groupPermissions&&event.kind==='private'&&(event.callbackData!==undefined?!event.callbackData.startsWith('lk:1:')&&event.callbackData!=='mi:1:i:02:04':event.text.startsWith('/')||(Object.values(menuLabels) as string[]).includes(event.text)))await this.opts.groupPermissions.cancelForActor(event.actorId);
@@ -380,6 +399,13 @@ export class TelegramUpdateApplication {
      if(event.kind!=='group'||event.edited||event.forwarded||event.sentAt===undefined)return {status:'DENIED',reason:'INVALID_GROUP_JOINS'};
      const status=await observeProtectionJoins(this.opts.store,this.opts.policy,this.clock,this.opts.protectionEnforcer,event.chatId,event.joins,event.sentAt,'b3-webhook:'+this.opts.botId+':'+event.updateId);
      return {status:'IGNORED',reason:'PROTECTION_JOINS_'+status};
+    }
+    if(event.kind==='group'&&!event.callbackData&&!event.edited&&!event.joins&&event.sentAt!==undefined&&this.opts.subscription&&this.clock()>=event.sentAt&&this.clock()-event.sentAt<=30000){
+     const state=await this.opts.store.snapshot(),consent=subscriptionEnforcementConsent(state,this.opts.policy,event.chatId,this.clock());
+     if(consent&&event.sentAt>=consent.at&&!this.opts.policy.isOwner(event.actorId)&&!this.opts.policy.has(state,event.actorId,'chat.manage',event.chatId,this.clock())){
+      const checked=await this.opts.subscription.synchronizeAutomatic(event.chatId,event.actorId);
+      if(checked.decision.status==='NOT_MEMBER')return this.subscriptionVerification(event,event.chatId,undefined,checked);
+     }
     }
     if(event.protectionMedia){
      const media=event.protectionMedia;
@@ -420,6 +446,14 @@ export class TelegramUpdateApplication {
      const view=await new TelegramModerationReports(this.opts.store,this.opts.policy,this.clock).handle(event.actorId,'rp:1:h:0');
      return view?{status:'APPLIED',reason:'MODERATION_REPORT_VIEW',plan:this.plan(event.actorId,view.text,undefined,view.keyboard)}:{status:'DENIED',reason:'MODERATION_REPORT_UNAVAILABLE'};
     }
+    const verification=/^\/verify(?:@([A-Za-z][A-Za-z0-9_]{4,31}))?(?: (-[1-9][0-9]{0,15}))?$/u.exec(event.text);
+    if(verification&&(!verification[1]||verification[1].toLowerCase()===this.opts.botUsername.toLowerCase())){
+     const group=verification[2]??(event.kind==='group'?event.chatId:undefined);return group?this.subscriptionVerification(event,group):{status:'APPLIED',reason:'SUBSCRIPTION_VERIFICATION_HELP',plan:this.plan(event.actorId,'للتحقق من حسابك فقط، أرسل /verify ثم رقم المجموعة، أو استخدم زر التحقق في رسالة المجموعة.')};
+    }
+    if(event.kind==='group'&&event.text==='/subscriptionprompt'){
+     const state=await this.opts.store.snapshot(),version=this.opts.policy.chatRevision(state,event.chatId);if(!this.opts.policy.isOwner(event.actorId)||!this.opts.policy.canUseChat(state,event.chatId,'navigation')||!this.opts.policy.canUseChat(state,event.chatId,'verification'))return {status:'DENIED',reason:'SUBSCRIPTION_PROMPT_UNAVAILABLE'};
+     return {status:'APPLIED',reason:'SUBSCRIPTION_VERIFICATION_PROMPT',groupMenuAccess:{actorId:event.actorId,epoch:groupMenuEpochDigest(state,event.chatId,event.topicId),expiresAt:this.clock()+120000},plan:{...this.plan(event.chatId,'<b>التحقق من الاشتراك</b>\nافتح <a href="https://t.me/'+this.opts.botUsername+'">خاص البوت</a> واضغط بدء، ثم استخدم زر التحقق أدناه. النتيجة تخص حساب من يضغط وتظهر في الخاص.',undefined,{inline_keyboard:[[{text:'✅ تحقق من اشتراكي',callback_data:'sv:1:'+event.chatId+':'+version}]]}),...(event.topicId!==undefined?{messageThreadId:event.topicId}:{})}};
+    }
     if(event.kind==='private'&&event.text==='/appeals'){
      const view=await new TelegramModerationAppeals(this.opts.store,this.opts.policy,this.clock).handle(event.actorId,'ap:1:h:0');
      return view?{status:'APPLIED',reason:'MODERATION_APPEAL_VIEW',plan:this.plan(event.actorId,view.text,undefined,view.keyboard)}:{status:'DENIED',reason:'MODERATION_APPEAL_UNAVAILABLE'};
@@ -432,6 +466,9 @@ export class TelegramUpdateApplication {
     if(kind==='private'&&event.topicId!==undefined)return {status:'DENIED',reason:'PRIVATE_TOPIC_NOT_SUPPORTED'};
     if(kind==='private'&&event.callbackData===undefined&&this.opts.policy.isOwner(actorId)&&!folderNavigation){const screen=await new CommunityFolderUI(this.opts.store,this.opts.policy,this.opts.subscription,this.clock).text(actorId,text);if(screen)return this.folderReply(event,screen);}
     if(event.callbackData!==undefined){
+     if(event.callbackData.startsWith('sv:1:')){
+      if(!validSubscriptionVerificationRoute(event.callbackData))return {status:'DENIED',reason:'INVALID_SUBSCRIPTION_VERIFICATION_ROUTE'};const parts=event.callbackData.split(':');return this.subscriptionVerification(event,parts[2]!,Number(parts[3]));
+     }
      if(kind==='group'&&event.callbackData.startsWith('gl:1:'))return this.groupLibrary(event);
      // Reauthorize the real sender at every tap. Never dispatch a privileged
      // command from untrusted callback_data or from a group context.
@@ -1413,9 +1450,9 @@ export class TelegramUpdateApplication {
     // Commit the decision and outbound reply intent in one durable transaction.
     // No external call occurs before the outbox row exists.
     await this.opts.store.finish(key,audit,handled.plan,handled.groupQuestionAccess,
-     handled.groupMenuAccess,handled.privateGroupAccess,handled.adminUIAccess,handled.privateLibraryAccess,studioInput&&!!handled.adminUIAccess,handled.communityAccess,handled.communityClose);
+     handled.groupMenuAccess,handled.privateGroupAccess,handled.adminUIAccess,handled.privateLibraryAccess,studioInput&&!!handled.adminUIAccess,handled.communityAccess,handled.communityClose,handled.verificationScoped===true);
     // Temporary actor IDs are only stored in the guarded queue, never returned.
-    const {groupQuestionAccess:_,groupMenuAccess:__,privateGroupAccess:___,adminUIAccess:____,privateLibraryAccess:_____,communityAccess:______,communityClose:_______,...publicResult}=handled;
+    const {groupQuestionAccess:_,groupMenuAccess:__,privateGroupAccess:___,adminUIAccess:____,privateLibraryAccess:_____,communityAccess:______,communityClose:_______,verificationScoped:________,...publicResult}=handled;
     const visible=publicResult.plan?{...publicResult,deliveryKey:key}:publicResult;
     return event.callbackQueryId?{...visible,callbackQueryId:event.callbackQueryId}:visible;
   }
