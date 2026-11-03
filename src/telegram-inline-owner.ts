@@ -18,6 +18,7 @@ import {validOwnerImportRoute} from './telegram-inline-imports.js';
 import {validOwnerUploadRoute} from './telegram-owner-upload.js';
 import {validSubscriptionConfigRoute} from './telegram-inline-subscription-config.js';
 import {validCommunityFolderRoute} from './telegram-community-folders.js';
+import {validPhase4CommunityRoute} from './phase4-community-ui.js';
 /** The approved 2026-10-23 owner catalogue from docs/أزرار_منارتك.md.
  * READ-ONLY navigation: do NOT treat a visible catalogue item as a permission
  * or operationally implemented action. Existing owner actions remain available
@@ -702,6 +703,7 @@ export function isValidTelegramInlineKeyboard(input:unknown):input is TelegramIn
      !/^si:1:(?:h|p:(?:0|[1-9][0-9]{0,2})|c:(?:0|[1-9][0-9]{0,2}):[1-8]:[a-f0-9]{12}|l:(?:0|[1-9][0-9]{0,2}):[1-8]:[a-f0-9]{12}:(?:0|[1-9][0-9]{0,2})|r:(?:0|[1-9][0-9]{0,2}):[1-8]:[a-f0-9]{12}:(?:0|[1-9][0-9]{0,2}):[1-8]:[a-f0-9]{12})$/u.test(button.callback_data)&&
      !/^pq:1:(?:h|p:(?:0|[1-9][0-9]{0,2})|v:(?:0|[1-9][0-9]{0,2}):[1-8]:[a-f0-9]{16})$/u.test(button.callback_data)&&
      protectionInlineRoute(button.callback_data)===null&&!validOwnerFAQInlineRoute(button.callback_data)&&!validOwnerLibraryInlineRoute(button.callback_data)&&!validStudioInlineRoute(button.callback_data)&&!validOwnerCategoryInlineRoute(button.callback_data)&&!validPrivateSettingsRoute(button.callback_data)&&!validDelegationEditRoute(button.callback_data)&&!validGroupSetupRoute(button.callback_data)&&!validGroupPolicyStudioRoute(button.callback_data)&&!validOwnerGroupSettingsRoute(button.callback_data)&&!validOwnerGroupBulkRestrictRoute(button.callback_data)&&!validOwnerNetworkRoute(button.callback_data)&&!validOwnerPreviewCancelRoute(button.callback_data)&&!validGroupLibraryInlineRoute(button.callback_data)&&!validPublicNavigationRoute(button.callback_data)&&!validOwnerImportRoute(button.callback_data)&&!validOwnerUploadRoute(button.callback_data)&&!validSubscriptionConfigRoute(button.callback_data)&&!validCommunityFolderRoute(button.callback_data)&&
+     !validPhase4CommunityRoute(button.callback_data)&&
      !/^pd:1:[cx]:[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}:[a-f0-9]{16}$/u.test(button.callback_data)&&
      !/^si:2:[ascuef]:(?:h|p:(?:0|[1-9][0-9]{0,2})|c:(?:0|[1-9][0-9]{0,2}):[1-8]:[a-f0-9]{12}|l:(?:0|[1-9][0-9]{0,2}):[1-8]:[a-f0-9]{12}:(?:0|[1-9][0-9]{0,2})|r:(?:0|[1-9][0-9]{0,2}):[1-8]:[a-f0-9]{12}:(?:0|[1-9][0-9]{0,2}):[1-8]:[a-f0-9]{12})$/u.test(button.callback_data))
     return false;
