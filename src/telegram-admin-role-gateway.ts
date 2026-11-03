@@ -45,6 +45,14 @@ export class TelegramAdminRoleGateway{
   const baseline=await this.#inspect(chat,target,role,authority);if(!baseline)return null;
   const plan=Object.freeze({group:chat,target,role,baseline});this.#plans.add(plan);return plan;
  }
+ /** Current observation is never evidence of who caused a past change. */
+ async observe(chat:string,target:string,authority:()=>Promise<boolean>):Promise<{status:string;digest:string}|null>{
+  if(!group(chat)||!user(target)||target===this.#bot)return null;
+  const value=await this.#call('getChatMember',{chat_id:chat,user_id:Number(target)},authority);
+  if(!await this.#allowed(authority)||!object(value)||!object(value.user)||value.user.id!==Number(target)||value.user.is_bot!==false||!['member','administrator','creator','restricted','left','kicked'].includes(String(value.status)))return null;
+  if(ADMIN_ROLE_FLAGS.some(k=>value[k]!==undefined&&typeof value[k]!=='boolean'))return null;
+  return {status:String(value.status),digest:digest([chat,target,value.status,value.can_be_edited??null,ADMIN_ROLE_FLAGS.map(k=>value[k]??null)])};
+ }
  async execute(plan:AdminRolePlan,authority:()=>Promise<boolean>):Promise<'DENIED'|'CONFIRMED'|'UNKNOWN_OUTCOME'>{
   if(!this.#plans.has(plan))return 'DENIED';this.#plans.delete(plan);
   const baseline=await this.#inspect(plan.group,plan.target,plan.role,authority);if(baseline!==plan.baseline||!await this.#allowed(authority))return 'DENIED';

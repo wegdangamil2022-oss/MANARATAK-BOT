@@ -36,3 +36,6 @@ test('protected identities, missing bot rights and fabricated plans cannot mutat
 test('timeout, unexpected added privilege and readback mismatch remain unresolved without retry',async()=>{
  for(const change of ['timeout','extra','drift'] as const){const f=fixture(),plan=await f.gateway.prepare(GROUP,USER,'DELETE',f.guard);assert.ok(plan);f[change]();assert.equal(await f.gateway.execute(plan,f.guard),'UNKNOWN_OUTCOME');assert.equal(await f.gateway.execute(plan,f.guard),'DENIED');assert.equal(f.mutations(),1);}
 });
+test('current-role inspection is read-only and rejects malformed identities and stopped reads',async()=>{
+ const f=fixture();assert.deepEqual((await f.gateway.observe(GROUP,USER,f.guard))?.status,'member');for(const member of [{status:'member',user:{id:302,is_bot:false}},{status:'creator',user:{id:301,is_bot:true}},{status:'not-a-role',user:{id:301,is_bot:false}},{status:'administrator',user:{id:301,is_bot:false},can_delete_messages:'yes'}]){f.target(member);assert.equal(await f.gateway.observe(GROUP,USER,f.guard),null);}f.stop();assert.equal(await f.gateway.observe(GROUP,USER,f.guard),null);assert.equal(f.mutations(),0);
+});
