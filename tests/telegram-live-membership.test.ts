@@ -77,6 +77,12 @@ test('contradictory bot identity blocks student and invitation reads',async()=>{
  assert.equal(await gateway.joinURL(GROUP),null);assert.equal(calls.length,2);
  assert.ok(calls.every(call=>call.url.endsWith('/getChatMember')&&call.body.user_id===123456789));
 });
+test('channel username evidence requires exact numeric identity and an explicit valid channel record',async()=>{
+ for(const [record,expected] of [[{id:Number(CHANNEL),type:'channel',username:'PublicChannel'},{username:'publicchannel'}],[{id:Number(CHANNEL),type:'channel'},{username:null}],[{id:Number(CHANNEL)+1,type:'channel',username:'PublicChannel'},null],[{id:Number(CHANNEL),type:'supergroup',username:'PublicChannel'},null],[{id:Number(CHANNEL),type:'channel',username:'bad/name'},null]] as const){
+  const {request}=fakeRequester(()=>Response.json({ok:true,result:record}));assert.deepEqual(await new TelegramBotApiMembershipGateway(TOKEN,request).inspectChannelUsername(CHANNEL),expected);
+ }
+ const down=new TelegramBotApiMembershipGateway(TOKEN,(async()=>{throw Error('DOWN');}) as typeof fetch);assert.equal(await down.inspectChannelUsername(CHANNEL),null);
+});
 test('membership result mapping is strict, including restricted member flag',async()=>{
  const cases:[
   string,boolean|undefined,'MEMBER'|'NOT_MEMBER'|'UNKNOWN'

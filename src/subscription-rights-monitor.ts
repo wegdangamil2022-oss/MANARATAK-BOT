@@ -4,12 +4,13 @@ import {subscriptionConfigEpoch} from './subscription-config-epoch.js';
 import {isCanonicalSubscriptionRule,subscriptionRequirementMode} from './subscription-integrity.js';
 import {recordSubscriptionRightsLoss} from './subscription-change-alert.js';
 import {recordChannelUnavailability} from './subscription-channel-unavailable.js';
+import {recordChannelIdentity} from './subscription-channel-identity.js';
 
 /** Periodic, bounded checks; an unavailable Telegram response is never a loss. */
 export class SubscriptionRightsMonitor{
  private readonly nextCheck=new Map<string,number>();
  constructor(private readonly store:BotStore,private readonly policy:Policy,
-  private readonly gateway:{inspectChannelRights(channel:string):Promise<'ADMIN'|'NOT_ADMIN'|'UNKNOWN'>},
+  private readonly gateway:{inspectChannelRights(channel:string):Promise<'ADMIN'|'NOT_ADMIN'|'UNKNOWN'>;inspectChannelUsername?(channel:string):Promise<{username:string|null}|null>},
   private readonly clock:()=>number=Date.now,private readonly safety:()=>Promise<boolean>=async()=>true){}
  async tick(limit=5):Promise<void>{
   const now=this.clock();if(!Number.isSafeInteger(now)||now<0||now>8640000000000000-600000||!await this.safety())return;
@@ -37,6 +38,11 @@ export class SubscriptionRightsMonitor{
     const at=this.clock();if(!Number.isSafeInteger(at)||at<now||at>=now+120000||subscriptionConfigEpoch(s)!==epoch||!this.policy.privateFeature(s,'owner.dashboard',actor)||!this.policy.canUseChat(s,c.group,'verification')||!this.policy.canUseChat(s,c.channel,'verification'))return;
     if(result==='NOT_ADMIN')recordSubscriptionRightsLoss(s,actor,c.group,c.channel,c.version,c.scope,at);else recordChannelUnavailability(s,at);
    });
+   if(result==='ADMIN'&&this.gateway.inspectChannelUsername){
+    if(!await this.safety())return;const beforeIdentity=await this.store.snapshot();if(subscriptionConfigEpoch(beforeIdentity)!==epoch||!await this.safety())return;const identityWitness=JSON.stringify(beforeIdentity.subscriptionChannelIdentities);
+    let identity:{username:string|null}|null=null;try{identity=await this.gateway.inspectChannelUsername(c.channel);}catch{/* no identity inference */}
+    if(identity&&await this.safety())await this.store.transaction(s=>{const at=this.clock();if(!Number.isSafeInteger(at)||at<now||at>=now+120000||subscriptionConfigEpoch(s)!==epoch||JSON.stringify(s.subscriptionChannelIdentities)!==identityWitness||!this.policy.privateFeature(s,'owner.dashboard',actor)||!this.policy.canUseChat(s,c.group,'verification')||!this.policy.canUseChat(s,c.channel,'verification'))return;recordChannelIdentity(s,actor,c.group,c.channel,c.version,c.scope,this.policy.chatRevision(s,c.channel),identity!.username,now,at);});
+   }
    if(--count<=0)break;
   }
  }

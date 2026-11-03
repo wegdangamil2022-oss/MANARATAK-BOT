@@ -202,6 +202,7 @@ export interface BotState {
   /** Optional anonymous, bounded monitoring counters; never authorization evidence. */
   subscriptionChannelHealth?:unknown;
   subscriptionChannelManualHealth?:unknown;
+  subscriptionChannelIdentities?:unknown;
   subscriptionSweepCursor?:{chatId:string;memberId:string};
   subscriptionGraceMembers?:SubscriptionGraceMember[];
   subscriptionObservedMembers?:SubscriptionObservedMember[];

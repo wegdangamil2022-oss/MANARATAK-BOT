@@ -41,7 +41,7 @@ const gaps={
  'GATE-005':'Ephemeral and temporary fallbacks plus cleanup exist; configurable fallback delay and complete capability acceptance remain open.',
  'GATE-007':'Observed candidates, active restrictions and verified grace records rotate; 1000 candidate capacity and 30-day retention are explicit limits.',
  'GATE-008':'No grace/hour/day reviewed policies and fresh expiry checks exist; no permanent automatic ban.',
- 'GATE-010':'Manual and periodic channel rights inspection distinguish explicit loss from unknown. Confirmed rights loss and local channel removals/additions queue guarded owner alerts when phase-three timers run. Verified channel identity migration remains open.',
+ 'GATE-010':'Manual and periodic rights checks distinguish explicit loss from unknown. Rights loss, channel list changes and verified primary public username changes on the same numeric channel queue guarded owner alerts. Numeric-ID migration and alternate-username coverage are not implemented. Real Telegram acceptance is deferred.',
  'GATE-012':'Owner-only aggregate verification outcomes, witnessed delivery confirmations, historical rights-loss notice states and separate anonymous bounded unavailable automatic/manual rights-check counts exist locally. Delivery does not prove page opening; other channel/API errors are not covered. The complete funnel remains open.',
  'RULELAW-001':'Local immutable numbered versions, approval dates, edits, disabling/reactivation and up to three manually reviewed optional languages preserve original violation history. Translation addition/removal requires private confirmation; published language replies reject stale source epochs. Real Telegram acceptance remains deferred; no full-stage closure.',
  'RULELAW-002':'Local reply warning accepts Arabic and /warnrule syntax; private confirmation displays original paragraph, verified executor name or ID, and an authorized link to the exact historical law version. Real Telegram acceptance remains deferred.',
@@ -52,6 +52,7 @@ const gaps={
 };
 const hashed=new Map();
 for(const path of ['src/telegram-trial-acceptance.ts','tests/sqlite-readonly-rejection.test.ts'])hashed.set(path,sha(await readFile(resolve(root,path))));
+for(const path of ['src/subscription-channel-identity.ts','tests/subscription-channel-identity.test.ts'])hashed.set(path,sha(await readFile(resolve(root,path))));
 for(const entry of Object.values(evidence))for(const path of [...entry.code,...entry.ui,...entry.tests])hashed.set(path,sha(await readFile(resolve(root,path))));
 const requirements=registry.requirements.map(r=>{
  const family=r.id.startsWith('GATE-')?'GATE':r.id.startsWith('RULELAW-')?'RULELAW':null;
