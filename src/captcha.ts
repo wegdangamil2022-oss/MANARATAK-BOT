@@ -73,6 +73,10 @@ export class CaptchaService{
   if(d.phase!=='PASSED')return 'PENDING';
   const receipts=s.audit.filter(a=>a.updateKey==='captcha:passed:'+d.nonce),a=receipts[0];return receipts.length===1&&a?.actorId===actor&&a.decision==='ALLOW'&&a.policyVersion===w.policyVersion&&a.at===d.lastAttempt&&a.at<d.deadline&&a.reason==='CAPTCHA_CHALLENGE_PASSED:'+hash([d.group,actor,d.revision])?'PASSED':'UNAVAILABLE';
  }
+ /** Stable per group/member/settings approval, including challenge retries. */
+ challenge(s:BotState,chat:string,actor:string):{reference:string;epoch:string;issued:number;nonce:string}|null{
+  const rows=s.wizards.filter(w=>w.key===key(chat,actor)),w=rows[0];if(rows.length!==1||!w)return null;const d=this.#read(s,w,actor);return d?{reference:'captcha_'+hash([chat,actor,d.revision,w.policyVersion]).slice(0,24),epoch:hash(w),issued:d.issued,nonce:d.nonce}:null;
+ }
  /** Human review concerns the CAPTCHA step only, never a Telegram release. */
  caseEvidence(s:BotState,actor:string,nonce:string):string|null{
   const cases=this.reviewCases(s,actor).filter(c=>c.nonce===nonce),c=cases[0];if(cases.length!==1||!c)return null;
@@ -96,8 +100,8 @@ export class CaptchaService{
  async observe(chat:string,members:string[],updateKey:string,sentAt:number):Promise<number>{
   if(!group(chat)||!Array.isArray(members)||members.length>100||new Set(members).size!==members.length||!members.every(user)||!/^b3-webhook:[A-Za-z0-9_-]{1,80}:[0-9]{1,16}$/u.test(updateKey)||!time(sentAt))return 0;
   return this.store.transaction(s=>{const now=this.clock(),settings=this.settings(s,chat);if(!time(now)||now<sentAt||now-sentAt>30000||!settings?.enabled||!this.policy.canUseChat(s,chat,'moderation'))return 0;this.#cleanup(s);let issued=0;
-   for(const actor of members){if(this.policy.has(s,actor,'chat.manage',chat,now))continue;const rows=s.wizards.filter(w=>w.key===key(chat,actor)),w=rows[0];if(rows.length>1)continue;if(w){const d=this.#read(s,w,actor,true);if(!d||d.revision===settings.revision&&w.policyVersion===this.policy.chatRevision(s,chat)&&now<d.issued+86400000)continue;}
-    if(s.wizards.filter(w=>typeof w.flow==='string'&&w.flow.startsWith(MEMBER)&&w.key!==key(chat,actor)).length>=1000)continue;const d=this.#fresh(chat,settings,1);s.wizards=s.wizards.filter(w=>w.key!==key(chat,actor));s.wizards.push({key:key(chat,actor),userId:actor,chatId:actor,topicId:'',flow:MEMBER+JSON.stringify(d),step:0,version:1,policyVersion:this.policy.chatRevision(s,chat),expiresAt:d.deadline,status:'ACTIVE'});issued++;
+   for(const actor of members){if(this.policy.has(s,actor,'chat.manage',chat,now)||this.status(s,chat,actor)==='PASSED')continue;const rows=s.wizards.filter(w=>w.key===key(chat,actor)),w=rows[0];if(rows.length>1)continue;if(w){const d=this.#read(s,w,actor,true);if(!d||d.revision===settings.revision&&w.policyVersion===this.policy.chatRevision(s,chat)&&now<d.issued+86400000)continue;}
+    if(s.wizards.filter(w=>typeof w.flow==='string'&&w.flow.startsWith(MEMBER)&&w.key!==key(chat,actor)).length>=1000)continue;const d=this.#fresh(chat,settings,1);s.audit.push({actorId:actor,updateKey:'captcha:join-issued:'+d.nonce,decision:'ALLOW',reason:'CAPTCHA_JOIN_OBSERVED:'+hash([chat,actor,d.nonce,updateKey,sentAt,s.audit.filter(a=>a.updateKey==='captcha:enforcement:'+chat)]),policyVersion:this.policy.chatRevision(s,chat),at:now});s.wizards=s.wizards.filter(w=>w.key!==key(chat,actor));s.wizards.push({key:key(chat,actor),userId:actor,chatId:actor,topicId:'',flow:MEMBER+JSON.stringify(d),step:0,version:1,policyVersion:this.policy.chatRevision(s,chat),expiresAt:d.deadline,status:'ACTIVE'});issued++;
    }return issued;});
  }
  async view(actor:string,data?:string):Promise<OwnerInlineScreen|null>{
@@ -121,7 +125,7 @@ export class CaptchaService{
    if(d.phase==='PASSED')return {text:'✅ اكتمل اختبار التحقق. هذا النجاح لا يفك عقوبة أو قيد اشتراك مستقل.\nفحص الزر أو السؤال لا يضمن إيقاف جميع الحسابات الآلية.',keyboard:{inline_keyboard:[back]}};
    if(d.phase==='FAILED'||at>=d.deadline)return {text:(d.phase==='FAILED'?'استُنفدت محاولات الاختبار.':'انتهت مهلة الاختبار.')+'\n'+(d.round>=3?'راجع مشرفًا لإكمال المراجعة البشرية.':'يمكن إعادة المحاولة بعد '+Math.max(0,Math.ceil((d.retryAt-at)/1000))+' ثانية، دون تغيير أي قيد مستقل.'),keyboard:{inline_keyboard:[...(d.round<3?[[b('🔄 إعادة المحاولة','cp:1:r:'+d.nonce)]]:[]),back]}};
    const sum=d.problem[0]+d.problem[1],answers=[0,1,2].map(i=>sum+(i-d.problem[2]+3)%3);
-   return {text:'<b>الاختبار: تحقق الانضمام</b>\nالمجموعة: '+d.group+'\nما ناتج '+d.problem[0]+' + '+d.problem[1]+'؟\nالوقت المتبقي: '+Math.max(0,Math.ceil((d.deadline-at)/1000))+' ثانية\nالمتبقي: '+(settings.attempts-d.tries)+' محاولات.\nيمكن استخدام زر التحقق البديل دون سؤال.\nهذا المسار الحالي لا يفرض عقوبات أو يرفعها.',keyboard:{inline_keyboard:[answers.map((v,i)=>b(String(v),'cp:1:a:'+d.nonce+':'+i)),[b('✅ تحقق بديل متاح','cp:1:b:'+d.nonce)],back]}};
+   return {text:'<b>الاختبار: تحقق الانضمام</b>\nالمجموعة: '+d.group+'\nما ناتج '+d.problem[0]+' + '+d.problem[1]+'؟\nالوقت المتبقي: '+Math.max(0,Math.ceil((d.deadline-at)/1000))+' ثانية\nالمتبقي: '+(settings.attempts-d.tries)+' محاولات.\nيمكن استخدام زر التحقق البديل دون سؤال.\nإنفاذ قيد CAPTCHA يتطلب اعتمادًا مستقلًا من المالك. القيود المستقلة لا يلغيها نجاح الاختبار.',keyboard:{inline_keyboard:[answers.map((v,i)=>b(String(v),'cp:1:a:'+d.nonce+':'+i)),[b('✅ تحقق بديل متاح','cp:1:b:'+d.nonce)],back]}};
   });
  }
 }

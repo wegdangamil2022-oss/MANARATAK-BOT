@@ -1,3 +1,4 @@
+import {CaptchaEnforcement} from './captcha-enforcement.js';
 import {TelegramRuleActions} from './telegram-rule-actions.js';
 import {validProtectionUsername} from './protection-rules.js';
 import {TelegramAdminRoomLinks} from './telegram-admin-room-links.js';
@@ -434,13 +435,18 @@ export class TelegramUpdateApplication {
   private delivery(event:Event){return event.messageId!==undefined&&event.sentAt!==undefined?{messageId:event.messageId,sentAt:event.sentAt}:undefined;}
   private async process(event:Event):Promise<ProcessedReply> {
     if(event.pinnedMessageId!==undefined){if(!event.edited&&this.opts.messageMetadata)await this.opts.messageMetadata.observePinned(event.chatId,event.pinnedMessageId);return {status:'IGNORED',reason:'PIN_OBSERVATION_ONLY'};}
-    const captcha=new CaptchaService(this.opts.store,this.opts.policy,this.opts.membership,this.clock);
+    const captcha=new CaptchaService(this.opts.store,this.opts.policy,this.opts.membership,this.clock),captchaEnforcement=new CaptchaEnforcement(this.opts.store,this.opts.policy,captcha,this.opts.moderation,this.opts.moderationRights,this.clock);
     if(event.kind==='private'&&this.opts.policy.isOwner(event.actorId)){
-     const owner=new TelegramCaptchaOwner(this.opts.store,this.opts.policy,captcha,this.clock);
+     const owner=new TelegramCaptchaOwner(this.opts.store,this.opts.policy,captcha,this.clock,captchaEnforcement);
      if(event.callbackData==='mi:1:i:04:07'||event.callbackData==='mi:1:i:04:10'||event.callbackData?.startsWith('ca:1:')){const view=await owner.handle(event.actorId,event.callbackData);return view?{status:'APPLIED',reason:'CAPTCHA_OWNER_VIEW',adminUIAccess:view.access,plan:this.plan(event.actorId,view.text,undefined,view.keyboard,event.callbackMessageId)}:{status:'DENIED',reason:'CAPTCHA_OWNER_UNAVAILABLE'};}
      await owner.cancel(event.actorId);
     }
-    if(event.kind==='private'&&!event.edited&&!event.forwarded&&(event.callbackData?.startsWith('cp:1:')||!event.callbackData&&['/start','/captcha'].includes(event.text))){const view=await captcha.view(event.actorId,event.callbackData);if(view)return {status:'APPLIED',reason:'CAPTCHA_CHALLENGE_VIEW',plan:this.plan(event.actorId,view.text,undefined,view.keyboard,event.callbackMessageId)};if(event.callbackData?.startsWith('cp:1:')||event.text==='/captcha')return {status:'DENIED',reason:'CAPTCHA_UNAVAILABLE'};}
+    if(event.kind==='private'&&!event.edited&&!event.forwarded&&(event.callbackData?.startsWith('cp:1:')||!event.callbackData&&['/start','/captcha'].includes(event.text))){
+     const view=await captcha.view(event.actorId,event.callbackData),settled=view||event.callbackData===undefined?await captchaEnforcement.releaseMember(event.actorId):{attempted:0,pending:0,remaining:0};
+     const pending='تعذر إكمال رفع قيد التحقق آليًا؛ راجع المشرف. لم يُغيَّر أي قيد مستقل.';
+     if(view||settled.attempted>0||settled.pending>0||settled.remaining>0){const screen=view??{text:'✅ اكتملت خطوة CAPTCHA. تبقى القيود والمتطلبات المستقلة حسب شروطها.',keyboard:{inline_keyboard:[[{text:'🏠 الرئيسية',callback_data:'pn:1:h'}]]}};return {status:'APPLIED',reason:'CAPTCHA_CHALLENGE_VIEW',plan:this.plan(event.actorId,screen.text+(settled.pending>0?'\n'+pending:'')+(settled.remaining>0?'\nتوجد مجموعات أخرى لم تُراجع بعد؛ افتح البوت مجددًا.':''),undefined,screen.keyboard,event.callbackMessageId)};}
+     if(event.callbackData?.startsWith('cp:1:')||event.text==='/captcha')return {status:'DENIED',reason:'CAPTCHA_UNAVAILABLE'};
+    }
     if(event.kind==='private'&&this.opts.policy.isOwner(event.actorId)){
      const roles=new TelegramAdminRoles(this.opts.store,this.opts.policy,this.opts.adminRoles,this.clock);
      if(event.callbackData?.startsWith('ar:1:')){const view=await roles.handle(event.actorId,event.callbackData);return view?{status:'APPLIED',reason:'ADMIN_ROLE_VIEW',adminUIAccess:view.access,plan:this.plan(event.chatId,view.text,undefined,view.keyboard,event.callbackMessageId)}:{status:'DENIED',reason:'ADMIN_ROLE_UNAVAILABLE'};}
@@ -458,6 +464,7 @@ export class TelegramUpdateApplication {
      await captcha.observe(event.chatId,event.joins,'b3-webhook:'+this.opts.botId+':'+event.updateId,event.sentAt);
      if(this.opts.subscription)for(const member of event.joins)await this.opts.subscription.observeMember(event.chatId,member,event.sentAt);
      const status=await observeProtectionJoins(this.opts.store,this.opts.policy,this.clock,this.opts.protectionEnforcer,event.chatId,event.joins,event.sentAt,'b3-webhook:'+this.opts.botId+':'+event.updateId);
+     if(captchaEnforcement.available()&&captchaEnforcement.consent(await this.opts.store.snapshot(),event.chatId)?.enabled)for(const member of event.joins)await captchaEnforcement.admit(event.chatId,member,'b3-webhook:'+this.opts.botId+':'+event.updateId,event.sentAt);
      return {status:'IGNORED',reason:'PROTECTION_JOINS_'+status};
     }
     if(event.kind==='group'&&!event.callbackData&&!event.edited&&!event.joins&&event.sentAt!==undefined&&this.opts.subscription&&this.clock()>=event.sentAt&&this.clock()-event.sentAt<=30000){
