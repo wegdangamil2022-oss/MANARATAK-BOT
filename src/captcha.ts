@@ -38,9 +38,27 @@ export class CaptchaService{
   }catch{return null;}
  }
  #fresh(chat:string,settings:Settings,round:number):Session{const now=this.clock();return {nonce:randomBytes(18).toString('base64url'),group:chat,revision:settings.revision,issued:now,deadline:now+settings.timeout*1000,retryAt:now+settings.timeout*1000+round*60000,round,tries:0,lastAttempt:-1,phase:'WAITING',problem:[randomInt(1,10),randomInt(1,10),randomInt(0,3)]};}
+ /** Retire completed challenge payloads only; audit and moderation evidence remain intact. */
+ #cleanup(s:BotState):number{
+  const now=this.clock();if(!time(now))return 0;
+  const removable=new Set<Wizard>();
+  for(const w of s.wizards){
+   if(removable.size>=100)break;
+   if(w.status!=='CANCELLED'||typeof w.flow!=='string'||!w.flow.startsWith(MEMBER))continue;
+   const d=this.#read(s,w,w.userId,true);
+   if(!d||d.phase!=='PASSED'||now<d.issued+86400000)continue;
+   const receipts=s.audit.filter(a=>a.updateKey==='captcha:passed:'+d.nonce),receipt=receipts[0];
+   if(receipts.length!==1||!receipt||receipt.actorId!==w.userId||receipt.decision!=='ALLOW'||receipt.policyVersion!==w.policyVersion||receipt.at!==d.lastAttempt||receipt.at>=d.deadline||receipt.reason!=='CAPTCHA_CHALLENGE_PASSED:'+hash([d.group,w.userId,d.revision]))continue;
+   // A future enforcement path must own its evidence lifecycle separately.
+   if(s.moderationReasons.some(r=>r.chatId===d.group&&r.memberId===w.userId)||s.moderationOperations.some(o=>o.chatId===d.group&&o.memberId===w.userId))continue;
+   removable.add(w);
+  }
+  s.wizards=s.wizards.filter(w=>!removable.has(w));return removable.size;
+ }
+ async cleanup():Promise<number>{return this.store.transaction(s=>this.#cleanup(s));}
  async observe(chat:string,members:string[],updateKey:string,sentAt:number):Promise<number>{
   if(!group(chat)||!Array.isArray(members)||members.length>100||new Set(members).size!==members.length||!members.every(user)||!/^b3-webhook:[A-Za-z0-9_-]{1,80}:[0-9]{1,16}$/u.test(updateKey)||!time(sentAt))return 0;
-  return this.store.transaction(s=>{const now=this.clock(),settings=this.settings(s,chat);if(!time(now)||now<sentAt||now-sentAt>30000||!settings?.enabled||!this.policy.canUseChat(s,chat,'moderation'))return 0;let issued=0;
+  return this.store.transaction(s=>{const now=this.clock(),settings=this.settings(s,chat);if(!time(now)||now<sentAt||now-sentAt>30000||!settings?.enabled||!this.policy.canUseChat(s,chat,'moderation'))return 0;this.#cleanup(s);let issued=0;
    for(const actor of members){if(this.policy.has(s,actor,'chat.manage',chat,now))continue;const rows=s.wizards.filter(w=>w.key===key(chat,actor)),w=rows[0];if(rows.length>1)continue;if(w){const d=this.#read(s,w,actor,true);if(!d||d.revision===settings.revision&&w.policyVersion===this.policy.chatRevision(s,chat)&&now<d.issued+86400000)continue;}
     if(s.wizards.filter(w=>typeof w.flow==='string'&&w.flow.startsWith(MEMBER)&&w.key!==key(chat,actor)).length>=1000)continue;const d=this.#fresh(chat,settings,1);s.wizards=s.wizards.filter(w=>w.key!==key(chat,actor));s.wizards.push({key:key(chat,actor),userId:actor,chatId:actor,topicId:'',flow:MEMBER+JSON.stringify(d),step:0,version:1,policyVersion:this.policy.chatRevision(s,chat),expiresAt:d.deadline,status:'ACTIVE'});issued++;
    }return issued;});
