@@ -57,7 +57,40 @@ export class CaptchaService{
  }
  reviewCases(s:BotState,actor:string):{nonce:string;group:string;actor:string;deadline:number;tries:number;round:number;phase:'FAILED'|'EXPIRED'}[]{
   if(!this.policy.isOwner(actor)||!this.policy.privateFeature(s,'owner.dashboard',actor))return [];
-  return s.wizards.flatMap(w=>{const d=this.#read(s,w,w.userId,true);return d&&d.round===3&&d.phase!=='PASSED'&&(d.phase==='FAILED'||this.clock()>=d.deadline)?[{nonce:d.nonce,group:d.group,actor:w.userId,deadline:d.deadline,tries:d.tries,round:d.round,phase:(d.phase==='FAILED'?'FAILED':'EXPIRED') as 'FAILED'|'EXPIRED'}]:[];}).sort((a,b)=>a.deadline-b.deadline||a.nonce.localeCompare(b.nonce));
+  return s.wizards.flatMap(w=>{const d=this.#read(s,w,w.userId);return d&&!s.audit.some(a=>a.updateKey==='captcha:review:'+d.nonce)&&d.round===3&&d.phase!=='PASSED'&&(d.phase==='FAILED'||this.clock()>=d.deadline)?[{nonce:d.nonce,group:d.group,actor:w.userId,deadline:d.deadline,tries:d.tries,round:d.round,phase:(d.phase==='FAILED'?'FAILED':'EXPIRED') as 'FAILED'|'EXPIRED'}]:[];}).sort((a,b)=>a.deadline-b.deadline||a.nonce.localeCompare(b.nonce));
+ }
+ /** Local CAPTCHA evidence only; callers must separately verify membership and other gates. */
+ status(s:BotState,chat:string,actor:string):'NOT_REQUIRED'|'PENDING'|'PASSED'|'REJECTED'|'UNAVAILABLE'{
+  if(!group(chat)||!user(actor)||!this.policy.canUseChat(s,chat,'moderation'))return 'UNAVAILABLE';
+  const settings=this.settings(s,chat);if(!settings)return 'UNAVAILABLE';if(!settings.enabled||this.policy.has(s,actor,'chat.manage',chat,this.clock()))return 'NOT_REQUIRED';
+  const rows=s.wizards.filter(w=>w.key===key(chat,actor)),w=rows[0];
+  if(rows.length===0){
+   const reason='CAPTCHA_CHALLENGE_PASSED:'+hash([chat,actor,settings.revision]),proofs=s.audit.filter(a=>a.actorId===actor&&a.reason===reason&&a.policyVersion===this.policy.chatRevision(s,chat));
+   return proofs.length>0&&proofs.every(a=>a.decision==='ALLOW'&&/^captcha:passed:[A-Za-z0-9_-]{24}$/u.exec(a.updateKey)?.[0]===a.updateKey&&time(a.at)&&a.at<=this.clock()&&s.audit.filter(other=>other.updateKey===a.updateKey).length===1)?'PASSED':'UNAVAILABLE';
+  }
+  if(rows.length!==1||!w)return 'UNAVAILABLE';const d=this.#read(s,w,actor);if(!d)return 'UNAVAILABLE';
+  const human=this.#humanDecision(s,w,d);if(human)return human==='APPROVED'?'PASSED':'REJECTED';if(s.audit.some(a=>a.updateKey==='captcha:review:'+d.nonce))return 'UNAVAILABLE';
+  if(d.phase!=='PASSED')return 'PENDING';
+  const receipts=s.audit.filter(a=>a.updateKey==='captcha:passed:'+d.nonce),a=receipts[0];return receipts.length===1&&a?.actorId===actor&&a.decision==='ALLOW'&&a.policyVersion===w.policyVersion&&a.at===d.lastAttempt&&a.at<d.deadline&&a.reason==='CAPTCHA_CHALLENGE_PASSED:'+hash([d.group,actor,d.revision])?'PASSED':'UNAVAILABLE';
+ }
+ /** Human review concerns the CAPTCHA step only, never a Telegram release. */
+ caseEvidence(s:BotState,actor:string,nonce:string):string|null{
+  const cases=this.reviewCases(s,actor).filter(c=>c.nonce===nonce),c=cases[0];if(cases.length!==1||!c)return null;
+  const w=s.wizards.find(w=>w.key===key(c.group,c.actor));return w?hash([captchaSource(s),w,s.moderationReasons.filter(r=>r.chatId===c.group&&r.memberId===c.actor),s.moderationOperations.filter(o=>o.chatId===c.group&&o.memberId===c.actor)]):null;
+ }
+ #humanDecision(s:BotState,w:Wizard,d:Session):'APPROVED'|'REJECTED'|null{
+  const rows=s.audit.filter(a=>a.updateKey==='captcha:review:'+d.nonce),a=rows[0];
+  if(rows.length!==1||!a||a.actorId!==this.policy.ownerId||a.decision!=='ALLOW'||a.policyVersion!==w.policyVersion||!time(a.at)||a.at<d.issued||a.at>this.clock())return null;
+  try{const v=JSON.parse(a.reason) as {decision:string;session:string};return Object.keys(v).sort().join(',')==='decision,session'&&v.session===hash(w)&&(v.decision==='APPROVED'||v.decision==='REJECTED')?v.decision:null;}catch{return null;}
+ }
+ async reviewCase(actor:string,nonce:string,decision:'APPROVED'|'REJECTED',expected:string,confirmationRef:string):Promise<boolean>{
+  if(!['APPROVED','REJECTED'].includes(decision)||/^captcha-owner:[A-Za-z0-9_-]{24}$/u.exec(confirmationRef)?.[0]!==confirmationRef||/^[a-f0-9]{64}$/u.exec(expected)?.[0]!==expected)return false;
+  return this.store.transaction(s=>{const now=this.clock(),rows=s.callbacks.filter(c=>c.ref===confirmationRef),c=rows[0];
+   if(!time(now)||rows.length!==1||!c||c.actorId!==actor||c.chatId!=='private'||c.policyVersion!==0||!c.used||c.revoked||!c.oneShot||!Number.isSafeInteger(c.expiresAt)||now>=c.expiresAt||c.expiresAt>now+120000||this.caseEvidence(s,actor,nonce)!==expected)return false;
+   try{const a=JSON.parse(c.action);if(!Array.isArray(a)||a.length!==3||a[2]!==expected||a[1]!==captchaSource(s)||a[0]?.group!==nonce||a[0]?.kind!==(decision==='APPROVED'?'accept-confirm':'reject-confirm'))return false;}catch{return false;}
+   const target=this.reviewCases(s,actor).find(c=>c.nonce===nonce);if(!target)return false;const w=s.wizards.find(w=>w.key===key(target.group,target.actor));if(!w||s.audit.some(a=>a.updateKey==='captcha:review:'+nonce))return false;
+   s.audit.push({actorId:actor,updateKey:'captcha:review:'+nonce,decision:'ALLOW',reason:JSON.stringify({decision,session:hash(w)}),policyVersion:w.policyVersion,at:now});return true;
+  });
  }
  async cleanup():Promise<number>{return this.store.transaction(s=>this.#cleanup(s));}
  async observe(chat:string,members:string[],updateKey:string,sentAt:number):Promise<number>{
@@ -77,6 +110,9 @@ export class CaptchaService{
   if(action==='r'&&(prior.phase==='PASSED'||prior.round>=3||now<prior.retryAt))return null;
   let member=false;try{member=await this.membership(selected.d.group,actor)==='VERIFIED';}catch{/* unknown is not membership */}if(!member)return null;
   return this.store.transaction(s=>{const at=this.clock(),w=s.wizards.find(w=>w.key===selected.w.key);if(!w||w.status!=='ACTIVE'||at<now||at>=now+120000||captchaSource(s)!==captchaSource(before)||w.flow!==selected.w.flow)return null;let d=this.#read(s,w,actor);if(!d&&selected.refresh&&data===undefined){const previous=this.#read(s,w,actor,true),current=previous?this.settings(s,previous.group):null;if(!previous||!current)return null;d=this.#fresh(previous.group,current,1);w.policyVersion=this.policy.chatRevision(s,previous.group);w.flow=MEMBER+JSON.stringify(d);w.expiresAt=d.deadline;}const settings=d?this.settings(s,d.group):null;if(!d||!settings)return null;
+   const human=this.#humanDecision(s,w,d);
+   if(human)return {text:(human==='APPROVED'?'✅ قُبل التحقق بمراجعة بشرية.':'رُفض التحقق بعد مراجعة بشرية.')+'\nهذا القرار يخص CAPTCHA فقط، ولا يرفع عقوبة أو قيد اشتراك مستقلًا.',keyboard:{inline_keyboard:[[{text:'🏠 الرئيسية',callback_data:'pn:1:h'}]]}};
+   if(s.audit.some(a=>a.updateKey==='captcha:review:'+d.nonce))return null;
    if(data){const action=data.split(':')[2];if(action==='r'){if(d.phase==='PASSED'||at<d.retryAt||d.round>=3)return null;Object.assign(d,this.#fresh(d.group,settings,d.round+1));}
     else if(action!=='o'){if(at>=d.deadline||d.phase!=='WAITING'||d.lastAttempt>=0&&at-d.lastAttempt<2000)return null;d.lastAttempt=at;d.tries++;if(action==='b'||Number(data.split(':')[4])===d.problem[2]){if(s.audit.some(a=>a.updateKey==='captcha:passed:'+d.nonce))return null;d.phase='PASSED';w.status='CANCELLED';s.audit.push({actorId:actor,updateKey:'captcha:passed:'+d.nonce,decision:'ALLOW',reason:'CAPTCHA_CHALLENGE_PASSED:'+hash([d.group,actor,d.revision]),policyVersion:w.policyVersion,at});}else if(d.tries>=settings.attempts)d.phase='FAILED';}
    }
