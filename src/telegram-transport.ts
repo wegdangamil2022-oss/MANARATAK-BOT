@@ -50,6 +50,7 @@ import {renderStaffInline} from './telegram-inline-staff.js';
 import {ModerationUnknownOwnerReview} from './moderation-unknown-review.js';
 import {ModerationPendingOwnerView} from './moderation-pending-owner-view.js';
 import {GroupProtectionPolicyService} from './group-protection-policy.js';
+import {Phase4OwnerGreetingUI} from './phase4-welcome-owner.js';
 import {TelegramProtectionEditor} from './telegram-protection-editor.js';
 import {renderOwnerPurgeQueue} from './telegram-inline-purge.js';
 import {renderOwnerModerationRateStatus} from './telegram-inline-moderation-rate-status.js';
@@ -376,6 +377,13 @@ export class TelegramUpdateApplication {
     if(event.kind==='private'&&this.opts.policy.isOwner(event.actorId)&&folderNavigation)await cancelCommunityFolder(this.opts.store,event.actorId);
     if(event.document)return this.handleDocument(event);
     const {actorId,chatId,kind,text}=event;
+    if(kind==='private'&&this.opts.policy.isOwner(actorId)&&
+      /^\/(?:welcometext|autoreplyadd)\s/u.test(text)){
+     const view=await new Phase4OwnerGreetingUI(this.opts.store,this.opts.policy,this.clock).handle(actorId,text);
+     return view?{status:'APPLIED',reason:'PHASE4_OWNER_UI_PLANNED',
+      plan:this.plan(chatId,view.text,undefined,view.keyboard)}:
+      {status:'DENIED',reason:'PHASE4_OWNER_COMMAND_INVALID'};
+    }
     if(kind==='private'&&this.opts.policy.isOwner(actorId)&&!event.callbackData?.startsWith('ou:1:'))await cancelOwnerUpload(this.opts.store,actorId);
     if(kind==='private'&&event.topicId!==undefined)return {status:'DENIED',reason:'PRIVATE_TOPIC_NOT_SUPPORTED'};
     if(kind==='private'&&event.callbackData===undefined&&this.opts.policy.isOwner(actorId)&&!folderNavigation){const screen=await new CommunityFolderUI(this.opts.store,this.opts.policy,this.opts.subscription,this.clock).text(actorId,text);if(screen)return this.folderReply(event,screen);}
@@ -384,6 +392,15 @@ export class TelegramUpdateApplication {
      // Reauthorize the real sender at every tap. Never dispatch a privileged
      // command from untrusted callback_data or from a group context.
      if(kind!=='private'||actorId!==chatId)return {status:'DENIED',reason:'PRIVATE_CALLBACK_ONLY'};
+     if(this.opts.policy.isOwner(actorId)&&
+       (event.callbackData==='mi:1:i:09:01'||event.callbackData==='mi:1:i:09:05'||
+        event.callbackData.startsWith('p4w:1:'))){
+      const view=await new Phase4OwnerGreetingUI(this.opts.store,this.opts.policy,this.clock)
+       .handle(actorId,event.callbackData);
+      return view?{status:'APPLIED',reason:'PHASE4_OWNER_UI_PLANNED',
+       plan:this.plan(chatId,view.text,undefined,view.keyboard,event.callbackMessageId)}:
+       {status:'DENIED',reason:'PHASE4_OWNER_ROUTE_UNAVAILABLE'};
+     }
      if(event.callbackData.startsWith('pn:1:')){
       const selected=await readPublicNavigation(this.opts.store,actorId,event.callbackData,publicMenuText,this.clock);if(!selected)return {status:'DENIED',reason:'PUBLIC_NAVIGATION_STALE_OR_INVALID'};
       const {callbackData:_,...base}=event;return this.process({...base,text:selected});
@@ -1291,9 +1308,9 @@ export class TelegramUpdateApplication {
     }
     const callback=event.callbackData??'';
     const ownerScreen=event.kind==='private'&&this.opts.policy.isOwner(event.actorId)&&(
-     /^(?:mi:1:|oi:1:|ou:1:|sc:1:|cf:1:|ec:1:|oc:1:|od:1:|gw:1:|gt:1:|gs:1:|gb:1:|nw:1:|gp:1:|of:1:|ol:1:|st:1:|ps:1:|pr:1:|pd:1:|pq:1:|mr:1:|mp:1:|c_)/u.test(callback)||
+     /^(?:p4w:1:|mi:1:|oi:1:|ou:1:|sc:1:|cf:1:|ec:1:|oc:1:|od:1:|gw:1:|gt:1:|gs:1:|gb:1:|nw:1:|gp:1:|of:1:|ol:1:|st:1:|ps:1:|pr:1:|pd:1:|pq:1:|mr:1:|mp:1:|c_)/u.test(callback)||
      event.text==='/ownerinline'||event.text==='/ownerlegacy'||event.text==='/ownerrecover'||isOwnerMenuText(event.text)||(event.document!==undefined&&handled.plan?.inlineMarkup!==undefined)||
-     handled.reason==='CATEGORY_TEXT_PREVIEW'||handled.reason==='NETWORK_TEXT_PREVIEW'||handled.reason==='DELEGATION_TEXT_PREVIEW'||handled.reason==='STUDIO_DRAFT_SAVED');
+     handled.reason==='CATEGORY_TEXT_PREVIEW'||handled.reason==='NETWORK_TEXT_PREVIEW'||handled.reason==='DELEGATION_TEXT_PREVIEW'||handled.reason==='STUDIO_DRAFT_SAVED'||handled.reason==='PHASE4_OWNER_UI_PLANNED');
     if(ownerScreen&&handled.plan&&!handled.adminUIAccess){
      const state=await this.opts.store.snapshot(),now=this.clock(),epoch=studioInput?studioPreviewEpoch(state,this.opts.policy,event.actorId,now):protectionUIEpoch(state,this.opts.policy,event.actorId,now);
      const recovery=!this.opts.policy.privateFeature(state,'owner.dashboard',event.actorId)&&
