@@ -112,5 +112,10 @@ for(const engine of ['json','sqlite'] as const){
   const next=await f.app.handle({update_id:84,callback_query:{id:'pending-retry',from:{id:300,is_bot:false},data:retry.callback_data,message:{message_id:84,from:{id:999,is_bot:true},chat:{id:300,type:'private'}}}});assert.match(next.plan!.text,/تعذر إكمال رفع قيد التحقق/u);assert.equal(f.target().status,'restricted');assert.equal(f.writes.length,1);
  }finally{await f.close();}});
 
+ test(engine+' queued channel screen is withdrawn when CAPTCHA settings change',async()=>{const f=await fixture(true);try{
+  await f.policy.approveChat('100','-200',['verification']);await f.store.transaction(s=>{s.subscriptionRequirements.push({chatId:G,channelIds:['-200'],mode:'ALL',version:1});});f.channelMembership.set('-200','300','NOT_MEMBER');f.advance();const at=f.now();await f.app.handle({update_id:91,message:{message_id:91,date:at/1000,from:{id:100,is_bot:false},chat:{id:Number(G),type:'supergroup'},new_chat_members:[{id:300,is_bot:false}]}});f.advance();const start=await f.app.handle({update_id:92,message:{message_id:92,from:{id:300,is_bot:false},chat:{id:300,type:'private'},text:'/start'}}),answer=pick({text:start.plan!.text,keyboard:start.plan!.inlineMarkup!},'تحقق بديل');
+  const view=await f.app.handle({update_id:93,callback_query:{id:'queued-channel',from:{id:300,is_bot:false},data:answer,message:{message_id:93,from:{id:999,is_bot:true},chat:{id:300,type:'private'}}}});assert.ok(view.deliveryKey);await f.captcha.configure('100',G,{enabled:true,timeout:120,attempts:3},captchaSource(await f.store.snapshot()));let sent=0;const dispatcher=new TelegramReplyDispatcher(f.store,f.policy,{send:async()=>{sent++;return {status:'CONFIRMED',messageId:90};}},()=>f.now(),async()=>true,undefined,f.membership);const result=await dispatcher.dispatch(view.deliveryKey!);assert.equal(result.status,'FAILED_CONFIRMED');assert.equal(sent,0);
+ }finally{await f.close();}});
+
 
 }
