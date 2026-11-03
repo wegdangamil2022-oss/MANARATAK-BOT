@@ -105,5 +105,12 @@ for(const engine of ['json','sqlite'] as const){
   const result=await f.app.handle({update_id:73,callback_query:{id:'stale-pass',from:{id:300,is_bot:false},data:answer,message:{message_id:73,from:{id:999,is_bot:true},chat:{id:300,type:'private'}}}});assert.equal(result.reason,'SUBSCRIPTION_VERIFICATION_STALE');assert.equal(f.writes.length,0);
  }finally{await f.close();}});
 
+ test(engine+' channel retry still reports a CAPTCHA restriction requiring review',async()=>{const f=await fixture(true);try{
+  await f.enable();f.advance();const at=f.now();await f.app.handle({update_id:81,message:{message_id:81,date:at/1000,from:{id:100,is_bot:false},chat:{id:Number(G),type:'supergroup'},new_chat_members:[{id:300,is_bot:false}]}});assert.equal(f.target().status,'restricted');
+  await f.policy.approveChat('100','-200',['verification']);await f.store.transaction(s=>{s.subscriptionRequirements.push({chatId:G,channelIds:['-200'],mode:'ALL',version:1});});f.channelMembership.set('-200','300','NOT_MEMBER');f.advance();const start=await f.app.handle({update_id:82,message:{message_id:82,from:{id:300,is_bot:false},chat:{id:300,type:'private'},text:'/start'}}),answer=pick({text:start.plan!.text,keyboard:start.plan!.inlineMarkup!},'تحقق بديل');
+  const first=await f.app.handle({update_id:83,callback_query:{id:'pending-pass',from:{id:300,is_bot:false},data:answer,message:{message_id:83,from:{id:999,is_bot:true},chat:{id:300,type:'private'}}}});assert.match(first.plan!.text,/تعذر إكمال رفع قيد التحقق/u);const retry=first.plan!.studioMarkup!.inline_keyboard.flat().find(b=>'callback_data' in b&&b.callback_data.startsWith('sv:1:'));assert.ok(retry&&'callback_data' in retry);f.channelMembership.set('-200','300','MEMBER');
+  const next=await f.app.handle({update_id:84,callback_query:{id:'pending-retry',from:{id:300,is_bot:false},data:retry.callback_data,message:{message_id:84,from:{id:999,is_bot:true},chat:{id:300,type:'private'}}}});assert.match(next.plan!.text,/تعذر إكمال رفع قيد التحقق/u);assert.equal(f.target().status,'restricted');assert.equal(f.writes.length,1);
+ }finally{await f.close();}});
+
 
 }
