@@ -75,6 +75,8 @@ import {TelegramProtectionEditor} from './telegram-protection-editor.js';
 import {renderOwnerPurgeQueue} from './telegram-inline-purge.js';
 import {TelegramPurgeEditor} from './telegram-purge-editor.js';
 import {TelegramOwnerRights} from './telegram-owner-rights.js';
+import {TelegramAdminRoles} from './telegram-admin-roles.js';
+import type {TelegramAdminRoleGateway} from './telegram-admin-role-gateway.js';
 import type {TelegramBotApiModerationGateway} from './telegram-moderation-gateway.js';
 import {renderOwnerModerationRateStatus} from './telegram-inline-moderation-rate-status.js';
 import {TelegramModerationRateEditor} from './telegram-moderation-rate-editor.js';
@@ -152,6 +154,7 @@ export interface TelegramApplicationOptions {
   /** Explicit reviewed-deletion service; no automatic metadata collection. */
   purge?:ModerationPurgeService;
   messageMetadata?:TelegramMessageMetadataCollector;
+  adminRoles?:TelegramAdminRoleGateway;
   moderationRights?:{gateway:TelegramBotApiModerationGateway;safety:()=>Promise<boolean>};
   ephemeralVerification?:boolean;
 }
@@ -429,6 +432,12 @@ export class TelegramUpdateApplication {
   private delivery(event:Event){return event.messageId!==undefined&&event.sentAt!==undefined?{messageId:event.messageId,sentAt:event.sentAt}:undefined;}
   private async process(event:Event):Promise<ProcessedReply> {
     if(event.pinnedMessageId!==undefined){if(!event.edited&&this.opts.messageMetadata)await this.opts.messageMetadata.observePinned(event.chatId,event.pinnedMessageId);return {status:'IGNORED',reason:'PIN_OBSERVATION_ONLY'};}
+    if(event.kind==='private'&&this.opts.policy.isOwner(event.actorId)){
+     const roles=new TelegramAdminRoles(this.opts.store,this.opts.policy,this.opts.adminRoles,this.clock);
+     if(event.callbackData?.startsWith('ar:1:')){const view=await roles.handle(event.actorId,event.callbackData);return view?{status:'APPLIED',reason:'ADMIN_ROLE_VIEW',adminUIAccess:view.access,plan:this.plan(event.chatId,view.text,undefined,view.keyboard,event.callbackMessageId)}:{status:'DENIED',reason:'ADMIN_ROLE_UNAVAILABLE'};}
+     if(!event.callbackData&&!event.edited&&!event.forwarded&&!event.document&&!event.text.startsWith('/')&&!(Object.values(menuLabels) as string[]).includes(event.text)){const view=await roles.input(event.actorId,event.text);if(view)return {status:'APPLIED',reason:'ADMIN_ROLE_INPUT',adminUIAccess:view.access,plan:this.plan(event.chatId,view.text,undefined,view.keyboard)};}
+     await roles.cancel(event.actorId);
+    }
     if(event.kind==='private'&&this.opts.policy.isOwner(event.actorId)&&!event.callbackData?.startsWith('rf:1:'))await new TelegramModerationRateEditor(this.opts.store,this.opts.policy,this.clock).cancel(event.actorId);
     if(event.kind==='private'&&!event.callbackData?.startsWith('ap:1:u:')&&!event.callbackData?.startsWith('ap:1:z:'))await cancelAppealWarningPreview(this.opts.store,event.actorId);
     if(event.kind==='private'&&this.opts.policy.isOwner(event.actorId)&&!event.callbackData?.startsWith('tr:1:')&&event.callbackData!=='mi:1:i:03:06')await new TelegramOwnerRights(this.opts.store,this.opts.policy,this.opts.moderationRights?.gateway,this.clock,this.opts.moderationRights?.safety??(async()=>false)).cancel(event.actorId);

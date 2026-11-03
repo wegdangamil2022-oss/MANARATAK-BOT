@@ -25,6 +25,7 @@ import {SubscriptionRightsMonitor} from './subscription-rights-monitor.js';
 import {AdminRoomOncallDispatcher} from './admin-room-oncall.js';
 import {AdminRoomNoticeDispatcher,AdminRoomDailyDispatcher,TelegramAdminRoomNoticeSender} from './admin-room-notices.js';
 import {TelegramBotApiModerationGateway} from './telegram-moderation-gateway.js';
+import {TelegramAdminRoleGateway} from './telegram-admin-role-gateway.js';
 import {TelegramEphemeralTextSender} from './telegram-ephemeral-sender.js';
 import {TelegramTemporaryGroupSender} from './telegram-temporary-group-sender.js';
 
@@ -193,7 +194,7 @@ export async function createLiveTelegramServer(config:LiveTelegramConfig,
  const app=new TelegramUpdateApplication({store,policy,education,admin,faq,links,
   botId:check.botId,botUsername:check.botUsername,
   ...(messageMetadata?{messageMetadata}:{}),
-  ...(phase3?{moderation:phase3.moderation,purge:phase3.purge,groupPermissions:phase3.groupPermissions,protectionEnforcer:phase3.protectionEnforcer,moderationRights:{gateway:new TelegramBotApiModerationGateway(check.token,request,safetyGate),safety:safetyGate},ephemeralVerification:true}:{}),
+  ...(phase3?{adminRoles:new TelegramAdminRoleGateway(check.token,request,safetyGate),moderation:phase3.moderation,purge:phase3.purge,groupPermissions:phase3.groupPermissions,protectionEnforcer:phase3.protectionEnforcer,moderationRights:{gateway:new TelegramBotApiModerationGateway(check.token,request,safetyGate),safety:safetyGate},ephemeralVerification:true}:{}),
   membership:(chatId,actorId)=>membership.verifyMembership(chatId,actorId),subscription,
   documentDownload:new TelegramBotApiDocumentDownloader(check.token,request,safetyGate),
   moderationSafetyFile:check.safetySwitchFile,ownerMenuMode:'inline',studentMenuMode:'inline'});
