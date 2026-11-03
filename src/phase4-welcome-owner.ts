@@ -2,7 +2,7 @@ import {randomBytes,createHash} from 'node:crypto';
 import type {BotState,BotStore} from './store.js';
 import {Policy} from './policy.js';
 import {Phase4GreetingService} from './phase4-greeting-service.js';
-import {defaultGreetingSettings,validateGreetingSettings,type GreetingSettings} from './phase4-welcome-engine.js';
+import {defaultGreetingSettings,validateGreetingSettings,renderGreetingTemplate,type GreetingSettings} from './phase4-welcome-engine.js';
 import type {TelegramInlineKeyboard} from './telegram-inline-owner.js';
 export interface OwnerGreetingScreen {readonly text:string;readonly keyboard:TelegramInlineKeyboard;}
 interface OwnerPreview{actorId:string;chatId:string;nonce:string;expiresAt:number;createdAt:number;
@@ -96,10 +96,15 @@ export class Phase4OwnerGreetingUI {
    state.phase4GreetingOwnerPreviews=[...rows,{actorId,chatId:proposed.chatId,nonce,
     createdAt:now,expiresAt:now+120_000,proposed}];
   });
+  const demo=proposed.templates.find(t=>t.id===(proposed.welcomeTemplateId??proposed.replyRules.at(-1)?.templateId));
+  const previewText=demo?renderGreetingTemplate(demo,proposed,{updateKey:'p4:preview',
+   chatId:proposed.chatId,actorId:actorId,kind:'JOIN',trusted:true,chatApproved:true,
+   at:now,memberName:'طالب منارتك',groupName:'مجتمع منارتك'}):'لا يوجد قالب ترحيب مخصص.';
+  const brief=previewText.slice(0,850).replace(/&(?:[a-z]*?)?$/u,'');
   return screen('<b>🔎 معاينة قبل اعتماد ترحيب المجموعة</b>\n'
    +'المجموعة: '+esc(proposed.chatId)+'\nالإصدار الجديد: '+proposed.revision
    +'\nالترحيب: '+esc(proposed.welcomeMode)+' · الوداع: '+(proposed.farewellEnabled?'نعم':'لا')
-   +'\nقواعد الرد: '+proposed.replyRules.length
+   +'\nقواعد الرد: '+proposed.replyRules.length+'\n\n<b>نموذج عرض تجريبي:</b>\n'+brief
    +'\n\nالمعاينة صالحة لدقيقتين، ولا تشغل Telegram.',
    [[button('✅ تأكيد التغيير','p4w:1:c:'+nonce)],
     [button('↩️ إلغاء','p4w:1:g:'+proposed.chatId)]]);
