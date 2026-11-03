@@ -53,9 +53,10 @@ export async function phase4CommunityScreen(service:Phase4CommunityService,actor
  const data=cmd?.kind==='HOME'?'p4c:1:l:0':cmd?.kind==='VIEW'?'p4c:1:g:'+cmd.chatId:input;
  if(cmd?.kind==='DIAGNOSE'){
   const diagnostic=await service.diagnose(actorId,cmd.chatId,cmd.sample,cmd.topicId);
-  const text=diagnostic.status==='REPLIES_DISABLED'?'الردود التلقائية متوقفة في هذه المجموعة.':
-   diagnostic.status==='NO_MATCH'?'لا توجد قاعدة ترد على هذه الرسالة في هذا الموضوع.':
-   '✅ توجد قاعدة مطابقة: <code>'+diagnostic.ruleId+'</code>\nنص تجريبي: '+diagnostic.preview;
+  const text=diagnostic.status==='MATCH'?
+   '✅ توجد قاعدة مطابقة: <code>'+diagnostic.ruleId+'</code>\nنص تجريبي: '+diagnostic.preview:
+   diagnostic.status==='REPLIES_DISABLED'?'الردود التلقائية متوقفة في هذه المجموعة.':
+   'لا توجد قاعدة ترد على هذه الرسالة في هذا الموضوع.';
   return {text:'<b>🧪 تشخيص الردود دون إرسال</b>\n'+text+
    '\nلا تحسب هذه المعاينة حدود المعدّل أو عضوية الطلاب.',
    keyboard:k([[btn('↩️ إعدادات المجموعة','p4c:1:g:'+cmd.chatId)]])};
