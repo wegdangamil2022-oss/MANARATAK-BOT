@@ -11,6 +11,9 @@ export interface CommunitySendProposal{
  readonly text:string;readonly chatId:string;readonly actorId:string;
  readonly kind:CommunityEventKind;readonly policyVersion:number;readonly topicId?:number;
 }
+/** Read-only administrative explanation, never stored with student text. */
+export type CommunityDiagnostic={status:'REPLIES_DISABLED'|'NO_MATCH'}|
+ {status:'MATCH';ruleId:string;preview:string};
 const isGroup=(s:string):boolean=>/^-[1-9]\d{0,15}$/u.test(s)&&Number.isSafeInteger(Number(s));
 const validNow=(n:number):boolean=>Number.isSafeInteger(n)&&n>=0&&n<=8_640_000_000_000_000-120000;
 const hex=(s:string):string=>createHash('sha256').update(s,'utf8').digest('hex');
@@ -19,7 +22,9 @@ const safe=(t:string):string=>t.replace(/&/gu,'&amp;').replace(/</gu,'&lt;')
 const groupAvailable=(s:BotState,policy:Policy,actorId:string,chatId:string):number=>{
  if(!isGroup(chatId)||!policy.has(s,actorId,'chat.manage',chatId))throw Error('COMMUNITY_OWNER_DENIED');
  const chat=s.chats.filter(c=>c.id===chatId);
- if(chat.length!==1||!chat[0]!.approved||!chat[0]!.present||
+ // Remote presence is advisory, not an authorization source. Explicit group
+ // owner approval and current scoped grants govern pre-configuration.
+ if(chat.length!==1||!chat[0]!.approved||
     !chat[0]!.scopes.includes('navigation')||chat[0]!.version<1)
   throw Error('COMMUNITY_GROUP_UNAVAILABLE');
  return chat[0]!.version;
@@ -35,7 +40,7 @@ export class Phase4CommunityService{
 
  async listGroups(actorId:string):Promise<{chatId:string;version:number;configured:boolean}[]>{
   const s=await this.store.snapshot();
-  return s.chats.filter(c=>c.approved&&c.present&&c.id.startsWith('-')&&
+  return s.chats.filter(c=>c.approved&&c.id.startsWith('-')&&
     c.scopes.includes('navigation')&&
     s.chats.filter(other=>other.id===c.id).length===1&&
     this.policy.has(s,actorId,'chat.manage',c.id))
@@ -56,7 +61,7 @@ export class Phase4CommunityService{
       (typeof request.text!=='string'||request.text.trim().length===0))
     throw Error('COMMUNITY_TEMPLATE_REQUIRED');
    if(kind==='REPLY_ADD'&&(typeof request.trigger!=='string'||!request.trigger.trim()||
-       !['EXACT','WORD','CONTAINS'].includes(request.match??'')))throw Error('COMMUNITY_TRIGGER_REQUIRED');
+       !['EXACT','WORD','CONTAINS','COMMAND'].includes(request.match??'')))throw Error('COMMUNITY_TRIGGER_REQUIRED');
    if(kind==='REPLY_ADD'&&current.rules.length>=30)throw Error('COMMUNITY_RULE_CAPACITY');
    if(kind==='REPLY_REMOVE'&&(!request.ruleId||!current.rules.some(r=>r.id===request.ruleId)))
     throw Error('COMMUNITY_RULE_MISSING');
@@ -128,6 +133,28 @@ export class Phase4CommunityService{
    return structuredClone(config);
   });
  }
+ /** Owner-only, side-effect-free dry run for a supplied sample message.
+  * Never persists the query, consumes quotas or asks Telegram for a member.
+  */
+ async diagnose(actorId:string,chatId:string,sample:string,topicId?:number):Promise<CommunityDiagnostic>{
+  const state=await this.store.snapshot();
+  groupAvailable(state,this.policy,actorId,chatId);
+  if(typeof sample!=='string'||sample.length===0||sample.length>4096||
+    (topicId!==undefined&&(!Number.isSafeInteger(topicId)||topicId<1||topicId>2147483647)))
+   throw Error('COMMUNITY_SAMPLE_INVALID');
+  const config=configured(state,chatId);
+  if(!validCommunityConfig(config))throw Error('COMMUNITY_CONFIG_INVALID');
+  if(!config.repliesEnabled)return {status:'REPLIES_DISABLED'};
+  const rule=selectCommunityRule(config,sample,topicId);
+  if(!rule)return {status:'NO_MATCH'};
+  const now=this.clock();
+  if(!validNow(now))throw Error('COMMUNITY_CLOCK_INVALID');
+  const input:CommunityInput={kind:'TEXT',chatId,actorId:'1',
+   memberName:'الطالب التجريبي',groupName:'مجموعة منارتك التجريبية',
+   messageText:sample,...(topicId!==undefined?{topicId}:{})};
+  return {status:'MATCH',ruleId:rule.id,
+   preview:renderCommunityTemplate(rule.response,input,now+config.utcOffsetMinutes*60000)};
+ }
  /** Atomically applies quotas and reserves an outbound event exactly once.
   * A reservation is at-most-once: its provider outcome is managed separately
   * by the existing Telegram reply ledger, never retried blindly.
@@ -144,7 +171,7 @@ export class Phase4CommunityService{
    const config=activeConfig(s,input.chatId);
    if(!config||!validCommunityConfig(config)||
       !this.policy.canUseChat(s,input.chatId,'navigation')||
-      s.chats.filter(c=>c.id===input.chatId&&c.approved&&c.present).length!==1)return null;
+      s.chats.filter(c=>c.id===input.chatId&&c.approved).length!==1)return null;
    let template:string,ruleId:string|undefined;
    if(input.kind==='JOIN'){if(!config.welcome.enabled)return null;template=config.welcome.text;}
    else if(input.kind==='LEAVE'){if(!config.farewell.enabled)return null;template=config.farewell.text;}
