@@ -1,4 +1,6 @@
 import {GroupProtectionPolicyService} from './group-protection-policy.js';
+import {Phase4GreetingService} from './phase4-greeting-service.js';
+import {Phase4TelegramRuntime} from './phase4-telegram-runtime.js';
 import {startProtectionMaintenance} from './protection-maintenance.js';
 import {createServer,type Server} from 'node:http';
 import {lstat,realpath} from 'node:fs/promises';
@@ -20,6 +22,8 @@ import {readTelegramSafetySwitch,createTelegramSafetyGate} from './telegram-safe
 export interface LiveTelegramConfig{
  ownerId:string;botId:string;botUsername:string;stateFile:string;
  token:string;webhookSecret:string;listenPort:number;publicWebhookUrl:string;safetySwitchFile:string;
+ /** Optional and OFF by default; still requires per-group owner confirmation. */
+ phase4GreetingsEnabled?:boolean;
 }
 /** An advisory URL syntax and topology gate, NOT DNS/TLS or proxy verification.
  * Reject deceptive/non-HTTPS local endpoints and alternate routing before the
@@ -75,9 +79,12 @@ export function loadLiveTelegramConfig(env:Readonly<Record<string,string|undefin
     !safetySwitchFile||!isAbsolute(safetySwitchFile)||
     safetySwitchFile!==resolve(safetySwitchFile)||
     /[\u0000-\u001f\u007f]/u.test(safetySwitchFile)||
-    safetySwitchFile===stateFile)
+    safetySwitchFile===stateFile||
+    (env.TELEGRAM_PHASE4_GREETINGS_ENABLED!==undefined&&
+     !['true','false'].includes(env.TELEGRAM_PHASE4_GREETINGS_ENABLED)))
    throw new Error('LIVE_TELEGRAM_CONFIG_INVALID');
- return {ownerId,botId,botUsername,stateFile,token,webhookSecret,listenPort:port,publicWebhookUrl,safetySwitchFile};
+ return {ownerId,botId,botUsername,stateFile,token,webhookSecret,listenPort:port,publicWebhookUrl,safetySwitchFile,
+  ...(env.TELEGRAM_PHASE4_GREETINGS_ENABLED==='true'?{phase4GreetingsEnabled:true}:{})};
 }
 /** Independently checks a pre-existing local state; never initializes databases.
  * Common verification for both the read-only preflight command and real runtime.
@@ -155,7 +162,8 @@ export async function createLiveTelegramServer(config:LiveTelegramConfig,
   BOT_STATE_FILE:config.stateFile,TELEGRAM_BOT_TOKEN:config.token,
   TELEGRAM_WEBHOOK_SECRET:config.webhookSecret,TELEGRAM_LISTEN_PORT:String(config.listenPort),
   TELEGRAM_WEBHOOK_PUBLIC_URL:config.publicWebhookUrl,
-  TELEGRAM_SAFETY_FILE:config.safetySwitchFile
+  TELEGRAM_SAFETY_FILE:config.safetySwitchFile,
+  TELEGRAM_PHASE4_GREETINGS_ENABLED:config.phase4GreetingsEnabled===true?'true':'false'
  });
  await assertPrivateStateReady(check.stateFile);
  // Both RUN and STOP are valid *protected* states; STOP starts only the local
@@ -181,8 +189,12 @@ export async function createLiveTelegramServer(config:LiveTelegramConfig,
  const dispatcher=new TelegramReplyDispatcher(store,policy,
   new TelegramBotApiTextSender(check.token,request),Date.now,safetyGate,subscription,
   (chatId,actorId)=>membership.verifyMembership(chatId,actorId));
+ const phase4=check.phase4GreetingsEnabled===true?
+  new Phase4TelegramRuntime(store,policy,
+   new Phase4GreetingService(store,policy,{allowSending:()=>true}),
+   new TelegramBotApiTextSender(check.token,request),{safetyGate}):undefined;
  const server=createServer(telegramWebhookListener(app,check.webhookSecret,dispatcher,{},safetyGate,
-  new TelegramBotApiCallbackAcker(check.token,request)));
+  new TelegramBotApiCallbackAcker(check.token,request),phase4));
  server.once('listening',()=>{
   const protection=new GroupProtectionPolicyService(store,policy);
   const cleanup=startProtectionMaintenance(async()=>{
