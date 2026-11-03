@@ -3,7 +3,7 @@
  * never from a student-supplied message or a callback parameter.
  */
 export type CommunityEventKind='JOIN'|'LEAVE'|'TEXT';
-export type ReplyMatch='EXACT'|'WORD'|'CONTAINS';
+export type ReplyMatch='EXACT'|'WORD'|'CONTAINS'|'COMMAND';
 export interface CommunityReplyRule{
  id:string;trigger:string;response:string;match:ReplyMatch;
  enabled:boolean;cooldownMs:number;topicId?:number;
@@ -50,7 +50,7 @@ const validTemplate=(t:unknown):t is string=>validText(t,800)&&
 const validTopic=(n:unknown):n is number=>typeof n==='number'&&Number.isSafeInteger(n)&&n>0&&n<=2147483647;
 const kinds=new Set<CommunityDraftKind>(['WELCOME_TEXT','FAREWELL_TEXT','REPLY_ADD','REPLY_REMOVE',
  'WELCOME_ON','WELCOME_OFF','FAREWELL_ON','FAREWELL_OFF','REPLIES_ON','REPLIES_OFF']);
-const matches=new Set<ReplyMatch>(['EXACT','WORD','CONTAINS']);
+const matches=new Set<ReplyMatch>(['EXACT','WORD','CONTAINS','COMMAND']);
 export function defaultCommunityConfig(chatId:string):CommunityConfig{
  if(!validGroup(chatId))throw Error('COMMUNITY_CHAT_INVALID');
  return {chatId,version:0,welcome:{enabled:false,text:'مرحبًا {العضو} في {اسم_المجموعة} 👋'},
@@ -71,6 +71,7 @@ export function validCommunityConfig(value:unknown):value is CommunityConfig{
  for(const rule of x.rules){
   if(!rule||typeof rule!=='object'||typeof rule.id!=='string'||!/^[a-f0-9]{12}$/u.test(rule.id)||
    !validText(rule.trigger,80)||!validTemplate(rule.response)||!matches.has(rule.match)||
+   (rule.match==='COMMAND'&&!/^m_[a-z][a-z0-9_]{0,23}$/u.test(rule.trigger))||
    typeof rule.enabled!=='boolean'||!Number.isInteger(rule.cooldownMs)||
    rule.cooldownMs<1000||rule.cooldownMs>86400000||
    (rule.topicId!==undefined&&!validTopic(rule.topicId)))return false;
@@ -124,6 +125,13 @@ export function normalizeCommunityMatch(raw:string):string{
 export function matchCommunityRule(rule:CommunityReplyRule,text:string):boolean{
  const value=normalizeCommunityMatch(text),trigger=normalizeCommunityMatch(rule.trigger);
  if(!value||!trigger)return false;
+ // An isolated /m_ namespace cannot collide with Telegram moderation or
+ // commands addressed to another bot; no callback or command is authorization.
+ if(rule.match==='COMMAND'){
+  if(!/^m_[a-z][a-z0-9_]{0,23}$/u.test(trigger))return false;
+  const parsed=/^\/(m_[a-z][a-z0-9_]{0,23})(?:\s|$)/u.exec(value);
+  return parsed?.[1]===trigger;
+ }
  if(rule.match==='EXACT')return value===trigger;
  if(rule.match==='CONTAINS')return value.includes(trigger);
  let start=value.indexOf(trigger);
@@ -154,8 +162,10 @@ export function renderCommunityTemplate(template:string,input:CommunityInput,now
  return html;
 }
 export function selectCommunityRule(config:CommunityConfig,text:string,topicId?:number):CommunityReplyRule|undefined{
- if(!config.repliesEnabled||!text.trim()||text.trimStart().startsWith('/')||
-  text.includes('@')&&/^@\w+/u.test(text.trimStart()))return;
+ if(!config.repliesEnabled||!text.trim()||
+   /^@\w+/u.test(text.trimStart()))return;
+ const command=text.trimStart().startsWith('/');
  return config.rules.find(rule=>rule.enabled&&
+  (command?rule.match==='COMMAND':rule.match!=='COMMAND')&&
   (rule.topicId===undefined||rule.topicId===topicId)&&matchCommunityRule(rule,text));
 }
