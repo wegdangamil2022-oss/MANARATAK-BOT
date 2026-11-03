@@ -244,6 +244,11 @@ test('owner inline live local read-only views reuse existing authorization and a
    assert.match(outcome.plan?.text??'',content,data);
    assert.equal(outcome.plan?.editMessageId,55);
    assert.equal(isValidTelegramInlineKeyboard(outcome.plan?.inlineMarkup),true);
+   if(data==='mi:1:i:04:05'){
+    assert.match(outcome.plan?.text??'',/نسبة الوصول غير متاحة/);
+    const back=outcome.plan?.inlineMarkup?.inline_keyboard.flat().find(b=>b.callback_data==='mi:1:s:04:0');assert.ok(back);
+    const returned=await f.app.handle(callback(++id,100,back.callback_data));assert.equal(returned.status,'APPLIED');assert.match(returned.plan?.text??'',/الانضمام والاشتراكات/);
+   }
    const refused=await f.app.handle(callback(++id,300,data));
    assert.equal(refused.status,'DENIED');
    assert.equal(refused.plan,undefined);

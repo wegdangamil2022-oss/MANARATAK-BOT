@@ -33,6 +33,24 @@ async function seed(f:Awaited<ReturnType<typeof fixture>>,count:number){
  for(let i=1;i<=count;i++)await f.observe(i);
 }
 for(const engine of ['json','sqlite'] as const){
+ test(`B2-advanced ${engine}: conflicting duplicate message metadata cannot authorize a deletion`,async()=>{
+  const f=await fixture(engine);try{
+   await f.observe(1);await f.observe(2);await f.store.transaction(s=>{const original=s.rollingMessageMeta.find(m=>m.messageId===2)!;s.rollingMessageMeta.push({...original,senderId:'301',pinned:true});});
+   const job=await f.service().preview(OWNER,GROUP,{limit:10,senderId:'300'});assert.deepEqual(job.items.map(i=>i.messageId),[1]);assert.equal(job.excluded.protected,1);
+   await assert.rejects(f.observe(2),/OBSERVED_IDENTITY_AMBIGUOUS/);await f.service().confirm(OWNER,job.id);
+   f.gateway.canDelete=async()=>{await f.store.transaction(s=>{const original=s.rollingMessageMeta.find(m=>m.messageId===1)!;s.rollingMessageMeta.push({...original,pinned:true});});return true;};
+   assert.equal((await f.service().dispatchNext(job.id)).status,'BLOCKED');assert.equal(f.gateway.calls.length,0);
+  }finally{await f.close();}
+ });
+ test(`B2-advanced ${engine}: duplicate plans and items cannot be confirmed or dispatched`,async()=>{
+  for(const change of ['plan-before-confirm','item-before-confirm','plan-during-rights','item-during-rights'] as const){const f=await fixture(engine);try{
+   await f.observe(1);const job=await f.service().preview(OWNER,GROUP,{limit:1});
+   const duplicate=async()=>f.store.transaction(s=>{const target=s.purgeJobs.find(j=>j.id===job.id)!;if(change.startsWith('plan'))s.purgeJobs.push(structuredClone(target));else target.items.push(structuredClone(target.items[0]!));});
+   if(change.endsWith('before-confirm')){await duplicate();await assert.rejects(f.service().confirm(OWNER,job.id),/PURGE_IDENTITY_AMBIGUOUS/);assert.equal((await f.service().dispatchNext(job.id)).status,'BLOCKED');}
+   else{await f.service().confirm(OWNER,job.id);f.gateway.canDelete=async()=>{await duplicate();return true;};assert.equal((await f.service().dispatchNext(job.id)).status,'BLOCKED');}
+   assert.equal(f.gateway.calls.length,0);
+  }finally{await f.close();}}
+ });
  test(`B2-advanced ${engine}: time filters use original send time and remain bound to the reviewed plan`,async()=>{
   const f=await fixture(engine);try{
    await f.observe(1,{sentAt:now0-3600000});await f.observe(2,{sentAt:now0-600000});await f.observe(3,{sentAt:now0-300000,pinned:true});await f.observe(4,{sentAt:now0-1000});

@@ -1,3 +1,4 @@
+import {fileURLToPath} from 'node:url';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtemp, rm, readFile, writeFile } from 'node:fs/promises';
@@ -26,7 +27,7 @@ async function fixture() {
  return {dir,file,store,policy,education,gateway,publishing,resources,close:()=>rm(dir,{force:true,recursive:true})};
 }
 async function worker(task:string,file:string,campaign:string) {
- return run(process.execPath,[new URL('./b4-sqlite-worker.js',import.meta.url).pathname,task,file,campaign]);
+ return run(process.execPath,[fileURLToPath(new URL('./b4-sqlite-worker.js',import.meta.url)),task,file,campaign]);
 }
 
 test('B4 sqlite: initializes a single canonical state with SQLite header and shared schema',async()=>{

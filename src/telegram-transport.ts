@@ -1,10 +1,19 @@
+import {TelegramRuleActions} from './telegram-rule-actions.js';
+import {validProtectionUsername} from './protection-rules.js';
+import {TelegramAdminRoomLinks} from './telegram-admin-room-links.js';
+import {TelegramOncall,validOncallRoute} from './telegram-oncall.js';
+import {TelegramRuleWarningPolicy} from './telegram-rule-warning-policy.js';
+import {TelegramRoomControl} from './telegram-room-control.js';
+import {TelegramRuleExemptions} from './telegram-rule-exemptions.js';
+import {groupRulesMarkup,type GroupRulesMarkup} from './telegram-group-rules-markup.js';
 import {subscriptionConfigEpoch} from './subscription-config-epoch.js';
 import {subscriptionVerificationEpoch,validSubscriptionVerificationRoute} from './subscription-verification-access.js';
+import {validSubscriptionFallbackCleanup,subscriptionFallbackReceiptEvidence,subscriptionFallbackVerificationDigest} from './subscription-fallback-receipt.js';
 import {subscriptionEnforcementConsent} from './subscription-enforcement-policy.js';
 import {observeProtectionJoins} from './protection-join-raid.js';
 import {TelegramGroupRules} from './telegram-group-rules.js';
 import {TelegramModerationReports} from './telegram-moderation-reports.js';
-import {TelegramModerationAppeals} from './telegram-moderation-appeals.js';
+import {TelegramModerationAppeals,cancelAppealWarningPreview} from './telegram-moderation-appeals.js';
 import {protectionMediaFromMessage,type ProtectionMedia} from './telegram-protection-media.js';
 import { timingSafeEqual,createHash } from 'node:crypto';
 import {ModerationCommandReview,cancelModerationCommandReview} from './telegram-moderation-command-review.js';
@@ -65,7 +74,10 @@ import type {ProtectionEnforcer} from './protection-enforcement.js';
 import {TelegramProtectionEditor} from './telegram-protection-editor.js';
 import {renderOwnerPurgeQueue} from './telegram-inline-purge.js';
 import {TelegramPurgeEditor} from './telegram-purge-editor.js';
+import {TelegramOwnerRights} from './telegram-owner-rights.js';
+import type {TelegramBotApiModerationGateway} from './telegram-moderation-gateway.js';
 import {renderOwnerModerationRateStatus} from './telegram-inline-moderation-rate-status.js';
+import {TelegramModerationRateEditor} from './telegram-moderation-rate-editor.js';
 import {renderOwnerModerationEmergencyStatus} from './telegram-inline-moderation-emergency.js';
 import {renderStudentInline,studentSectionInlineData} from './telegram-inline-student.js';
 import {groupLibraryInline} from './telegram-group-library-inline.js';
@@ -85,6 +97,7 @@ import {escapeTelegramListPreview} from './telegram-preview.js';
 import {parseB6ExplicitMention} from './b6-telegram-mention.js';
 import type {ModerationService} from './moderation.js';
 import type {ModerationPurgeService} from './moderation-purge.js';
+import type {TelegramMessageMetadataCollector} from './telegram-message-metadata.js';
 import {isReplyDeleteCommand,previewReplyDelete,handleReplyDeleteCallback} from './telegram-reply-delete.js';
 import {parseReplyModerationCommand,executeReplyModerationCommand} from './telegram-moderation-commands.js';
 import {parseB6OwnerReplyTarget} from './b6-telegram-owner-reply.js';
@@ -108,14 +121,14 @@ interface IncomingDocument {
 }
 /** Offline B3 application adapter: creates plans, NEVER sends a message or connects to Telegram. */
 export interface TelegramReplyPlan { chatId: string; parseMode: 'HTML'; text: string;
- replyMarkup?:TelegramReplyKeyboard; inlineMarkup?:TelegramInlineKeyboard; studioMarkup?:import('./telegram-studio-rich.js').StudioNativeKeyboard; editMessageId?:number;messageThreadId?:number; }
+ replyMarkup?:TelegramReplyKeyboard; inlineMarkup?:TelegramInlineKeyboard; studioMarkup?:import('./telegram-studio-rich.js').StudioNativeKeyboard; groupRulesMarkup?:GroupRulesMarkup; editMessageId?:number;messageThreadId?:number; }
 export interface TelegramResult { status: 'APPLIED' | 'DUPLICATE' | 'DENIED' | 'IGNORED' | 'UNKNOWN'; reason: string; plan?: TelegramReplyPlan; deliveryKey?: string; callbackQueryId?:string; }
 type ProcessedReply={status:TelegramResult['status'];reason:string;plan?:TelegramReplyPlan;
  groupQuestionAccess?:TelegramReplyJob['groupQuestionAccess'];
  groupMenuAccess?:TelegramReplyJob['groupMenuAccess'];
  privateGroupAccess?:TelegramReplyJob['privateGroupAccess'];
  adminUIAccess?:TelegramReplyJob['adminUIAccess'];
- privateLibraryAccess?:TelegramReplyJob['privateLibraryAccess'];communityAccess?:TelegramReplyJob['communityAccess'];communityClose?:TelegramReplyJob['communityClose'];verificationScoped?:true};
+ privateLibraryAccess?:TelegramReplyJob['privateLibraryAccess'];communityAccess?:TelegramReplyJob['communityAccess'];communityClose?:TelegramReplyJob['communityClose'];verificationScoped?:true;verificationEphemeral?:true;verificationEphemeralTopicId?:number;verificationOutcome?:'MEMBER'|'NOT_MEMBER'|'UNAVAILABLE'|'NOT_REQUIRED'|'DENIED'};
 export interface TelegramApplicationOptions {
   store: BotStore; policy: Policy; education: EducationService; admin: EducationAdminFacade;
   faq: ApprovedAnswerService; links: ResourceLinkService; membership: MembershipPort;
@@ -138,9 +151,12 @@ export interface TelegramApplicationOptions {
   protectionEnforcer?:ProtectionEnforcer;
   /** Explicit reviewed-deletion service; no automatic metadata collection. */
   purge?:ModerationPurgeService;
+  messageMetadata?:TelegramMessageMetadataCollector;
+  moderationRights?:{gateway:TelegramBotApiModerationGateway;safety:()=>Promise<boolean>};
+  ephemeralVerification?:boolean;
 }
 
-type Event = {updateId: number; actorId: string; chatId: string; kind: 'private' | 'group'; text: string; displayName?:string; topicId?:number; entities?:unknown; messageId?:number; sentAt?:number; replyTo?:unknown; joins?:string[]; document?: IncomingDocument; protectionMedia?:ProtectionMedia; edited?:true; forwarded?:true; callbackData?:string; callbackQueryId?:string; callbackMessageId?:number};
+type Event = {updateId: number; actorId: string; chatId: string; kind: 'private' | 'group'; text: string; displayName?:string; username?:string; topicId?:number; entities?:unknown; messageId?:number; sentAt?:number; replyTo?:unknown; joins?:string[]; pinnedMessageId?:number; document?: IncomingDocument; protectionMedia?:ProtectionMedia; edited?:true; forwarded?:true; callbackData?:string; callbackQueryId?:string; callbackMessageId?:number};
 const isObject=(x:unknown):x is Record<string,unknown>=>Boolean(x)&&typeof x==='object'&&!Array.isArray(x);
 const positiveId=(x:unknown): x is number=>typeof x==='number'&&Number.isSafeInteger(x)&&x>0;
 const chatId=(x:unknown): x is number=>typeof x==='number'&&Number.isSafeInteger(x)&&x!==0;
@@ -179,14 +195,15 @@ function eventFrom(value:unknown):{event?:Event;reason:string} {
    if(!kind||(kind==='private'&&cb.message.chat.id!==cb.from.id)||
     (kind==='group'&&cb.message.chat.id>=0))
     return {reason:'INVALID_CALLBACK_CHAT'};
-   if(cb.message.message_thread_id!==undefined&&!positiveId(cb.message.message_thread_id))return {reason:'INVALID_CALLBACK_TOPIC'};
-   return {event:{updateId:value.update_id as number,actorId:String(cb.from.id),
+   if(cb.message.message_thread_id!==undefined&&(!positiveId(cb.message.message_thread_id)||cb.message.message_thread_id>2147483647))return {reason:'INVALID_CALLBACK_TOPIC'};
+   const displayName=senderDisplayName(cb.from);
+   return {event:{updateId:value.update_id as number,actorId:String(cb.from.id),...(displayName?{displayName}:{}),
     chatId:String(cb.message.chat.id),kind,text:'',
     callbackData:cb.data,callbackQueryId:cb.id,callbackMessageId:cb.message.message_id,...(cb.message.message_thread_id!==undefined?{topicId:cb.message.message_thread_id as number}:{})},reason:'VALID'};
   }
   if(!isObject(value.message))return {reason:'UNSUPPORTED_EVENT'};
   const msg=value.message;
-  if(!isObject(msg.chat)||!isObject(msg.from)||!positiveId(msg.from.id)||msg.from.is_bot!==false||!chatId(msg.chat.id))return {reason:'INVALID_ACTOR_OR_CHAT'};
+  if(!isObject(msg.chat)||!isObject(msg.from)||!positiveId(msg.from.id)||(msg.from.is_bot!==false&&!(msg.from.is_bot===true&&msg.pinned_message!==undefined))||!chatId(msg.chat.id))return {reason:'INVALID_ACTOR_OR_CHAT'};
   if(msg.sender_chat!==undefined||msg.via_bot!==undefined||msg.is_automatic_forward===true)return {reason:'UNTRUSTED_FORWARD'};
   if(msg.date!==undefined&&(!positiveId(msg.date)||msg.date>8640000000000))return {reason:'INVALID_MESSAGE_DATE'};
   const forwarded=msg.forward_origin!==undefined||msg.forward_date!==undefined;
@@ -200,7 +217,13 @@ function eventFrom(value:unknown):{event?:Event;reason:string} {
   const kind=msg.chat.type==='private'?'private':msg.chat.type==='group'||msg.chat.type==='supergroup'?'group':null;
   if(!kind || (kind==='private'&&(msg.chat.id!==msg.from.id))||(kind==='group'&&msg.chat.id>=0))return {reason:'INVALID_CHAT_CONTEXT'};
   const displayName=kind==='group'?senderDisplayName(msg.from):undefined;
-  if(msg.message_thread_id!==undefined&&!positiveId(msg.message_thread_id))return {reason:'INVALID_MESSAGE_TOPIC'};
+  const username=kind==='group'&&validProtectionUsername(msg.from.username)?msg.from.username:undefined;
+  if(msg.message_thread_id!==undefined&&(!positiveId(msg.message_thread_id)||msg.message_thread_id>2147483647))return {reason:'INVALID_MESSAGE_TOPIC'};
+  if(msg.pinned_message!==undefined){
+   const pinned=msg.pinned_message;
+   if(kind!=='group'||forwarded||!positiveId(msg.message_id)||!positiveId(msg.date)||!isObject(pinned)||!positiveId(pinned.message_id)||!isObject(pinned.chat)||pinned.chat.id!==msg.chat.id||!['group','supergroup'].includes(String(pinned.chat.type))||['text','caption','document','photo','video','animation','audio','voice','video_note','sticker','poll','contact','location','new_chat_members','left_chat_member'].some(k=>msg[k]!==undefined))return {reason:'INVALID_GROUP_PIN'};
+   return {event:{updateId:value.update_id as number,actorId:String(msg.from.id),chatId:String(msg.chat.id),kind,text:'',pinnedMessageId:pinned.message_id},reason:'VALID'};
+  }
   if(msg.new_chat_members!==undefined){
    if(kind!=='group'||forwarded||!positiveId(msg.message_id)||!positiveId(msg.date)||!Array.isArray(msg.new_chat_members)||msg.new_chat_members.length<1||msg.new_chat_members.length>100||['text','caption','document','photo','video','animation','audio','voice','video_note','sticker','poll','contact','location','left_chat_member','reply_to_message'].some(k=>msg[k]!==undefined)||!msg.new_chat_members.every(m=>isObject(m)&&positiveId(m.id)&&typeof m.is_bot==='boolean')||new Set(msg.new_chat_members.map(m=>(m as Record<string,unknown>).id)).size!==msg.new_chat_members.length)return {reason:'INVALID_GROUP_JOINS'};
    return {event:{updateId:value.update_id as number,actorId:String(msg.from.id),chatId:String(msg.chat.id),kind,text:'',messageId:msg.message_id,sentAt:msg.date*1000,joins:msg.new_chat_members.filter(m=>isObject(m)&&m.is_bot===false).map(m=>String((m as Record<string,unknown>).id))},reason:'VALID'};
@@ -208,7 +231,7 @@ function eventFrom(value:unknown):{event?:Event;reason:string} {
   if(kind==='group'){
    const decoded=protectionMediaFromMessage(msg);
    if(decoded.status==='INVALID')return {reason:'INVALID_GROUP_MEDIA'};
-   if(decoded.status==='MEDIA')return {event:{updateId:value.update_id as number,actorId:String(msg.from.id),chatId:String(msg.chat.id),kind,text:'',protectionMedia:decoded.media,...(displayName?{displayName}:{}),...(positiveId(msg.message_id)&&positiveId(msg.date)?{messageId:msg.message_id,sentAt:msg.date*1000}:{}),...(forwarded?{forwarded:true as const}:{})},reason:'VALID'};
+   if(decoded.status==='MEDIA')return {event:{updateId:value.update_id as number,actorId:String(msg.from.id),chatId:String(msg.chat.id),kind,text:'',protectionMedia:decoded.media,...(displayName?{displayName}:{}),...(username?{username}:{}),...(msg.message_thread_id!==undefined?{topicId:msg.message_thread_id as number}:{}),...(positiveId(msg.message_id)&&positiveId(msg.date)?{messageId:msg.message_id,sentAt:msg.date*1000}:{}),...(forwarded?{forwarded:true as const}:{})},reason:'VALID'};
   }
   if(msg.document!==undefined){
     // Telegram must not attach both an ordinary text command and a document.
@@ -230,7 +253,7 @@ function eventFrom(value:unknown):{event?:Event;reason:string} {
   if(typeof msg.text!=='string'||msg.text.length<1||msg.text.length>4096)return {reason:'UNSUPPORTED_MESSAGE'};
   if(/\u0000/u.test(msg.text))return {reason:'INVALID_TEXT'};
   return {event:{updateId:value.update_id as number,actorId:String(msg.from.id),chatId:String(msg.chat.id),kind,text:msg.text,...(forwarded?{forwarded:true as const}:{}),
-   ...(displayName?{displayName}:{}),
+   ...(displayName?{displayName}:{}),...(username?{username}:{}),
    ...(msg.entities!==undefined?{entities:msg.entities}:{}),...(msg.message_thread_id!==undefined?{topicId:msg.message_thread_id as number}:{}),
    ...(msg.message_id!==undefined?{messageId:msg.message_id as number}:{}),...(positiveId(msg.date)?{sentAt:msg.date*1000}:{}),
    ...(msg.reply_to_message!==undefined?{replyTo:msg.reply_to_message}:{})},reason:'VALID'};
@@ -393,23 +416,33 @@ export class TelegramUpdateApplication {
    const targets=await gate.joinTargets(group),state=await this.opts.store.snapshot(),now=this.clock(),epoch=subscriptionVerificationEpoch(state,this.opts.policy,actor,group,now);
    if(!epoch||now<at||now>=at+120000||now>8640000000000000-120000||subscriptionConfigEpoch(state)!==subscriptionConfigEpoch(before))return {status:'DENIED',reason:'SUBSCRIPTION_VERIFICATION_STALE'};
    const decision=result.decision,rule=state.subscriptionRequirements.find(r=>r.chatId===group),required=rule?(rule.mode==='ANY'?1:rule.mode==='AT_LEAST'?rule.minimumCount??0:rule.channelIds.length):0;
+   if(event.kind==='private'&&decision.status==='MEMBER')await this.opts.store.transaction(s=>{const checked=this.clock();if(!Number.isSafeInteger(checked)||checked<now||checked>=at+120000||subscriptionVerificationEpoch(s,this.opts.policy,actor,group,checked)!==epoch)return;for(const job of s.telegramReplyJobs??[]){const receipt=job.verificationCleanup;if(job.status!=='SENT'||!validSubscriptionFallbackCleanup(receipt)||receipt.status!=='WAITING'||(receipt.memberId??receipt.chatId)!==actor||receipt.scope!==group||receipt.verifiedAt!==undefined||checked<receipt.createdAt||!subscriptionFallbackReceiptEvidence(s,job,receipt)||(s.telegramReplyJobs??[]).filter(x=>x.updateKey===job.updateKey).length!==1||(s.telegramReplyJobs??[]).filter(x=>x.verificationCleanup?.chatId===receipt.chatId&&x.verificationCleanup?.messageId===receipt.messageId).length!==1||s.audit.some(a=>a.updateKey===job.updateKey+':fallback-verified'))continue;receipt.verifiedAt=checked;s.audit.push({actorId:receipt.chatId,updateKey:job.updateKey+':fallback-verified',decision:'ALLOW',reason:'SUBSCRIPTION_FALLBACK_VERIFIED:'+subscriptionFallbackVerificationDigest(receipt,checked),policyVersion:this.opts.policy.chatRevision(s,group),at:checked});}});
    const label={MEMBER:'✅ اكتمل شرط الاشتراك في هذا الفحص.',NOT_MEMBER:'لم يكتمل شرط الاشتراك.',NOT_REQUIRED:'لا يلزم اشتراك وفق نتيجة هذا الفحص.',UNAVAILABLE:'تعذر إكمال الفحص؛ لا يُعد ذلك مخالفة.',DENIED:'التحقق غير متاح لهذا النطاق.'}[decision.status];
    const effect='effect' in result?result.effect:undefined;
-   const text='<b>التحقق من الاشتراك</b>\n'+label+(decision.channels.length?'\nالمتحقق: '+(result.verified??0)+' من '+decision.channels.length+' · المطلوب: '+required+' · غير المحسوم: '+(result.unknown??0):'')+'\n'+(effect?.status==='APPLIED'?'حُدّث سبب الاشتراك وفُحصت نتيجة العملية.':effect?.status==='UNKNOWN_OUTCOME'||effect?.status==='BLOCKED_UNKNOWN'?'نتيجة تغيير القيد غير محسومة؛ يلزم المشرف، ولا إعادة تلقائية.':effect&&effect.status!=='NO_CHANGE'?'لم يُؤكد تغيير القيد؛ القيود المستقلة تبقى محفوظة.':mode==='UNAVAILABLE'?'هذا الفحص لا يغيّر القيود.':'لا تغيير جديد في سبب الاشتراك.')+'\nروابط الجهات تُقرأ من بيانات Telegram الحالية؛ ما لم يتوفر له رابط موثوق لا يُخمن.';
-   const rows:import('./telegram-studio-rich.js').StudioNativeButton[][]=targets.filter(t=>t.url!==null).map((t,i)=>[{text:'🔗 فتح الجهة '+(i+1),url:t.url!}]);rows.push([{text:'✅ إعادة التحقق',callback_data:'sv:1:'+group+':'+this.opts.policy.chatRevision(state,group)}],[{text:'🏠 الرئيسية',callback_data:'pn:1:h'}]);
-   return {status:'APPLIED',reason:'SUBSCRIPTION_VERIFICATION_VIEW',privateGroupAccess:{actorId:actor,scope:group,epoch,expiresAt:now+120000},verificationScoped:true,plan:{chatId:actor,parseMode:'HTML',text,studioMarkup:{inline_keyboard:rows},...(event.kind==='private'&&event.callbackMessageId!==undefined?{editMessageId:event.callbackMessageId}:{})}};
+   const text='<b>التحقق من الاشتراك</b>\n'+label+(decision.channels.length?'\nالمتحقق: '+(result.verified??0)+' من '+decision.channels.length+' · المطلوب: '+required+' · غير المحسوم: '+(result.unknown??0):'')+'\n'+(effect&&'reason' in effect&&effect.reason==='SUBSCRIPTION_LEAVE_GRACE'?'مهلة السماح للمغادرة سارية؛ أعد الاشتراك ثم اضغط إعادة التحقق.':effect?.status==='APPLIED'?'حُدّث سبب الاشتراك وفُحصت نتيجة العملية.':effect?.status==='UNKNOWN_OUTCOME'||effect?.status==='BLOCKED_UNKNOWN'?'نتيجة تغيير القيد غير محسومة؛ يلزم المشرف، ولا إعادة تلقائية.':effect&&effect.status!=='NO_CHANGE'?'لم يُؤكد تغيير القيد؛ القيود المستقلة تبقى محفوظة.':mode==='UNAVAILABLE'?'هذا الفحص لا يغيّر القيود.':'لا تغيير جديد في سبب الاشتراك.')+'\nروابط الجهات تُقرأ من بيانات Telegram الحالية؛ ما لم يتوفر له رابط موثوق لا يُخمن.';
+   const rows:import('./telegram-studio-rich.js').StudioNativeButton[][]=targets.filter(t=>t.url!==null).map((t,i)=>[{text:'🔗 فتح الجهة '+(i+1),url:t.url!}]);const ephemeral=event.kind==='group'&&this.opts.ephemeralVerification===true;
+   if(ephemeral&&event.topicId!==undefined&&event.topicId>2147483647)return {status:'DENIED',reason:'SUBSCRIPTION_VERIFICATION_UNAVAILABLE'};
+   if(ephemeral)rows.push([{text:'🤖 فتح خاص البوت للتحقق',url:'https://t.me/'+this.opts.botUsername}]);else rows.push([{text:'✅ إعادة التحقق',callback_data:'sv:1:'+group+':'+this.opts.policy.chatRevision(state,group)}],[{text:'🏠 الرئيسية',callback_data:'pn:1:h'}]);
+   const temporaryCallback=event.kind==='private'&&event.callbackMessageId!==undefined&&(state.telegramReplyJobs??[]).some(job=>{const receipt=job.verificationCleanup;return job.status==='SENT'&&validSubscriptionFallbackCleanup(receipt)&&receipt.chatId===actor&&receipt.messageId===event.callbackMessageId&&subscriptionFallbackReceiptEvidence(state,job,receipt);});
+   return {status:'APPLIED',reason:'SUBSCRIPTION_VERIFICATION_VIEW',privateGroupAccess:{actorId:actor,scope:group,epoch,expiresAt:now+120000},verificationScoped:true,verificationOutcome:decision.status,...(ephemeral?{verificationEphemeral:true as const,...(event.topicId!==undefined?{verificationEphemeralTopicId:event.topicId}:{})}:{}),plan:{chatId:actor,parseMode:'HTML',text:ephemeral?text+'\nافتح خاص البوت ثم أرسل <code>/verify '+group+'</code> لإعادة التحقق.':text,studioMarkup:{inline_keyboard:rows},...(event.kind==='private'&&event.callbackMessageId!==undefined&&!temporaryCallback?{editMessageId:event.callbackMessageId}:{})}};
   }
   private delivery(event:Event){return event.messageId!==undefined&&event.sentAt!==undefined?{messageId:event.messageId,sentAt:event.sentAt}:undefined;}
   private async process(event:Event):Promise<ProcessedReply> {
+    if(event.pinnedMessageId!==undefined){if(!event.edited&&this.opts.messageMetadata)await this.opts.messageMetadata.observePinned(event.chatId,event.pinnedMessageId);return {status:'IGNORED',reason:'PIN_OBSERVATION_ONLY'};}
+    if(event.kind==='private'&&this.opts.policy.isOwner(event.actorId)&&!event.callbackData?.startsWith('rf:1:'))await new TelegramModerationRateEditor(this.opts.store,this.opts.policy,this.clock).cancel(event.actorId);
+    if(event.kind==='private'&&!event.callbackData?.startsWith('ap:1:u:')&&!event.callbackData?.startsWith('ap:1:z:'))await cancelAppealWarningPreview(this.opts.store,event.actorId);
+    if(event.kind==='private'&&this.opts.policy.isOwner(event.actorId)&&!event.callbackData?.startsWith('tr:1:')&&event.callbackData!=='mi:1:i:03:06')await new TelegramOwnerRights(this.opts.store,this.opts.policy,this.opts.moderationRights?.gateway,this.clock,this.opts.moderationRights?.safety??(async()=>false)).cancel(event.actorId);
     if(event.kind==='private'&&this.opts.policy.isOwner(event.actorId)&&!event.callbackData?.startsWith('pc:1:'))await new TelegramPurgeEditor(this.opts.store,this.opts.policy,this.opts.purge,this.clock).cancel(event.actorId);
     if(this.opts.groupPermissions&&event.kind==='private'&&(event.callbackData!==undefined?!event.callbackData.startsWith('lk:1:')&&event.callbackData!=='mi:1:i:02:04':event.text.startsWith('/')||(Object.values(menuLabels) as string[]).includes(event.text)))await this.opts.groupPermissions.cancelForActor(event.actorId);
     if(this.opts.moderation&&event.kind==='private'&&(event.callbackData!==undefined?!event.callbackData.startsWith('mc:1:'):event.text.startsWith('/')||(Object.values(menuLabels) as string[]).includes(event.text)))await cancelModerationCommandReview(this.opts.store,event.actorId);
     if(event.joins){
      if(event.kind!=='group'||event.edited||event.forwarded||event.sentAt===undefined)return {status:'DENIED',reason:'INVALID_GROUP_JOINS'};
+     if(this.opts.subscription)for(const member of event.joins)await this.opts.subscription.observeMember(event.chatId,member,event.sentAt);
      const status=await observeProtectionJoins(this.opts.store,this.opts.policy,this.clock,this.opts.protectionEnforcer,event.chatId,event.joins,event.sentAt,'b3-webhook:'+this.opts.botId+':'+event.updateId);
      return {status:'IGNORED',reason:'PROTECTION_JOINS_'+status};
     }
     if(event.kind==='group'&&!event.callbackData&&!event.edited&&!event.joins&&event.sentAt!==undefined&&this.opts.subscription&&this.clock()>=event.sentAt&&this.clock()-event.sentAt<=30000){
+     await this.opts.subscription.observeMember(event.chatId,event.actorId,event.sentAt);
      const state=await this.opts.store.snapshot(),consent=subscriptionEnforcementConsent(state,this.opts.policy,event.chatId,this.clock());
      if(consent&&event.sentAt>=consent.at&&!this.opts.policy.isOwner(event.actorId)&&!this.opts.policy.has(state,event.actorId,'chat.manage',event.chatId,this.clock())){
       const checked=await this.opts.subscription.synchronizeAutomatic(event.chatId,event.actorId);
@@ -419,28 +452,47 @@ export class TelegramUpdateApplication {
     if(event.protectionMedia){
      const media=event.protectionMedia;
      await new GroupProtectionPolicyService(this.opts.store,this.opts.policy,this.clock,this.opts.protectionEnforcer).observeIncomingMessage(
-      {chatId:event.chatId,memberId:event.actorId,type:media.type,caption:media.caption,...(event.displayName?{displayName:event.displayName}:{}),...(event.forwarded?{forwarded:true}:{})},media.entities,'b3-webhook:'+this.opts.botId+':'+event.updateId,!event.edited,this.delivery(event));
+      {chatId:event.chatId,memberId:event.actorId,type:media.type,caption:media.caption,...(media.vcardFile?{vcardFile:true}:{}),...(event.displayName?{displayName:event.displayName}:{}),...(event.username?{username:event.username}:{}),...(event.forwarded?{forwarded:true}:{})},media.entities,'b3-webhook:'+this.opts.botId+':'+event.updateId,!event.edited,this.delivery(event));
      return media.type==='DOCUMENT'?{status:'DENIED',reason:'PRIVATE_ADMIN_UPLOAD_ONLY'}:{status:'IGNORED',reason:'PROTECTION_MEDIA_MONITOR_ONLY'};
     }
     if(event.forwarded){
      await new GroupProtectionPolicyService(this.opts.store,this.opts.policy,this.clock,this.opts.protectionEnforcer).observeIncomingMessage(
-      {chatId:event.chatId,memberId:event.actorId,type:'TEXT',text:event.text,forwarded:true,...(event.displayName?{displayName:event.displayName}:{})},event.entities,'b3-webhook:'+this.opts.botId+':'+event.updateId,!event.edited,this.delivery(event));
+      {chatId:event.chatId,memberId:event.actorId,type:'TEXT',text:event.text,forwarded:true,...(event.displayName?{displayName:event.displayName}:{}),...(event.username?{username:event.username}:{})},event.entities,'b3-webhook:'+this.opts.botId+':'+event.updateId,!event.edited,this.delivery(event));
      return {status:'DENIED',reason:'UNTRUSTED_FORWARD'};
     }
     if(event.edited){
      await new GroupProtectionPolicyService(this.opts.store,this.opts.policy,this.clock,this.opts.protectionEnforcer).observeIncomingText(
-      event.actorId,event.chatId,event.text,event.entities,'b3-webhook:'+this.opts.botId+':'+event.updateId,false,this.delivery(event),event.displayName);
+      event.actorId,event.chatId,event.text,event.entities,'b3-webhook:'+this.opts.botId+':'+event.updateId,false,this.delivery(event),event.displayName,event.username);
      return {status:'IGNORED',reason:'PROTECTION_EDIT_MONITOR_ONLY'};
     }
     if(event.kind==='private'&&this.opts.policy.isOwner(event.actorId)&&!event.callbackData?.startsWith('sc:1:')&&event.callbackData!=='mi:1:i:04:02'&&event.callbackData!=='mi:1:i:04:04')await cancelSubscriptionConfig(this.opts.store,event.actorId);
+    if(event.kind==='private'&&this.opts.moderation&&!event.callbackData?.startsWith('ra:1:'))await new TelegramRuleActions(this.opts.store,this.opts.policy,this.opts.moderation,this.clock).cancel(event.actorId);
+    if(event.kind==='private'&&!event.callbackData?.startsWith('rw:1:c:')&&!event.callbackData?.startsWith('rw:1:x:'))await new TelegramRuleWarningPolicy(this.opts.store,this.opts.policy,this.clock).cancel(event.actorId);
     if(event.kind==='private'&&!event.callbackData?.startsWith('rl:1:c:')&&!event.callbackData?.startsWith('rl:1:x:'))await new TelegramGroupRules(this.opts.store,this.opts.policy,this.clock).cancel(event.actorId);
-    if(event.kind==='group'&&(event.text==='/rules'||event.text.toLowerCase()==='/rules@'+this.opts.botUsername.toLowerCase())){
-     const rules=await new TelegramGroupRules(this.opts.store,this.opts.policy,this.clock).publishedView(event.chatId,event.topicId);
-     return rules?{status:'APPLIED',reason:'GROUP_RULES_VIEW',groupMenuAccess:{actorId:event.actorId,epoch:rules.epoch,expiresAt:this.clock()+120000},plan:{...this.plan(event.chatId,rules.text),...(event.topicId!==undefined?{messageThreadId:event.topicId}:{})}}:{status:'DENIED',reason:'GROUP_RULES_UNAVAILABLE'};
+    if(event.kind==='private'&&!event.callbackData?.startsWith('le:1:c:')&&!event.callbackData?.startsWith('le:1:x:')&&!event.callbackData?.startsWith('le:1:r:')&&!event.callbackData?.startsWith('le:1:z:'))await new TelegramRuleExemptions(this.opts.store,this.opts.policy,this.clock).cancel(event.actorId);
+    if(event.kind==='private'&&!event.callbackData?.startsWith('al:1:z:')&&!event.callbackData?.startsWith('al:1:w:')&&!event.callbackData?.startsWith('al:1:y:')&&!event.callbackData?.startsWith('al:1:v:'))await new TelegramAdminRoomLinks(this.opts.store,this.opts.policy,this.clock).cancel(event.actorId);
+    if(event.kind==='private'&&!/^rc:1:[csv]:/u.test(event.callbackData??''))await new TelegramRoomControl(this.opts.store,this.opts.policy,this.opts.moderation,this.clock,this.opts.moderationRights?.gateway,this.opts.moderationRights?.safety).cancel(event.actorId);
+    const roomReports=event.kind==='group'&&event.text==='/roomreports'?event.chatId:event.kind==='private'?/^\/roomreports (-[1-9][0-9]{0,15})$/u.exec(event.text)?.[1]:undefined;if(roomReports){const view=await new TelegramRoomControl(this.opts.store,this.opts.policy,this.opts.moderation,this.clock,this.opts.moderationRights?.gateway,this.opts.moderationRights?.safety).listFromRoom(event.actorId,roomReports);return view?{status:'APPLIED',reason:'ROOM_CONTROL_LIST',adminUIAccess:view.access,plan:this.plan(event.actorId,view.text,undefined,view.keyboard)}:{status:'DENIED',reason:'ROOM_CONTROL_UNAVAILABLE'};}
+    if(event.kind==='private'&&event.text.startsWith('/centralban ')){const view=await new TelegramRoomControl(this.opts.store,this.opts.policy,this.opts.moderation,this.clock,this.opts.moderationRights?.gateway,this.opts.moderationRights?.safety).central(event.actorId,event.text);return view?{status:'APPLIED',reason:'ROOM_CENTRAL_PREVIEW',adminUIAccess:view.access,plan:this.plan(event.actorId,view.text,undefined,view.keyboard)}:{status:'DENIED',reason:'ROOM_CENTRAL_UNAVAILABLE'};}
+    if(event.kind==='private'&&!event.callbackData?.startsWith('oc:1:c:'))await new TelegramOncall(this.opts.store,this.opts.policy,this.clock).cancel(event.actorId);
+    if(event.kind==='private'&&event.text.startsWith('/oncall ')){const view=await new TelegramOncall(this.opts.store,this.opts.policy,this.clock).command(event.actorId,event.text);return view?{status:'APPLIED',reason:'ONCALL_VIEW',adminUIAccess:view.access,plan:this.plan(event.actorId,view.text,undefined,view.keyboard)}:{status:'DENIED',reason:'ONCALL_UNAVAILABLE'};}
+    if(event.kind==='private'&&event.text.startsWith('/adminlink ')){const view=await new TelegramAdminRoomLinks(this.opts.store,this.opts.policy,this.clock).create(event.actorId,event.text);return view?{status:'APPLIED',reason:'ADMIN_ROOM_VIEW',adminUIAccess:view.access,plan:this.plan(event.actorId,view.text,undefined,view.keyboard)}:{status:'DENIED',reason:'ADMIN_ROOM_UNAVAILABLE'};}
+    if(event.kind==='private'&&event.text==='/adminlinks'){const view=await new TelegramAdminRoomLinks(this.opts.store,this.opts.policy,this.clock).handle(event.actorId,'al:1:h:0');return view?{status:'APPLIED',reason:'ADMIN_ROOM_VIEW',adminUIAccess:view.access,plan:this.plan(event.actorId,view.text,undefined,view.keyboard)}:{status:'DENIED',reason:'ADMIN_ROOM_UNAVAILABLE'};}
+    if(event.kind==='private'&&event.text.startsWith('/exemptrule')){const view=await new TelegramRuleExemptions(this.opts.store,this.opts.policy,this.clock).preview(event.actorId,event.text);return view?{status:'APPLIED',reason:'RULE_EXEMPTION_PREVIEW',adminUIAccess:view.access,plan:this.plan(event.actorId,view.text,undefined,view.keyboard)}:{status:'DENIED',reason:'RULE_EXEMPTION_UNAVAILABLE'};}
+    const rulesCommand=/^\/rules(?:@[A-Za-z0-9_]+)?(?: ([a-z]{2}(?:-[A-Z]{2})?))?$/u.exec(event.text),rulesHead=event.text.split(' ')[0]!.toLowerCase();
+    if(event.kind==='group'&&rulesCommand?.[0]===event.text&&(rulesHead==='/rules'||rulesHead==='/rules@'+this.opts.botUsername.toLowerCase())){
+     const rules=await new TelegramGroupRules(this.opts.store,this.opts.policy,this.clock).publishedView(event.chatId,event.topicId,rulesCommand[1]);
+     return rules?{status:'APPLIED',reason:'GROUP_RULES_VIEW',groupMenuAccess:{actorId:event.actorId,epoch:rules.epoch,expiresAt:this.clock()+120000},plan:{...this.plan(event.chatId,rules.text),groupRulesMarkup:groupRulesMarkup(this.opts.botUsername),...(event.topicId!==undefined?{messageThreadId:event.topicId}:{})}}:{status:'DENIED',reason:'GROUP_RULES_UNAVAILABLE'};
     }
-    if(event.kind==='private'&&event.text.startsWith('/setrules')){
+    if(event.kind==='private'&&(event.text.startsWith('/rulewarnings')||event.text.startsWith('/ruleactions'))){const view=await new TelegramRuleWarningPolicy(this.opts.store,this.opts.policy,this.clock).preview(event.actorId,event.text);return view?{status:'APPLIED',reason:'RULE_WARNING_POLICY_PREVIEW',adminUIAccess:view.access,plan:this.plan(event.actorId,view.text,undefined,view.keyboard)}:{status:'DENIED',reason:'RULE_WARNING_POLICY_UNAVAILABLE'};}
+    if(event.kind==='private'&&['/setrules','/disablerule','/enablerule','/translaterules','/removerulelang'].some(command=>event.text.startsWith(command))){
      const view=await new TelegramGroupRules(this.opts.store,this.opts.policy,this.clock).preview(event.actorId,event.text);
      return view?{status:'APPLIED',reason:'GROUP_RULES_PREVIEW',adminUIAccess:view.access,plan:this.plan(event.actorId,view.text,undefined,view.keyboard)}:{status:'DENIED',reason:'GROUP_RULES_INPUT_REJECTED'};
+    }
+    const historicalLaw=/^\/start law_([1-9][0-9]{0,15})_([1-9][0-9]{0,14})$/u.exec(event.text);
+    if(event.kind==='private'&&historicalLaw?.[0]===event.text){
+     const view=await new TelegramGroupRules(this.opts.store,this.opts.policy,this.clock).historical(event.actorId,'-'+historicalLaw[1],Number(historicalLaw[2]));
+     return view?{status:'APPLIED',reason:'GROUP_RULES_HISTORY_VIEW',adminUIAccess:view.access,plan:this.plan(event.actorId,view.text,undefined,view.keyboard)}:{status:'DENIED',reason:'GROUP_RULES_UNAVAILABLE'};
     }
     if(event.kind==='private'&&event.text==='/grouprules'){
      const view=await new TelegramGroupRules(this.opts.store,this.opts.policy,this.clock).handle(event.actorId,'rl:1:h:0');
@@ -451,7 +503,7 @@ export class TelegramUpdateApplication {
      const reportState=status==='RECORDED'?await this.opts.store.snapshot():null;
      return {status:status==='RECORDED'?'APPLIED':'DENIED',reason:'MODERATION_REPORT_'+status,...(reportState?{groupMenuAccess:{actorId:event.actorId,epoch:groupMenuEpochDigest(reportState,event.chatId,event.topicId),expiresAt:this.clock()+120000}}:{}),...(status==='RECORDED'?{plan:{...this.plan(event.chatId,'سُجل البلاغ للمراجعة الخاصة دون عقوبة. يمكنك متابعة الحالة عبر /reports في خاص البوت.'),...(event.topicId!==undefined?{messageThreadId:event.topicId}:{})}}:{})};
     }
-    if(event.kind==='private'&&event.text==='/reports'){
+    if(event.kind==='private'&&(event.text==='/reports'||event.text==='/start reports')){
      const view=await new TelegramModerationReports(this.opts.store,this.opts.policy,this.clock).handle(event.actorId,'rp:1:h:0');
      return view?{status:'APPLIED',reason:'MODERATION_REPORT_VIEW',plan:this.plan(event.actorId,view.text,undefined,view.keyboard)}:{status:'DENIED',reason:'MODERATION_REPORT_UNAVAILABLE'};
     }
@@ -463,7 +515,7 @@ export class TelegramUpdateApplication {
      const state=await this.opts.store.snapshot(),version=this.opts.policy.chatRevision(state,event.chatId);if(!this.opts.policy.isOwner(event.actorId)||!this.opts.policy.canUseChat(state,event.chatId,'navigation')||!this.opts.policy.canUseChat(state,event.chatId,'verification'))return {status:'DENIED',reason:'SUBSCRIPTION_PROMPT_UNAVAILABLE'};
      return {status:'APPLIED',reason:'SUBSCRIPTION_VERIFICATION_PROMPT',groupMenuAccess:{actorId:event.actorId,epoch:groupMenuEpochDigest(state,event.chatId,event.topicId),expiresAt:this.clock()+120000},plan:{...this.plan(event.chatId,'<b>التحقق من الاشتراك</b>\nافتح <a href="https://t.me/'+this.opts.botUsername+'">خاص البوت</a> واضغط بدء، ثم استخدم زر التحقق أدناه. النتيجة تخص حساب من يضغط وتظهر في الخاص.',undefined,{inline_keyboard:[[{text:'✅ تحقق من اشتراكي',callback_data:'sv:1:'+event.chatId+':'+version}]]}),...(event.topicId!==undefined?{messageThreadId:event.topicId}:{})}};
     }
-    if(event.kind==='private'&&event.text==='/appeals'){
+    if(event.kind==='private'&&(event.text==='/appeals'||event.text==='/start appeals')){
      const view=await new TelegramModerationAppeals(this.opts.store,this.opts.policy,this.clock).handle(event.actorId,'ap:1:h:0');
      return view?{status:'APPLIED',reason:'MODERATION_APPEAL_VIEW',plan:this.plan(event.actorId,view.text,undefined,view.keyboard)}:{status:'DENIED',reason:'MODERATION_APPEAL_UNAVAILABLE'};
     }
@@ -479,13 +531,31 @@ export class TelegramUpdateApplication {
       if(!validSubscriptionVerificationRoute(event.callbackData))return {status:'DENIED',reason:'INVALID_SUBSCRIPTION_VERIFICATION_ROUTE'};const parts=event.callbackData.split(':');return this.subscriptionVerification(event,parts[2]!,Number(parts[3]));
      }
      if(kind==='group'&&event.callbackData.startsWith('gl:1:'))return this.groupLibrary(event);
+     if(kind==='group'&&/^rc:1:[pwm]:[A-Za-z0-9_-]{24}$/u.exec(event.callbackData)?.[0]===event.callbackData){const view=await new TelegramRoomControl(this.opts.store,this.opts.policy,this.opts.moderation,this.clock,this.opts.moderationRights?.gateway,this.opts.moderationRights?.safety).fromRoom(actorId,chatId,event.callbackData.slice(7),event.callbackData[5]==='w'?'WARN':event.callbackData[5]==='m'?'MUTE':'CLOSE');return view?{status:'APPLIED',reason:'ROOM_CONTROL_PREVIEW',adminUIAccess:view.access,plan:this.plan(actorId,view.text,undefined,view.keyboard)}:{status:'DENIED',reason:'ROOM_CONTROL_UNAVAILABLE'};}
      // Reauthorize the real sender at every tap. Never dispatch a privileged
      // command from untrusted callback_data or from a group context.
      if(kind!=='private'||actorId!==chatId)return {status:'DENIED',reason:'PRIVATE_CALLBACK_ONLY'};
+     const roomList=/^rc:1:h:(-[1-9][0-9]{0,15}):(0|[1-9][0-9]{0,2})$/u.exec(event.callbackData);if(roomList?.[0]===event.callbackData){const view=await new TelegramRoomControl(this.opts.store,this.opts.policy,this.opts.moderation,this.clock,this.opts.moderationRights?.gateway,this.opts.moderationRights?.safety).listFromRoom(actorId,roomList[1]!,Number(roomList[2]));return view?{status:'APPLIED',reason:'ROOM_CONTROL_LIST',adminUIAccess:view.access,plan:this.plan(actorId,view.text,undefined,view.keyboard,event.callbackMessageId)}:{status:'DENIED',reason:'ROOM_CONTROL_UNAVAILABLE'};}
+     if(/^rc:1:[pwm]:[A-Za-z0-9_-]{24}$/u.exec(event.callbackData)?.[0]===event.callbackData){const view=await new TelegramRoomControl(this.opts.store,this.opts.policy,this.opts.moderation,this.clock,this.opts.moderationRights?.gateway,this.opts.moderationRights?.safety).fromPrivate(actorId,event.callbackData.slice(7),event.callbackData[5]==='w'?'WARN':event.callbackData[5]==='m'?'MUTE':'CLOSE');return view?{status:'APPLIED',reason:'ROOM_CONTROL_PREVIEW',adminUIAccess:view.access,plan:this.plan(actorId,view.text,undefined,view.keyboard,event.callbackMessageId)}:{status:'DENIED',reason:'ROOM_CONTROL_UNAVAILABLE'};}
+     const centralSelection=/^rc:1:([sv]):([A-Za-z0-9_-]{24})(?::([1-8]))?$/u.exec(event.callbackData);if(centralSelection?.[0]===event.callbackData&&((centralSelection[1]==='s')===(centralSelection[3]!==undefined))){const view=await new TelegramRoomControl(this.opts.store,this.opts.policy,this.opts.moderation,this.clock,this.opts.moderationRights?.gateway,this.opts.moderationRights?.safety).selection(actorId,centralSelection[2]!,centralSelection[3]===undefined?undefined:Number(centralSelection[3]));return view?{status:'APPLIED',reason:'ROOM_CENTRAL_SELECTION',adminUIAccess:view.access,plan:this.plan(actorId,view.text,undefined,view.keyboard,event.callbackMessageId)}:{status:'DENIED',reason:'ROOM_CENTRAL_UNAVAILABLE'};}
+     if(/^rc:1:c:[A-Za-z0-9_-]{24}$/u.exec(event.callbackData)?.[0]===event.callbackData){const view=await new TelegramRoomControl(this.opts.store,this.opts.policy,this.opts.moderation,this.clock,this.opts.moderationRights?.gateway,this.opts.moderationRights?.safety).confirm(actorId,event.callbackData.slice(7));return view?{status:'APPLIED',reason:'ROOM_CONTROL_RESULT',adminUIAccess:view.access,plan:this.plan(actorId,view.text,undefined,view.keyboard,event.callbackMessageId)}:{status:'DENIED',reason:'ROOM_CONTROL_UNAVAILABLE'};}
+     if(validOncallRoute(event.callbackData)){const view=await new TelegramOncall(this.opts.store,this.opts.policy,this.clock).handle(actorId,event.callbackData);return view?{status:'APPLIED',reason:'ONCALL_VIEW',adminUIAccess:view.access,plan:this.plan(actorId,view.text,undefined,view.keyboard,event.callbackMessageId)}:{status:'DENIED',reason:'ONCALL_UNAVAILABLE'};}
+     if(event.callbackData.startsWith('al:1:')||event.callbackData==='mi:1:i:01:04'){const view=await new TelegramAdminRoomLinks(this.opts.store,this.opts.policy,this.clock,this.opts.moderationRights?.gateway,this.opts.moderationRights?.safety).handle(actorId,event.callbackData);return view?{status:'APPLIED',reason:'ADMIN_ROOM_VIEW',adminUIAccess:view.access,plan:this.plan(actorId,view.text,undefined,view.keyboard,event.callbackMessageId)}:{status:'DENIED',reason:'ADMIN_ROOM_UNAVAILABLE'};}
+     if(event.callbackData.startsWith('rf:1:')){
+      const view=await new TelegramModerationRateEditor(this.opts.store,this.opts.policy,this.clock).handle(actorId,event.callbackData);
+      return view?{status:'APPLIED',reason:'MODERATION_RATE_EDITOR',adminUIAccess:view.access,plan:this.plan(actorId,view.text,undefined,view.keyboard,event.callbackMessageId)}:{status:'DENIED',reason:'MODERATION_RATE_EDITOR_UNAVAILABLE'};
+     }
+     if(event.callbackData.startsWith('le:1:')){const view=await new TelegramRuleExemptions(this.opts.store,this.opts.policy,this.clock).handle(actorId,event.callbackData);return view?{status:'APPLIED',reason:'RULE_EXEMPTION_VIEW',adminUIAccess:view.access,plan:this.plan(actorId,view.text,undefined,view.keyboard,event.callbackMessageId)}:{status:'DENIED',reason:'RULE_EXEMPTION_UNAVAILABLE'};}
+     if(event.callbackData==='mi:1:i:03:06'||event.callbackData.startsWith('tr:1:')){
+      const view=await new TelegramOwnerRights(this.opts.store,this.opts.policy,this.opts.moderationRights?.gateway,this.clock,this.opts.moderationRights?.safety??(async()=>false)).handle(actorId,event.callbackData);
+      return view?{status:'APPLIED',reason:'OWNER_BOT_RIGHTS_VIEW',adminUIAccess:view.access,plan:this.plan(actorId,view.text,undefined,view.keyboard,event.callbackMessageId)}:{status:'DENIED',reason:'OWNER_BOT_RIGHTS_UNAVAILABLE'};
+     }
      if(event.callbackData.startsWith('pc:1:')){
       const view=await new TelegramPurgeEditor(this.opts.store,this.opts.policy,this.opts.purge,this.clock).handle(actorId,event.callbackData);
       return view?{status:view.status,reason:view.reason,adminUIAccess:view.access,plan:this.plan(actorId,view.text,undefined,view.keyboard,event.callbackMessageId)}:{status:'DENIED',reason:'PURGE_EDITOR_STALE_OR_UNAVAILABLE'};
      }
+     if(event.callbackData.startsWith('ra:1:')){if(!this.opts.moderation)return {status:'DENIED',reason:'MODERATION_NOT_CONFIGURED'};const v=await new TelegramRuleActions(this.opts.store,this.opts.policy,this.opts.moderation,this.clock).handle(actorId,event.callbackData,{...(event.displayName?{displayName:event.displayName}:{}),botUsername:this.opts.botUsername});return v?{status:v.status,reason:v.reason,adminUIAccess:v.access,plan:this.plan(actorId,v.text,undefined,v.keyboard,event.callbackMessageId)}:{status:'DENIED',reason:'RULE_ACTION_STALE_OR_UNAUTHORIZED'};}
+     if(event.callbackData.startsWith('rw:1:')){const view=await new TelegramRuleWarningPolicy(this.opts.store,this.opts.policy,this.clock).handle(actorId,event.callbackData);return view?{status:'APPLIED',reason:'RULE_WARNING_POLICY_VIEW',adminUIAccess:view.access,plan:this.plan(actorId,view.text,undefined,view.keyboard,event.callbackMessageId)}:{status:'DENIED',reason:'RULE_WARNING_POLICY_STALE_OR_UNAUTHORIZED'};}
      if(event.callbackData.startsWith('rl:1:')||event.callbackData==='mi:1:i:02:11'){
       const view=await new TelegramGroupRules(this.opts.store,this.opts.policy,this.clock).handle(actorId,event.callbackData);
       return view?{status:'APPLIED',reason:'GROUP_RULES_VIEW',adminUIAccess:view.access,plan:this.plan(actorId,view.text,undefined,view.keyboard,event.callbackMessageId)}:{status:'DENIED',reason:'GROUP_RULES_STALE_OR_UNAUTHORIZED'};
@@ -727,7 +797,7 @@ export class TelegramUpdateApplication {
       plan:this.plan(chatId,view.text,undefined,view.keyboard,event.callbackMessageId)};
     }
     if(kind==='group')await new GroupProtectionPolicyService(this.opts.store,this.opts.policy,this.clock,this.opts.protectionEnforcer).observeIncomingText(
-     actorId,chatId,text,event.entities,'b3-webhook:'+this.opts.botId+':'+event.updateId,true,this.delivery(event),event.displayName);
+     actorId,chatId,text,event.entities,'b3-webhook:'+this.opts.botId+':'+event.updateId,true,this.delivery(event),event.displayName,event.username);
     if(kind==='group'&&isReplyDeleteCommand(text,this.opts.botUsername)){
      if(!this.opts.purge)return {status:'DENIED',reason:'DELETE_NOT_CONFIGURED'};
      const result=await previewReplyDelete(this.opts.store,this.opts.policy,this.opts.purge,actorId,chatId,event.messageId,text,event.replyTo,this.clock());
@@ -743,9 +813,34 @@ export class TelegramUpdateApplication {
     }
     if(kind==='group'){
      let moderationText=text;
-     const lawStart=/^\/warnrule(?:@([A-Za-z][A-Za-z0-9_]{4,31}))?(?=\s|$)/u.exec(text);
-     if(lawStart&&(!lawStart[1]||lawStart[1].toLowerCase()===this.opts.botUsername.toLowerCase())){
-      const syntax=/^\/warnrule(?:@[A-Za-z][A-Za-z0-9_]{4,31})? ([1-9][0-9]?)$/u.exec(text),replyId=event.replyTo&&typeof event.replyTo==='object'?(event.replyTo as Record<string,unknown>).message_id:undefined;
+     const noticeOrChoice=/^\/(noticerule|actrule)(?:@([A-Za-z][A-Za-z0-9_]{4,31}))?(?=\s|$)/u.exec(text);
+     if(noticeOrChoice&&(!noticeOrChoice[2]||noticeOrChoice[2].toLowerCase()===this.opts.botUsername.toLowerCase())){
+      const syntax=/^\/(noticerule|actrule)(?:@[A-Za-z][A-Za-z0-9_]{4,31})? ([1-9][0-9]?)$/u.exec(text),replyId=event.replyTo&&typeof event.replyTo==='object'?(event.replyTo as Record<string,unknown>).message_id:undefined;
+      const reference=syntax&&typeof replyId==='number'?await new TelegramGroupRules(this.opts.store,this.opts.policy,this.clock).warningReference(chatId,Number(syntax[2]),replyId):null;
+      if(!reference)return {status:'DENIED',reason:'GROUP_RULE_PARAGRAPH_UNAVAILABLE'};
+      moderationText='/notice '+reference;
+      if(syntax![1]==='actrule'){
+       const parsed=parseReplyModerationCommand(moderationText,this.opts.botUsername,chatId,event.messageId,event.replyTo);
+       if(parsed.status!=='COMMAND'||!this.opts.moderation)return {status:'DENIED',reason:'INVALID_RULE_ACTION_TARGET'};
+       const v=await new TelegramRuleActions(this.opts.store,this.opts.policy,this.opts.moderation,this.clock).choose(actorId,chatId,parsed.command.memberId,reference);
+       return v?{status:v.status,reason:v.reason,adminUIAccess:v.access,plan:this.plan(actorId,v.text,undefined,v.keyboard)}:{status:'DENIED',reason:'RULE_ACTION_UNAVAILABLE'};
+      }
+     }
+     const reviewLawStart=/^\/reviewrule(?:@([A-Za-z][A-Za-z0-9_]{4,31}))?(?=\s|$)/u.exec(text);
+     if(reviewLawStart&&(!reviewLawStart[1]||reviewLawStart[1].toLowerCase()===this.opts.botUsername.toLowerCase())){
+      const syntax=/^\/reviewrule(?:@[A-Za-z][A-Za-z0-9_]{4,31})? ([1-9][0-9]?)$/u.exec(text),replyId=event.replyTo&&typeof event.replyTo==='object'?(event.replyTo as Record<string,unknown>).message_id:undefined;
+      const reference=syntax&&typeof replyId==='number'?await new TelegramGroupRules(this.opts.store,this.opts.policy,this.clock).warningReference(chatId,Number(syntax[1]),replyId):null;
+      if(!reference)return {status:'DENIED',reason:'GROUP_RULE_PARAGRAPH_UNAVAILABLE'};moderationText='/review '+reference;
+     }
+     const muteLawStart=/^\/muterule(?:@([A-Za-z][A-Za-z0-9_]{4,31}))?(?=\s|$)/u.exec(text);
+     if(muteLawStart&&(!muteLawStart[1]||muteLawStart[1].toLowerCase()===this.opts.botUsername.toLowerCase())){
+      const syntax=/^\/muterule(?:@[A-Za-z][A-Za-z0-9_]{4,31})? ([1-9][0-9]?) ([1-9][0-9]{0,4})$/u.exec(text),replyId=event.replyTo&&typeof event.replyTo==='object'?(event.replyTo as Record<string,unknown>).message_id:undefined,seconds=Number(syntax?.[2]);
+      const reference=syntax&&typeof replyId==='number'&&seconds>=60&&seconds<=86400?await new TelegramGroupRules(this.opts.store,this.opts.policy,this.clock).warningReference(chatId,Number(syntax[1]),replyId):null;
+      if(!reference)return {status:'DENIED',reason:'GROUP_RULE_PARAGRAPH_UNAVAILABLE'};moderationText='/mute '+reference+' '+seconds+'s';
+     }
+     const lawStart=/^\/warnrule(?:@([A-Za-z][A-Za-z0-9_]{4,31}))?(?=\s|$)/u.exec(text),arabicLaw=/^إنذار(?=\s|$)/u.test(text);
+     if(arabicLaw||lawStart&&(!lawStart[1]||lawStart[1].toLowerCase()===this.opts.botUsername.toLowerCase())){
+      const syntax=(arabicLaw?/^إنذار ([1-9][0-9]?)$/u:/^\/warnrule(?:@[A-Za-z][A-Za-z0-9_]{4,31})? ([1-9][0-9]?)$/u).exec(text),replyId=event.replyTo&&typeof event.replyTo==='object'?(event.replyTo as Record<string,unknown>).message_id:undefined;
       const reference=syntax&&typeof replyId==='number'?await new TelegramGroupRules(this.opts.store,this.opts.policy,this.clock).warningReference(chatId,Number(syntax[1]),replyId):null;
       if(!reference)return {status:'DENIED',reason:'GROUP_RULE_PARAGRAPH_UNAVAILABLE'};moderationText='/warn '+reference;
      }
@@ -753,8 +848,8 @@ export class TelegramUpdateApplication {
      if(command.status==='INVALID')return {status:'DENIED',reason:'INVALID_MODERATION_COMMAND'};
      if(command.status==='COMMAND'){
       if(!this.opts.moderation)return {status:'DENIED',reason:'MODERATION_NOT_CONFIGURED'};
-      if(this.opts.moderationCommandMode!=='direct'||command.command.kind==='warn'&&command.command.reference.startsWith('law_')){
-       const view=await new ModerationCommandReview(this.opts.store,this.opts.policy,this.opts.moderation,this.clock).preview(actorId,chatId,command.command);
+      if(this.opts.moderationCommandMode!=='direct'||command.command.reference.startsWith('law_')){
+       const view=await new ModerationCommandReview(this.opts.store,this.opts.policy,this.opts.moderation,this.clock).preview(actorId,chatId,command.command,{...(event.displayName?{displayName:event.displayName}:{}),botUsername:this.opts.botUsername});
        return view?{status:view.status,reason:view.reason,adminUIAccess:view.access,plan:this.plan(actorId,view.text,undefined,view.keyboard)}:{status:'DENIED',reason:'MODERATION_PREVIEW_NOT_AUTHORIZED'};
       }
       return executeReplyModerationCommand(this.opts.moderation,actorId,chatId,command.command);
@@ -1389,6 +1484,11 @@ export class TelegramUpdateApplication {
      // this NEVER re-runs the operation or re-sends the durable reply.
      return event.callbackQueryId?{...duplicate,callbackQueryId:event.callbackQueryId}:duplicate;
     }
+    if(this.opts.messageMetadata&&event.kind==='group'&&event.callbackData===undefined&&!event.joins&&!event.forwarded&&positiveId(event.messageId)&&event.sentAt!==undefined){
+     const text=event.protectionMedia?.caption??event.text,entities=event.protectionMedia?.entities??event.entities;
+     const hasLinks=/\b(?:https?:\/\/|www\.)/iu.test(text)||Array.isArray(entities)&&entities.some(e=>isObject(e)&&(e.type==='url'||e.type==='text_link'));
+     try{await this.opts.messageMetadata.observe({chatId:event.chatId,senderId:event.actorId,messageId:event.messageId,sentAt:event.sentAt,updateId:event.updateId,contentType:event.protectionMedia?'MEDIA':/^\/[A-Za-z]/u.test(event.text)?'COMMAND':'TEXT',hasLinks});}catch{/* Observation never authorizes deletion or interrupts update processing. */}
+    }
     const publicText=event.kind==='private'&&event.callbackData?.startsWith('pn:1:')?await readPublicNavigation(this.opts.store,event.actorId,event.callbackData,publicMenuText,this.clock):null;
     const effectiveText=publicText??event.text;
     const staffInput=event.kind==='private'&&(event.callbackData?.startsWith('ms:1:')||event.text==='/staffinline');
@@ -1463,9 +1563,9 @@ export class TelegramUpdateApplication {
     // Commit the decision and outbound reply intent in one durable transaction.
     // No external call occurs before the outbox row exists.
     await this.opts.store.finish(key,audit,handled.plan,handled.groupQuestionAccess,
-     handled.groupMenuAccess,handled.privateGroupAccess,handled.adminUIAccess,handled.privateLibraryAccess,studioInput&&!!handled.adminUIAccess,handled.communityAccess,handled.communityClose,handled.verificationScoped===true);
+     handled.groupMenuAccess,handled.privateGroupAccess,handled.adminUIAccess,handled.privateLibraryAccess,studioInput&&!!handled.adminUIAccess,handled.communityAccess,handled.communityClose,handled.verificationScoped===true,handled.verificationEphemeral===true,handled.verificationEphemeralTopicId,handled.verificationOutcome);
     // Temporary actor IDs are only stored in the guarded queue, never returned.
-    const {groupQuestionAccess:_,groupMenuAccess:__,privateGroupAccess:___,adminUIAccess:____,privateLibraryAccess:_____,communityAccess:______,communityClose:_______,verificationScoped:________,...publicResult}=handled;
+    const {groupQuestionAccess:_,groupMenuAccess:__,privateGroupAccess:___,adminUIAccess:____,privateLibraryAccess:_____,communityAccess:______,communityClose:_______,verificationScoped:________,verificationEphemeral:_________,verificationEphemeralTopicId:__________,verificationOutcome:___________,...publicResult}=handled;
     const visible=publicResult.plan?{...publicResult,deliveryKey:key}:publicResult;
     return event.callbackQueryId?{...visible,callbackQueryId:event.callbackQueryId}:visible;
   }

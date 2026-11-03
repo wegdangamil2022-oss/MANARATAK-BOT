@@ -2,6 +2,7 @@ import {createHash,randomUUID} from 'node:crypto';
 import {BotStore,type BotState,type RollingMessageMeta,type PurgeJob,type PurgeFilter,type PurgeItem} from './store.js';
 import {Policy} from './policy.js';
 import {nextDispatchLease,leaseExpired} from './publication-worker-lease.js';
+import {TelegramBotApiPurgeGateway} from './telegram-purge-gateway.js';
 
 const WINDOW_MS=48*60*60*1000, REVIEW_MS=10*60*1000, MAX_PREVIEW=25, DAILY_LIMIT=50;
 const RETENTION_MS=30*24*60*60*1000;
@@ -97,22 +98,22 @@ export class FakePurgeGateway implements PurgeGateway {
 export type PurgeDispatchResult={status:PurgeOutcome|'RATE_LIMITED'|'EMPTY'|'BLOCKED'|'BLOCKED_UNKNOWN'|'BLOCKED_PENDING'|'BLOCKED_DAILY_LIMIT'|'NOT_CONFIRMED'|'PAUSED'|'CANCELLED';messageId?:number};
 const hash=(m:RollingMessageMeta)=>createHash('sha256').update(JSON.stringify([
  m.chatId,m.messageId,m.senderKind,m.senderId??null,m.sentAt,m.contentType,m.hasLinks,
- m.pinned,m.linkedChannel,m.adminLog,m.approvedAnnouncement
+ m.pinned,m.linkedChannel,m.adminLog,m.approvedAnnouncement,...(m.protectionUnverified===true?[{protectionUnverified:true}]:[])
 ])).digest('hex');
 /** Immutable review/attempt projection; a restored or concurrent writer must
  * not replace the approved target/filter while external rights checks wait. */
 const attemptBinding=(job:PurgeJob,item:PurgeItem):string=>JSON.stringify([
  job.id,job.chatId,job.actorId,job.createdAt,job.expiresAt,job.scopeVersion,job.filter,
- job.confirmedAt,job.confirmedBy,...(Object.hasOwn(job,'automatic')?[{automatic:job.automatic}]:[]),item.messageId,item.metaDigest,item.attemptId,item.startedAt,item.leaseUntil
+ job.confirmedAt,job.confirmedBy,...(Object.hasOwn(job,'automatic')?[{automatic:job.automatic}]:[]),...(Object.hasOwn(job,'gatewayOrigin')?[{gatewayOrigin:job.gatewayOrigin}]:[]),item.messageId,item.metaDigest,item.attemptId,item.startedAt,item.leaseUntil
 ]);
 /** Local comparison digest of exactly what a human previewed. This is not
  * authentication against replacement of both database and original button. */
 export const purgeReviewDigest=(job:PurgeJob):string=>createHash('sha256').update(JSON.stringify([
  job.id,job.chatId,job.actorId,job.createdAt,job.expiresAt,job.scopeVersion,job.filter,
- job.items.map(i=>[i.messageId,i.metaDigest]),...(Object.hasOwn(job,'automatic')?[{automatic:job.automatic}]:[])
+ job.items.map(i=>[i.messageId,i.metaDigest]),...(Object.hasOwn(job,'automatic')?[{automatic:job.automatic}]:[]),...(Object.hasOwn(job,'gatewayOrigin')?[{gatewayOrigin:job.gatewayOrigin}]:[])
 ])).digest('hex').slice(0,16);
 const terminalItem=(s:PurgeItem['status'])=>s==='ACKNOWLEDGED'||s==='CANCELLED'||s==='SKIPPED_UNVERIFIED';
-const protectedMessage=(m:RollingMessageMeta)=>m.pinned||m.linkedChannel||m.adminLog||m.approvedAnnouncement;
+const protectedMessage=(m:RollingMessageMeta)=>m.pinned||m.linkedChannel||m.adminLog||m.approvedAnnouncement||m.protectionUnverified!==undefined;
 const validId=(v:unknown)=>typeof v==='number'&&Number.isSafeInteger(v)&&v>0;
 const validTime=(v:unknown)=>typeof v==='number'&&Number.isSafeInteger(v)&&v>=0;
 export function isValidPurgeFilter(value:unknown):value is PurgeFilter{
@@ -157,8 +158,8 @@ function allowed(s:BotState,policy:Policy,actor:string,chat:string,now:number):b
 function available(s:BotState,job:PurgeJob,now:number):boolean{
  if(!isValidPurgeFilter(job.filter))return false;
  return job.items.every(item=>{
-  const current=s.rollingMessageMeta.find(m=>m.chatId===job.chatId&&m.messageId===item.messageId);
-  return current&&recent(current,now)&&!protectedMessage(current)&&
+  const rows=s.rollingMessageMeta.filter(m=>m.chatId===job.chatId&&m.messageId===item.messageId),current=rows[0];
+  return rows.length===1&&current&&recent(current,now)&&!protectedMessage(current)&&
     matches(current,job.filter)&&hash(current)===item.metaDigest;
  });
 }
@@ -182,6 +183,7 @@ function chatCooldown(s:BotState,chatId:string):number {
  * No text, captions, media payloads, or human readable body is persisted.
  */
 export class ModerationPurgeService {
+ private matchesGateway(job:PurgeJob):boolean{return TelegramBotApiPurgeGateway.isOfficial(this.gateway)?job.gatewayOrigin==='TELEGRAM_API':!Object.hasOwn(job,'gatewayOrigin');}
  constructor(private readonly store:BotStore,private readonly policy:Policy,
              private readonly gateway:PurgeGateway,private readonly clock:()=>number=Date.now){}
  async observe(meta:RollingMessageMeta):Promise<boolean>{
@@ -192,7 +194,8 @@ export class ModerationPurgeService {
    if(!this.policy.canUseChat(s,meta.chatId,'moderation'))throw new Error('CHAT_NOT_APPROVED');
    prune(s,now);
    if(!recent(meta,now))return false; // too old cannot enter index or be reported as seen
-   const old=s.rollingMessageMeta.find(x=>x.chatId===meta.chatId&&x.messageId===meta.messageId);
+   const rows=s.rollingMessageMeta.filter(x=>x.chatId===meta.chatId&&x.messageId===meta.messageId),old=rows[0];
+   if(rows.length>1)throw new Error('OBSERVED_IDENTITY_AMBIGUOUS');
    if(old){
     if(old.sentAt!==meta.sentAt||old.senderKind!==meta.senderKind||old.senderId!==meta.senderId)
       throw new Error('OBSERVED_IDENTITY_CHANGED');
@@ -216,13 +219,14 @@ export class ModerationPurgeService {
    if(sourceCurrent&&!sourceCurrent(s)||!allowed(s,this.policy,actor,chatId,this.clock()))throw new Error('MANAGE_DENIED');
    const now=this.clock();
    prune(s,now);
+   const counts=new Map<number,number>();for(const m of s.rollingMessageMeta)if(m.chatId===chatId)counts.set(m.messageId,(counts.get(m.messageId)??0)+1);
    const observed=s.rollingMessageMeta.filter(m=>m.chatId===chatId&&matches(m,filter))
      .sort((a,b)=>b.messageId-a.messageId);
-   const excluded={protected:observed.filter(protectedMessage).length,expired:0};
-   const selected=observed.filter(m=>!protectedMessage(m)).slice(0,filter.limit);
+   const excluded={protected:new Set(observed.filter(m=>protectedMessage(m)||(counts.get(m.messageId)??0)!==1).map(m=>m.messageId)).size,expired:0};
+   const selected=observed.filter(m=>!protectedMessage(m)&&counts.get(m.messageId)===1).slice(0,filter.limit);
    if(selected.length===0)throw new Error('NO_ELIGIBLE_OBSERVED_MESSAGES');
    const job:PurgeJob={id:randomUUID(),chatId,actorId:actor,createdAt:now,expiresAt:now+REVIEW_MS,
-     scopeVersion:this.policy.chatRevision(s,chatId),status:'PREVIEW',...(automatic?{automatic:true as const}:{}),filter:structuredClone(filter),
+     scopeVersion:this.policy.chatRevision(s,chatId),status:'PREVIEW',...(automatic?{automatic:true as const}:{}),...(TelegramBotApiPurgeGateway.isOfficial(this.gateway)?{gatewayOrigin:'TELEGRAM_API' as const}:{}),filter:structuredClone(filter),
      excluded,items:selected.map(m=>({messageId:m.messageId,metaDigest:hash(m),status:'QUEUED'}))};
    s.purgeJobs.push(job);
    return structuredClone(job);
@@ -230,8 +234,10 @@ export class ModerationPurgeService {
  }
  async confirm(actor:string,jobId:string,expectedReviewDigest?:string,sourceCurrent?:(s:BotState)=>boolean):Promise<PurgeJob>{
   return this.store.transaction(s=>{
-   const job=s.purgeJobs.find(x=>x.id===jobId);
+   const jobs=s.purgeJobs.filter(x=>x.id===jobId),job=jobs[0];
    if(!job)throw new Error('PURGE_NOT_FOUND');
+   if(!this.matchesGateway(job))throw Error('PURGE_GATEWAY_ORIGIN_MISMATCH');
+   if(jobs.length!==1||new Set(job.items.map(item=>item.messageId)).size!==job.items.length)throw new Error('PURGE_IDENTITY_AMBIGUOUS');
    if(Object.hasOwn(job,'automatic')&&(job.automatic!==true||!sourceCurrent))throw Error('AUTOMATIC_PURGE_PROOF_REQUIRED');
    const now=this.clock();
    if(sourceCurrent&&!sourceCurrent(s)||!allowed(s,this.policy,actor,job.chatId,now))throw new Error('MANAGE_DENIED');
@@ -256,8 +262,10 @@ export class ModerationPurgeService {
  }
  async dispatchNext(jobId:string,sourceCurrent?:(s:BotState)=>boolean):Promise<PurgeDispatchResult>{
   const claimed=await this.store.transaction(s=>{
-   const job=s.purgeJobs.find(x=>x.id===jobId);
+   const jobs=s.purgeJobs.filter(x=>x.id===jobId),job=jobs[0];
    if(!job)throw new Error('PURGE_NOT_FOUND');
+   if(!this.matchesGateway(job))return {kind:'BLOCKED' as const};
+   if(jobs.length!==1||new Set(job.items.map(item=>item.messageId)).size!==job.items.length)return {kind:'BLOCKED' as const};
    if(Object.hasOwn(job,'automatic')&&(job.automatic!==true||!sourceCurrent))return {kind:'BLOCKED' as const};
    if(sourceCurrent&&!sourceCurrent(s))return {kind:'BLOCKED' as const};
    if(job.status==='PREVIEW')return {kind:'NOT_CONFIRMED' as const};
@@ -296,7 +304,7 @@ export class ModerationPurgeService {
    const items=job.items.filter(i=>i.messageId===claimed.messageId);
    if(items.length!==1)return false;
    const item=items[0]!;
-   return (!sourceCurrent||sourceCurrent(s))&&job.status==='READY'&&item.status==='SENDING'&&item.attemptId===claimed.attemptId&&
+   return this.matchesGateway(job)&&(!sourceCurrent||sourceCurrent(s))&&job.status==='READY'&&item.status==='SENDING'&&item.attemptId===claimed.attemptId&&
     attemptBinding(job,item)===claimed.binding&&!leaseExpired(item.leaseUntil,this.clock())&&
     allowed(s,this.policy,claimed.actor,claimed.chatId,this.clock())&&
     this.policy.chatRevision(s,claimed.chatId)===claimed.version&&available(s,{...job,items:[item]},this.clock());
@@ -307,9 +315,8 @@ export class ModerationPurgeService {
   let rights=false;
   try{rights=(await this.gateway.canDelete(claimed.chatId))===true;}catch{/* fail closed */}
   const permit=await this.store.transaction(s=>{
-   const job=s.purgeJobs.find(x=>x.id===jobId);
-   const item=job?.items.find(x=>x.messageId===claimed.messageId);
-   if(!job||!item||item.status!=='SENDING'||item.attemptId!==claimed.attemptId)return false;
+   const jobs=s.purgeJobs.filter(x=>x.id===jobId),job=jobs[0],items=job?.items.filter(x=>x.messageId===claimed.messageId)??[],item=items[0];
+   if(jobs.length!==1||items.length!==1||!job||!item||item.status!=='SENDING'||item.attemptId!==claimed.attemptId)return false;
    if(leaseExpired(item.leaseUntil,this.clock())){item.status='UNKNOWN_OUTCOME';return false;}
    if(attemptBinding(job,item)!==claimed.binding){item.status='UNKNOWN_OUTCOME';return false;}
    prune(s,this.clock());
@@ -327,9 +334,8 @@ export class ModerationPurgeService {
   catch{response='UNKNOWN_OUTCOME';}
   const outcome=normalizedOutcome(response);
   return this.store.transaction(s=>{
-   const job=s.purgeJobs.find(x=>x.id===jobId);
-   const item=job?.items.find(x=>x.messageId===claimed.messageId);
-   if(!job||!item||item.status!=='SENDING'||item.attemptId!==claimed.attemptId)
+   const jobs=s.purgeJobs.filter(x=>x.id===jobId),job=jobs[0],items=job?.items.filter(x=>x.messageId===claimed.messageId)??[],item=items[0];
+   if(jobs.length!==1||items.length!==1||!job||!item||item.status!=='SENDING'||item.attemptId!==claimed.attemptId)
      return {status:'BLOCKED' as const};
    const recordedAttempt=item.attemptId;
    // A late API acknowledgement does not certify continued authority or an

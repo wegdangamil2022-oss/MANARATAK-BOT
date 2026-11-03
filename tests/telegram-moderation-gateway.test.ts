@@ -30,6 +30,20 @@ const granted=(method:string,body:Record<string,unknown>)=>{
   member('administrator',BOT,{can_restrict_members:true}):member('member',Number(body.user_id));
  return acknowledged();
 };
+test('room privacy probe reads only matching group metadata and never treats bad or public usernames as private',async()=>{
+ for(const [value,expected] of [
+  [{id:Number(GROUP),type:'group'},'NO_PUBLIC_USERNAME'],
+  [{id:Number(GROUP),type:'supergroup'},'NO_PUBLIC_USERNAME'],
+  [{id:Number(GROUP),type:'supergroup',username:'Public_Name'},'PUBLIC_USERNAME'],
+  [{id:Number(GROUP),type:'supergroup',active_usernames:['Other_Name']},'PUBLIC_USERNAME'],
+  [{id:Number(GROUP),type:'supergroup',username:''},'UNKNOWN'],
+  [{id:Number(GROUP),type:'supergroup',active_usernames:['bad']},'UNKNOWN'],
+  [{id:Number(GROUP),type:'group',username:'Public_Name'},'UNKNOWN'],
+  [{id:Number(GROUP),type:'channel'},'NOT_GROUP'],
+  [{id:-1,type:'supergroup'},'UNKNOWN']
+ ] as const){const f=fake(()=>Response.json({ok:true,result:value}));const gw=new TelegramBotApiModerationGateway(TOKEN,f.request);assert.equal(TelegramBotApiModerationGateway.usesOfficialRoomPrivacyRead(gw),true);assert.equal(await gw.inspectRoomPrivacy(GROUP),expected);assert.deepEqual(f.calls.map(c=>c.method),['getChat']);assert.deepEqual(f.calls[0]!.body,{chat_id:GROUP});}
+ const f=fake(()=>Response.json({ok:true,result:{id:Number(GROUP),type:'group'}})),gw=new TelegramBotApiModerationGateway(TOKEN,f.request);Object.defineProperty(gw,'inspectRoomPrivacy',{value:async()=> 'NO_PUBLIC_USERNAME'});assert.equal(TelegramBotApiModerationGateway.usesOfficialRoomPrivacyRead(gw),false);
+});
 test('invalid API tokens and target IDs make zero remote requests',async()=>{
  let calls=0;
  const request=(async()=>{calls++;throw Error('NETWORK_MUST_NOT_HAPPEN');}) as typeof fetch;
@@ -63,6 +77,17 @@ test('read-only rights preflight demands fresh bot administrator can_restrict_me
   assert.deepEqual(f.calls.map(c=>c.method),['getChatMember']);
   assert.deepEqual(f.calls[0]?.body,{chat_id:GROUP,user_id:BOT});
  }
+});
+test('admin rights probe distinguishes absent, malformed, denied and creator rights without writes',async()=>{
+ for(const status of ['administrator','creator','member','unexpected']){
+  const f=fake(()=>member(status,BOT,{can_restrict_members:true,can_delete_messages:false,can_invite_users:'yes'}));const gw=new TelegramBotApiModerationGateway(TOKEN,f.request);
+  assert.equal(TelegramBotApiModerationGateway.usesOfficialRightsRead(gw),true);const rights=await gw.inspectBotAdminRights(GROUP);
+  if(status==='administrator'){assert.equal(rights.restrict,'GRANTED');assert.equal(rights.delete,'DENIED');assert.equal(rights.invite,'UNKNOWN');assert.equal(rights.pin,'UNKNOWN');}
+  else assert.ok(Object.values(rights).every(right=>right===(status==='creator'?'GRANTED':status==='member'?'DENIED':'UNKNOWN')));
+  assert.deepEqual(f.calls.map(c=>c.method),['getChatMember']);
+ }
+ const f=fake(()=>member('administrator',BOT));const gw=new TelegramBotApiModerationGateway(TOKEN,f.request);
+ Object.defineProperty(gw,'inspectBotAdminRights',{value:async()=>({})});assert.equal(TelegramBotApiModerationGateway.usesOfficialRightsRead(gw),false);
 });
 test('target preflight protects chat owners, administrators, bots and unverified statuses',async()=>{
  for(const [status,botFlag,protectedExpected] of [

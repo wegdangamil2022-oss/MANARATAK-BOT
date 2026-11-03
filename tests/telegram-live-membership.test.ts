@@ -12,7 +12,7 @@ import {loadLiveTelegramConfig,createLiveTelegramServer} from '../src/telegram-l
 const TOKEN='123456789:ABCDEFGHIJKLMNOPQRSTUVWXYZabcde';
 const SECRET='abcdefghijklmnopqrstuvwx_123456789ABCDE',GROUP='-100123',CHANNEL='-100999',STUDENT='300',OWNER='100';
 const reply=(status:string,id:number=300,more:Record<string,unknown>={})=>new Response(JSON.stringify({
- ok:true,result:{status,user:{id,is_bot:false,first_name:'person'},...more}
+ ok:true,result:{status,user:{id,is_bot:id===123456789,first_name:'person'},...more}
 }),{status:200,headers:{'content-type':'application/json'}});
 const admin=(id=123456789)=>reply('administrator',id);
 function fakeRequester(fn:(url:string,body:Record<string,unknown>)=>Response|Promise<Response>):{
@@ -30,16 +30,27 @@ test('membership gateway rejects invalid token and malformed IDs before any netw
  for(const token of ['', '123:broken', '123456789:short','123456789:A/B'])assert.throws(
   ()=>new TelegramBotApiMembershipGateway(token,fetchStub),/INVALID_TELEGRAM_TOKEN/);
  const gw=new TelegramBotApiMembershipGateway(TOKEN,fetchStub);
- for(const chat of ['private','1','-0','-100foo','--100','-9007199254740999','-100/123']){
+ for(const chat of ['private','1','-0','-100foo','--100','-9007199254740999','-100/123','-100\n']){
   assert.equal(await gw.canVerifyChannel(chat),false);
+  assert.equal(await gw.inspectChannelRights(chat),'UNKNOWN');
   assert.equal(await gw.getMember(chat,STUDENT),'UNKNOWN');
   assert.equal(await gw.verifyMembership(chat,STUDENT),'UNKNOWN');
  }
- for(const user of ['0','-1','abc','2.2','9007199254740992','10/11','01']){
+ for(const user of ['0','-1','abc','2.2','9007199254740992','10/11','01','1\n']){
   assert.equal(await gw.getMember(GROUP,user),'UNKNOWN');
   assert.equal(await gw.verifyMembership(GROUP,user),'UNKNOWN');
  }
  assert.equal(calls,0);
+});
+test('channel rights inspection distinguishes confirmed removal from unavailable or forged evidence',async()=>{
+ for(const [status,expected] of [['administrator','ADMIN'],['creator','ADMIN'],['member','NOT_ADMIN'],['restricted','NOT_ADMIN'],['left','NOT_ADMIN'],['kicked','NOT_ADMIN'],['mystery','UNKNOWN']] as const){
+  const {request}=fakeRequester(()=>reply(status,123456789,{user:{id:123456789,is_bot:true}}));
+  assert.equal(await new TelegramBotApiMembershipGateway(TOKEN,request).inspectChannelRights(GROUP),expected);
+ }
+ for(const response of [reply('member',123456789,{user:{id:123456789,is_bot:false}}),reply('member',123456780,{user:{id:123456780,is_bot:true}}),new Response('not json',{status:200}),new Response('',{status:403})]){
+  const {request}=fakeRequester(()=>response);assert.equal(await new TelegramBotApiMembershipGateway(TOKEN,request).inspectChannelRights(GROUP),'UNKNOWN');
+ }
+ const down=new TelegramBotApiMembershipGateway(TOKEN,(async()=>{throw Error('NETWORK_DOWN')}) as typeof fetch);assert.equal(await down.inspectChannelRights(GROUP),'UNKNOWN');
 });
 test('canVerifyChannel requires matching bot id with administrator or creator status',async()=>{
  for(const status of ['administrator','creator','member','restricted','left','kicked','mystery']){
@@ -54,6 +65,17 @@ test('canVerifyChannel requires matching bot id with administrator or creator st
  }
  const mismatch=fakeRequester(()=>admin(123456780));
  assert.equal(await new TelegramBotApiMembershipGateway(TOKEN,mismatch.request).canVerifyChannel(GROUP),false);
+ for(const user of [{id:123456789,is_bot:false},{id:123456789},{id:123456789,is_bot:'true'}]){
+  const fake=fakeRequester(()=>reply('administrator',123456789,{user}));
+  assert.equal(await new TelegramBotApiMembershipGateway(TOKEN,fake.request).canVerifyChannel(GROUP),false);
+ }
+});
+test('contradictory bot identity blocks student and invitation reads',async()=>{
+ const {request,calls}=fakeRequester(()=>reply('administrator',123456789,{user:{id:123456789,is_bot:false}}));
+ const gateway=new TelegramBotApiMembershipGateway(TOKEN,request);
+ assert.equal(await gateway.verifyMembership(GROUP,STUDENT),'UNKNOWN');assert.equal(calls.length,1);
+ assert.equal(await gateway.joinURL(GROUP),null);assert.equal(calls.length,2);
+ assert.ok(calls.every(call=>call.url.endsWith('/getChatMember')&&call.body.user_id===123456789));
 });
 test('membership result mapping is strict, including restricted member flag',async()=>{
  const cases:[

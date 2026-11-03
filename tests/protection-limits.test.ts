@@ -25,6 +25,11 @@ for(const engine of ['json','sqlite'] as const){
    const entities=[{type:'text_mention',offset:0,length:3,user:{id:401}},{type:'text_mention',offset:4,length:3,user:{id:402}}];
    await service.observeIncomingText('300','-100','Ali Bob',entities,'b3-webhook:limit:1');let s=await store.snapshot();assert.ok(s.audit.some(a=>a.updateKey==='b3-webhook:limit:1:protection:-100'&&a.reason.includes('action=WARN')));assert.equal(JSON.stringify(s).includes('Ali Bob'),false);assert.equal(JSON.stringify(s).includes('401'),false);
    await service.observeIncomingText('300','-100','Ali Bob',[entities[0],entities[0]],'b3-webhook:limit:2');s=await store.snapshot();assert.equal(s.audit.some(a=>a.updateKey==='b3-webhook:limit:2:protection:-100'),false);
+   await service.observeIncomingText('300','-100','Ali @bravo',[entities[0]],'b3-webhook:limit:4');s=await store.snapshot();assert.ok(s.audit.some(a=>a.updateKey==='b3-webhook:limit:4:protection:-100'));
+   await service.observeIncomingText('300','-100','@bravo',[{type:'text_mention',offset:0,length:6,user:{id:401}},{type:'mention',offset:0,length:6}],'b3-webhook:limit:5');s=await store.snapshot();assert.equal(s.audit.some(a=>a.updateKey==='b3-webhook:limit:5:protection:-100'),false);
+   await service.save('100',{...config('MENTIONS',100),revision:2},1,1);
+   const many=Array(100).fill('@alpha').join(' ')+' Ali';
+   await service.observeIncomingText('300','-100',many,[{type:'text_mention',offset:many.length-3,length:3,user:{id:401}}],'b3-webhook:limit:6');s=await store.snapshot();assert.ok(s.audit.some(a=>a.updateKey==='b3-webhook:limit:6:protection:-100'));
    assert.equal(await service.observeIncomingText('300','-100','😀',[{type:'text_mention',offset:1,length:1}],'b3-webhook:limit:3'),'UNAVAILABLE');
   }finally{await rm(dir,{recursive:true,force:true});}
  });

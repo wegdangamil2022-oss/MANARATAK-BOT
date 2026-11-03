@@ -2,7 +2,7 @@ import type {MembershipGateway,Membership} from './subscription.js';
 import type {MembershipStatus} from './education-interactions.js';
 
 const id=(text:string):boolean=>{
- if(!/^[1-9][0-9]*$/.test(text))return false;
+ if(/^[1-9][0-9]*$/u.exec(text)?.[0]!==text)return false;
  const numeric=Number(text);
  return Number.isSafeInteger(numeric)&&numeric>0;
 };
@@ -71,7 +71,16 @@ export class TelegramBotApiMembershipGateway implements MembershipGateway {
  }
  async canVerifyChannel(channelId:string):Promise<boolean>{
   const record=await this.query(channelId,String(this.botId));
-  return record!==null&&['administrator','creator'].includes(record.status);
+  return record!==null&&record.user.is_bot===true&&['administrator','creator'].includes(record.status);
+ }
+ /** This evidence distinguishes an explicit bot membership result from an
+  * unavailable API. A transport/API error can never prove loss of rights. */
+ async inspectChannelRights(channelId:string):Promise<'ADMIN'|'NOT_ADMIN'|'UNKNOWN'>{
+  const record=await this.query(channelId,String(this.botId));
+  if(!record||record.user.is_bot!==true)return 'UNKNOWN';
+  if(record.status==='administrator'||record.status==='creator')return 'ADMIN';
+  if(['member','restricted','left','kicked'].includes(record.status))return 'NOT_ADMIN';
+  return 'UNKNOWN';
  }
  async getMember(channelId:string,userId:string):Promise<Membership>{
   const record=await this.query(channelId,userId);

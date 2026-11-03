@@ -1,5 +1,6 @@
 import {randomUUID} from 'node:crypto';
 import {delegationFingerprint} from './delegation-fingerprint.js';
+import {recordSubscriptionChannelChange} from './subscription-change-alert.js';
 import { BotStore, type BotState, type Chat, type Grant, type Capability, type GroupAIMode, type PrivateAIMode, type SubscriptionRequirement } from './store.js';
 
 const pauseSubscriptionRule=(rule:SubscriptionRequirement):void=>{rule.channelIds=[];if(rule.mode==='AT_LEAST'){rule.mode='ALL';delete rule.minimumCount;}};
@@ -99,7 +100,7 @@ export class Policy {
   private clearSubscriptionDependencies(s:BotState,chatId:string):void{
     for(const config of s.subscriptionRequirements){
       if(config.chatId===chatId || config.channelIds.includes(chatId)){
-        if(config.channelIds.length){pauseSubscriptionRule(config);config.version++;}
+        if(config.channelIds.length){const previous=Array.isArray(config.channelIds)?[...config.channelIds]:[];pauseSubscriptionRule(config);config.version++;const groups=s.chats.filter(c=>c.id===config.chatId);if(groups.length===1)try{recordSubscriptionChannelChange(s,this.ownerId,config.chatId,previous,config.channelIds,config.version,groups[0]!.version,this.clock());}catch{/* Restrictive revocation must not depend on alert journaling. */}}
       }
     }
   }
@@ -124,10 +125,11 @@ export class Policy {
          expectedChatRevision<=0||expectedRequirementRevision<=0||
          chat.version!==expectedChatRevision||config.version!==expectedRequirementRevision)
         throw Error('SUBSCRIPTION_POLICY_STALE');
-      const remaining=config.channelIds.filter(id=>id!==channelId);
+      const previousChannels=[...config.channelIds],remaining=config.channelIds.filter(id=>id!==channelId);
       if(config.mode==='AT_LEAST'&&remaining.length>0&&remaining.length<config.minimumCount!)throw Error('SUBSCRIPTION_MINIMUM_REVIEW_REQUIRED');
       if(remaining.length===0)pauseSubscriptionRule(config);else config.channelIds=remaining;
       config.version++;chat.version++;
+      recordSubscriptionChannelChange(s,owner,chatId,previousChannels,config.channelIds,config.version,chat.version,this.clock());
       s.audit.push({updateKey:'owner:subscription:remove-channel:'+chatId+':'+config.version,
         decision:'ALLOW',reason:'SUBSCRIPTION_REQUIRED_CHANNEL_REMOVED_LOCALLY',
         policyVersion:chat.version,at:this.clock()});
@@ -145,7 +147,8 @@ export class Policy {
       if(!Number.isSafeInteger(expectedChatVersion)||!Number.isSafeInteger(expectedRequirementVersion)||
         chat.version!==expectedChatVersion || config.version!==expectedRequirementVersion)
         throw Error('SUBSCRIPTION_POLICY_STALE');
-      pauseSubscriptionRule(config);config.version++;chat.version++;
+      const previousChannels=Array.isArray(config.channelIds)?[...config.channelIds]:[];pauseSubscriptionRule(config);config.version++;chat.version++;
+      recordSubscriptionChannelChange(s,owner,chatId,previousChannels,config.channelIds,config.version,chat.version,this.clock());
       s.audit.push({updateKey:'owner:subscription:pause:'+chatId+':'+config.version,
         decision:'ALLOW',reason:'SUBSCRIPTION_REQUIREMENT_PAUSED_LOCALLY',
         policyVersion:chat.version,at:this.clock()});
@@ -274,8 +277,9 @@ export class Policy {
         reason='CHAT_OWNER_REVOKED_LOCALLY';
         updateKey='owner:chat:revoke:'+chat.id+':'+chat.version;
       }else{
-        const rule=requirement[0]!;
+        const rule=requirement[0]!,previousChannels=Array.isArray(rule.channelIds)?[...rule.channelIds]:[];
         pauseSubscriptionRule(rule);rule.version++;chat.version++;
+        recordSubscriptionChannelChange(s,actor,chat.id,previousChannels,rule.channelIds,rule.version,chat.version,at);
         reason='SUBSCRIPTION_REQUIREMENT_PAUSED_LOCALLY';
         updateKey='owner:subscription:pause:'+chat.id+':'+rule.version;
       }

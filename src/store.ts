@@ -6,7 +6,13 @@ import {validCommunityMessageMetadata,type CommunityMessageReceipt} from './comm
 import {validAdminUIAccess,type AdminUIAccess} from './protection-ui-access.js';
 import {validStudioState,type StudioState} from './button-studio-model.js';
 import {validCategoryLanguage,validTopicVisibility} from './education-category-policy.js';
-import { mkdir, open, readFile, rename, rm, stat, lstat, realpath, writeFile } from 'node:fs/promises';
+import {validSubscriptionGraceMember,type SubscriptionGraceMember} from './subscription-leave-grace.js';
+import {validSubscriptionObservedMembers,type SubscriptionObservedMember} from './subscription-observed-members.js';
+import {validSubscriptionFallbackCleanup,type SubscriptionFallbackCleanup} from './subscription-fallback-receipt.js';
+import {validModerationRateConfig} from './moderation-rate-fuse.js';
+import {validGroupRulesMarkup} from './telegram-group-rules-markup.js';
+import { mkdir, open, readFile, rm, stat, lstat, realpath, writeFile } from 'node:fs/promises';
+import {renameStateAtomically} from './atomic-json-rename.js';
 import { dirname } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { DatabaseSync, backup } from 'node:sqlite';
@@ -33,7 +39,7 @@ export type RestrictionKind = 'NONE' | 'MUTE' | 'BAN';
 export type ModerationDispatchGateway='SIMULATION'|'TELEGRAM_API'|'UNSPECIFIED';
 export interface ModerationReason { chatId: string; memberId: string; source: 'MANUAL' | 'SUBSCRIPTION'; reference: string; kind: 'MUTE' | 'BAN'; createdBy: string; active: boolean; expiresAt?:number; }
 export interface ModerationOperation { id: string; chatId: string; memberId: string; actorId: string; kind: RestrictionKind; reasonFingerprint: string; policyVersion: number; status: OperationStatus; createdAt: number; untilDate?:number; baselineMode?:'INHERIT_GROUP_DEFAULTS'; reverses?:string; action?:'KICK'; caseReference?:string; /** Gateway used when the attempt entered STARTED. Absent on legacy/undispatched rows. */ attemptGateway?:ModerationDispatchGateway; /** Owner triage never alters status or authorizes retry. */ review?:{decision:'ACKNOWLEDGED_UNRESOLVED'|'ESCALATED';reviewedBy:string;reviewedAt:number;/** Approval epoch at review time; optional for legacy records. */policyVersion?:number;/** Immutable local attempt evidence binding; absent on legacy reviews. */evidenceDigest?:string}; }
-export interface Warning { chatId: string; memberId: string; reference: string; actorId: string; at: number; active: boolean; }
+export interface Warning { chatId: string; memberId: string; reference: string; actorId: string; at: number; active: boolean; expiresAt?:number; }
 export interface SubscriptionRequirement { chatId: string; channelIds: string[]; mode: 'ALL' | 'ANY' | 'AT_LEAST'; minimumCount?:number; version: number; }
 export interface FAQEntry { id: string; scope: string; question: string; aliases: string[]; answer: string; sourceResourceId: string; createdBy: string; approvedBy?: string; status: 'DRAFT' | 'APPROVED' | 'ARCHIVED'; createdAt: number; }
 export interface ResourceLink { ref: string; scope: string; resourceId: string; resourceRevision: number; policyVersion: number; expiresAt: number; boundUserId?: string; issuedBy: string; revoked: boolean; }
@@ -71,6 +77,7 @@ export interface RollingMessageMeta {
   chatId:string; messageId:number; senderKind:'USER'|'CHANNEL'|'UNKNOWN'; senderId?:string;
   sentAt:number; observedAt:number; contentType:'TEXT'|'MEDIA'|'COMMAND'|'OTHER'; hasLinks:boolean;
   pinned:boolean; linkedChannel:boolean; adminLog:boolean; approvedAnnouncement:boolean;
+  protectionUnverified?:true; sourceUpdateId?:number;
 }
 export interface PurgeFilter {
   limit:number; beforeMessageId?:number; senderId?:string; linksOnly?:boolean; mediaOnly?:boolean; commandsOnly?:boolean;
@@ -86,6 +93,7 @@ export interface PurgeItem {
 }
 /** Separate explicit review required before any mock delete request. */
 export interface PurgeJob {
+  gatewayOrigin?:'TELEGRAM_API';
   id:string; chatId:string; actorId:string; scopeVersion:number; createdAt:number; expiresAt:number;
   filter:PurgeFilter; automatic?:true; excluded:{protected:number;expired:number};
   status:'PREVIEW'|'READY'|'PAUSED'|'CANCELLED'|'COMPLETED';
@@ -100,6 +108,7 @@ export interface TelegramReplyJob {
   replyMarkup?:import('./telegram-menu.js').TelegramReplyKeyboard;
   inlineMarkup?:import('./telegram-inline-owner.js').TelegramInlineKeyboard;
   studioMarkup?:import('./telegram-studio-rich.js').StudioNativeKeyboard;
+  groupRulesMarkup?:import('./telegram-group-rules-markup.js').GroupRulesMarkup;
   editMessageId?:number;messageThreadId?:number};
  status:'QUEUED'|'SENDING'|'SENT'|'FAILED_CONFIRMED'|'UNKNOWN_OUTCOME';
  attemptId?:string;startedAt?:number;messageId?:number;
@@ -121,6 +130,12 @@ export interface TelegramReplyJob {
   * without either this or privateGroupAccess are quarantine-only on dispatch.
   */
  privateReplyKind?:'LOCAL'|'GROUP_SCOPED'|'VERIFICATION_SCOPED'|'ADMIN_SCOPED'|'LIBRARY_SCOPED'|'STUDIO_SCOPED'|'COMMUNITY_SCOPED';
+ verificationEphemeral?:true;
+ verificationEphemeralTopicId?:number;
+ verificationFallback?:true;
+ verificationPublicFallback?:true;
+ verificationFallbackTopicId?:number;
+ verificationCleanup?:SubscriptionFallbackCleanup;
  /** Ephemeral administrative view witness, removed before any outbound attempt. */
  adminUIAccess?:AdminUIAccess;
  /** Short-lived witness for private inline library contents. */
@@ -182,7 +197,14 @@ export interface BotState {
   audit: AuditRecord[];
   moderationReasons: ModerationReason[];
   moderationOperations: ModerationOperation[];
+  moderationRateConfig?:import('./moderation-rate-fuse.js').ModerationRateConfig;
   subscriptionRequirements: SubscriptionRequirement[];
+  /** Optional anonymous, bounded monitoring counters; never authorization evidence. */
+  subscriptionChannelHealth?:unknown;
+  subscriptionChannelManualHealth?:unknown;
+  subscriptionSweepCursor?:{chatId:string;memberId:string};
+  subscriptionGraceMembers?:SubscriptionGraceMember[];
+  subscriptionObservedMembers?:SubscriptionObservedMember[];
   warnings: Warning[];
   educationCategories: EducationCategory[];
   educationResources: EducationResource[];
@@ -249,8 +271,11 @@ export class BotStore {
       previous.purgeJobs = [];
     }
     if (previous.schemaVersion !== 8 ||
+      (previous.subscriptionObservedMembers!==undefined&&!validSubscriptionObservedMembers(previous.subscriptionObservedMembers))||
+      (previous.subscriptionGraceMembers!==undefined&&(!Array.isArray(previous.subscriptionGraceMembers)||previous.subscriptionGraceMembers.length>1000||previous.subscriptionGraceMembers.some(row=>!validSubscriptionGraceMember(row))||new Set(previous.subscriptionGraceMembers.map((row:SubscriptionGraceMember)=>JSON.stringify([row.chatId,row.memberId]))).size!==previous.subscriptionGraceMembers.length))||
       (previous.groupNetworks!==undefined&&!validGroupNetworks(previous.groupNetworks))||
       (previous.communityFolders!==undefined&&!validCommunityFolders(previous.communityFolders))||
+      (previous.moderationRateConfig!==undefined&&!validModerationRateConfig(previous.moderationRateConfig))||
       (previous.groupPermissionJobs!==undefined&&!validGroupPermissionJobs(previous.groupPermissionJobs))||
       (Array.isArray(previous.moderationReasons)&&previous.moderationReasons.some((r:Record<string,unknown>)=>r&&typeof r==='object'&&Object.hasOwn(r,'expiresAt')&&(r.source!=='MANUAL'||!Number.isSafeInteger(r.expiresAt)||Number(r.expiresAt)<=0||Number(r.expiresAt)>8640000000000000)))||
       (previous.privateSettingsRevision!==undefined&&(typeof previous.privateSettingsRevision!=='number'||!Number.isSafeInteger(previous.privateSettingsRevision)||previous.privateSettingsRevision<0||previous.privateSettingsRevision>=Number.MAX_SAFE_INTEGER))||
@@ -366,6 +391,13 @@ export class BotStore {
         const job=raw as Record<string,unknown>;
         if(!validCommunityMessageMetadata(raw as TelegramReplyJob))return true;
         const plan=job.plan as Record<string,unknown>|undefined;
+        if(plan?.groupRulesMarkup!==undefined&&(!validGroupRulesMarkup(plan.groupRulesMarkup)||job.groupReplyKind!=='GENERAL'||job.groupMenuAccess===undefined||typeof plan.chatId!=='string'||!plan.chatId.startsWith('-')||plan.editMessageId!==undefined))return true;
+        if(job.verificationEphemeral!==undefined&&(job.verificationEphemeral!==true||job.status!=='QUEUED'||job.privateReplyKind!=='VERIFICATION_SCOPED'||!plan||plan.editMessageId!==undefined||plan.studioMarkup===undefined||job.privateGroupAccess===undefined))return true;
+        if(job.verificationEphemeralTopicId!==undefined&&(job.verificationEphemeral!==true||!Number.isSafeInteger(job.verificationEphemeralTopicId)||Number(job.verificationEphemeralTopicId)<1||Number(job.verificationEphemeralTopicId)>2147483647))return true;
+        if(job.verificationFallback!==undefined&&(job.verificationFallback!==true||job.status!=='QUEUED'||job.privateReplyKind!=='VERIFICATION_SCOPED'||job.verificationEphemeral!==undefined||job.privateGroupAccess===undefined))return true;
+        if(job.verificationPublicFallback!==undefined&&(job.verificationPublicFallback!==true||job.status!=='QUEUED'||job.privateReplyKind!=='VERIFICATION_SCOPED'||job.verificationEphemeral!==undefined||job.verificationFallback!==undefined||job.privateGroupAccess===undefined))return true;
+        if(job.verificationFallbackTopicId!==undefined&&(job.verificationFallback!==true&&job.verificationPublicFallback!==true||!Number.isSafeInteger(job.verificationFallbackTopicId)||Number(job.verificationFallbackTopicId)<1||Number(job.verificationFallbackTopicId)>2147483647))return true;
+        if(job.verificationCleanup!==undefined&&(!validSubscriptionFallbackCleanup(job.verificationCleanup)||job.status!=='SENT'||job.messageId!==job.verificationCleanup.messageId||job.attemptId!==job.verificationCleanup.sendAttemptId||job.verificationFallback!==undefined||job.verificationPublicFallback!==undefined))return true;
         if(plan?.messageThreadId!==undefined&&(!Number.isSafeInteger(plan.messageThreadId)||Number(plan.messageThreadId)<1||Number(plan.messageThreadId)>2147483647||typeof plan.chatId!=='string'||!plan.chatId.startsWith('-')||job.groupMenuAccess===undefined))return true;
         if(job.accessDenialCode!==undefined&&(
            job.status!=='FAILED_CONFIRMED'||typeof job.accessDenialCode!=='string'||
@@ -529,7 +561,7 @@ export class BotStore {
       await mkdir(dirname(this.file), { recursive: true });
       const tmp = this.file + '.' + randomUUID() + '.tmp';
       await writeFile(tmp, JSON.stringify(state), { encoding: 'utf8', mode: 0o600, flag: 'wx' });
-      await rename(tmp, this.file);
+      await renameStateAtomically(tmp, this.file);
       return result;
     } finally { release(); }
   }
@@ -605,24 +637,26 @@ export class BotStore {
    * The host must separately prevent filesystem races and protect sidecars.
    */
   static async snapshotSqliteReadOnly(filePath:string):Promise<BotState>{
-    const invalid=():never=>{throw Error('TELEGRAM_OUTBOX_STATE_INVALID');};
+    const invalid=(reason:string):never=>{throw new Error('TELEGRAM_OUTBOX_STATE_INVALID',{cause:new Error(reason)});};
     if(typeof filePath!=='string'||!isAbsolute(filePath)||filePath!==resolve(filePath))
-      return invalid();
+      return invalid('SQLITE_READONLY_PATH_INVALID');
+    let info:Awaited<ReturnType<typeof lstat>>,canonical:string;
     try{
-      const info=await lstat(filePath);
-      if(!info.isFile()||info.isSymbolicLink()||(info.mode&0o077)!==0||
-        await realpath(filePath)!==filePath||
-        !(await BotStore.verifySqliteBackupReadOnly(filePath)))return invalid();
-    }catch{return invalid();}
+      info=await lstat(filePath);canonical=await realpath(filePath);
+    }catch{return invalid('SQLITE_READONLY_FILE_UNAVAILABLE');}
+    if(!info.isFile()||info.isSymbolicLink())return invalid('SQLITE_READONLY_FILE_TYPE_INVALID');
+    if((info.mode&0o077)!==0)return invalid('SQLITE_READONLY_PRIVATE_MODE_REQUIRED');
+    if(canonical!==filePath)return invalid('SQLITE_READONLY_CANONICAL_PATH_REQUIRED');
+    if(!(await BotStore.verifySqliteBackupReadOnly(filePath)))return invalid('SQLITE_READONLY_CONTENT_INVALID');
     let db:DatabaseSync;
     try{db=new DatabaseSync(filePath,{readOnly:true});}
-    catch{return invalid();}
+    catch{return invalid('SQLITE_READONLY_OPEN_FAILED');}
     try{
       const row=db.prepare('SELECT data FROM bot_state WHERE id=1').get() as {data?:unknown}|undefined;
-      if(typeof row?.data!=='string')return invalid();
+      if(typeof row?.data!=='string')return invalid('SQLITE_READONLY_CONTENT_INVALID');
       const state=new BotStore(filePath,{engine:'sqlite'}).decode(JSON.parse(row.data) as unknown);
       return structuredClone(state);
-    }catch{return invalid();}
+    }catch{return invalid('SQLITE_READONLY_CONTENT_INVALID');}
     finally{db.close();}
   }
 
@@ -736,7 +770,7 @@ export class BotStore {
     groupQuestionAccess?:TelegramReplyJob['groupQuestionAccess'],
     groupMenuAccess?:TelegramReplyJob['groupMenuAccess'],
     privateGroupAccess?:TelegramReplyJob['privateGroupAccess'],
-    adminUIAccess?:TelegramReplyJob['adminUIAccess'],privateLibraryAccess?:TelegramReplyJob['privateLibraryAccess'],studioScoped=false,communityAccess?:TelegramReplyJob['communityAccess'],communityClose?:CommunityMessageReceipt,verificationScoped=false): Promise<void> {
+    adminUIAccess?:TelegramReplyJob['adminUIAccess'],privateLibraryAccess?:TelegramReplyJob['privateLibraryAccess'],studioScoped=false,communityAccess?:TelegramReplyJob['communityAccess'],communityClose?:CommunityMessageReceipt,verificationScoped=false,verificationEphemeral=false,verificationEphemeralTopicId?:number,verificationOutcome?:'MEMBER'|'NOT_MEMBER'|'UNAVAILABLE'|'NOT_REQUIRED'|'DENIED'): Promise<void> {
     await this.transaction(s => {
       const update = s.updates.find(x => x.key === key);
       if (!update || update.status !== 'CLAIMED') throw new Error('Update not claimed');
@@ -744,6 +778,12 @@ export class BotStore {
       update.status = statuses.includes('UNKNOWN_OUTCOME') ? 'UNKNOWN' : 'DONE';
       if (!s.audit.some(a => a.updateKey === key)) s.audit.push(decision); // no tokens or raw inbound messages
       if(verificationScoped&&(!reply||reply.chatId.startsWith('-')||!privateGroupAccess||adminUIAccess||privateLibraryAccess||communityAccess))throw Error('INVALID_VERIFICATION_REPLY_SCOPE');
+      if(verificationEphemeral&&(!verificationScoped||!reply||reply.editMessageId!==undefined||!reply.studioMarkup))throw Error('INVALID_EPHEMERAL_VERIFICATION_SCOPE');
+      if(verificationEphemeralTopicId!==undefined&&(!verificationEphemeral||!Number.isSafeInteger(verificationEphemeralTopicId)||verificationEphemeralTopicId<1||verificationEphemeralTopicId>2147483647))throw Error('INVALID_EPHEMERAL_TOPIC');
+      if(verificationOutcome!==undefined){
+        if(!verificationScoped||decision.reason!=='SUBSCRIPTION_VERIFICATION_VIEW'||decision.decision!=='ALLOW'||!['MEMBER','NOT_MEMBER','UNAVAILABLE','NOT_REQUIRED','DENIED'].includes(verificationOutcome))throw Error('INVALID_VERIFICATION_OUTCOME');
+        if(update.status==='DONE'&&!s.audit.some(a=>a.updateKey===key+':subscription-metric'))s.audit.push({updateKey:key+':subscription-metric',decision:'ALLOW',reason:'SUBSCRIPTION_METRIC_'+verificationOutcome,policyVersion:0,at:decision.at});
+      }
       if(reply && update.status==='DONE') {
         s.telegramReplyJobs??=[];
         if(!s.telegramReplyJobs.some(j=>j.updateKey===key))
@@ -754,6 +794,8 @@ export class BotStore {
           ...(groupQuestionAccess?{groupQuestionAccess:structuredClone(groupQuestionAccess)}:{}),
           ...(groupMenuAccess?{groupMenuAccess:structuredClone(groupMenuAccess)}:{}),
           ...(privateGroupAccess?{privateGroupAccess:structuredClone(privateGroupAccess)}:{}),
+          ...(verificationEphemeral?{verificationEphemeral:true as const}:{}),
+          ...(verificationEphemeralTopicId!==undefined?{verificationEphemeralTopicId}:{}),
           ...(adminUIAccess?{adminUIAccess:structuredClone(adminUIAccess)}:{}),
           ...(communityAccess?{communityAccess:structuredClone(communityAccess)}:{}),
           ...(communityClose?{communityClose:structuredClone(communityClose)}:{}),

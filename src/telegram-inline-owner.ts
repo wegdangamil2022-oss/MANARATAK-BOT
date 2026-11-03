@@ -1,3 +1,9 @@
+import {validRuleActionRoute} from './telegram-rule-actions.js';
+import {validModerationRateEditorRoute} from './telegram-moderation-rate-editor.js';
+import {validAdminRoomRoute} from './telegram-admin-room-links.js';
+import {validOncallRoute} from './telegram-oncall.js';
+import {validRuleWarningPolicyRoute} from './telegram-rule-warning-policy.js';
+import {validRoomControlRoute} from './telegram-room-control.js';
 import {validSubscriptionVerificationRoute} from './subscription-verification-access.js';
 import {validGroupRulesRoute} from './telegram-group-rules.js';
 import {validModerationReportRoute} from './telegram-moderation-reports.js';
@@ -24,6 +30,8 @@ import {validOwnerImportRoute} from './telegram-inline-imports.js';
 import {validOwnerUploadRoute} from './telegram-owner-upload.js';
 import {validSubscriptionConfigRoute} from './telegram-inline-subscription-config.js';
 import {validPurgeEditorRoute} from './telegram-purge-editor.js';
+import {validOwnerRightsRoute} from './telegram-owner-rights.js';
+import {validRuleExemptionRoute} from './telegram-rule-exemptions.js';
 import {validCommunityFolderRoute} from './telegram-community-folders.js';
 /** The approved 2026-10-23 owner catalogue from docs/أزرار_منارتك.md.
  * READ-ONLY navigation: do NOT treat a visible catalogue item as a permission
@@ -708,6 +716,10 @@ export function isValidTelegramInlineKeyboard(input:unknown):input is TelegramIn
      !validModerationAppealRoute(button.callback_data)&&
      !validModerationReportRoute(button.callback_data)&&
      !validGroupRulesRoute(button.callback_data)&&
+     !validOwnerRightsRoute(button.callback_data)&&
+     !validRuleExemptionRoute(button.callback_data)&&!validRuleWarningPolicyRoute(button.callback_data)&&!validRuleActionRoute(button.callback_data)&&
+     !validAdminRoomRoute(button.callback_data)&&!validOncallRoute(button.callback_data)&&!validRoomControlRoute(button.callback_data)&&
+     !validModerationRateEditorRoute(button.callback_data)&&
      !validSubscriptionVerificationRoute(button.callback_data)&&
      !/^ms:1:(?:h|p:(?:0|[1-9][0-9]{0,2})|g:-[1-9][0-9]{0,18}:[1-9][0-9]{0,9}:(?:0|[1-9][0-9]{0,2}))$/u.test(button.callback_data)&&
      !/^ms:1:o:-[1-9][0-9]{0,18}:[1-9][0-9]{0,9}:(?:0|[1-9][0-9]{0,2}):(?:0|[1-9][0-9]{0,2}):[a-f0-9]{12}$/u.test(button.callback_data)&&
@@ -734,7 +746,7 @@ export function ownerInlineConnection(data:string):'EDITOR'|'VIEW'|'SPECIFICATIO
  const m=/^mi:1:i:([0-9]{2}):([0-9]{2})$/u.exec(data);if(!m||m[0]!==data)return null;
  const section=ownerInlineSections[Number(m[1])-1];if(!section||Number(m[2])<1||Number(m[2])>section.items.length)return null;
  if(/^mi:1:i:02:0[234]$/u.test(data)||/^mi:1:i:04:0[234]$/u.test(data)||data==='mi:1:i:13:04'||delegationOwnerEntry(data)||/^mi:1:i:01:(?:03|06|07|08|12)$/u.test(data)||data==='mi:1:i:10:16'||data==='mi:1:i:11:03'||studioOwnerEntry(data))return 'EDITOR';
- if(ownerInlineLinkedReadOnly(data)!==null||/^mi:1:i:01:(?:09|10|11)$/u.test(data)||data==='mi:1:i:03:01'||data==='mi:1:i:02:01'||data==='mi:1:i:02:15'||data==='mi:1:i:02:16'||data==='mi:1:i:02:13'||/^mi:1:i:02:(?:0[56789]|12)$/u.test(data))return 'VIEW';
+ if(ownerInlineLinkedReadOnly(data)!==null||/^mi:1:i:01:(?:09|10|11)$/u.test(data)||data==='mi:1:i:03:01'||data==='mi:1:i:03:06'||data==='mi:1:i:02:01'||data==='mi:1:i:02:15'||data==='mi:1:i:02:16'||data==='mi:1:i:02:13'||/^mi:1:i:02:(?:0[56789]|12)$/u.test(data))return 'VIEW';
  return 'SPECIFICATION';
 }
 /** Catalogue origin only; never an authorization token or a mutable action. */

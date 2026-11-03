@@ -8,11 +8,14 @@ import {telegramGroupPermissionGateway} from './telegram-group-permission-gatewa
 import {moderationProtectionEnforcer} from './protection-enforcement.js';
 import {tickGroupPermissionRestores} from './group-permission-timers.js';
 import {tickModerationExpiry} from './moderation-expiry.js';
+import {ModerationPurgeService} from './moderation-purge.js';
+import {TelegramBotApiPurgeGateway} from './telegram-purge-gateway.js';
 
 /** Construction is offline. A caller must explicitly select this composition;
  * no fake subscription gateway may share its sanction ledger. */
 export async function createPhase3ModerationRuntime(store:BotStore,policy:Policy,token:string,request:typeof fetch=fetch,safetyGate:()=>Promise<boolean>=async()=>false,clock:()=>number=Date.now,automaticRestores=false){
  const state=await store.snapshot();
+ if(state.purgeJobs.some(j=>j.gatewayOrigin!=='TELEGRAM_API')||state.rollingMessageMeta.some(m=>m.protectionUnverified!==true&&!m.pinned&&!m.linkedChannel&&!m.adminLog&&!m.approvedAnnouncement&&m.sourceUpdateId===undefined))throw Error('PHASE3_UNPROVEN_DELETE_HISTORY');
  // Old simulation receipts must never suppress a real dispatch or become a
  // restoration baseline. Refuse mixed ledgers without rewriting any data.
  if(state.moderationOperations.some(o=>o.status!=='CANCELLED'&&o.attemptGateway!=='TELEGRAM_API')||
@@ -20,8 +23,9 @@ export async function createPhase3ModerationRuntime(store:BotStore,policy:Policy
   throw Error('PHASE3_UNPROVEN_MODERATION_HISTORY');
  const moderation=new ModerationService(store,policy,new TelegramBotApiModerationGateway(token,request,safetyGate,clock),clock);
  const groupPermissions=new GroupPermissionLockService(store,policy,telegramGroupPermissionGateway(token,request,safetyGate),clock);
- const protectionEnforcer=moderationProtectionEnforcer(moderation,automaticRestores?groupPermissions:undefined);
- return Object.freeze({moderation,groupPermissions,protectionEnforcer,
+ const purge=new ModerationPurgeService(store,policy,new TelegramBotApiPurgeGateway(token,request,safetyGate),clock);
+ const protectionEnforcer=moderationProtectionEnforcer(moderation,automaticRestores?groupPermissions:undefined,{store,purge});
+ return Object.freeze({moderation,groupPermissions,protectionEnforcer,purge,
   async tick(enabled=false):Promise<void>{
    if(!enabled||!await safetyGate())return;
    const restored=await tickGroupPermissionRestores(store,groupPermissions,clock(),true);
