@@ -20,11 +20,12 @@ export interface CommunityConfig{
  groupCooldownMs:number;
 }
 export type CommunityDraftKind='WELCOME_TEXT'|'FAREWELL_TEXT'|'REPLY_ADD'|'REPLY_REMOVE'|
- 'WELCOME_ON'|'WELCOME_OFF'|'FAREWELL_ON'|'FAREWELL_OFF'|'REPLIES_ON'|'REPLIES_OFF';
+ 'WELCOME_ON'|'WELCOME_OFF'|'FAREWELL_ON'|'FAREWELL_OFF'|'REPLIES_ON'|'REPLIES_OFF'|
+ 'REPLY_ENABLE'|'REPLY_DISABLE'|'REPLY_COOLDOWN';
 export interface CommunityDraft{
  id:string;actorId:string;chatId:string;chatVersion:number;configVersion:number;
  kind:CommunityDraftKind;createdAt:number;expiresAt:number;
- text?:string;trigger?:string;match?:ReplyMatch;ruleId?:string;topicId?:number;
+ text?:string;trigger?:string;match?:ReplyMatch;ruleId?:string;topicId?:number;cooldownMs?:number;
 }
 export interface CommunityReceipt{
  /** An opaque hash of the inbound Telegram update and bot identifier. */
@@ -49,7 +50,8 @@ const validTemplate=(t:unknown):t is string=>validText(t,800)&&
  !/\{(?!العضو\}|اسم_المجموعة\}|التاريخ\}|الوقت\}|رابط_القوانين\})[^{}]*\}/u.test(t);
 const validTopic=(n:unknown):n is number=>typeof n==='number'&&Number.isSafeInteger(n)&&n>0&&n<=2147483647;
 const kinds=new Set<CommunityDraftKind>(['WELCOME_TEXT','FAREWELL_TEXT','REPLY_ADD','REPLY_REMOVE',
- 'WELCOME_ON','WELCOME_OFF','FAREWELL_ON','FAREWELL_OFF','REPLIES_ON','REPLIES_OFF']);
+ 'WELCOME_ON','WELCOME_OFF','FAREWELL_ON','FAREWELL_OFF','REPLIES_ON','REPLIES_OFF',
+ 'REPLY_ENABLE','REPLY_DISABLE','REPLY_COOLDOWN']);
 const matches=new Set<ReplyMatch>(['EXACT','WORD','CONTAINS','COMMAND']);
 export function defaultCommunityConfig(chatId:string):CommunityConfig{
  if(!validGroup(chatId))throw Error('COMMUNITY_CHAT_INVALID');
@@ -100,10 +102,12 @@ export function validCommunityState(value:unknown):value is CommunityAutomationS
    (d.trigger!==undefined&&!validText(d.trigger,80))||
    (d.match!==undefined&&!matches.has(d.match))||
    (d.ruleId!==undefined&&!/^[a-f0-9]{12}$/u.test(d.ruleId))||
-   (d.topicId!==undefined&&!validTopic(d.topicId)))return false;
+   (d.topicId!==undefined&&!validTopic(d.topicId))||
+   (d.cooldownMs!==undefined&&(!Number.isInteger(d.cooldownMs)||d.cooldownMs<1000||d.cooldownMs>86400000)))return false;
   if((d.kind==='WELCOME_TEXT'||d.kind==='FAREWELL_TEXT')&&!d.text||
    d.kind==='REPLY_ADD'&&(!d.text||!d.trigger||!d.match)||
-   d.kind==='REPLY_REMOVE'&&!d.ruleId)return false;
+   (['REPLY_REMOVE','REPLY_ENABLE','REPLY_DISABLE','REPLY_COOLDOWN'] as string[]).includes(d.kind)&&!d.ruleId||
+   d.kind==='REPLY_COOLDOWN'&&d.cooldownMs===undefined)return false;
   draftIds.add(d.id);
  }
  const receiptIds=new Set<string>();
