@@ -1,3 +1,4 @@
+import {subscriptionRequirementMode} from './subscription-integrity.js';
 import {retirementOperationDigest} from './moderation-reason-retirement.js';
 import {createHash,randomBytes} from 'node:crypto';
 import type {BotState,BotStore} from './store.js';
@@ -13,17 +14,18 @@ export class CaptchaEnforcement{
  constructor(private readonly store:BotStore,private readonly policy:Policy,private readonly captcha:CaptchaService,
   private readonly moderation:ModerationService|undefined,private readonly probe:{gateway:TelegramBotApiModerationGateway;safety:()=>Promise<boolean>}|undefined,private readonly clock:()=>number){}
  available():boolean{return !!this.moderation?.supportsSubscriptionEnforcement()&&!!this.probe&&TelegramBotApiModerationGateway.usesOfficialRightsRead(this.probe.gateway)&&TelegramBotApiModerationGateway.usesOfficialTrialGroupRead(this.probe.gateway);}
- #stamp(s:BotState,chat:string):string{return hash([this.policy.ownerId,chat,s.chats.filter(c=>c.id===chat),this.captcha.settings(s,chat),s.privateFeatures['owner.dashboard'],s.privateSettingsRevision??null]);}
- epoch(s:BotState,chat:string):string{return hash([chat,captchaSource(s),s.audit.filter(a=>a.updateKey===ROOT+chat)]);}
+ standalone(s:BotState,chat:string):boolean{const mode=subscriptionRequirementMode(s,chat);return mode==='NONE'||mode==='PAUSED';}
+ #stamp(s:BotState,chat:string):string{return hash([this.policy.ownerId,chat,s.chats.filter(c=>c.id===chat),this.captcha.settings(s,chat),s.subscriptionRequirements.filter(r=>r?.chatId===chat),s.privateFeatures['owner.dashboard'],s.privateSettingsRevision??null]);}
+ epoch(s:BotState,chat:string):string{return hash([chat,captchaSource(s),s.subscriptionRequirements.filter(r=>r?.chatId===chat),s.audit.filter(a=>a.updateKey===ROOT+chat)]);}
  consent(s:BotState,chat:string):{enabled:boolean;at:number;version:number}|null{
-  if(!/^-[1-9][0-9]{0,15}$/u.test(chat)||!Number.isSafeInteger(Number(chat))||!this.policy.privateFeature(s,'owner.dashboard',this.policy.ownerId)||!this.policy.canUseChat(s,chat,'moderation')||!this.captcha.settings(s,chat)?.enabled)return null;
+  if(!this.standalone(s,chat)||!/^-[1-9][0-9]{0,15}$/u.test(chat)||!Number.isSafeInteger(Number(chat))||!this.policy.privateFeature(s,'owner.dashboard',this.policy.ownerId)||!this.policy.canUseChat(s,chat,'moderation')||!this.captcha.settings(s,chat)?.enabled)return null;
   const rows=s.audit.filter(a=>a.updateKey===ROOT+chat),a=rows[0],now=this.clock();if(rows.length!==1||!a||a.actorId!==this.policy.ownerId||a.decision!=='ALLOW'||a.policyVersion!==this.policy.chatRevision(s,chat)||!validTime(now)||!validTime(a.at)||a.at>now)return null;
   try{const v=JSON.parse(a.reason) as {enabled:boolean;stamp:string;version:number};return Object.keys(v).sort().join(',')==='enabled,stamp,version'&&typeof v.enabled==='boolean'&&v.stamp===this.#stamp(s,chat)&&Number.isSafeInteger(v.version)&&v.version>0?{enabled:v.enabled,at:a.at,version:v.version}:null;}catch{return null;}
  }
  async configure(actor:string,chat:string,enabled:boolean,expected:string,confirmationRef:string):Promise<boolean>{
   const started=this.clock();if(typeof enabled!=='boolean'||!validTime(started)||!this.available()||!this.policy.isOwner(actor))return false;
   const current=(s:BotState)=>{
-   const now=this.clock(),rows=s.callbacks.filter(c=>c.ref===confirmationRef),c=rows[0];if(!validTime(now)||now<started||now>=started+120000||this.epoch(s,chat)!==expected||!this.policy.privateFeature(s,'owner.dashboard',actor)||!this.policy.canUseChat(s,chat,'moderation')||!this.captcha.settings(s,chat)?.enabled||rows.length!==1||!c||!/^captcha-owner:[A-Za-z0-9_-]{24}$/u.test(c.ref)||c.actorId!==actor||c.chatId!=='private'||c.policyVersion!==0||!c.oneShot||!c.used||c.revoked||!Number.isSafeInteger(c.expiresAt)||now>=c.expiresAt||c.expiresAt>now+120000)return false;
+   const now=this.clock(),rows=s.callbacks.filter(c=>c.ref===confirmationRef),c=rows[0];if(!validTime(now)||now<started||now>=started+120000||this.epoch(s,chat)!==expected||!this.policy.privateFeature(s,'owner.dashboard',actor)||!this.policy.canUseChat(s,chat,'moderation')||!this.captcha.settings(s,chat)?.enabled||enabled&&!this.standalone(s,chat)||rows.length!==1||!c||!/^captcha-owner:[A-Za-z0-9_-]{24}$/u.test(c.ref)||c.actorId!==actor||c.chatId!=='private'||c.policyVersion!==0||!c.oneShot||!c.used||c.revoked||!Number.isSafeInteger(c.expiresAt)||now>=c.expiresAt||c.expiresAt>now+120000)return false;
    try{const a=JSON.parse(c.action);return Array.isArray(a)&&a.length===3&&a[1]===captchaSource(s)&&a[2]===expected&&a[0]?.group===chat&&a[0]?.kind===(enabled?'enforce-on-confirm':'enforce-off-confirm');}catch{return false;}
   };
   if(!current(await this.store.snapshot()))return false;
