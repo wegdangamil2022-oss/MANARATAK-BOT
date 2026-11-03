@@ -93,18 +93,18 @@
 | GATE-007 | 621 | PARTIAL_LOCAL_REVIEW | Observed candidates, active restrictions and verified grace records rotate; 1000 candidate capacity and 30-day retention are explicit limits. |
 | GATE-008 | 622 | PARTIAL_LOCAL_REVIEW | No grace/hour/day reviewed policies and fresh expiry checks exist; no permanent automatic ban. |
 | GATE-009 | 623 | PARTIAL_LOCAL_REVIEW | Related local code and tests identified; full official requirement has not been independently accepted. |
-| GATE-010 | 624 | PARTIAL_LOCAL_REVIEW | Manual and periodic channel rights inspection distinguish explicit loss from unknown. Confirmed rights loss and local channel removals/additions queue guarded owner alerts when phase-three timers run. Verified channel identity migration remains open. |
+| GATE-010 | 624 | PARTIAL_LOCAL_REVIEW | Manual and periodic rights checks distinguish explicit loss from unknown. Rights loss, channel list changes and verified primary public username changes on the same numeric channel queue guarded owner alerts. Numeric-ID migration and alternate-username coverage are not implemented. Real Telegram acceptance is deferred. |
 | GATE-011 | 625 | PARTIAL_LOCAL_REVIEW | Related local code and tests identified; full official requirement has not been independently accepted. |
 | GATE-012 | 626 | PARTIAL_LOCAL_REVIEW | Owner-only aggregate verification outcomes, witnessed delivery confirmations, historical rights-loss notice states and separate anonymous bounded unavailable automatic/manual rights-check counts exist locally. Delivery does not prove page opening; other channel/API errors are not covered. The complete funnel remains open. |
-| VERIFY-001 | 632 | NOT_REVIEWED_IN_THIS_PASS | لم تكتمل مطابقته في هذه المراجعة. |
-| VERIFY-002 | 633 | NOT_REVIEWED_IN_THIS_PASS | لم تكتمل مطابقته في هذه المراجعة. |
-| VERIFY-003 | 634 | NOT_REVIEWED_IN_THIS_PASS | لم تكتمل مطابقته في هذه المراجعة. |
-| VERIFY-004 | 635 | NOT_REVIEWED_IN_THIS_PASS | لم تكتمل مطابقته في هذه المراجعة. |
-| VERIFY-005 | 636 | NOT_REVIEWED_IN_THIS_PASS | لم تكتمل مطابقته في هذه المراجعة. |
-| VERIFY-006 | 637 | NOT_REVIEWED_IN_THIS_PASS | لم تكتمل مطابقته في هذه المراجعة. |
-| VERIFY-007 | 638 | NOT_REVIEWED_IN_THIS_PASS | لم تكتمل مطابقته في هذه المراجعة. |
-| VERIFY-008 | 639 | NOT_REVIEWED_IN_THIS_PASS | لم تكتمل مطابقته في هذه المراجعة. |
-| VERIFY-009 | 640 | NOT_REVIEWED_IN_THIS_PASS | لم تكتمل مطابقته في هذه المراجعة. |
+| VERIFY-001 | 632 | PARTIAL_LOCAL_REVIEW | Local join challenge supports random question and accessible alternative; real-client verification deferred. |
+| VERIFY-002 | 633 | PARTIAL_LOCAL_REVIEW | Separately approved CAPTCHA mute is available for a trusted join without an active subscription; existing restrictions and the joined subscription path remain open. |
+| VERIFY-003 | 634 | PARTIAL_LOCAL_REVIEW | Timeouts, attempts and bounded retries exist; graduated sanctions and their timing remain open. |
+| VERIFY-004 | 635 | PARTIAL_LOCAL_REVIEW | Owner can require current published rules after CAPTCHA; combined subscription enforcement remains blocked. |
+| VERIFY-005 | 636 | PARTIAL_LOCAL_REVIEW | Private success is shown after interaction; configurable welcome and hiding join service messages remain open. |
+| VERIFY-006 | 637 | PARTIAL_LOCAL_REVIEW | Private bot interaction is supported; configured join-link notice and safe cleanup remain open. |
+| VERIFY-007 | 638 | PARTIAL_LOCAL_REVIEW | Owner review with approval and rejection exists; Android, iOS and Desktop acceptance is deferred. |
+| VERIFY-008 | 639 | PARTIAL_LOCAL_REVIEW | Member can proceed from CAPTCHA and rules to channel verification without repeating CAPTCHA; combined enforcement and existing restrictions remain open. |
+| VERIFY-009 | 640 | PARTIAL_LOCAL_REVIEW | Future AI Guardians and WebApp support has not been reviewed. |
 | NETWORK-001 | 701 | NOT_REVIEWED_IN_THIS_PASS | لم تكتمل مطابقته في هذه المراجعة. |
 | NETWORK-002 | 702 | NOT_REVIEWED_IN_THIS_PASS | لم تكتمل مطابقته في هذه المراجعة. |
 | NETWORK-003 | 703 | NOT_REVIEWED_IN_THIS_PASS | لم تكتمل مطابقته في هذه المراجعة. |
@@ -171,7 +171,7 @@
 | TOPIC-005 | 1187 | NOT_REVIEWED_IN_THIS_PASS | لم تكتمل مطابقته في هذه المراجعة. |
 | JOIN-001 | 1193 | NOT_REVIEWED_IN_THIS_PASS | لم تكتمل مطابقته في هذه المراجعة. |
 | JOIN-002 | 1194 | NOT_REVIEWED_IN_THIS_PASS | لم تكتمل مطابقته في هذه المراجعة. |
-| JOIN-003 | 1195 | NOT_REVIEWED_IN_THIS_PASS | لم تكتمل مطابقته في هذه المراجعة. |
+| JOIN-003 | 1195 | PARTIAL_LOCAL_REVIEW | The local member screens are connected; combined enforcement and safe handling of existing restrictions remain open. |
 | JOIN-004 | 1196 | NOT_REVIEWED_IN_THIS_PASS | لم تكتمل مطابقته في هذه المراجعة. |
 | JOIN-005 | 1197 | NOT_REVIEWED_IN_THIS_PASS | لم تكتمل مطابقته في هذه المراجعة. |
 | STUDENT-001 | 1203 | NOT_REVIEWED_IN_THIS_PASS | لم تكتمل مطابقته في هذه المراجعة. |
@@ -256,7 +256,7 @@
 | ADMSET-008 | 1515 | NOT_REVIEWED_IN_THIS_PASS | لم تكتمل مطابقته في هذه المراجعة. |
 | ADMSET-009 | 1516 | NOT_REVIEWED_IN_THIS_PASS | لم تكتمل مطابقته في هذه المراجعة. |
 | ADMSET-010 | 1517 | NOT_REVIEWED_IN_THIS_PASS | لم تكتمل مطابقته في هذه المراجعة. |
-| LIFECYCLE-001 | 1538 | NOT_REVIEWED_IN_THIS_PASS | لم تكتمل مطابقته في هذه المراجعة. |
+| LIFECYCLE-001 | 1538 | PARTIAL_LOCAL_REVIEW | CAPTCHA, rules and subscription screens have a partial local route; unified onboarding and Join Requests remain open. |
 | LIFECYCLE-002 | 1539 | NOT_REVIEWED_IN_THIS_PASS | لم تكتمل مطابقته في هذه المراجعة. |
 | LIFECYCLE-003 | 1540 | NOT_REVIEWED_IN_THIS_PASS | لم تكتمل مطابقته في هذه المراجعة. |
 | LIFECYCLE-004 | 1541 | NOT_REVIEWED_IN_THIS_PASS | لم تكتمل مطابقته في هذه المراجعة. |

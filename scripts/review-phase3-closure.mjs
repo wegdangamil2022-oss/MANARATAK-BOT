@@ -32,10 +32,22 @@ const failures=details.split(/\r?\n(?=test at )/u).filter(b=>/^test at /u.test(b
 });
 assert.equal(failures.length,tests.fail,'Failure inventory must cover every failed test');
 const evidence={
+ VERIFY:{code:['src/captcha.ts','src/captcha-enforcement.ts','src/captcha-rules.ts','src/subscription.ts','src/telegram-transport.ts'],ui:['src/telegram-captcha-owner.ts','src/telegram-transport.ts'],tests:['tests/captcha.test.ts','tests/captcha-enforcement.test.ts','tests/captcha-rules.test.ts']},
  GATE:{code:['src/subscription-channel-unavailable.ts','src/subscription-channel-incidents.ts','src/subscription-activity-summary.ts','src/store.ts','src/subscription-rights-monitor.ts','src/subscription-change-alert.ts','src/policy.ts','src/telegram-membership.ts','src/subscription.ts','src/subscription-observed-members.ts','src/subscription-leave-grace.ts','src/subscription-cleanup-attempt.ts','src/telegram-replies.ts','src/telegram-live-server.ts'],ui:['src/telegram-owner-menu.ts','src/telegram-inline-subscription-config.ts','src/telegram-transport.ts'],tests:['tests/subscription-channel-unavailable.test.ts','tests/b3-owner-subscription-health.test.ts','tests/owner-inline-navigation.test.ts','tests/subscription-rights-monitor.test.ts','tests/subscription-change-alerts.test.ts','tests/telegram-live-membership.test.ts','tests/owner-inline-subscription-config.test.ts','tests/subscription-owned-restoration.test.ts','tests/subscription-cleanup-attempt.test.ts']},
  RULELAW:{code:['src/telegram-group-rules.ts','src/moderation.ts','src/group-rule-exemption-model.ts','src/group-rule-restriction-report.ts','src/group-rule-warning-policy.ts','src/moderation-report-model.ts','src/group-rules-model.ts','src/group-rule-notices.ts','src/telegram-live-server.ts','src/moderation-command-review-epoch.ts','src/protection-ui-access.ts','src/telegram-inline-owner.ts','src/telegram-moderation-commands.ts'],ui:['src/telegram-moderation-appeals.ts','src/telegram-moderation-cases.ts','src/telegram-moderation-command-review.ts','src/telegram-rule-exemptions.ts','src/telegram-rule-warning-policy.ts','src/telegram-moderation-reports.ts','src/telegram-transport.ts','src/telegram-rule-actions.ts'],tests:['tests/telegram-moderation-appeals.test.ts','tests/telegram-moderation-cases.test.ts','tests/group-rules.test.ts','tests/group-rule-exemptions.test.ts','tests/group-rule-warning-policy.test.ts','tests/group-rule-review.test.ts','tests/group-rule-actions.test.ts']}
 };
 const gaps={
+ 'VERIFY-001':'Local join challenge supports random question and accessible alternative; real-client verification deferred.',
+ 'VERIFY-002':'Separately approved CAPTCHA mute is available for a trusted join without an active subscription; existing restrictions and the joined subscription path remain open.',
+ 'VERIFY-003':'Timeouts, attempts and bounded retries exist; graduated sanctions and their timing remain open.',
+ 'VERIFY-004':'Owner can require current published rules after CAPTCHA; combined subscription enforcement remains blocked.',
+ 'VERIFY-005':'Private success is shown after interaction; configurable welcome and hiding join service messages remain open.',
+ 'VERIFY-006':'Private bot interaction is supported; configured join-link notice and safe cleanup remain open.',
+ 'VERIFY-007':'Owner review with approval and rejection exists; Android, iOS and Desktop acceptance is deferred.',
+ 'VERIFY-008':'Member can proceed from CAPTCHA and rules to channel verification without repeating CAPTCHA; combined enforcement and existing restrictions remain open.',
+ 'VERIFY-009':'Future AI Guardians and WebApp support has not been reviewed.',
+ 'JOIN-003':'The local member screens are connected; combined enforcement and safe handling of existing restrictions remain open.',
+ 'LIFECYCLE-001':'CAPTCHA, rules and subscription screens have a partial local route; unified onboarding and Join Requests remain open.',
  'GATE-003':'Human messages and observed joins enroll bounded candidates; no claim to enumerate unobserved historical Telegram members or complete join-request workflow.',
  'GATE-004':'Reviewed official restriction path exists; unverified delete metadata does not authorize deletion.',
  'GATE-005':'Ephemeral and temporary fallbacks plus cleanup exist; configurable fallback delay and complete capability acceptance remain open.',
@@ -55,7 +67,7 @@ for(const path of ['src/telegram-trial-acceptance.ts','tests/sqlite-readonly-rej
 for(const path of ['src/subscription-channel-identity.ts','tests/subscription-channel-identity.test.ts'])hashed.set(path,sha(await readFile(resolve(root,path))));
 for(const entry of Object.values(evidence))for(const path of [...entry.code,...entry.ui,...entry.tests])hashed.set(path,sha(await readFile(resolve(root,path))));
 const requirements=registry.requirements.map(r=>{
- const family=r.id.startsWith('GATE-')?'GATE':r.id.startsWith('RULELAW-')?'RULELAW':null;
+ const family=r.id.startsWith('GATE-')?'GATE':r.id.startsWith('RULELAW-')?'RULELAW':r.id.startsWith('VERIFY-')||r.id==='JOIN-003'||r.id==='LIFECYCLE-001'?'VERIFY':null;
  const actionsCheck=additionalChecks.find(c=>c.path==='artifacts/section-closure/rule-actions-tests.log'),languageCheck=additionalChecks.find(c=>c.path==='artifacts/section-closure/rule-languages-tests.log'),explanationCheck=additionalChecks.find(c=>c.path==='artifacts/section-closure/rule-explanation-tests.log'),warningPresentationCheck=additionalChecks.find(c=>c.path==='artifacts/section-closure/rule-warning-presentation-tests.log');
  const passing=(check,min)=>check?.counts.tests>=min&&check.counts.fail===0&&check.counts.cancelled===0&&check.counts.skipped===0;
  const implemented=r.id==='RULELAW-003'&&passing(actionsCheck,173)||r.id==='RULELAW-001'&&passing(languageCheck,185)||r.id==='RULELAW-005'&&passing(explanationCheck,213)||r.id==='RULELAW-002'&&passing(warningPresentationCheck,217);
