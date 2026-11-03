@@ -1,4 +1,5 @@
 import {CaptchaEnforcement} from './captcha-enforcement.js';
+import {CaptchaRuleGate} from './captcha-rules.js';
 import {TelegramRuleActions} from './telegram-rule-actions.js';
 import {validProtectionUsername} from './protection-rules.js';
 import {TelegramAdminRoomLinks} from './telegram-admin-room-links.js';
@@ -435,16 +436,19 @@ export class TelegramUpdateApplication {
   private delivery(event:Event){return event.messageId!==undefined&&event.sentAt!==undefined?{messageId:event.messageId,sentAt:event.sentAt}:undefined;}
   private async process(event:Event):Promise<ProcessedReply> {
     if(event.pinnedMessageId!==undefined){if(!event.edited&&this.opts.messageMetadata)await this.opts.messageMetadata.observePinned(event.chatId,event.pinnedMessageId);return {status:'IGNORED',reason:'PIN_OBSERVATION_ONLY'};}
-    const captcha=new CaptchaService(this.opts.store,this.opts.policy,this.opts.membership,this.clock),captchaEnforcement=new CaptchaEnforcement(this.opts.store,this.opts.policy,captcha,this.opts.moderation,this.opts.moderationRights,this.clock);
+    const captcha=new CaptchaService(this.opts.store,this.opts.policy,this.opts.membership,this.clock),captchaEnforcement=new CaptchaEnforcement(this.opts.store,this.opts.policy,captcha,this.opts.moderation,this.opts.moderationRights,this.clock),captchaRules=new CaptchaRuleGate(this.opts.store,this.opts.policy,captcha,this.opts.membership,this.clock);
+    if(event.kind==='private'&&!event.callbackData?.startsWith('cr:1:')&&!event.callbackData?.startsWith('cp:1:')&&(event.callbackData!==undefined||!['/start','/captcha'].includes(event.text)))await captchaRules.cancel(event.actorId);
     if(event.kind==='private'&&this.opts.policy.isOwner(event.actorId)){
      const owner=new TelegramCaptchaOwner(this.opts.store,this.opts.policy,captcha,this.clock,captchaEnforcement);
      if(event.callbackData==='mi:1:i:04:07'||event.callbackData==='mi:1:i:04:10'||event.callbackData?.startsWith('ca:1:')){const view=await owner.handle(event.actorId,event.callbackData);return view?{status:'APPLIED',reason:'CAPTCHA_OWNER_VIEW',adminUIAccess:view.access,plan:this.plan(event.actorId,view.text,undefined,view.keyboard,event.callbackMessageId)}:{status:'DENIED',reason:'CAPTCHA_OWNER_UNAVAILABLE'};}
      await owner.cancel(event.actorId);
     }
-    if(event.kind==='private'&&!event.edited&&!event.forwarded&&(event.callbackData?.startsWith('cp:1:')||!event.callbackData&&['/start','/captcha'].includes(event.text))){
-     const view=await captcha.view(event.actorId,event.callbackData),settled=view||event.callbackData===undefined?await captchaEnforcement.releaseMember(event.actorId):{attempted:0,pending:0,remaining:0};
+    if(event.kind==='private'&&!event.edited&&!event.forwarded&&(event.callbackData?.startsWith('cp:1:')||event.callbackData?.startsWith('cr:1:')||!event.callbackData&&['/start','/captcha'].includes(event.text))){
+     const rulesCallback=event.callbackData?.startsWith('cr:1:')===true,accepted=rulesCallback?await captchaRules.accept(event.actorId,event.callbackData!):false;if(rulesCallback&&!accepted)return {status:'DENIED',reason:'CAPTCHA_RULES_UNAVAILABLE'};
+     const view=rulesCallback?null:await captcha.view(event.actorId,event.callbackData),valid=accepted||!!view||event.callbackData===undefined,settled=valid?await captchaEnforcement.releaseMember(event.actorId):{attempted:0,pending:0,remaining:0};
+     if(valid)for(const chat of await captchaRules.pendingBatch(event.actorId)){const rulesView=await captchaRules.open(event.actorId,chat);if(rulesView)return {status:'APPLIED',reason:'CAPTCHA_RULES_VIEW',privateGroupAccess:rulesView.verificationAccess,verificationScoped:true,plan:this.plan(event.actorId,rulesView.text,undefined,rulesView.keyboard,event.callbackMessageId)};}
      const pending='تعذر إكمال رفع قيد التحقق آليًا؛ راجع المشرف. لم يُغيَّر أي قيد مستقل.';
-     if(view||settled.attempted>0||settled.pending>0||settled.remaining>0){const screen=view??{text:'✅ اكتملت خطوة CAPTCHA. تبقى القيود والمتطلبات المستقلة حسب شروطها.',keyboard:{inline_keyboard:[[{text:'🏠 الرئيسية',callback_data:'pn:1:h'}]]}};return {status:'APPLIED',reason:'CAPTCHA_CHALLENGE_VIEW',plan:this.plan(event.actorId,screen.text+(settled.pending>0?'\n'+pending:'')+(settled.remaining>0?'\nتوجد مجموعات أخرى لم تُراجع بعد؛ افتح البوت مجددًا.':''),undefined,screen.keyboard,event.callbackMessageId)};}
+     if(view||accepted||settled.attempted>0||settled.pending>0||settled.remaining>0){const screen=view??{text:accepted?'✅ حُفظت موافقتك على القوانين. تبقى القيود والمتطلبات المستقلة حسب شروطها.':'✅ اكتملت خطوة CAPTCHA. تبقى القيود والمتطلبات المستقلة حسب شروطها.',keyboard:{inline_keyboard:[[{text:'🏠 الرئيسية',callback_data:'pn:1:h'}]]}};return {status:'APPLIED',reason:'CAPTCHA_CHALLENGE_VIEW',plan:this.plan(event.actorId,screen.text+(settled.pending>0?'\n'+pending:'')+(settled.remaining>0?'\nتوجد مجموعات أخرى لم تُراجع بعد؛ افتح البوت مجددًا.':''),undefined,screen.keyboard,event.callbackMessageId)};}
      if(event.callbackData?.startsWith('cp:1:')||event.text==='/captcha')return {status:'DENIED',reason:'CAPTCHA_UNAVAILABLE'};
     }
     if(event.kind==='private'&&this.opts.policy.isOwner(event.actorId)){

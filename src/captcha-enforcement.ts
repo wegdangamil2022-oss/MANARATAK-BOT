@@ -4,6 +4,7 @@ import {createHash,randomBytes} from 'node:crypto';
 import type {BotState,BotStore} from './store.js';
 import type {Policy} from './policy.js';
 import {CaptchaService,captchaSource} from './captcha.js';
+import {CaptchaRuleGate} from './captcha-rules.js';
 import type {ModerationService,ModerationResult} from './moderation.js';
 import {TelegramBotApiModerationGateway} from './telegram-moderation-gateway.js';
 const ROOT='captcha:enforcement:';
@@ -11,8 +12,9 @@ const hash=(v:unknown)=>createHash('sha256').update(JSON.stringify(v)).digest('h
 const validTime=(n:number)=>Number.isSafeInteger(n)&&n>=0&&n<=8640000000000000-120000;
 const denied=(reason:string):ModerationResult=>({status:'DENIED',reason});
 export class CaptchaEnforcement{
+ private readonly rules:CaptchaRuleGate;
  constructor(private readonly store:BotStore,private readonly policy:Policy,private readonly captcha:CaptchaService,
-  private readonly moderation:ModerationService|undefined,private readonly probe:{gateway:TelegramBotApiModerationGateway;safety:()=>Promise<boolean>}|undefined,private readonly clock:()=>number){}
+  private readonly moderation:ModerationService|undefined,private readonly probe:{gateway:TelegramBotApiModerationGateway;safety:()=>Promise<boolean>}|undefined,private readonly clock:()=>number){this.rules=new CaptchaRuleGate(store,policy,captcha,async()=> 'UNKNOWN',clock);}
  available():boolean{return !!this.moderation?.supportsSubscriptionEnforcement()&&!!this.probe&&TelegramBotApiModerationGateway.usesOfficialRightsRead(this.probe.gateway)&&TelegramBotApiModerationGateway.usesOfficialTrialGroupRead(this.probe.gateway);}
  standalone(s:BotState,chat:string):boolean{const mode=subscriptionRequirementMode(s,chat);return mode==='NONE'||mode==='PAUSED';}
  #stamp(s:BotState,chat:string):string{return hash([this.policy.ownerId,chat,s.chats.filter(c=>c.id===chat),this.captcha.settings(s,chat),s.subscriptionRequirements.filter(r=>r?.chatId===chat),s.privateFeatures['owner.dashboard'],s.privateSettingsRevision??null]);}
@@ -35,10 +37,10 @@ export class CaptchaEnforcement{
    s.audit.push({...record,updateKey:'captcha:enforcement-change:'+randomBytes(18).toString('base64url'),reason:'CAPTCHA_ENFORCEMENT_CONSENT:'+hash(record)});return true;
   });
  }
- #source(s:BotState,chat:string,member:string){const consent=this.consent(s,chat),challenge=this.captcha.challenge(s,chat,member);if(!consent?.enabled||!challenge)return null;const ownership=s.audit.filter(a=>a.updateKey==='captcha:enforced:'+challenge.reference);let operationId:string|undefined;try{operationId=JSON.parse(ownership[0]?.reason??'null')?.operationId;}catch{}return {consent,challenge,epoch:this.epoch(s,chat),status:this.captcha.status(s,chat,member),ownership,attempts:s.moderationOperations.filter(o=>o.id===operationId)};}
+ #source(s:BotState,chat:string,member:string){const consent=this.consent(s,chat),challenge=this.captcha.challenge(s,chat,member);if(!consent?.enabled||!challenge)return null;const ownership=s.audit.filter(a=>a.updateKey==='captcha:enforced:'+challenge.reference);let operationId:string|undefined;try{operationId=JSON.parse(ownership[0]?.reason??'null')?.operationId;}catch{}return {consent,challenge,epoch:this.epoch(s,chat),status:this.captcha.status(s,chat,member),rulesStatus:this.rules.status(s,chat,member),rulesEpoch:this.rules.epoch(s,chat),ownership,attempts:s.moderationOperations.filter(o=>o.id===operationId)};}
  async admit(chat:string,member:string,updateKey:string,sentAt:number):Promise<ModerationResult>{
   const now=this.clock();if(!this.available()||!validTime(now)||!validTime(sentAt)||now<sentAt||now-sentAt>30000)return denied('CAPTCHA_ENFORCEMENT_UNAVAILABLE');
-  const before=await this.store.snapshot(),source=this.#source(before,chat,member);if(!source||source.status!=='PENDING'||source.challenge.issued<source.consent.at||sentAt<source.consent.at||!/^b3-webhook:[A-Za-z0-9_-]{1,80}:[0-9]{1,16}$/u.test(updateKey))return denied('CAPTCHA_ENFORCEMENT_NOT_APPROVED');
+  const before=await this.store.snapshot(),source=this.#source(before,chat,member);if(!source||source.status!=='PENDING'||source.rulesStatus==='UNAVAILABLE'||source.challenge.issued<source.consent.at||sentAt<source.consent.at||!/^b3-webhook:[A-Za-z0-9_-]{1,80}:[0-9]{1,16}$/u.test(updateKey))return denied('CAPTCHA_ENFORCEMENT_NOT_APPROVED');
   const observed=before.audit.filter(a=>a.updateKey==='captcha:join-issued:'+source.challenge.nonce),proof=observed[0];
   if(observed.length!==1||!proof||proof.actorId!==member||proof.decision!=='ALLOW'||proof.at!==source.challenge.issued||proof.policyVersion!==this.policy.chatRevision(before,chat)||proof.reason!=='CAPTCHA_JOIN_OBSERVED:'+hash([chat,member,source.challenge.nonce,updateKey,sentAt,before.audit.filter(a=>a.updateKey===ROOT+chat)]))return denied('CAPTCHA_JOIN_SOURCE_UNAVAILABLE');
   // Do not overwrite an existing independent or unresolved restriction.
@@ -51,6 +53,7 @@ export class CaptchaEnforcement{
  async release(chat:string,member:string):Promise<ModerationResult>{
   if(!this.available())return denied('CAPTCHA_ENFORCEMENT_UNAVAILABLE');const now=this.clock(),before=await this.store.snapshot(),source=this.#source(before,chat,member);
   if(!validTime(now)||!source||source.status!=='PASSED')return denied('CAPTCHA_NOT_VERIFIED');
+  if(source.rulesStatus!=='NOT_REQUIRED'&&source.rulesStatus!=='ACCEPTED')return denied('CAPTCHA_RULES_NOT_ACCEPTED');
   const receipts=before.audit.filter(a=>a.updateKey==='captcha:enforced:'+source.challenge.reference),receipt=receipts[0];
   if(receipts.length!==1||!receipt||receipt.actorId!==this.policy.ownerId||receipt.decision!=='ALLOW'||receipt.policyVersion!==this.policy.chatRevision(before,chat)||!validTime(receipt.at)||receipt.at>now)return denied('CAPTCHA_ENFORCEMENT_RECEIPT_UNAVAILABLE');
   try{const v=JSON.parse(receipt.reason),ops=before.moderationOperations.filter(o=>o.id===v.operationId),op=ops[0];if(Object.keys(v).sort().join(',')!=='digest,operationId,reference'||v.reference!==source.challenge.reference||ops.length!==1||!op||op.chatId!==chat||op.memberId!==member||op.actorId!==this.policy.ownerId||op.kind!=='MUTE'||op.status!=='CONFIRMED'||op.attemptGateway!=='TELEGRAM_API'||op.baselineMode!=='INHERIT_GROUP_DEFAULTS'||op.policyVersion!==receipt.policyVersion||receipt.at<op.createdAt||v.digest!==retirementOperationDigest(op))return denied('CAPTCHA_ENFORCEMENT_RECEIPT_INVALID');}catch{return denied('CAPTCHA_ENFORCEMENT_RECEIPT_INVALID');}
