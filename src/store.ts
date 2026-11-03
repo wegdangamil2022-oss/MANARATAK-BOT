@@ -1,6 +1,7 @@
 import {isValidFloodWindow,type FloodWindow} from './protection-flood.js';
 import {validGroupNetworks,type GroupNetwork} from './group-network-model.js';
 import {validCommunityFolders,type CommunityFolder} from './community-folder-model.js';
+import {validCommunityState,type CommunityAutomationState} from './phase4-community-model.js';
 import {validCommunityMessageMetadata,type CommunityMessageReceipt} from './community-message-receipt.js';
 import {validAdminUIAccess,type AdminUIAccess} from './protection-ui-access.js';
 import {validStudioState,type StudioState} from './button-studio-model.js';
@@ -158,6 +159,8 @@ export interface B6BudgetAttempt {
   operatorReview?:{reviewedBy:string;reviewedAt:number};
 }
 export interface BotState {
+  /** Opt-in phase 4 group interactions; no active rules in legacy states. */
+  phase4Community?:CommunityAutomationState;
   communityFolders?:CommunityFolder[];
   buttonStudio?:StudioState;
   /** Local owner network folders; never evidence of Telegram rights. */
@@ -245,6 +248,7 @@ export class BotStore {
       previous.purgeJobs = [];
     }
     if (previous.schemaVersion !== 8 ||
+      (previous.phase4Community!==undefined&&!validCommunityState(previous.phase4Community))||
       (previous.groupNetworks!==undefined&&!validGroupNetworks(previous.groupNetworks))||
       (previous.communityFolders!==undefined&&!validCommunityFolders(previous.communityFolders))||
       (previous.privateSettingsRevision!==undefined&&(typeof previous.privateSettingsRevision!=='number'||!Number.isSafeInteger(previous.privateSettingsRevision)||previous.privateSettingsRevision<0||previous.privateSettingsRevision>=Number.MAX_SAFE_INTEGER))||
