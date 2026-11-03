@@ -41,7 +41,7 @@ export class TelegramCaptchaOwner{
    }
    // Confirm intent is a separate screen, never the setting-selection button.
    if(selected.step.kind!=='confirm'&&step.kind==='confirm')return null;
-   if(step.kind==='groups'||step.kind==='edit')rows.push([b('🧑 مراجعة الحالات',{kind:'queue',page:0,group:'',settings:defaults})]);
+   if(groups.length>0&&(step.kind==='groups'||step.kind==='edit'))rows.push([b('🧑 مراجعة الحالات',{kind:'queue',page:0,group:'',settings:defaults})]);
    rows.push([{text:'↩️ قسم الانضمام',callback_data:'mi:1:s:04:0'},{text:'🏠 لوحة المالك',callback_data:'mi:1:h'}]);const access=protectionUIEpoch(s,this.policy,actor,now);return access?{text,keyboard:{inline_keyboard:rows},access:{actorId:actor,epoch:access,expiresAt:now+120000}}:null;
   });
  }
