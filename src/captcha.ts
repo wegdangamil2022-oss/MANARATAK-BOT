@@ -55,6 +55,10 @@ export class CaptchaService{
   }
   s.wizards=s.wizards.filter(w=>!removable.has(w));return removable.size;
  }
+ reviewCases(s:BotState,actor:string):{nonce:string;group:string;actor:string;deadline:number;tries:number;round:number;phase:'FAILED'|'EXPIRED'}[]{
+  if(!this.policy.isOwner(actor)||!this.policy.privateFeature(s,'owner.dashboard',actor))return [];
+  return s.wizards.flatMap(w=>{const d=this.#read(s,w,w.userId,true);return d&&d.round===3&&d.phase!=='PASSED'&&(d.phase==='FAILED'||this.clock()>=d.deadline)?[{nonce:d.nonce,group:d.group,actor:w.userId,deadline:d.deadline,tries:d.tries,round:d.round,phase:(d.phase==='FAILED'?'FAILED':'EXPIRED') as 'FAILED'|'EXPIRED'}]:[];}).sort((a,b)=>a.deadline-b.deadline||a.nonce.localeCompare(b.nonce));
+ }
  async cleanup():Promise<number>{return this.store.transaction(s=>this.#cleanup(s));}
  async observe(chat:string,members:string[],updateKey:string,sentAt:number):Promise<number>{
   if(!group(chat)||!Array.isArray(members)||members.length>100||new Set(members).size!==members.length||!members.every(user)||!/^b3-webhook:[A-Za-z0-9_-]{1,80}:[0-9]{1,16}$/u.test(updateKey)||!time(sentAt))return 0;
