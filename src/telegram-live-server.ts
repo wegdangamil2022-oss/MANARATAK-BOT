@@ -1,4 +1,5 @@
 import {GroupProtectionPolicyService} from './group-protection-policy.js';
+import {Phase4CommunityService} from './phase4-community.js';
 import {startProtectionMaintenance} from './protection-maintenance.js';
 import {createServer,type Server} from 'node:http';
 import {lstat,realpath} from 'node:fs/promises';
@@ -177,7 +178,8 @@ export async function createLiveTelegramServer(config:LiveTelegramConfig,
   botId:check.botId,botUsername:check.botUsername,
   membership:(chatId,actorId)=>membership.verifyMembership(chatId,actorId),subscription,
   documentDownload:new TelegramBotApiDocumentDownloader(check.token,request,safetyGate),
-  moderationSafetyFile:check.safetySwitchFile,ownerMenuMode:'inline',studentMenuMode:'inline'});
+  moderationSafetyFile:check.safetySwitchFile,ownerMenuMode:'inline',studentMenuMode:'inline',
+  community:new Phase4CommunityService(store,policy)});
  const dispatcher=new TelegramReplyDispatcher(store,policy,
   new TelegramBotApiTextSender(check.token,request),Date.now,safetyGate,subscription,
   (chatId,actorId)=>membership.verifyMembership(chatId,actorId));
