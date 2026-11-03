@@ -1342,7 +1342,8 @@ function respond(res:ServerResponse,status:number,body:Record<string,unknown>):v
 export function telegramWebhookListener(app:TelegramUpdateApplication,secretToken:string,
  outbound?:TelegramReplyDispatcher,ingressOptions:IngressOptions={},
  safetyGate?:()=>Promise<boolean>,
- callbackAcker?:{answer(callbackQueryId:string,outcome?:TelegramResult['status']):Promise<void>}):RequestListener {
+ callbackAcker?:{answer(callbackQueryId:string,outcome?:TelegramResult['status']):Promise<void>},
+ phase4Handler?:{handle(payload:unknown,primary:TelegramResult):Promise<unknown>}):RequestListener {
   if(!/^[A-Za-z0-9_-]{32,256}$/.test(secretToken))throw Error('INVALID_WEBHOOK_SECRET');
   const guard=new BoundedIngress(ingressOptions);
   return (req,res)=>{
@@ -1379,6 +1380,11 @@ export function telegramWebhookListener(app:TelegramUpdateApplication,secretToke
       if(callbackAcker&&result.callbackQueryId)
        await callbackAcker.answer(result.callbackQueryId,result.status);
       if(outbound&&result.plan&&result.deliveryKey)await outbound.dispatch(result.deliveryKey);
+      // Optional phase-four engagement only after the main handler and ingress gates.
+      // A failed engagement must not replay a completed main moderation/FAQ reply.
+      if(phase4Handler&&!result.plan){
+       try{await phase4Handler.handle(payload,result);}catch{/* phase-four queue remains inspectable; no automatic retry */}
+      }
       // Keep the reply body minimal: no user text, provider errors or Bot API secret.
       respond(res,result.status==='DENIED'&&result.reason==='INVALID_UPDATE_ID'?422:200,{ok:true,status:result.status});
       }finally{release();}
