@@ -2,7 +2,7 @@ import {createHash} from 'node:crypto';
 import type {BotState,BotStore} from './store.js';
 import type {Policy} from './policy.js';
 import type {ModerationService} from './moderation.js';
-import type {TelegramReplySender,TelegramSendResult} from './telegram-replies.js';
+import type {TelegramReplySender,TelegramTemporaryPrivateResult} from './telegram-replies.js';
 import {groupRuleDescription} from './group-rules-model.js';
 import {ruleReference,exemptFromRule} from './group-rule-exemption-model.js';
 import {ruleActionAllowed,ruleWarningPolicy} from './group-rule-warning-policy.js';
@@ -40,7 +40,7 @@ export class RuleNoticeDispatcher{
  private eligible(s:BotState,n:RuleNotice,now:number):boolean{const p=ruleWarningPolicy(s,n.chat,n.reference,now);return (p.status==='CONFIGURED'?p.policy.revision:p.status==='NONE'?0:-1)===n.policyRevision&&Number.isSafeInteger(now)&&now>=n.at&&now<n.at+120000&&now<n.expiresAt&&n.version===this.policy.chatRevision(s,n.chat)&&this.policy.canUseChat(s,n.chat,'moderation')&&this.policy.has(s,n.actor,'chat.manage',n.chat,now)&&(!this.policy.isOwner(n.actor)||this.policy.privateFeature(s,'owner.dashboard',n.actor))&&n.member!==n.actor&&n.member!==this.policy.ownerId&&!this.policy.has(s,n.member,'chat.manage',n.chat,now)&&!!groupRuleDescription(s,n.chat,n.reference,true)&&!exemptFromRule(s,n.chat,n.member,n.reference,now)&&ruleActionAllowed(s,n.chat,n.reference,'notice',now)&&ruleNotices(s,now).some(r=>r.id===n.id&&r.delivery==='PENDING'&&ruleNoticeDigest(r)===ruleNoticeDigest(n));}
  private started(s:BotState,n:RuleNotice,now:number):boolean{const rows=s.audit.filter(a=>a.updateKey===n.id+':started'),a=rows[0];return rows.length===1&&a?.actorId===n.actor&&a.decision==='ALLOW'&&a.reason==='RULE_NOTICE_STARTED'&&a.policyVersion===n.version&&Number.isSafeInteger(a.at)&&a.at>=n.at&&now>=a.at&&now<a.at+30000&&!s.audit.some(a=>a.updateKey===n.id+':outcome');}
  async drain(limit=5):Promise<number>{
-  if(!Number.isSafeInteger(limit)||limit<1||limit>10)throw Error('RULE_NOTICE_LIMIT_INVALID');let sent=0;
+  if(!Number.isSafeInteger(limit)||limit<1||limit>10)throw Error('RULE_NOTICE_LIMIT_INVALID');if(!this.sender.sendTemporaryPrivate)return 0;let sent=0;
   for(let i=0;i<limit;i++){
    if(!await this.safety())break;
    const job=await this.store.transaction(s=>{const now=this.clock();if(!Number.isSafeInteger(now)||now<0)return null;
@@ -51,10 +51,15 @@ export class RuleNoticeDispatcher{
     s.audit.push({actorId:n.actor,updateKey:n.id+':started',decision:'ALLOW',reason:'RULE_NOTICE_STARTED',policyVersion:n.version,at:now});return n;
    });if(!job)break;if(job==='SKIP')continue;
    const allowed=await this.service.canReviewCommand(job.actor,job.chat,job.member),running=await this.safety(),s=await this.store.snapshot(),now=this.clock();
-   if(!allowed||!running||!this.eligible(s,job,now)||!this.started(s,job,now)){await this.finish(job,'CANCELLED');continue;}
-   const description=groupRuleDescription(s,job.chat,job.reference,true)!.replace(/[&<>]/gu,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]!));let result:TelegramSendResult;
-   try{result=await this.sender.send({chatId:job.member,parseMode:'HTML',text:'<b>تنبيه أول بخصوص قوانين المجموعة</b>\nالمجموعة: '+job.chat+'\n'+description+'\nمرجع الرسالة: '+job.reference+'\nهذا تنبيه خاص دون إنذار محتسب أو تقييد. راجع الفقرة قبل المشاركة مجددًا.'});}catch{result={status:'UNKNOWN_OUTCOME'};}
-   await this.finish(job,result.status==='CONFIRMED'&&Number.isSafeInteger(result.messageId)&&result.messageId>0?'CONFIRMED':result.status==='FAILED_CONFIRMED'?'FAILED_CONFIRMED':'UNKNOWN_OUTCOME',result.status==='CONFIRMED'?result.messageId:undefined);sent++;
+   if(!allowed||!running||!this.eligible(s,job,now)||!this.started(s,job,now)){await this.store.transaction(state=>this.record(state,job,'CANCELLED',this.clock()));continue;}
+   const sourceDescription=groupRuleDescription(s,job.chat,job.reference,true)!,description=sourceDescription.replace(/[&<>]/gu,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]!));let result:TelegramTemporaryPrivateResult,authorizedAtSend=false;
+   try{result=await this.sender.sendTemporaryPrivate({chatId:job.member,parseMode:'HTML',text:'<b>تنبيه أول بخصوص قوانين المجموعة</b>\nالمجموعة: '+job.chat+'\n'+description+'\nمرجع الرسالة: '+job.reference+'\nهذا تنبيه خاص دون إنذار محتسب أو تقييد. راجع الفقرة قبل المشاركة مجددًا.'},async()=>{authorizedAtSend=false;
+    if(!await this.safety()||!await this.service.canReviewCommand(job.actor,job.chat,job.member)||!await this.safety())return false;
+    const current=await this.store.snapshot(),at=this.clock();if(!this.eligible(current,job,at)||!this.started(current,job,at)||groupRuleDescription(current,job.chat,job.reference,true)!==sourceDescription||!await this.safety())return false;
+    const final=await this.store.snapshot(),finalAt=this.clock();const ok=this.eligible(final,job,finalAt)&&this.started(final,job,finalAt)&&groupRuleDescription(final,job.chat,job.reference,true)===sourceDescription;if(ok)authorizedAtSend=true;return ok;
+   });}catch{result={status:'UNKNOWN_OUTCOME'};}
+   if(result.status==='FAILED_CONFIRMED'&&!authorizedAtSend){await this.store.transaction(state=>this.record(state,job,'CANCELLED',this.clock()));continue;}
+   await this.finish(job,result.status==='CONFIRMED'&&authorizedAtSend&&Number.isSafeInteger(result.messageId)&&result.messageId>0?'CONFIRMED':authorizedAtSend&&(result.status==='FAILED_CONFIRMED'||result.status==='PRIVATE_UNAVAILABLE')?'FAILED_CONFIRMED':'UNKNOWN_OUTCOME',result.status==='CONFIRMED'?result.messageId:undefined);sent++;
   }return sent;
  }
  private record(s:BotState,n:RuleNotice,status:RuleNotice['delivery'],now:number):void{if(s.audit.some(a=>a.updateKey===n.id+':outcome'))return;s.audit.push({actorId:n.actor,updateKey:n.id+':outcome',decision:'NOOP',reason:'RULE_NOTICE_'+status,policyVersion:n.version,at:Number.isSafeInteger(now)&&now>=n.at?now:n.at});}
