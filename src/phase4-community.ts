@@ -6,7 +6,7 @@ import {defaultCommunityConfig,emptyCommunityState,validCommunityConfig,
  type CommunityConfig,type CommunityInput,type CommunityDraft,type CommunityDraftKind,
  type ReplyMatch,type CommunityAutomationState,type CommunityEventKind} from './phase4-community-model.js';
 
-export type DraftRequest={kind:CommunityDraftKind;text?:string;trigger?:string;match?:ReplyMatch;ruleId?:string;topicId?:number};
+export type DraftRequest={kind:CommunityDraftKind;text?:string;trigger?:string;match?:ReplyMatch;ruleId?:string;topicId?:number;cooldownMs?:number};
 export interface CommunitySendProposal{
  readonly text:string;readonly chatId:string;readonly actorId:string;
  readonly kind:CommunityEventKind;readonly policyVersion:number;readonly topicId?:number;
@@ -63,8 +63,14 @@ export class Phase4CommunityService{
    if(kind==='REPLY_ADD'&&(typeof request.trigger!=='string'||!request.trigger.trim()||
        !['EXACT','WORD','CONTAINS','COMMAND'].includes(request.match??'')))throw Error('COMMUNITY_TRIGGER_REQUIRED');
    if(kind==='REPLY_ADD'&&current.rules.length>=30)throw Error('COMMUNITY_RULE_CAPACITY');
-   if(kind==='REPLY_REMOVE'&&(!request.ruleId||!current.rules.some(r=>r.id===request.ruleId)))
+   if(['REPLY_REMOVE','REPLY_ENABLE','REPLY_DISABLE','REPLY_COOLDOWN'].includes(kind)&&
+      (!request.ruleId||!current.rules.some(r=>r.id===request.ruleId)))
     throw Error('COMMUNITY_RULE_MISSING');
+   if(kind==='REPLY_COOLDOWN'&&(!Number.isInteger(request.cooldownMs)||
+      request.cooldownMs===undefined||request.cooldownMs<1000||request.cooldownMs>86400000))
+    throw Error('COMMUNITY_COOLDOWN_INVALID');
+   if(kind==='REPLY_ADD'&&request.match==='COMMAND'&&!/^m_[a-z][a-z0-9_]{0,23}$/u.test(request.trigger??''))
+    throw Error('COMMUNITY_COMMAND_INVALID');
    const id=randomBytes(12).toString('hex');
    const draft:CommunityDraft={id,actorId,chatId,chatVersion,configVersion:current.version,kind,
     createdAt:now,expiresAt:now+120000,
@@ -72,7 +78,8 @@ export class Phase4CommunityService{
     ...(request.trigger!==undefined?{trigger:request.trigger}:{}),
     ...(request.match!==undefined?{match:request.match}:{}),
     ...(request.ruleId!==undefined?{ruleId:request.ruleId}:{}),
-    ...(request.topicId!==undefined?{topicId:request.topicId}:{})};
+    ...(request.topicId!==undefined?{topicId:request.topicId}:{}),
+    ...(request.cooldownMs!==undefined?{cooldownMs:request.cooldownMs}:{})};
    s.phase4Community??=emptyCommunityState();
    const st=s.phase4Community;
    st.drafts=st.drafts.filter(d=>d.actorId!==actorId&&d.expiresAt>now).slice(-90);
@@ -113,6 +120,9 @@ export class Phase4CommunityService{
     case 'REPLIES_ON':config.repliesEnabled=true;break;
     case 'REPLIES_OFF':config.repliesEnabled=false;break;
     case 'REPLY_REMOVE':config.rules=config.rules.filter(r=>r.id!==draft.ruleId);break;
+    case 'REPLY_ENABLE':config.rules.find(r=>r.id===draft.ruleId)!.enabled=true;break;
+    case 'REPLY_DISABLE':config.rules.find(r=>r.id===draft.ruleId)!.enabled=false;break;
+    case 'REPLY_COOLDOWN':config.rules.find(r=>r.id===draft.ruleId)!.cooldownMs=draft.cooldownMs!;break;
     case 'REPLY_ADD':{
      const same=config.rules.some(r=>r.match===draft.match&&r.topicId===draft.topicId&&
        normalizeCommunityMatch(r.trigger)===normalizeCommunityMatch(draft.trigger!));
@@ -212,6 +222,10 @@ export class Phase4CommunityService{
    return '<b>معاينة قالب '+(draft.kind==='WELCOME_TEXT'?'الترحيب':'الوداع')+
     '</b>\n'+clean(draft.text??'');
   if(draft.kind==='REPLY_REMOVE')return 'مراجعة حذف القاعدة: '+clean(draft.ruleId??'');
+  if(draft.kind==='REPLY_ENABLE'||draft.kind==='REPLY_DISABLE')
+   return 'مراجعة '+(draft.kind==='REPLY_ENABLE'?'تفعيل':'إيقاف')+' القاعدة: '+clean(draft.ruleId??'');
+  if(draft.kind==='REPLY_COOLDOWN')return 'مراجعة فاصل الرد للقاعدة '+clean(draft.ruleId??'')+
+    ': '+(draft.cooldownMs!/1000)+' ثانية';
   return 'معاينة التغيير: '+draft.kind;
  }
 }
