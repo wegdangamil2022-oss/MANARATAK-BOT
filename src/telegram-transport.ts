@@ -76,6 +76,8 @@ import {renderOwnerPurgeQueue} from './telegram-inline-purge.js';
 import {TelegramPurgeEditor} from './telegram-purge-editor.js';
 import {TelegramOwnerRights} from './telegram-owner-rights.js';
 import {TelegramAdminRoles} from './telegram-admin-roles.js';
+import {CaptchaService} from './captcha.js';
+import {TelegramCaptchaOwner} from './telegram-captcha-owner.js';
 import type {TelegramAdminRoleGateway} from './telegram-admin-role-gateway.js';
 import type {TelegramBotApiModerationGateway} from './telegram-moderation-gateway.js';
 import {renderOwnerModerationRateStatus} from './telegram-inline-moderation-rate-status.js';
@@ -432,6 +434,13 @@ export class TelegramUpdateApplication {
   private delivery(event:Event){return event.messageId!==undefined&&event.sentAt!==undefined?{messageId:event.messageId,sentAt:event.sentAt}:undefined;}
   private async process(event:Event):Promise<ProcessedReply> {
     if(event.pinnedMessageId!==undefined){if(!event.edited&&this.opts.messageMetadata)await this.opts.messageMetadata.observePinned(event.chatId,event.pinnedMessageId);return {status:'IGNORED',reason:'PIN_OBSERVATION_ONLY'};}
+    const captcha=new CaptchaService(this.opts.store,this.opts.policy,this.opts.membership,this.clock);
+    if(event.kind==='private'&&this.opts.policy.isOwner(event.actorId)){
+     const owner=new TelegramCaptchaOwner(this.opts.store,this.opts.policy,captcha,this.clock);
+     if(event.callbackData==='mi:1:i:04:07'||event.callbackData?.startsWith('ca:1:')){const view=await owner.handle(event.actorId,event.callbackData);return view?{status:'APPLIED',reason:'CAPTCHA_OWNER_VIEW',adminUIAccess:view.access,plan:this.plan(event.actorId,view.text,undefined,view.keyboard,event.callbackMessageId)}:{status:'DENIED',reason:'CAPTCHA_OWNER_UNAVAILABLE'};}
+     await owner.cancel(event.actorId);
+    }
+    if(event.kind==='private'&&!event.edited&&!event.forwarded&&(event.callbackData?.startsWith('cp:1:')||!event.callbackData&&['/start','/captcha'].includes(event.text))){const view=await captcha.view(event.actorId,event.callbackData);if(view)return {status:'APPLIED',reason:'CAPTCHA_CHALLENGE_VIEW',plan:this.plan(event.actorId,view.text,undefined,view.keyboard,event.callbackMessageId)};if(event.callbackData?.startsWith('cp:1:')||event.text==='/captcha')return {status:'DENIED',reason:'CAPTCHA_UNAVAILABLE'};}
     if(event.kind==='private'&&this.opts.policy.isOwner(event.actorId)){
      const roles=new TelegramAdminRoles(this.opts.store,this.opts.policy,this.opts.adminRoles,this.clock);
      if(event.callbackData?.startsWith('ar:1:')){const view=await roles.handle(event.actorId,event.callbackData);return view?{status:'APPLIED',reason:'ADMIN_ROLE_VIEW',adminUIAccess:view.access,plan:this.plan(event.chatId,view.text,undefined,view.keyboard,event.callbackMessageId)}:{status:'DENIED',reason:'ADMIN_ROLE_UNAVAILABLE'};}
@@ -446,6 +455,7 @@ export class TelegramUpdateApplication {
     if(this.opts.moderation&&event.kind==='private'&&(event.callbackData!==undefined?!event.callbackData.startsWith('mc:1:'):event.text.startsWith('/')||(Object.values(menuLabels) as string[]).includes(event.text)))await cancelModerationCommandReview(this.opts.store,event.actorId);
     if(event.joins){
      if(event.kind!=='group'||event.edited||event.forwarded||event.sentAt===undefined)return {status:'DENIED',reason:'INVALID_GROUP_JOINS'};
+     await captcha.observe(event.chatId,event.joins,'b3-webhook:'+this.opts.botId+':'+event.updateId,event.sentAt);
      if(this.opts.subscription)for(const member of event.joins)await this.opts.subscription.observeMember(event.chatId,member,event.sentAt);
      const status=await observeProtectionJoins(this.opts.store,this.opts.policy,this.clock,this.opts.protectionEnforcer,event.chatId,event.joins,event.sentAt,'b3-webhook:'+this.opts.botId+':'+event.updateId);
      return {status:'IGNORED',reason:'PROTECTION_JOINS_'+status};
