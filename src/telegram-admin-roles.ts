@@ -51,13 +51,15 @@ export class TelegramAdminRoles{
   const active=async()=>{const state=await this.store.snapshot(),session=this.#session(state,actor),rows=state.audit.filter(a=>a.updateKey===attemptKey(claimed));return !!session&&JSON.stringify(session.data)===JSON.stringify(claimed)&&(!confirm||rows.length===1&&rows[0]!.reason==='ADMIN_ROLE_STARTED');};
   const plan=await this.gateway.prepare(claimed.group,claimed.target!,claimed.role!,active);
   if(!confirm){
+   if(!await active())return null;
    if(!plan){await this.store.transaction(s=>{const w=s.wizards.find(w=>w.key===PREFIX+actor);if(w?.flow===PREFIX+JSON.stringify(claimed))w.status='CANCELLED';});return this.#screen(actor,'تعذر اعتماد المعاينة: تحقق من عضوية الشخص، وإمكانية تعديل المشرف، وصلاحيات البوت. لم يُرسل تغيير.');}
    const saved=await this.store.transaction(s=>{const session=this.#session(s,actor);if(!session||JSON.stringify(session.data)!==JSON.stringify(claimed))return false;const d=session.data;d.phase='CONFIRM';d.baseline=plan.baseline;s.wizards.find(w=>w.key===PREFIX+actor)!.flow=PREFIX+JSON.stringify(d);return true;});
    return saved?this.#screen(actor,'<b>تأكيد تغيير مشرف Telegram</b>\nالمجموعة: '+claimed.group+'\nالعضو: '+claimed.target+'\nالإجراء: '+label(claimed.role!)+'\nلن تُمنح صلاحية ترقية مشرفين. التأكيد صالح لمدة دقيقتين من بدء الطلب؛ الرجوع يلغي الطلب.',[[{text:'✅ تأكيد التنفيذ مرة واحدة',callback_data:'ar:1:c:'+nonce}]]):null;
   }
   let outcome:'DENIED'|'CONFIRMED'|'UNKNOWN_OUTCOME'='DENIED';
   try{if(plan&&plan.baseline===claimed.baseline&&await active())outcome=await this.gateway.execute(plan,active);}catch{outcome='UNKNOWN_OUTCOME';}
+  const canDisplay=await active();
   await this.store.transaction(s=>{const rows=s.audit.filter(a=>a.updateKey===attemptKey(claimed));if(rows.length===1&&rows[0]!.reason==='ADMIN_ROLE_STARTED'){rows[0]!.reason='ADMIN_ROLE_'+outcome;rows[0]!.decision=outcome==='CONFIRMED'?'ALLOW':'DENY';}const w=s.wizards.find(w=>w.key===PREFIX+actor);if(w?.flow===PREFIX+JSON.stringify(claimed))w.status='CANCELLED';});
-  return this.#screen(actor,outcome==='CONFIRMED'?'✅ تأكد تنفيذ التغيير بقراءة حالة العضو من Telegram.':outcome==='DENIED'?'لم يُرسل تغيير؛ تغيرت الصلاحيات أو حالة العضو أو انتهى الطلب.':'نتيجة التغيير غير محسومة. افحص Telegram يدويًا؛ لا إعادة تلقائية لهذه المحاولة.');
+  return canDisplay?this.#screen(actor,outcome==='CONFIRMED'?'✅ تأكد تنفيذ التغيير بقراءة حالة العضو من Telegram.':outcome==='DENIED'?'لم يُرسل تغيير؛ تغيرت الصلاحيات أو حالة العضو أو انتهى الطلب.':'نتيجة التغيير غير محسومة. افحص Telegram يدويًا؛ لا إعادة تلقائية لهذه المحاولة.'):null;
  }
 }
