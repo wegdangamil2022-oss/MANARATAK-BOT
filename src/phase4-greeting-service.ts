@@ -135,7 +135,7 @@ export class Phase4GreetingService {
   });
   if(!reserved)return {status:'NOT_FOUND'};
   if('done' in reserved){
-   if(reserved.done==='QUEUED'||reserved.done==='SENDING')return {status:'NOT_READY'};
+   if(reserved.done==='SENDING')return {status:'NOT_READY'};
    return {status:reserved.done==='SENT'?'SENT':reserved.done==='FAILED_CONFIRMED'?'FAILED_CONFIRMED':
     reserved.done==='CANCELLED'?'CANCELLED':reserved.done==='PAUSED'?'PAUSED':'UNKNOWN_OUTCOME'};
   }
