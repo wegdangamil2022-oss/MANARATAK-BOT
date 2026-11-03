@@ -391,7 +391,9 @@ export class TelegramUpdateApplication {
    */
   private async phase4Reply(event:Event):Promise<ProcessedReply|null>{
     if(!this.opts.community||event.kind!=='group'||event.forwarded||event.edited||event.protectionMedia)return null;
-    if(!event.communityKind&&(!event.text||event.text.startsWith('/')))return null;
+    // Only /m_ custom commands may match, enforced by the scoped rule matcher.
+    // Standard Telegram and moderation commands can never match this namespace.
+    if(!event.communityKind&&!event.text)return null;
     const input:CommunityInput={kind:event.communityKind??'TEXT',chatId:event.chatId,
       actorId:event.communityMemberId??event.actorId,
       memberName:event.memberName??'عضو',groupName:event.groupName??'المجموعة',
