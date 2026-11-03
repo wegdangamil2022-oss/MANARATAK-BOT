@@ -179,6 +179,12 @@ export function decideGreeting(s:GreetingSettings,e:InteractionEvent,hist:readon
  if(!template)return reject('INVALID_CONFIG');
  const history=hist.filter(x=>x.result==='SENT_PLANNED'&&x.chatId===s.chatId&&
   x.ruleId===ruleId&&x.at<=e.at);
+ // Hard global anti-flood fuse applies even when a rule's configured cooldown is zero.
+ // A group can stage at most 12 automatic replies/minute and one actor at most 3.
+ const oneMinute=hist.filter(x=>x.result==='SENT_PLANNED'&&x.chatId===s.chatId&&
+  x.at>=e.at-60_000&&x.at<=e.at);
+ if(oneMinute.length>=12||oneMinute.filter(x=>x.actorId===e.actorId).length>=3)
+  return reject('RATE_LIMIT',ruleId);
  if(cooldownUser>0&&history.some(x=>x.actorId===e.actorId&&e.at-x.at<cooldownUser))
   return reject('RATE_LIMIT',ruleId);
  if(cooldownTopic>0&&history.some(x=>x.topicId===e.topicId&&e.at-x.at<cooldownTopic))
