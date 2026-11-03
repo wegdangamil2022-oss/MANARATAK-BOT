@@ -1,3 +1,4 @@
+import {moderationEvidenceMatches,validReasonRetirement,retirementOperationDigest,REASON_RETIREMENT} from './moderation-reason-retirement.js';
 import {exemptFromRule} from './group-rule-exemption-model.js';
 import {warningActive,ruleWarningPolicy,paragraphWarningCount} from './group-rule-warning-policy.js';
 import {enqueueAdminRoomWarningNotice,enqueueAdminRoomOperationNotice,enqueueAdminRoomRightsFailure} from './admin-room-notices.js';
@@ -213,14 +214,14 @@ export class ModerationService {
     if(reasons.length!==1||reasons[0]!.source!==reasonSource||reasons[0]!.reference!==reference||reasons[0]!.kind!==kind)return null;
     const ops=s.moderationOperations.filter(o=>byTarget(o,chat,member)&&o.status==='CONFIRMED');
     const at=ops.reduce((n,o)=>Math.max(n,o.createdAt),0),latest=ops.filter(o=>o.createdAt===at),op=latest[0];
-    return latest.length===1&&op?.kind===kind&&op.attemptGateway==='TELEGRAM_API'&&op.baselineMode==='INHERIT_GROUP_DEFAULTS'&&op.policyVersion===this.policy.chatRevision(s,chat)&&op.reasonFingerprint===fingerprint(s,chat,member)?structuredClone(op):null;
+    return latest.length===1&&op?.kind===kind&&op.attemptGateway==='TELEGRAM_API'&&op.baselineMode==='INHERIT_GROUP_DEFAULTS'&&op.policyVersion===this.policy.chatRevision(s,chat)&&moderationEvidenceMatches(s,op,fingerprint(s,chat,member),this.policy.ownerId,this.clock())?structuredClone(op):null;
   }
   private releaseCurrent(s:BotState,actor:string,chat:string,member:string,context:ReviewedReleaseContext):boolean{
     const now=this.clock(),original=s.moderationOperations.filter(o=>o.id===context.original.id),confirmed=s.moderationOperations.filter(o=>byTarget(o,chat,member)&&o.status==='CONFIRMED');
     const at=confirmed.reduce((n,o)=>Math.max(n,o.createdAt),0),latest=confirmed.filter(o=>o.createdAt===at);
     const reasons=s.moderationReasons.filter(r=>byTarget(r,chat,member)&&r.active);
     return Number.isSafeInteger(now)&&now>=context.reviewedAt&&now<context.expiresAt&&this.policy.isOwner(actor)&&this.policy.privateFeature(s,'owner.dashboard',actor)&&TelegramBotApiModerationGateway.usesOfficialDispatch(this.gateway)&&
-      this.authorized(s,actor,chat,member)&&reasons.length===1&&reasons[0]!.source===(context.source??'MANUAL')&&(context.source!=='SUBSCRIPTION'||subscriptionEnforcementConsent(s,this.policy,chat)!==null)&&reasons[0]!.reference===context.reference&&reasons[0]!.kind===context.original.kind&&fingerprint(s,chat,member)===context.original.reasonFingerprint&&original.length===1&&original[0]!.status==='CONFIRMED'&&sameModerationAttempt(original[0]!,context.original)&&
+      this.authorized(s,actor,chat,member)&&reasons.length===1&&reasons[0]!.source===(context.source??'MANUAL')&&(context.source!=='SUBSCRIPTION'||subscriptionEnforcementConsent(s,this.policy,chat)!==null)&&reasons[0]!.reference===context.reference&&reasons[0]!.kind===context.original.kind&&moderationEvidenceMatches(s,context.original,fingerprint(s,chat,member),this.policy.ownerId,now)&&original.length===1&&original[0]!.status==='CONFIRMED'&&sameModerationAttempt(original[0]!,context.original)&&
       original[0]!.baselineMode==='INHERIT_GROUP_DEFAULTS'&&original[0]!.attemptGateway==='TELEGRAM_API'&&original[0]!.policyVersion===this.policy.chatRevision(s,chat)&&latest.length===1&&latest[0]!.id===context.original.id;
   }
   supportsSubscriptionEnforcement():boolean{return TelegramBotApiModerationGateway.usesOfficialDispatch(this.gateway);}
@@ -310,6 +311,30 @@ export class ModerationService {
     if(changed==='KIND_MISMATCH')return {status:'DENIED',reason:'REASON_KIND_MISMATCH'};
     return changed ? this.reconcile(actorId, chatId, memberId) : { status: 'NO_CHANGE', reason: 'NOT_ACTIVE' };
   }
+  /** Retire a satisfied MANUAL reason only when another reason keeps precisely
+   * the same remote restriction. No remote mutation or CONFIRMED op is added. */
+  async retireManualReasonPreservingRestriction(actor:string,chat:string,member:string,reference:string,kind:'MUTE'|'BAN',stillCurrent:(s:BotState)=>boolean,expiresAt:number):Promise<ModerationResult>{
+    const started=this.clock();if(typeof stillCurrent!=='function'||!Number.isSafeInteger(started)||started<0||!Number.isSafeInteger(expiresAt)||expiresAt<=started||expiresAt>started+120000||!reference||reference.length>80||!['MUTE','BAN'].includes(kind)||!TelegramBotApiModerationGateway.usesOfficialDispatch(this.gateway))return {status:'DENIED',reason:'RETIREMENT_REQUIRES_CURRENT_REVIEW'};
+    const prior=await this.priorPending(actor,chat,member);if(prior)return prior;
+    const source=(s:BotState)=>{
+      const now=this.clock();if(!Number.isSafeInteger(now)||now<started||now>=expiresAt||!this.policy.isOwner(actor)||!this.policy.privateFeature(s,'owner.dashboard',actor)||!this.authorized(s,actor,chat,member)||this.unresolved(s,chat,member)||!stillCurrent(s))return null;
+      const reasons=s.moderationReasons.filter(r=>byTarget(r,chat,member)&&r.active),found=reasons.filter(r=>r.source==='MANUAL'&&r.reference===reference&&r.kind===kind);
+      if(reasons.length<2||found.length!==1)return null;
+      const confirmed=s.moderationOperations.filter(o=>byTarget(o,chat,member)&&o.status==='CONFIRMED'),latestAt=confirmed.reduce((at,o)=>Math.max(at,o.createdAt),0),latest=confirmed.filter(o=>o.createdAt===latestAt),op=latest[0];
+      if(latest.length!==1||!op||op.kind==='NONE'||op.attemptGateway!=='TELEGRAM_API'||op.baselineMode!=='INHERIT_GROUP_DEFAULTS'||op.policyVersion!==this.policy.chatRevision(s,chat))return null;
+      const before=fingerprint(s,chat,member),after=fingerprint({...s,moderationReasons:s.moderationReasons.map(r=>r===found[0]?{...r,active:false}:r)},chat,member);
+      if(!moderationEvidenceMatches(s,op,before,this.policy.ownerId,now)||!validReasonRetirement(before,after,op))return null;
+      return {op:structuredClone(op),before,after,reasons:JSON.stringify(s.moderationReasons.filter(r=>byTarget(r,chat,member))),operations:targetOperationHistory(s,chat,member,'')};
+    };
+    const original=source(await this.store.snapshot());if(!original)return {status:'DENIED',reason:'RETIREMENT_SOURCE_UNAVAILABLE'};
+    const current=(s:BotState)=>{const fresh=source(s);return fresh!==null&&JSON.stringify(fresh)===JSON.stringify(original);};
+    const matched=await (this.gateway as TelegramBotApiModerationGateway).confirmPreservedRestriction(chat,member,{kind:original.op.kind as 'MUTE'|'BAN',...(original.op.untilDate===undefined?{}:{untilDate:original.op.untilDate})},async()=>current(await this.store.snapshot()));
+    if(!matched)return {status:'DENIED',reason:'RETIREMENT_REMOTE_NOT_MATCHED'};
+    return this.store.transaction(s=>{if(!current(s))return {status:'DENIED' as const,reason:'RETIREMENT_EVIDENCE_CHANGED'};const found=s.moderationReasons.find(r=>byTarget(r,chat,member)&&r.active&&r.source==='MANUAL'&&r.reference===reference&&r.kind===kind)!;
+      found.active=false;s.audit.push({actorId:actor,updateKey:REASON_RETIREMENT+randomUUID(),decision:'ALLOW',reason:JSON.stringify({operationId:original.op.id,digest:retirementOperationDigest(original.op),before:original.before,after:original.after}),policyVersion:original.op.policyVersion,at:this.clock()});
+      return {status:'APPLIED' as const,reason:'LOCAL_REASON_RETIRED_RESTRICTION_PRESERVED'};
+    });
+  }
   private async releaseReviewed(actor:string,chat:string,member:string,reference:string,kind:'BAN'|'MUTE',stillCurrent:(s:BotState)=>boolean,expiresAt:number,reasonSource:'MANUAL'|'SUBSCRIPTION'='MANUAL'):Promise<ModerationResult>{
     const now=this.clock();if(!Number.isSafeInteger(expiresAt)||expiresAt<=now||expiresAt>now+120000)return {status:'DENIED',reason:'RELEASE_REVIEW_EXPIRED'};
     const original=this.releaseSource(await this.store.snapshot(),actor,chat,member,reference,kind,reasonSource);
@@ -329,7 +354,7 @@ export class ModerationService {
     if(TelegramBotApiModerationGateway.usesOfficialDispatch(this.gateway)){
       const initial=await this.store.snapshot(),now=this.clock(),reasons=initial.moderationReasons.filter(r=>byTarget(r,chatId,memberId)&&r.active),r=reasons[0];
       if(reasons.length&&r&&reasons.every(r=>r.source==='MANUAL'&&r.expiresAt!==undefined&&r.expiresAt<=now)){
-        const source=(s:BotState)=>{if(!this.policy.isOwner(actorId)||!TelegramBotApiModerationGateway.usesOfficialDispatch(this.gateway)||!this.authorized(s,actorId,chatId,memberId)||this.unresolved(s,chatId,memberId))return null;const ops=s.moderationOperations.filter(o=>byTarget(o,chatId,memberId)&&o.status==='CONFIRMED'),at=ops.reduce((n,o)=>Math.max(n,o.createdAt),0),latest=ops.filter(o=>o.createdAt===at),o=latest[0];return latest.length===1&&o&&o.kind!=='NONE'&&o.attemptGateway==='TELEGRAM_API'&&o.baselineMode==='INHERIT_GROUP_DEFAULTS'&&o.policyVersion===this.policy.chatRevision(s,chatId)&&o.reasonFingerprint===fingerprint(s,chatId,memberId)?o:null;};
+        const source=(s:BotState)=>{if(!this.policy.isOwner(actorId)||!TelegramBotApiModerationGateway.usesOfficialDispatch(this.gateway)||!this.authorized(s,actorId,chatId,memberId)||this.unresolved(s,chatId,memberId))return null;const ops=s.moderationOperations.filter(o=>byTarget(o,chatId,memberId)&&o.status==='CONFIRMED'),at=ops.reduce((n,o)=>Math.max(n,o.createdAt),0),latest=ops.filter(o=>o.createdAt===at),o=latest[0];return latest.length===1&&o&&o.kind!=='NONE'&&o.attemptGateway==='TELEGRAM_API'&&o.baselineMode==='INHERIT_GROUP_DEFAULTS'&&o.policyVersion===this.policy.chatRevision(s,chatId)&&moderationEvidenceMatches(s,o,fingerprint(s,chatId,memberId),this.policy.ownerId,this.clock())?o:null;};
         const original=source(initial),deadline=now+120000;
         if(original?.untilDate!==undefined&&original.untilDate*1000<=now){
           const current=(s:BotState)=>{const at=this.clock(),fresh=source(s);return Number.isSafeInteger(at)&&at>=now&&at<deadline&&!!fresh&&sameModerationAttempt(fresh,original)&&JSON.stringify(s.moderationReasons.filter(x=>byTarget(x,chatId,memberId)&&x.active))===JSON.stringify(reasons);};

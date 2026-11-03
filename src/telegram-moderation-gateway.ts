@@ -75,6 +75,7 @@ export class TelegramBotApiModerationGateway implements ModerationGateway{
    adapter.isProtected===officialGatewayMethods.isProtected&&
    prototype.confirmUnrestricted===officialGatewayMethods.confirmUnrestricted&&adapter.confirmUnrestricted===officialGatewayMethods.confirmUnrestricted&&
    prototype.confirmExpiredRestriction===officialGatewayMethods.confirmExpiredRestriction&&adapter.confirmExpiredRestriction===officialGatewayMethods.confirmExpiredRestriction&&
+   prototype.confirmPreservedRestriction===officialGatewayMethods.confirmPreservedRestriction&&adapter.confirmPreservedRestriction===officialGatewayMethods.confirmPreservedRestriction&&
    prototype.canRestoreReviewed===officialGatewayMethods.canRestoreReviewed&&adapter.canRestoreReviewed===officialGatewayMethods.canRestoreReviewed&&
    prototype.restoreFromReviewedDecision===officialGatewayMethods.restoreFromReviewedDecision&&adapter.restoreFromReviewedDecision===officialGatewayMethods.restoreFromReviewedDecision&&
    prototype.kickMember===officialGatewayMethods.kickMember&&adapter.kickMember===officialGatewayMethods.kickMember&&
@@ -321,6 +322,12 @@ export class TelegramBotApiModerationGateway implements ModerationGateway{
  async canRestoreReviewed(chatId:string,memberId:string,source:ReviewedRestorationSource):Promise<boolean>{
   return await this.#restorationState(chatId,memberId,source)!=='DENIED';
  }
+ /** Read-only proof that the exact original restriction is still present.
+  * CLEAR cannot attest preservation and never authorizes a local retirement. */
+ async confirmPreservedRestriction(chatId:string,memberId:string,source:ReviewedRestorationSource,verify:()=>Promise<boolean>):Promise<boolean>{
+  if(typeof verify!=='function')return false;
+  try{for(let i=0;i<2;i++){if(!await verify()||await this.#restorationState(chatId,memberId,source)!=='MATCH')return false;}return await verify()===true&&await this.#restorationState(chatId,memberId,source)==='MATCH'&&await this.#allowed();}catch{return false;}
+ }
  /** Read-only expiry acknowledgement. A still-present restriction is never lifted. */
  async confirmExpiredRestriction(chatId:string,memberId:string,source:ReviewedRestorationSource,verify:()=>Promise<boolean>):Promise<boolean>{
   if(!source||source.untilDate===undefined||!Number.isSafeInteger(source.untilDate)||source.untilDate*1000>this.#clock()||typeof verify!=='function')return false;
@@ -442,6 +449,7 @@ const officialGatewayMethods=Object.freeze({
  isProtected:TelegramBotApiModerationGateway.prototype.isProtected,
  confirmUnrestricted:TelegramBotApiModerationGateway.prototype.confirmUnrestricted,
  confirmExpiredRestriction:TelegramBotApiModerationGateway.prototype.confirmExpiredRestriction,
+ confirmPreservedRestriction:TelegramBotApiModerationGateway.prototype.confirmPreservedRestriction,
  canRestoreReviewed:TelegramBotApiModerationGateway.prototype.canRestoreReviewed,
  restoreFromReviewedDecision:TelegramBotApiModerationGateway.prototype.restoreFromReviewedDecision,
  kickMember:TelegramBotApiModerationGateway.prototype.kickMember,
