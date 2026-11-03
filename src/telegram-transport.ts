@@ -192,8 +192,10 @@ function eventFrom(value:unknown):{event?:Event;reason:string} {
    if(msg.left_chat_member!==undefined&&
      (!isObject(msg.left_chat_member)||!positiveId(msg.left_chat_member.id)||
       typeof msg.left_chat_member.is_bot!=='boolean'))return {reason:'INVALID_SERVICE_EVENT'};
-   const human=members!==undefined?(members as Record<string,unknown>[]).filter(m=>m.is_bot===false):
-    (msg.left_chat_member.is_bot===false?[msg.left_chat_member]:[]);
+   const left=msg.left_chat_member;
+   const human:Record<string,unknown>[]=members!==undefined?
+    (members as Record<string,unknown>[]).filter(m=>m.is_bot===false):
+    left!==undefined&&isObject(left)&&left.is_bot===false?[left]:[];
    if(human.length===0)return {reason:'UNSUPPORTED_EVENT'};
    const first=human[0]!;
    const name=(m:Record<string,unknown>)=>typeof m.first_name==='string'&&m.first_name.trim()?
