@@ -13,13 +13,23 @@ const help='للتعديل أرسل في خاص البوت أحد الأوامر
  +'<code>/setwelcome -100123 نص الترحيب {العضو}</code>\n'
  +'<code>/setfarewell -100123 نص الوداع</code>\n'
  +'<code>/replyadd -100123 WORD منحة | راجع قسم المنح الدراسية</code>\n'
+ +'<code>/replyadd -100123 topic:777 COMMAND m_grants | رابط المنح</code>\n'
+ +'<code>/replycheck -100123 منحة دراسية</code>\n'
  +'<code>/replydel -100123 معرف_القاعدة</code>\n'
  +'يظهر تأكيد مستقل لكل تعديل، وتظل الميزات مغلقة حتى تفعّلها.';
 export function parsePhase4CommunityCommand(text:string):
- {kind:'HOME'}|{kind:'VIEW';chatId:string}|{kind:'EDIT';chatId:string;request:DraftRequest}|null{
+ {kind:'HOME'}|{kind:'VIEW';chatId:string}|{kind:'EDIT';chatId:string;request:DraftRequest}|
+ {kind:'DIAGNOSE';chatId:string;sample:string;topicId?:number}|null{
  if(text==='/community')return {kind:'HOME'};
  const view=/^\/community (-[1-9]\d{0,15})$/u.exec(text);
  if(view)return {kind:'VIEW',chatId:view[1]!};
+ const check=/^\/replycheck (-[1-9]\d{0,15}) (?:(?:topic:([1-9]\d{0,9})) )?([^\u0000-\u001f\u007f]{1,400})$/u.exec(text);
+ if(check){
+  const topic=check[2]!==undefined?Number(check[2]):undefined;
+  if(topic!==undefined&&(!Number.isSafeInteger(topic)||topic>2147483647))return null;
+  return {kind:'DIAGNOSE',chatId:check[1]!,sample:check[3]!,
+   ...(topic!==undefined?{topicId:topic}:{})};
+ }
  const match=/^\/(setwelcome|setfarewell|replyadd|replydel) (-[1-9]\d{0,15}) ([^\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]+)$/u.exec(text);
  if(!match)return null;
  const [,kind,chatId,rest]=match;
@@ -28,15 +38,28 @@ export function parsePhase4CommunityCommand(text:string):
   return {kind:'EDIT',chatId:chatId!,request:{kind:kind==='setwelcome'?'WELCOME_TEXT':'FAREWELL_TEXT',text:rest!.trim()}};
  if(kind==='replydel')
   return /^[a-f0-9]{12}$/u.test(rest!.trim())?{kind:'EDIT',chatId:chatId!,request:{kind:'REPLY_REMOVE',ruleId:rest!.trim()}}:null;
- const parts=/^(EXACT|WORD|CONTAINS) ([^\u000a|]{1,80}) \| ([^\u0000-\u001f]+)$/u.exec(rest!);
+ const parts=/^(?:topic:([1-9]\d{0,9}) )?(EXACT|WORD|CONTAINS|COMMAND) ([^\u000a|]{1,80}) \| ([^\u0000-\u001f]+)$/u.exec(rest!);
  if(!parts)return null;
- return {kind:'EDIT',chatId:chatId!,request:{kind:'REPLY_ADD',match:parts[1]! as ReplyMatch,
-  trigger:parts[2]!.trim(),text:parts[3]!.trim()}};
+ const topic=parts[1]!==undefined?Number(parts[1]):undefined;
+ if(topic!==undefined&&(!Number.isSafeInteger(topic)||topic>2147483647))return null;
+ const matchType=parts[2]! as ReplyMatch,trigger=parts[3]!.trim();
+ if(matchType==='COMMAND'&&!/^m_[a-z][a-z0-9_]{0,23}$/u.test(trigger))return null;
+ return {kind:'EDIT',chatId:chatId!,request:{kind:'REPLY_ADD',match:matchType,
+  trigger,text:parts[4]!.trim(),...(topic!==undefined?{topicId:topic}:{})}};
 }
 export async function phase4CommunityScreen(service:Phase4CommunityService,actorId:string,
  input:string):Promise<OwnerInlineScreen|null>{
  const cmd=parsePhase4CommunityCommand(input);
  const data=cmd?.kind==='HOME'?'p4c:1:l:0':cmd?.kind==='VIEW'?'p4c:1:g:'+cmd.chatId:input;
+ if(cmd?.kind==='DIAGNOSE'){
+  const diagnostic=await service.diagnose(actorId,cmd.chatId,cmd.sample,cmd.topicId);
+  const text=diagnostic.status==='REPLIES_DISABLED'?'الردود التلقائية متوقفة في هذه المجموعة.':
+   diagnostic.status==='NO_MATCH'?'لا توجد قاعدة ترد على هذه الرسالة في هذا الموضوع.':
+   '✅ توجد قاعدة مطابقة: <code>'+diagnostic.ruleId+'</code>\nنص تجريبي: '+diagnostic.preview;
+  return {text:'<b>🧪 تشخيص الردود دون إرسال</b>\n'+text+
+   '\nلا تحسب هذه المعاينة حدود المعدّل أو عضوية الطلاب.',
+   keyboard:k([[btn('↩️ إعدادات المجموعة','p4c:1:g:'+cmd.chatId)]])};
+ }
  if(cmd?.kind==='EDIT'){
   const draft=await service.pending(actorId,cmd.request,cmd.chatId);
   return {text:service.preview(draft)+'\n\nلن يُطبّق التغيير قبل الاعتماد. صالحة لدقيقتين.',
