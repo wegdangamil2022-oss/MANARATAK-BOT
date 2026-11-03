@@ -55,7 +55,8 @@ const ownerCallback=(id:number,data:string)=>({
    from:{id:900,is_bot:true}}}
 });
 const enable=async(f:Awaited<ReturnType<typeof fixture>>,kind:'WELCOME'|'FAREWELL'|'REPLIES')=>{
- const draft=await f.community.pending(OWNER,{kind:kind+'_ON'},GROUP);
+ const action=kind==='WELCOME'?'WELCOME_ON':kind==='FAREWELL'?'FAREWELL_ON':'REPLIES_ON';
+ const draft=await f.community.pending(OWNER,{kind:action},GROUP);
  return f.community.approve(OWNER,draft.id);
 };
 
@@ -180,7 +181,7 @@ for(const engine of ['json','sqlite'] as const){
    assert.equal(validPhase4CommunityRoute('p4c:1:g:'+GROUP),true);
    const preview=await f.app().handle(ownerMessage(72,'/setwelcome '+GROUP+' مرحبًا {العضو}'));
    assert.equal(preview.status,'APPLIED');assert.match(preview.plan?.text??'',/معاينة/);
-   assert.equal((await f.community.view(OWNER,GROUP)).welcome.text.includes('مرحبًا'),false);
+   assert.equal((await f.community.view(OWNER,GROUP)).welcome.text,defaultCommunityConfig(GROUP).welcome.text);
    const approveBtn=preview.plan?.inlineMarkup?.inline_keyboard.flat().find(b=>b.text.includes('اعتماد'))?.callback_data;
    assert.ok(approveBtn);
    const saved=await f.app().handle(ownerCallback(73,approveBtn!));
