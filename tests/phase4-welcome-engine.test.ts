@@ -93,3 +93,17 @@ test('phase4: Gregorian and Hijri templates are timezone-aware',()=>{
  assert.match(renderGreetingTemplate(t,s,event),/اليوم /);
  assert.match(renderGreetingTemplate(t,{...s,calendar:'islamic'},event),/اليوم /);
 });
+test('phase4: hard anti-flood fuse blocks even rules with zero configured cooldown',()=>{
+ const s={...settings(),replyRules:[{id:'faq',enabled:true,trigger:'KEYWORD' as const,
+  match:'EXACT' as const,phrase:'سؤال',templateId:'hello',priority:0,cooldownUserMs:0,cooldownTopicMs:0}]};
+ const entry={...event,kind:'KEYWORD' as const,text:'سؤال'};
+ const groupBurst=Array.from({length:12},(_,i)=>({...decideGreeting(s,
+  {...entry,updateKey:'p4:burst'+i,actorId:String(500+i)},[]).receipt,
+  at:event.at-2000,chatId:chat,actorId:String(500+i)}));
+ assert.equal(decideGreeting(s,entry,groupBurst).status,'RATE_LIMIT');
+ const actorBurst=Array.from({length:3},(_,i)=>({...decideGreeting(s,
+  {...entry,updateKey:'p4:actor'+i},[]).receipt,at:event.at-1000,chatId:chat}));
+ assert.equal(decideGreeting(s,entry,actorBurst).status,'RATE_LIMIT');
+ const staleBurst=groupBurst.map(x=>({...x,at:event.at-61_000}));
+ assert.equal(decideGreeting(s,entry,staleBurst).status,'READY');
+});
