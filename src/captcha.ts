@@ -77,6 +77,10 @@ export class CaptchaService{
  challenge(s:BotState,chat:string,actor:string):{reference:string;epoch:string;issued:number;nonce:string}|null{
   const rows=s.wizards.filter(w=>w.key===key(chat,actor)),w=rows[0];if(rows.length!==1||!w)return null;const d=this.#read(s,w,actor);return d?{reference:'captcha_'+hash([chat,actor,d.revision,w.policyVersion]).slice(0,24),epoch:hash(w),issued:d.issued,nonce:d.nonce}:null;
  }
+ /** Resolve only the actor's completed session for the callback just handled. */
+ completedGroupForRoute(s:BotState,actor:string,data:string):string|null{
+  if(!user(actor)||!validCaptchaRoute(data)||!/^cp:1:[abo]:/u.test(data))return null;const nonce=data.split(':')[3],matches=s.wizards.flatMap(w=>{if(w.userId!==actor)return [];const d=this.#read(s,w,actor);return d&&d.nonce===nonce&&this.status(s,d.group,actor)==='PASSED'?[d.group]:[];});return matches.length===1?matches[0]!:null;
+ }
  /** Human review concerns the CAPTCHA step only, never a Telegram release. */
  caseEvidence(s:BotState,actor:string,nonce:string):string|null{
   const cases=this.reviewCases(s,actor).filter(c=>c.nonce===nonce),c=cases[0];if(cases.length!==1||!c)return null;
