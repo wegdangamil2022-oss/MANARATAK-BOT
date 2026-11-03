@@ -37,7 +37,10 @@ export function groupQuestionEpochDigest(state:BotState,groupId:string):string{
 export function groupMenuEpochDigest(state:BotState,groupId:string,topicId?:number):string{
  return createHash('sha256').update('MANARATAK:B6:GROUP-MENU:DISPATCH:v2:')
   .update(topicId===undefined?'':'TOPIC:'+topicId+':')
-  .update(groupQuestionSubscriptionEpoch(state,groupId)).digest('hex');
+  .update(groupQuestionSubscriptionEpoch(state,groupId))
+  // A queued automatic reply cannot outlive a revised or disabled community policy.
+  .update(JSON.stringify(state.phase4Community?.configs.filter(c=>c.chatId===groupId)??[]))
+  .digest('hex');
 }
 
 /** Scoped private DM browsing uses a separate change-detection domain. */
