@@ -1,6 +1,3 @@
-import {inspectContinuousModerationTrialReadOnly} from './moderation-trial-continuous.js';
-import {TelegramBotApiModerationGateway} from './telegram-moderation-gateway.js';
-
 /** One-shot, explicitly selected READ-ONLY operator trial. The token is
  * accepted ONLY from the process environment, never a command-line arg.
  * Every provider request is getChatMember or getChat. No Telegram mutations, no writes
@@ -37,6 +34,10 @@ void (async()=>{
   // Check protected owner BEFORE even read-only Bot API calls.
   if(args[12]===process.env.BOT_OWNER_ID)
    throw Error('MODERATION_TRIAL_INVALID_TARGET');
+  // Invalid requests must not load SQLite: Node 22's experimental runtime
+  // diagnostic includes a process ID outside our static redacted error.
+  const {TelegramBotApiModerationGateway}=await import('./telegram-moderation-gateway.js');
+  const {inspectContinuousModerationTrialReadOnly}=await import('./moderation-trial-continuous.js');
   const gateway=new TelegramBotApiModerationGateway(process.env.TELEGRAM_BOT_TOKEN);
   const options={
    stateFile:args[2]!,backupFile:args[4]!,safetyFile:args[6]!,
