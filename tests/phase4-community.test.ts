@@ -213,3 +213,64 @@ test('P4 command parser rejects malformed editing and callback routes',()=>{
   'p4c:1:l:00','p4c:1:c:'+('f'.repeat(24))+'\n'])
   assert.equal(validPhase4CommunityRoute(bad),false,bad);
 });
+
+test('P4 safe custom command replies are namespaced and never capture other bots or moderation commands',()=>{
+ const rule={id:'123456789abc',trigger:'m_grants',response:'الدليل',match:'COMMAND' as const,
+  enabled:true,cooldownMs:60000};
+ assert.equal(matchCommunityRule(rule,'/m_grants'),true);
+ assert.equal(matchCommunityRule(rule,'/m_grants تفاصيل'),true);
+ for(const wrong of ['/ban','/m_grants@OtherBot','/m_grants2','النص /m_grants'])
+  assert.equal(matchCommunityRule(rule,wrong),false,wrong);
+ const parsed=parsePhase4CommunityCommand('/replyadd '+GROUP+' topic:777 COMMAND m_grants | رابط الدليل');
+ assert.deepEqual(parsed,{kind:'EDIT',chatId:GROUP,request:{kind:'REPLY_ADD',
+  match:'COMMAND',trigger:'m_grants',text:'رابط الدليل',topicId:777}});
+ assert.equal(parsePhase4CommunityCommand('/replyadd '+GROUP+' COMMAND start | محظور'),null);
+ assert.equal(parsePhase4CommunityCommand('/replyadd '+GROUP+' topic:0 WORD grant | no'),null);
+});
+
+for(const engine of ['json','sqlite'] as const){
+ test('P4 '+engine+': approved groups can prepare greetings before remote presence is observed',async()=>{
+  const f=await fixture(engine);try{
+   await f.policy.setPresence(GROUP,false);
+   const draft=await f.community.pending(OWNER,{kind:'WELCOME_ON'},GROUP);
+   const applied=await f.community.approve(OWNER,draft.id);
+   assert.equal(applied.welcome.enabled,true);
+   await f.policy.revokeChat(OWNER,GROUP);
+   await assert.rejects(f.community.view(OWNER,GROUP),/COMMUNITY_GROUP_UNAVAILABLE|COMMUNITY_OWNER_DENIED/);
+  }finally{await f.close();}
+ });
+ test('P4 '+engine+': owner can dry-run reply rules and explain why a sample does not match without sending',async()=>{
+  const f=await fixture(engine);try{
+   const off=await f.community.diagnose(OWNER,GROUP,'منحة');
+   assert.equal(off.status,'REPLIES_DISABLED');
+   const newRule=await f.community.pending(OWNER,{kind:'REPLY_ADD',
+    match:'WORD',trigger:'منحة',text:'اقرأ الدليل'},GROUP);
+   await f.community.approve(OWNER,newRule.id);
+   await enable(f,'REPLIES');
+   const unchanged=JSON.stringify((await f.store.snapshot()).phase4Community);
+   const missing=await f.community.diagnose(OWNER,GROUP,'جامعة');
+   assert.equal(missing.status,'NO_MATCH');
+   const found=await f.community.diagnose(OWNER,GROUP,'منحة دراسية');
+   assert.equal(found.status,'MATCH');
+   assert.match(found.preview??'',/اقرأ الدليل/);
+   assert.equal(JSON.stringify((await f.store.snapshot()).phase4Community),unchanged);
+   await assert.rejects(f.community.diagnose(MEMBER,GROUP,'منحة'),/COMMUNITY_OWNER_DENIED/);
+  }finally{await f.close();}
+ });
+ test('P4 '+engine+': topic-specific command replies appear only in matching topic and never double-send',async()=>{
+  const f=await fixture(engine);try{
+   const parsed=parsePhase4CommunityCommand('/replyadd '+GROUP+' topic:777 COMMAND m_grants | ملف المنح');
+   assert.ok(parsed&&parsed.kind==='EDIT');
+   await f.community.approve(OWNER,(await f.community.pending(OWNER,parsed.request,GROUP)).id);
+   await enable(f,'REPLIES');
+   const other=await f.app().handle(groupMessage(440,'/m_grants',300,778));
+   assert.equal(other.plan,undefined);
+   const matched=await f.app().handle(groupMessage(441,'/m_grants',300,777));
+   assert.equal(matched.status,'APPLIED');assert.match(matched.plan?.text??'',/ملف المنح/);
+   assert.equal(matched.plan?.messageThreadId,777);
+   const duplicate=await f.app().handle(groupMessage(441,'/m_grants',300,777));
+   assert.equal(duplicate.plan,undefined);
+   assert.ok(['DUPLICATE','UNKNOWN'].includes(duplicate.status));
+  }finally{await f.close();}
+ });
+}
