@@ -2,7 +2,7 @@ import {Phase4CommunityService,type DraftRequest} from './phase4-community.js';
 import type {OwnerInlineScreen,TelegramInlineKeyboard} from './telegram-inline-owner.js';
 import type {CommunityDraftKind,ReplyMatch} from './phase4-community-model.js';
 const group=/^-[1-9]\d{0,15}$/u,hex=/^[a-f0-9]{24}$/u;
-const route=/^p4c:1:(?:l:(?:0|[1-9]\d{0,2})|g:-[1-9]\d{0,15}|r:-[1-9]\d{0,15}:(?:0|[1-9]\d{0,2})|t:-[1-9]\d{0,15}:[wfr]:[01]|d:-[1-9]\d{0,15}:[a-f0-9]{12}|[cx]:[a-f0-9]{24})$/u;
+const route=/^p4c:1:(?:l:(?:0|[1-9]\d{0,2})|g:-[1-9]\d{0,15}|r:-[1-9]\d{0,15}:(?:0|[1-9]\d{0,2})|t:-[1-9]\d{0,15}:[wfr]:[01]|d:-[1-9]\d{0,15}:[a-f0-9]{12}|e:-[1-9]\d{0,15}:[a-f0-9]{12}:[01]|[cx]:[a-f0-9]{24})$/u;
 export const validPhase4CommunityRoute=(s:unknown):s is string=>typeof s==='string'&&
  Buffer.byteLength(s,'utf8')<=64&&route.test(s);
 const esc=(s:string):string=>s.replace(/&/gu,'&amp;').replace(/</gu,'&lt;')
@@ -16,11 +16,19 @@ const help='للتعديل أرسل في خاص البوت أحد الأوامر
  +'<code>/replyadd -100123 topic:777 COMMAND m_grants | رابط المنح</code>\n'
  +'<code>/replycheck -100123 منحة دراسية</code>\n'
  +'<code>/replydel -100123 معرف_القاعدة</code>\n'
+ +'<code>/replyrate -100123 معرف_القاعدة 90</code>\n'
  +'يظهر تأكيد مستقل لكل تعديل، وتظل الميزات مغلقة حتى تفعّلها.';
 export function parsePhase4CommunityCommand(text:string):
  {kind:'HOME'}|{kind:'VIEW';chatId:string}|{kind:'EDIT';chatId:string;request:DraftRequest}|
  {kind:'DIAGNOSE';chatId:string;sample:string;topicId?:number}|null{
  if(text==='/community')return {kind:'HOME'};
+ const rate=/^\/replyrate (-[1-9]\d{0,15}) ([a-f0-9]{12}) (0|[1-9]\d{0,4})$/u.exec(text);
+ if(rate){
+  const seconds=Number(rate[3]);
+  if(seconds<1||seconds>86400)return null;
+  return {kind:'EDIT',chatId:rate[1]!,
+   request:{kind:'REPLY_COOLDOWN',ruleId:rate[2]!,cooldownMs:seconds*1000}};
+ }
  const view=/^\/community (-[1-9]\d{0,15})$/u.exec(text);
  if(view)return {kind:'VIEW',chatId:view[1]!};
  const check=/^\/replycheck (-[1-9]\d{0,15}) (?:(?:topic:([1-9]\d{0,9})) )?([^\u0000-\u001f\u007f]{1,400})$/u.exec(text);
@@ -119,7 +127,10 @@ export async function phase4CommunityScreen(service:Phase4CommunityService,actor
   const pages=Math.max(1,Math.ceil(c.rules.length/6));
   if(page>=pages)return null;
   const selected=c.rules.slice(page*6,page*6+6);
-  const rows=selected.map(r=>[btn('🗑️ حذف '+r.id,'p4c:1:d:'+c.chatId+':'+r.id)]);
+  const rows=selected.map(r=>[
+   btn(r.enabled?'⏸️ إيقاف':'▶️ تفعيل','p4c:1:e:'+c.chatId+':'+r.id+':'+(r.enabled?'0':'1')),
+   btn('🗑️ حذف','p4c:1:d:'+c.chatId+':'+r.id)
+  ]);
   const nav=[] as {text:string;callback_data:string}[];
   if(page>0)nav.push(btn('⬅️ السابق','p4c:1:r:'+c.chatId+':'+(page-1)));
   if(page+1<pages)nav.push(btn('التالي ➡️','p4c:1:r:'+c.chatId+':'+(page+1)));
@@ -127,9 +138,19 @@ export async function phase4CommunityScreen(service:Phase4CommunityService,actor
   rows.push([btn('↩️ المجموعة','p4c:1:g:'+c.chatId)]);
   return {text:'<b>🤖 الردود المحفوظة</b>\n'+(selected.length?
    selected.map(r=>'<code>'+r.id+'</code> • '+r.match+' • '+esc(r.trigger.slice(0,65))+
+   (r.enabled?' • نشط':' • متوقف')+' • '+(r.cooldownMs/1000)+' ثانية'+
    (r.topicId?' • موضوع '+r.topicId:'')).join('\n'):'لا توجد ردود.')+
    '\n\nإضافة رد: <code>/replyadd '+c.chatId+' WORD كلمة | نص الرد</code>',
    keyboard:k(rows)};
+ }
+ const perRule=/^p4c:1:e:(-[1-9]\d{0,15}):([a-f0-9]{12}):([01])$/u.exec(data);
+ if(perRule){
+  const draft=await service.pending(actorId,{kind:perRule[3]==='1'?'REPLY_ENABLE':'REPLY_DISABLE',
+   ruleId:perRule[2]!},perRule[1]!);
+  return {text:service.preview(draft)+'\nالإجراء لن يطبّق قبل التأكيد.',
+   keyboard:k([[btn('✅ اعتماد','p4c:1:c:'+draft.id)],
+    [btn('❌ إلغاء','p4c:1:x:'+draft.id)],
+    [btn('↩️ القواعد','p4c:1:r:'+draft.chatId+':0')]])};
  }
  const remove=/^p4c:1:d:(-[1-9]\d{0,15}):([a-f0-9]{12})$/u.exec(data);
  if(remove){
