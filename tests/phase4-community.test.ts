@@ -274,3 +274,56 @@ for(const engine of ['json','sqlite'] as const){
   }finally{await f.close();}
  });
 }
+
+for(const engine of ['json','sqlite'] as const){
+ test('P4 '+engine+': per-rule pause, resume and cooldown require owner review and persist',async()=>{
+  const f=await fixture(engine);try{
+   const create=await f.community.pending(OWNER,{kind:'REPLY_ADD',match:'WORD',
+    trigger:'منحة',text:'دليل المنح'},GROUP);
+   const added=await f.community.approve(OWNER,create.id);
+   const ruleId=added.rules[0]!.id;
+   await enable(f,'REPLIES');
+   const pause=await f.community.pending(OWNER,{kind:'REPLY_DISABLE',ruleId},GROUP);
+   assert.equal((await f.community.view(OWNER,GROUP)).rules[0]?.enabled,true);
+   const disabled=await f.community.approve(OWNER,pause.id);
+   assert.equal(disabled.rules[0]!.enabled,false);
+   assert.equal(await f.community.propose({kind:'TEXT',chatId:GROUP,actorId:MEMBER,
+    memberName:'طالب',groupName:'مجموعة',messageText:'منحة'},'b3-webhook:bot-main:700'),null);
+   const resume=await f.community.pending(OWNER,{kind:'REPLY_ENABLE',ruleId},GROUP);
+   await f.community.approve(OWNER,resume.id);
+   const rate=await f.community.pending(OWNER,{kind:'REPLY_COOLDOWN',ruleId,cooldownMs:120000},GROUP);
+   assert.equal((await f.community.view(OWNER,GROUP)).rules[0]!.cooldownMs,60000);
+   const updated=await f.community.approve(OWNER,rate.id);
+   assert.equal(updated.rules[0]!.cooldownMs,120000);
+   const msg={kind:'TEXT' as const,chatId:GROUP,actorId:MEMBER,
+    memberName:'طالب',groupName:'مجموعة',messageText:'منحة'};
+   assert.ok(await f.community.propose(msg,'b3-webhook:bot-main:701'));
+   f.setNow(f.now()+70000);
+   assert.equal(await f.community.propose(msg,'b3-webhook:bot-main:702'),null);
+   f.setNow(f.now()+50001);
+   assert.ok(await f.community.propose(msg,'b3-webhook:bot-main:703'));
+  }finally{await f.close();}
+ });
+ test('P4 '+engine+': rule toggles appear in owner inline panel with freshness checks',async()=>{
+  const f=await fixture(engine);try{
+   const draft=await f.community.pending(OWNER,{kind:'REPLY_ADD',
+    match:'EXACT',trigger:'دليل',text:'الإجابة'},GROUP);
+   const config=await f.community.approve(OWNER,draft.id);
+   const id=config.rules[0]!.id;
+   const rules=await phase4CommunityScreen(f.community,OWNER,'p4c:1:r:'+GROUP+':0');
+   assert.ok(rules);
+   const toggle=rules?.keyboard.inline_keyboard.flat().find(b=>b.callback_data.startsWith('p4c:1:e:'));
+   assert.ok(toggle);
+   const preview=await phase4CommunityScreen(f.community,OWNER,toggle!.callback_data);
+   const confirm=preview!.keyboard.inline_keyboard.flat().find(b=>b.callback_data.startsWith('p4c:1:c:'));
+   assert.ok(confirm);
+   const modified=await phase4CommunityScreen(f.community,OWNER,confirm!.callback_data);
+   assert.ok(modified);
+   assert.equal((await f.community.view(OWNER,GROUP)).rules[0]!.enabled,false);
+   assert.equal(await phase4CommunityScreen(f.community,OWNER,confirm!.callback_data).catch(()=>null),null);
+   const command=parsePhase4CommunityCommand('/replyrate '+GROUP+' '+id+' 90');
+   assert.deepEqual(command,{kind:'EDIT',chatId:GROUP,request:
+    {kind:'REPLY_COOLDOWN',ruleId:id,cooldownMs:90000}});
+  }finally{await f.close();}
+ });
+}
