@@ -24,6 +24,7 @@ async function fixture(engine:'json'|'sqlite'='json'){
  const clock=()=>now,store=new BotStore(file,{engine});
  const policy=new Policy(store,OWNER,clock);
  await policy.approveChat(OWNER,GROUP,['navigation']);
+ await policy.setPresence(GROUP,true);
  const community=new Phase4CommunityService(store,policy,clock);
  const education=new EducationService(store,policy,clock);
  const admin=new EducationAdminFacade(store,policy,education);
