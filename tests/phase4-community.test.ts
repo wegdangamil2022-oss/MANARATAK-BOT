@@ -327,3 +327,67 @@ for(const engine of ['json','sqlite'] as const){
   }finally{await f.close();}
  });
 }
+
+test('P4 rules-link template uses only explicitly confirmed Telegram HTTPS links',async()=>{
+ const config=defaultCommunityConfig(GROUP);
+ assert.equal(config.rulesUrl,undefined);
+ const student={kind:'JOIN' as const,chatId:GROUP,actorId:MEMBER,memberName:'طالب',groupName:'منارتك'};
+ const template='القوانين: {رابط_القوانين}';
+ assert.equal(renderCommunityTemplate(template,student,1_000_000),'القوانين: ');
+ const example='https://t.me/manaratak_rules/3';
+ assert.equal(renderCommunityTemplate(template,student,1_000_000,example),'القوانين: '+example);
+ for(const unsafe of ['http://t.me/test','https://t.me.evil.org/x',
+  'https://user:secret@t.me/x','https://t.me/x#token',
+  'https://t.me/x?start=private','javascript:alert(1)'])
+  assert.equal(parsePhase4CommunityCommand('/setruleslink '+GROUP+' '+unsafe),null,unsafe);
+ const command=parsePhase4CommunityCommand('/setruleslink '+GROUP+' '+example);
+ assert.deepEqual(command,{kind:'EDIT',chatId:GROUP,request:{kind:'RULES_LINK_SET',text:example}});
+ assert.deepEqual(parsePhase4CommunityCommand('/clearruleslink '+GROUP),
+  {kind:'EDIT',chatId:GROUP,request:{kind:'RULES_LINK_CLEAR'}});
+});
+
+for(const engine of ['json','sqlite'] as const){
+ test('P4 '+engine+': rules links are review-gated, persist, render and revoke queued welcome',async()=>{
+  const f=await fixture(engine);try{
+   const template=await f.community.pending(OWNER,
+    {kind:'WELCOME_TEXT',text:'أهلًا {العضو}! القوانين: {رابط_القوانين}'},GROUP);
+   await f.community.approve(OWNER,template.id);
+   await enable(f,'WELCOME');
+   const before=await f.app().handle(joinMessage(790,'JOIN'));
+   assert.equal(before.status,'APPLIED');
+   assert.equal(before.plan?.text,'أهلًا فاطمة &lt;&amp;&gt;! القوانين: ');
+   const draft=await f.community.pending(OWNER,
+    {kind:'RULES_LINK_SET',text:'https://t.me/manaratak_rules/3'},GROUP);
+   assert.equal((await f.community.view(OWNER,GROUP)).rulesUrl,undefined);
+   assert.match(f.community.preview(draft),/manaratak_rules/);
+   await assert.rejects(f.community.approve(MEMBER,draft.id),/COMMUNITY_DRAFT_NOT_FOUND/);
+   const approved=await f.community.approve(OWNER,draft.id);
+   assert.equal(approved.rulesUrl,'https://t.me/manaratak_rules/3');
+   const restored=await new BotStore(f.file,{engine}).snapshot();
+   assert.equal(restored.phase4Community?.configs[0]?.rulesUrl,approved.rulesUrl);
+   let sent=0;
+   const sender=new TelegramReplyDispatcher(f.store,f.policy,
+    {send:async()=>{sent++;return {status:'CONFIRMED' as const,messageId:900};}},f.now);
+   assert.equal((await sender.dispatch(before.deliveryKey!)).status,'FAILED_CONFIRMED');
+   assert.equal(sent,0);
+   f.setNow(f.now()+9000);
+   const after=await f.app().handle(joinMessage(791,'JOIN'));
+   assert.match(after.plan?.text??'',/https:\/\/t.me\/manaratak_rules\/3/);
+   const remove=await f.community.pending(OWNER,{kind:'RULES_LINK_CLEAR'},GROUP);
+   await f.community.approve(OWNER,remove.id);
+   assert.equal((await f.community.view(OWNER,GROUP)).rulesUrl,undefined);
+   assert.equal((await sender.dispatch(after.deliveryKey!)).status,'FAILED_CONFIRMED');
+   assert.equal(sent,0);
+  }finally{await f.close();}
+ });
+ test('P4 '+engine+': malicious or unauthorized links never become durable policy',async()=>{
+  const f=await fixture(engine);try{
+   for(const url of ['https://evil.test/abc','https://t.me@evil.test/a',
+    'http://t.me/a','https://t.me/a?private=1','https://t.me/a#fragment'])
+    await assert.rejects(f.community.pending(OWNER,{kind:'RULES_LINK_SET',text:url},GROUP));
+   await assert.rejects(f.community.pending(MEMBER,
+    {kind:'RULES_LINK_SET',text:'https://t.me/manaratak_rules'},GROUP));
+   assert.equal((await f.community.view(OWNER,GROUP)).rulesUrl,undefined);
+  }finally{await f.close();}
+ });
+}
