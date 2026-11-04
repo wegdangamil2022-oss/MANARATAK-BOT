@@ -214,3 +214,31 @@ test('WELCOME-005: Telegram group-profile gateway requires fresh can_change_info
  const invalid=new TelegramBotApiGroupProfileGateway(token,async()=>new Response(JSON.stringify({ok:false,description:'Forbidden'}),{status:403}));
  assert.equal(await invalid.removePhoto(GROUP),'FAILED_CONFIRMED');
 });
+
+
+for(const engine of ['json','sqlite'] as const){
+ test('WELCOME-005 '+engine+': a real Telegram profile change while owner reviews draft invalidates old confirmation',async()=>{
+  const f=await fixture(engine);try{
+   await f.approve({kind:'GROUP_PROFILE_ON'});
+   const draft=await f.community.pending(OWNER,{kind:'GROUP_TITLE_SET',text:'عنوان راجعه المالك'},GROUP);
+   assert.equal(await f.community.recordServiceEvent({chatId:GROUP,actorId:STUDENT,
+    messageId:313,kind:'PHOTO_CHANGED',updateKey:'b3-webhook:bot-main:313',sentAtMs:f.clock()}),true);
+   await assert.rejects(f.community.approve(OWNER,draft.id),/COMMUNITY_PROFILE_DRAFT_STALE/);
+   assert.equal((await f.store.snapshot()).phase4Community?.profileJobs?.length??0,0);
+  }finally{await f.close();}
+ });
+ test('WELCOME-005 '+engine+': event witness is monotonic under dedupe and distinct changes',async()=>{
+  const f=await fixture(engine);try{
+   await f.approve({kind:'GROUP_PROFILE_ON'});
+   const event=(n:number)=>({chatId:GROUP,actorId:STUDENT,messageId:n,
+    kind:'TITLE_CHANGED' as const,updateKey:'b3-webhook:bot-main:'+n,sentAtMs:f.clock()});
+   assert.equal(await f.community.recordServiceEvent(event(901)),true);
+   assert.equal(await f.community.recordServiceEvent(event(901)),false);
+   assert.equal(await f.community.recordServiceEvent(event(902)),true);
+   const snapshot=await f.store.snapshot();
+   assert.equal(snapshot.phase4Community?.profileRevisions?.[0]?.revision,2);
+   assert.equal(snapshot.phase4Community?.profileObservations?.length,2);
+   assert.equal((await f.community.recentChanges(OWNER,GROUP)).length,0);
+  }finally{await f.close();}
+ });
+}
