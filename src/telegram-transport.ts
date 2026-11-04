@@ -192,7 +192,7 @@ function eventFrom(value:unknown):{event?:Event;reason:string} {
        typeof p.file_unique_id==='string'&&/^[A-Za-z0-9_-]{4,512}$/u.test(p.file_unique_id)&&
        Number.isSafeInteger(p.width)&&Number.isSafeInteger(p.height)&&
        (p.width as number)>0&&(p.height as number)>0);
-   if(count!==1||msg.text!==undefined||msg.document!==undefined||
+   if(count!==1||!positiveId(msg.message_id)||msg.text!==undefined||msg.document!==undefined||
       (title!==undefined&&(typeof title!=='string'||title.trim().length===0||
        title.length>128||/[\u0000-\u001f\u007f]/u.test(title)))||
       (photo!==undefined&&!validPhoto)||
