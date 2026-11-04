@@ -12,7 +12,7 @@ import {ApprovedAnswerService,ResourceLinkService} from '../src/education-intera
 import {TelegramUpdateApplication} from '../src/telegram-transport.js';
 import {TelegramReplyDispatcher} from '../src/telegram-replies.js';
 import {defaultCommunityConfig,validCommunityConfig,inCommunityQuietHours} from '../src/phase4-community-model.js';
-import {parsePhase4CommunityCommand} from '../src/phase4-community-ui.js';
+import {parsePhase4CommunityCommand,phase4CommunityScreen,validPhase4CommunityRoute} from '../src/phase4-community-ui.js';
 import {groupMenuEpochDigest} from '../src/telegram-group-access.js';
 
 const GROUP='-1001234',OWNER='100',NOW=Date.parse('2026-11-04T23:30:00.000Z');
@@ -164,6 +164,37 @@ for(const engine of ['json','sqlite'] as const){
    assert.equal(sent,0);
    assert.equal((await dispatcher.dispatch(queued.deliveryKey!)).status,'FAILED_CONFIRMED');
    assert.equal((await f.store.snapshot()).telegramReplyJobs?.find(x=>x.updateKey===queued.deliveryKey)?.status,'FAILED_CONFIRMED');
+  }finally{await f.close()}
+ });
+}
+
+for(const engine of ['json','sqlite'] as const){
+ test('P4 '+engine+': official owner UI exposes quiet/topic controls with reviewed clearing',async()=>{
+  const f=await fixture(engine);try{
+   await f.apply({kind:'QUIET_HOURS_SET',startMinute:120,endMinute:240});
+   await f.apply({kind:'TOPIC_COOLDOWN_SET',topicId:777,cooldownMs:15000});
+   for(const route of ['p4c:1:q:'+GROUP,'p4c:1:z:'+GROUP,
+     'p4c:1:y:'+GROUP,'p4c:1:y:'+GROUP+':777'])
+    assert.equal(validPhase4CommunityRoute(route),true,route);
+   const overview=await phase4CommunityScreen(f.service,OWNER,'p4c:1:g:'+GROUP);
+   const rootButtons=overview?.keyboard.inline_keyboard.flat().map(x=>x.callback_data)??[];
+   assert.ok(rootButtons.includes('p4c:1:q:'+GROUP));
+   assert.ok(rootButtons.includes('p4c:1:y:'+GROUP));
+   const quiet=await phase4CommunityScreen(f.service,OWNER,'p4c:1:q:'+GROUP);
+   assert.match(quiet?.text??'',/02:00 — 04:00/);
+   const quietConfirmation=await phase4CommunityScreen(f.service,OWNER,'p4c:1:z:'+GROUP);
+   const quietApprove=quietConfirmation?.keyboard.inline_keyboard.flat().find(x=>x.text.includes('اعتماد'))?.callback_data;
+   assert.ok(quietApprove);
+   await phase4CommunityScreen(f.service,OWNER,quietApprove!);
+   assert.equal((await f.service.view(OWNER,GROUP)).quietHours,undefined);
+   const topics=await phase4CommunityScreen(f.service,OWNER,'p4c:1:y:'+GROUP);
+   assert.match(topics?.text??'',/الموضوع 777: 15 ثانية/);
+   const topicConfirmation=await phase4CommunityScreen(f.service,OWNER,'p4c:1:y:'+GROUP+':777');
+   const topicApprove=topicConfirmation?.keyboard.inline_keyboard.flat().find(x=>x.text.includes('اعتماد'))?.callback_data;
+   assert.ok(topicApprove);
+   await phase4CommunityScreen(f.service,OWNER,topicApprove!);
+   assert.equal((await f.service.view(OWNER,GROUP)).topicCooldowns,undefined);
+   assert.equal(await phase4CommunityScreen(f.service,'300','p4c:1:q:'+GROUP).then(()=>false,()=>true),true);
   }finally{await f.close()}
  });
 }
