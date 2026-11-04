@@ -95,7 +95,7 @@ export interface CommunityReceipt{
 /** A bounded, opt-in decision record. No message, display name or actor identifier. */
 export type CommunityDecisionReason=
  'RESERVED'|'WELCOME_DISABLED'|'FAREWELL_DISABLED'|'REPLIES_DISABLED'|'QUIET_HOURS'|
- 'NO_MATCH'|'CLOCK_SKEW'|'GROUP_LIMIT'|'TOPIC_COOLDOWN'|'GROUP_COOLDOWN'|
+ 'NO_MATCH'|'CLOCK_SKEW'|'GROUP_LIMIT'|'TOPIC_COOLDOWN'|'GROUP_COOLDOWN'|'REMOVAL_SUPPRESSED'|
  'ACTOR_COOLDOWN'|'TEMPLATE_INVALID'|'CAPTION_LIMIT';
 export interface CommunityDecision {
  key:string;chatId:string;at:number;kind:CommunityEventKind;configVersion:number;
@@ -289,7 +289,7 @@ export function validCommunityState(value:unknown):value is CommunityAutomationS
  }
  const validReasons=new Set<CommunityDecisionReason>(['RESERVED','WELCOME_DISABLED','FAREWELL_DISABLED',
   'REPLIES_DISABLED','QUIET_HOURS','NO_MATCH','CLOCK_SKEW','GROUP_LIMIT','TOPIC_COOLDOWN',
-  'GROUP_COOLDOWN','ACTOR_COOLDOWN','TEMPLATE_INVALID','CAPTION_LIMIT']);
+  'GROUP_COOLDOWN','ACTOR_COOLDOWN','TEMPLATE_INVALID','CAPTION_LIMIT','REMOVAL_SUPPRESSED']);
  if(v.decisionLog){
   const keys=new Set<string>();
   for(const entry of v.decisionLog){
