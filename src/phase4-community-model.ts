@@ -65,6 +65,8 @@ export interface CommunityConfig{
  rulesUrl?:string;
  /** Missing in old snapshots means disabled. */
  changeLogEnabled?:boolean;
+ /** Separately opt-in, owner-reviewed group title/photo removal edits. */
+ profileEditingEnabled?:boolean;
  /** Opt-in, privacy-limited decisions ledger; disabled by default. */
  decisionLogEnabled?:boolean;
  /** Missing per-kind flags preserve legacy behavior (both true). */
@@ -75,6 +77,7 @@ export interface CommunityConfig{
 export type CommunityDraftKind='WELCOME_TEXT'|'FAREWELL_TEXT'|'REPLY_ADD'|'REPLY_REMOVE'|
  'WELCOME_ON'|'WELCOME_OFF'|'FAREWELL_ON'|'FAREWELL_OFF'|'REPLIES_ON'|'REPLIES_OFF'|
  'PRIVATE_WELCOME_ON'|'PRIVATE_WELCOME_OFF'|
+ 'GROUP_PROFILE_ON'|'GROUP_PROFILE_OFF'|'GROUP_TITLE_SET'|'GROUP_PHOTO_REMOVE'|
  'REPLY_ENABLE'|'REPLY_DISABLE'|'REPLY_COOLDOWN'|
  'QUIET_HOURS_SET'|'QUIET_HOURS_CLEAR'|'TOPIC_COOLDOWN_SET'|'TOPIC_COOLDOWN_CLEAR'|
  'CHANGE_LOG_ON'|'CHANGE_LOG_OFF'|'DECISION_LOG_ON'|'DECISION_LOG_OFF'|'SERVICE_CLEANUP_ON'|'SERVICE_CLEANUP_OFF'|'SERVICE_CLEANUP_DELAY'|
@@ -124,8 +127,26 @@ export interface CommunityCleanupJob{
  messageId:number;kind:CommunityServiceKind|'AUTOMATIC_REPLY';observedAt:number;dueAt:number;
  status:CommunityCleanupStatus;attemptId?:string;
 }
+export type CommunityProfileStatus='QUEUED'|'SENDING'|'CONFIRMED'|'FAILED_CONFIRMED'|'UNKNOWN_OUTCOME'|'SKIPPED';
+/** Never copy a Telegram group title into the public change-audit record. A
+ * confirmed/attempted job discards the title before contacting the provider. */
+export interface CommunityProfileJob{
+ key:string;chatId:string;chatVersion:number;policyVersion:number;
+ kind:'TITLE_SET'|'PHOTO_REMOVE';status:CommunityProfileStatus;
+ createdAt:number;profileEpoch:number;title?:string;attemptId?:string;
+}
+export interface CommunityProfileObservation{key:string;chatId:string;at:number;}
+export function validCommunityProfileTitle(value:unknown):value is string{
+ return typeof value==='string'&&value.trim()===value&&
+  Array.from(value).length>=1&&Array.from(value).length<=128&&
+  !/[\u0000-\u001f\u007f\u202a-\u202e\u2066-\u2069]/u.test(value);
+}
 export interface CommunityAutomationState{
  configs:CommunityConfig[];drafts:CommunityDraft[];receipts:CommunityReceipt[];
+ /** Owner approved edits, at most once; raw title is only kept while QUEUED. */
+ profileJobs?:CommunityProfileJob[];
+ /** Opaque arrival witnesses when editing is enabled, not visible in audit UI. */
+ profileObservations?:CommunityProfileObservation[];
  /** Event audit contains kind and opaque digests only, never titles or images. */
  serviceChanges?:CommunityServiceChange[];
  cleanupJobs?:CommunityCleanupJob[];
@@ -191,7 +212,8 @@ export function inCommunityQuietHours(hours:CommunityQuietHours,now:number,utcOf
   minute>=hours.startMinute||minute<hours.endMinute;
 }
 const kinds=new Set<CommunityDraftKind>(['WELCOME_TEXT','FAREWELL_TEXT','REPLY_ADD','REPLY_REMOVE',
- 'WELCOME_ON','WELCOME_OFF','PRIVATE_WELCOME_ON','PRIVATE_WELCOME_OFF','FAREWELL_ON','FAREWELL_OFF','REPLIES_ON','REPLIES_OFF',
+ 'WELCOME_ON','WELCOME_OFF','PRIVATE_WELCOME_ON','PRIVATE_WELCOME_OFF',
+ 'GROUP_PROFILE_ON','GROUP_PROFILE_OFF','GROUP_TITLE_SET','GROUP_PHOTO_REMOVE','FAREWELL_ON','FAREWELL_OFF','REPLIES_ON','REPLIES_OFF',
  'REPLY_ENABLE','REPLY_DISABLE','REPLY_COOLDOWN',
  'QUIET_HOURS_SET','QUIET_HOURS_CLEAR','TOPIC_COOLDOWN_SET','TOPIC_COOLDOWN_CLEAR',
  'CHANGE_LOG_ON','CHANGE_LOG_OFF','DECISION_LOG_ON','DECISION_LOG_OFF','SERVICE_CLEANUP_ON','SERVICE_CLEANUP_OFF','SERVICE_CLEANUP_DELAY',
@@ -242,6 +264,7 @@ export function validCommunityConfig(value:unknown):value is CommunityConfig{
   (x.clockFormat!==undefined&&x.clockFormat!=='12'&&x.clockFormat!=='24')||
   (x.calendar!==undefined&&x.calendar!=='gregorian'&&x.calendar!=='hijri')||
   (x.changeLogEnabled!==undefined&&typeof x.changeLogEnabled!=='boolean')||
+  (x.profileEditingEnabled!==undefined&&typeof x.profileEditingEnabled!=='boolean')||
   (x.decisionLogEnabled!==undefined&&typeof x.decisionLogEnabled!=='boolean')||
   (x.serviceCleanup!==undefined&&(!x.serviceCleanup||typeof x.serviceCleanup!=='object'||
     typeof x.serviceCleanup.enabled!=='boolean'||!Number.isInteger(x.serviceCleanup.delayMs)||
@@ -287,7 +310,38 @@ export function validCommunityState(value:unknown):value is CommunityAutomationS
   (v.serviceChanges!==undefined&&(!Array.isArray(v.serviceChanges)||v.serviceChanges.length>1000))||
   (v.cleanupJobs!==undefined&&(!Array.isArray(v.cleanupJobs)||v.cleanupJobs.length>1000))||
   (v.decisionLog!==undefined&&(!Array.isArray(v.decisionLog)||v.decisionLog.length>1000))||
-  (v.privateWelcomes!==undefined&&(!Array.isArray(v.privateWelcomes)||v.privateWelcomes.length>2500)))return false;
+  (v.privateWelcomes!==undefined&&(!Array.isArray(v.privateWelcomes)||v.privateWelcomes.length>2500))||
+  (v.profileJobs!==undefined&&(!Array.isArray(v.profileJobs)||v.profileJobs.length>500))||
+  (v.profileObservations!==undefined&&(!Array.isArray(v.profileObservations)||v.profileObservations.length>1000)))return false;
+ if(v.profileObservations){
+  const seen=new Set<string>();
+  for(const o of v.profileObservations){
+   if(!o||typeof o!=='object'||Array.isArray(o)||Object.keys(o).some(k=>!['key','chatId','at'].includes(k))||
+     typeof o.key!=='string'||!/^[a-f0-9]{64}$/u.test(o.key)||seen.has(o.key)||
+     !validGroup(o.chatId)||!validClock(o.at))return false;
+   seen.add(o.key);
+  }
+ }
+ if(v.profileJobs){
+  const seen=new Set<string>();
+  const states=new Set<CommunityProfileStatus>(['QUEUED','SENDING','CONFIRMED','FAILED_CONFIRMED','UNKNOWN_OUTCOME','SKIPPED']);
+  for(const job of v.profileJobs){
+   if(!job||typeof job!=='object'||Array.isArray(job)||
+     Object.keys(job).some(k=>!['key','chatId','chatVersion','policyVersion','kind','status','createdAt','profileEpoch','title','attemptId'].includes(k))||
+     typeof job.key!=='string'||!/^[a-f0-9]{24}$/u.test(job.key)||seen.has(job.key)||
+     !validGroup(job.chatId)||!Number.isSafeInteger(job.chatVersion)||job.chatVersion<1||
+     !Number.isSafeInteger(job.policyVersion)||job.policyVersion<1||
+     !['TITLE_SET','PHOTO_REMOVE'].includes(job.kind)||!states.has(job.status)||
+     !validClock(job.createdAt)||!Number.isSafeInteger(job.profileEpoch)||job.profileEpoch<0||job.profileEpoch>2000000000||
+     (job.title!==undefined&&(job.kind!=='TITLE_SET'||job.status!=='QUEUED'||!validCommunityProfileTitle(job.title)))||
+     (job.kind==='TITLE_SET'&&job.status==='QUEUED'&&!validCommunityProfileTitle(job.title))||
+     (job.attemptId!==undefined&&(typeof job.attemptId!=='string'||!/^[a-f0-9]{24}$/u.test(job.attemptId)))||
+     (job.status==='SENDING'&&!job.attemptId)||
+     (job.status==='QUEUED'&&job.attemptId!==undefined))return false;
+   seen.add(job.key);
+  }
+ }
+
  if(v.privateWelcomes){
   const unique=new Set<string>();
   for(const x of v.privateWelcomes){
@@ -356,7 +410,7 @@ export function validCommunityState(value:unknown):value is CommunityAutomationS
    !Number.isSafeInteger(d.configVersion)||d.configVersion<0||
    !kinds.has(d.kind)||!validClock(d.createdAt)||!validClock(d.expiresAt)||
    d.expiresAt<=d.createdAt||d.expiresAt-d.createdAt>120000||
-   (d.text!==undefined&&!validTemplate(d.text))||
+   (d.text!==undefined&&(d.kind==='GROUP_TITLE_SET'?!validCommunityProfileTitle(d.text):!validTemplate(d.text)))||
    (d.trigger!==undefined&&!validText(d.trigger,80))||
    (d.match!==undefined&&!matches.has(d.match))||
    (d.source!==undefined&&!['NOTE','RULES','FAQ'].includes(d.source))||
@@ -383,6 +437,7 @@ export function validCommunityState(value:unknown):value is CommunityAutomationS
       (typeof d.buttonUrl!=='string'||!validCommunityLinkButtons([{text:d.buttonText??'',
         url:d.buttonUrl}]))) )return false;
   if((d.kind==='WELCOME_TEXT'||d.kind==='FAREWELL_TEXT')&&!d.text||
+   d.kind==='GROUP_TITLE_SET'&&!validCommunityProfileTitle(d.text)||
    d.kind==='REPLY_ADD'&&(!d.trigger||!d.match||
       (d.source===undefined||d.source==='NOTE')&&!validTemplate(d.text))||
    (['REPLY_REMOVE','REPLY_ENABLE','REPLY_DISABLE','REPLY_COOLDOWN'] as string[]).includes(d.kind)&&!d.ruleId||
