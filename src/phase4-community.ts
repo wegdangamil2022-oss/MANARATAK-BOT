@@ -2,7 +2,7 @@ import {createHash,randomBytes} from 'node:crypto';
 import {BotStore,type BotState} from './store.js';
 import {Policy} from './policy.js';
 import {defaultCommunityConfig,emptyCommunityState,validCommunityConfig,
- matchCommunityRule,renderCommunityTemplate,selectCommunityRule,normalizeCommunityMatch,
+ matchCommunityRule,renderCommunityTemplate,selectCommunityRule,normalizeCommunityMatch,validCommunityRulesUrl,
  type CommunityConfig,type CommunityInput,type CommunityDraft,type CommunityDraftKind,
  type ReplyMatch,type CommunityAutomationState,type CommunityEventKind,type CommunityServiceKind,
  type CommunityServiceChange} from './phase4-community-model.js';
@@ -73,6 +73,8 @@ export class Phase4CommunityService{
    if(kind==='SERVICE_CLEANUP_DELAY'&&(!Number.isInteger(request.delayMs)||
       request.delayMs===undefined||request.delayMs<30000||request.delayMs>3600000))
     throw Error('COMMUNITY_SERVICE_DELAY_INVALID');
+   if(kind==='RULES_LINK_SET'&&!validCommunityRulesUrl(request.text))
+    throw Error('COMMUNITY_RULES_URL_INVALID');
    if(kind==='REPLY_ADD'&&request.match==='COMMAND'&&!/^m_[a-z][a-z0-9_]{0,23}$/u.test(request.trigger??''))
     throw Error('COMMUNITY_COMMAND_INVALID');
    const id=randomBytes(12).toString('hex');
@@ -116,6 +118,8 @@ export class Phase4CommunityService{
    const config=configured(s,draft.chatId);
    if(config.version!==draft.configVersion)throw Error('COMMUNITY_DRAFT_STALE');
    switch(draft.kind){
+    case 'RULES_LINK_SET':config.rulesUrl=draft.text!;break;
+    case 'RULES_LINK_CLEAR':delete config.rulesUrl;break;
     case 'WELCOME_TEXT':config.welcome.text=draft.text!;break;
     case 'FAREWELL_TEXT':config.farewell.text=draft.text!;break;
     case 'WELCOME_ON':config.welcome.enabled=true;break;
@@ -237,7 +241,7 @@ export class Phase4CommunityService{
    memberName:'الطالب التجريبي',groupName:'مجموعة منارتك التجريبية',
    messageText:sample,...(topicId!==undefined?{topicId}:{})};
   return {status:'MATCH',ruleId:rule.id,
-   preview:renderCommunityTemplate(rule.response,input,now+config.utcOffsetMinutes*60000)};
+   preview:renderCommunityTemplate(rule.response,input,now+config.utcOffsetMinutes*60000,config.rulesUrl??'')};
  }
  /** Atomically applies quotas and reserves an outbound event exactly once.
   * A reservation is at-most-once: its provider outcome is managed separately
@@ -276,7 +280,7 @@ export class Phase4CommunityService{
        x.ruleId===ruleId&&now-x.at<actorPeriod))return null;
    let text:string;
    try{text=renderCommunityTemplate(template,input,
-     now+config.utcOffsetMinutes*60000);}
+     now+config.utcOffsetMinutes*60000,config.rulesUrl??'');}
    catch{return null;}
    const receipt={key,chatId:input.chatId,at:now,kind:input.kind,actorDigest,
     ...(ruleId?{ruleId}:{})};
@@ -289,6 +293,9 @@ export class Phase4CommunityService{
  /** Preview never calls the Telegram gateway, writes a send or records a vote. */
  preview(draft:CommunityDraft):string{
   const clean=(x:string)=>safe(x.slice(0,250));
+  if(draft.kind==='RULES_LINK_SET')return '<b>اعتماد رابط القوانين</b>\n'+clean(draft.text??'')+
+    '\nهذا الرابط سيظهر في القوالب التي تستخدم متغير {رابط_القوانين}.';
+  if(draft.kind==='RULES_LINK_CLEAR')return 'اعتماد مسح رابط القوانين: سيختفي من الرسائل التالية.';
   if(draft.kind==='REPLY_ADD')
    return '<b>معاينة رد تلقائي</b>\nالكلمة: '+clean(draft.trigger??'')+
     '\nالمطابقة: '+draft.match+'\nالرد: '+clean(draft.text??'');
