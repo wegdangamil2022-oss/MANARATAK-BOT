@@ -1,5 +1,5 @@
 import {validAdminUIAccess,protectionUIEpoch,ADMIN_UI_TTL_MS} from './protection-ui-access.js';
-import {randomUUID} from 'node:crypto';
+import {randomUUID,createHash} from 'node:crypto';
 import {BotStore,type TelegramReplyJob} from './store.js';
 import {Policy} from './policy.js';
 import type {TelegramReplyPlan} from './telegram-transport.js';
@@ -400,6 +400,7 @@ export class TelegramReplyDispatcher {
     return {status:'FAILED_CONFIRMED' as const};
    }
    const attemptId=randomUUID();
+   const automationForCleanup=job.communityAutomation;
    const communityReceipt=community&&plan.studioMarkup?.inline_keyboard.some(row=>row.some(b=>'url' in b))?{chatId:plan.chatId,epoch:community.epoch,expiresAt:community.expiresAt}:undefined;
    if(plan.editMessageId!==undefined&&(community||job.communityClose||(s.telegramReplyJobs??[]).some(old=>old.communityMessage?.chatId===plan.chatId&&old.communityMessage.messageId===plan.editMessageId)))job.communityEditTarget={chatId:plan.chatId,messageId:plan.editMessageId};
    // An attempted edit makes the old contents uncertain, even if its outcome
@@ -411,7 +412,7 @@ export class TelegramReplyDispatcher {
    // copy goes to the sender, but a crash leaves no replayable payload.
    delete job.plan;delete job.adminUIAccess;delete job.privateLibraryAccess;delete job.communityAccess;delete job.groupQuestionAccess;delete job.groupMenuAccess;delete job.privateGroupAccess;delete job.privateReplyKind;delete job.groupReplyKind;delete job.communityAutomation;job.redactedAt=at;
    delete job.communityClose;
-   return {status:'SEND' as const,attemptId,plan,communityReceipt};
+   return {status:'SEND' as const,attemptId,plan,communityReceipt,automationForCleanup};
   });
   if(claim.status!=='SEND')return {status:claim.status};
   let result:TelegramSendResult;
@@ -429,6 +430,36 @@ export class TelegramReplyDispatcher {
    job.status=terminal;
    if(terminal!=='UNKNOWN_OUTCOME')delete job.communityEditTarget;
    if(result.status==='CONFIRMED')job.messageId=result.messageId;
+   // Only a provider-CONFIRMED, bot-authored Phase 4 message can be considered
+   // for expiry. This is NOT scheduled from the inbound user's message ID or
+   // an uncertain SEND response. A policy edit while Telegram was awaited
+   // fences old deletion plans; there is no retry on UNKNOWN_OUTCOME.
+   if(result.status==='CONFIRMED'&&claim.automationForCleanup&&
+      Number.isSafeInteger(result.messageId)&&result.messageId>0&&
+      result.messageId<=2147483647){
+    const now=this.clock();
+    const configs=s.phase4Community?.configs.filter(x=>x.chatId===claim.plan.chatId)??[];
+    const config=configs.length===1?configs[0]:undefined;
+    const chat=s.chats.filter(x=>x.id===claim.plan.chatId&&x.approved&&x.present);
+    if(Number.isSafeInteger(now)&&now>=0&&now<=8_640_000_000_000_000-3600000&&
+       config&&validCommunityConfig(config)&&
+       config.version===claim.automationForCleanup.configVersion&&
+       config.replyCleanup?.enabled===true&&chat.length===1&&
+       this.policy.canUseChat(s,claim.plan.chatId,'navigation')){
+     const key=createHash('sha256').update('P4:AUTOMATIC_REPLY:'+updateKey).digest('hex');
+     const existing=s.phase4Community!.cleanupJobs??[];
+     const kept=existing.filter(x=>x.status==='QUEUED'||x.status==='SENDING'||
+      now-x.observedAt<7*86400000);
+     if(kept.length<1000&&
+        !kept.some(x=>x.key===key||
+         x.chatId===claim.plan.chatId&&x.messageId===result.messageId)){
+      kept.push({key,chatId:claim.plan.chatId,messageId:result.messageId,
+       kind:'AUTOMATIC_REPLY',chatVersion:chat[0]!.version,policyVersion:config.version,
+       observedAt:now,dueAt:now+config.replyCleanup.delayMs,status:'QUEUED'});
+     }
+     s.phase4Community!.cleanupJobs=kept;
+    }
+   }
    if(result.status==='CONFIRMED'&&claim.communityReceipt){
     for(const old of s.telegramReplyJobs??[])if(old.communityMessage?.chatId===claim.plan.chatId&&old.communityMessage.messageId===result.messageId)delete old.communityMessage;
     job.communityMessage={...claim.communityReceipt,messageId:result.messageId};
