@@ -228,6 +228,8 @@ export class Phase4CommunityService{
     }
     case 'FAREWELL_TEXT':config.farewell.text=draft.text!;break;
     case 'WELCOME_ON':config.welcome.enabled=true;break;
+    case 'PRIVATE_WELCOME_ON':config.privateWelcomeEnabled=true;break;
+    case 'PRIVATE_WELCOME_OFF':config.privateWelcomeEnabled=false;break;
     case 'WELCOME_OFF':config.welcome.enabled=false;break;
     case 'FAREWELL_ON':config.farewell.enabled=true;break;
     case 'FAREWELL_OFF':config.farewell.enabled=false;break;
@@ -341,6 +343,43 @@ export class Phase4CommunityService{
   });
  }
  /** Owner-only, bounded seven-day history without raw student content. */
+ /** A member explicitly opens the bot's private chat, after a fresh external
+  * membership check. Local join proof is short-lived; never send unsolicited DMs.
+  * The opaque receipt claim is consumed at most once even on an unknown send.
+  */
+ async claimPrivateWelcome(actorId:string,chatId:string,memberName:string):Promise<string|null>{
+  const now=this.clock();
+  if(!validNow(now)||!isGroup(chatId)||!/^[1-9]\\d{0,15}$/u.test(actorId)||
+      !Number.isSafeInteger(Number(actorId))||typeof memberName!=='string'||
+      memberName.length>200)return null;
+  return this.store.transaction(s=>{
+   const config=activeConfig(s,chatId),st=s.phase4Community;
+   if(!config||!validCommunityConfig(config)||!config.welcome.enabled||
+      config.privateWelcomeEnabled!==true||!st||
+      !this.policy.canUseChat(s,chatId,'navigation')||
+      s.chats.filter(c=>c.id===chatId&&c.approved).length!==1)return null;
+   const actorDigest=hex('P4:ACTOR:'+chatId+':'+actorId);
+   const join=st.receipts.filter(x=>x.kind==='JOIN'&&x.chatId===chatId&&
+      x.actorDigest===actorDigest&&x.at<=now&&now-x.at<=900000)
+      .sort((a,b)=>b.at-a.at)[0];
+   if(!join)return null;
+   const claims=st.privateWelcomes??[];
+   if(claims.some(x=>x.chatId===chatId&&x.joinKey===join.key&&
+      x.actorDigest===actorDigest))return null;
+   const input:CommunityInput={kind:'JOIN',chatId,actorId,memberName,
+      groupName:'مجموعة منارتك',...(join.joinKind?{joinKind:join.joinKind}:{})};
+   let text:string;
+   try{text=renderCommunityTemplate(selectCommunityGreeting(config,'welcome',join.joinKind),
+     input,now+(config.timeZone?0:config.utcOffsetMinutes*60000),config.rulesUrl??'',
+     {language:config.language??'ar',clockFormat:config.clockFormat??'24',
+      calendar:config.calendar??'gregorian',...(config.timeZone?{timeZone:config.timeZone}:{})});}
+   catch{return null;}
+   if(Buffer.byteLength(text,'utf8')>4096)return null;
+   st.privateWelcomes=[...claims.filter(x=>x.at<=now&&now-x.at<86400000)
+     .slice(-2499),{joinKey:join.key,chatId,actorDigest,at:now}];
+   return text;
+  });
+ }
  async recentDecisions(actorId:string,chatId:string):Promise<CommunityDecision[]>{
   const s=await this.store.snapshot();groupAvailable(s,this.policy,actorId,chatId);
   const config=configured(s,chatId),now=this.clock();
@@ -480,7 +519,8 @@ export class Phase4CommunityService{
     record('CAPTION_LIMIT',ruleId);return null;
    }
    const receipt={key,chatId:input.chatId,at:now,kind:input.kind,actorDigest,
-    ...(ruleId?{ruleId}:{}),...(input.topicId!==undefined?{topicId:input.topicId}:{})};
+    ...(ruleId?{ruleId}:{}),...(input.topicId!==undefined?{topicId:input.topicId}:{}),
+    ...(input.kind==='JOIN'&&input.joinKind?{joinKind:input.joinKind}:{})};
    s.phase4Community??=emptyCommunityState();
    s.phase4Community.receipts=[...active.slice(-2499),receipt];
    // Reserved means local intent only; the Telegram send may subsequently fail.
@@ -507,6 +547,8 @@ export class Phase4CommunityService{
     '\nالوجهة: '+clean(draft.buttonUrl??'')+'\nزر رابط فقط؛ لا يستدعي أمرًا داخل البوت.';
   if(draft.kind==='WELCOME_BUTTONS_CLEAR'||draft.kind==='FAREWELL_BUTTONS_CLEAR')
    return '<b>حذف جميع أزرار الرابط</b> من '+(draft.kind==='WELCOME_BUTTONS_CLEAR'?'الترحيب':'الوداع');
+  if(draft.kind==='PRIVATE_WELCOME_ON')return 'تفعيل رابط ترحيب خاص اختياري بعد الانضمام.\\nلا يرسل البوت رسالة للعضو دون فتحه الخاص بنفسه؛ يتطلب عضوية حقيقية وانضمامًا حديثًا.\\nالرسالة العامة ما تزال ظاهرة لأعضاء المجموعة.';
+  if(draft.kind==='PRIVATE_WELCOME_OFF')return 'إيقاف رابط الترحيب الخاص وإبطال رسائل الخاص المعلقة ذات الإعداد القديم.\\nلا يعطل الترحيب العام.';
   if(draft.kind==='WELCOME_VARIANT_SET')return '<b>معاينة ترحيب حسب نوع الدخول: '+
    safe(draft.joinKind??'')+'</b>\n'+safe(draft.text??'')+'\nلن يُرسل حتى تفعيل الترحيب.';
   if(draft.kind==='WELCOME_VARIANT_CLEAR')return '<b>مسح ترحيب نوع الدخول: '+
