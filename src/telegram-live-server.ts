@@ -28,6 +28,8 @@ import {TelegramBotApiModerationGateway} from './telegram-moderation-gateway.js'
 import {TelegramAdminRoleGateway} from './telegram-admin-role-gateway.js';
 import {TelegramEphemeralTextSender} from './telegram-ephemeral-sender.js';
 import {TelegramTemporaryGroupSender} from './telegram-temporary-group-sender.js';
+import {CaptchaJoinNotices} from './captcha-join-notices.js';
+import {CaptchaService} from './captcha.js';
 
 export interface LiveTelegramConfig{
  ownerId:string;botId:string;botUsername:string;stateFile:string;
@@ -191,9 +193,13 @@ export async function createLiveTelegramServer(config:LiveTelegramConfig,
  // moderation gateway stays mock-only unless the explicit phase-3 option is selected.
  const subscription=new SubscriptionGate(store,policy,membership,
   phase3?.moderation??new ModerationService(store,policy,new FakeModerationGateway()));
+ const joinNotices=phase3&&check.phase3TimersEnabled===true?new CaptchaJoinNotices(
+  store,policy,new CaptchaService(store,policy,(chat,actor)=>membership.verifyMembership(chat,actor),Date.now),
+  new TelegramTemporaryGroupSender(check.token,request),check.botUsername,Date.now,safetyGate):undefined;
  const app=new TelegramUpdateApplication({store,policy,education,admin,faq,links,
   botId:check.botId,botUsername:check.botUsername,
   ...(messageMetadata?{messageMetadata}:{}),
+  ...(joinNotices?{joinNotices}:{}),
   ...(phase3?{adminRoles:new TelegramAdminRoleGateway(check.token,request,safetyGate),moderation:phase3.moderation,purge:phase3.purge,groupPermissions:phase3.groupPermissions,protectionEnforcer:phase3.protectionEnforcer,moderationRights:{gateway:new TelegramBotApiModerationGateway(check.token,request,safetyGate),safety:safetyGate},ephemeralVerification:true}:{}),
   membership:(chatId,actorId)=>membership.verifyMembership(chatId,actorId),subscription,
   documentDownload:new TelegramBotApiDocumentDownloader(check.token,request,safetyGate),
@@ -217,6 +223,7 @@ export async function createLiveTelegramServer(config:LiveTelegramConfig,
    const result=await protection.cleanupFloodWindows();
    if(phase3)await phase3.tick(check.phase3TimersEnabled===true);
    if(phase3&&check.phase3TimersEnabled===true){await messageMetadata!.prune();const verified=await subscription.tickAutomatic(true,safetyGate);if(verified.status==='INVALID')throw Error('SUBSCRIPTION_MAINTENANCE_INVALID');const pending=await dispatcher.drainVerificationFallbacks();if(pending.status==='INVALID')throw Error('SUBSCRIPTION_FALLBACK_INVALID');const cleaned=await dispatcher.cleanupVerificationFallbacks();if(cleaned.status==='INVALID')throw Error('SUBSCRIPTION_CLEANUP_INVALID');}
+   if(joinNotices){await joinNotices.drain();await joinNotices.cleanup();}
    if(notices)await notices.drain();
    if(ruleNotices)await ruleNotices.drain();
    if(subscriptionRightsMonitor)await subscriptionRightsMonitor.tick();
