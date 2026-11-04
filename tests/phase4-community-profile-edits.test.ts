@@ -242,3 +242,24 @@ for(const engine of ['json','sqlite'] as const){
   }finally{await f.close();}
  });
 }
+
+
+for(const engine of ['json','sqlite'] as const){
+ test('WELCOME-005 '+engine+': duplicate Telegram service update IDs cannot double-count one real profile change',async()=>{
+  const f=await fixture(engine);try{
+   await f.approve({kind:'CHANGE_LOG_ON'});
+   await f.approve({kind:'GROUP_PROFILE_ON'});
+   const make=(id:number)=>({chatId:GROUP,actorId:STUDENT,messageId:314,
+    kind:'TITLE_CHANGED' as const,updateKey:'b3-webhook:bot-main:'+id,sentAtMs:f.clock()});
+   assert.equal(await f.community.recordServiceEvent(make(801)),true);
+   assert.equal(await f.community.recordServiceEvent(make(802)),false);
+   assert.equal((await f.community.recentChanges(OWNER,GROUP)).length,1);
+   assert.equal((await f.store.snapshot()).phase4Community?.profileRevisions?.[0]?.revision,1);
+   await f.approve({kind:'CHANGE_LOG_OFF'});
+   assert.equal((await f.community.recentChanges(OWNER,GROUP)).length,0);
+   assert.equal((await f.store.snapshot()).phase4Community?.serviceChanges?.length??0,0);
+   assert.equal((await f.store.snapshot()).phase4Community?.profileObservations?.length,1,
+    'stopping owner history does not erase the edit-fencing witness');
+  }finally{await f.close();}
+ });
+}
