@@ -101,8 +101,10 @@ export class Phase4ServiceCleanupDispatcher{
    const chat=state.chats.filter(x=>x.id===current.chatId);
    // Never delete old service messages, messages from a revoked group,
    // or messages under a policy that changed after the event was admitted.
+   const cleanupEnabled=current.kind==='AUTOMATIC_REPLY'?
+     config?.replyCleanup?.enabled:config?.serviceCleanup?.enabled;
    if(liveNow<current.observedAt||liveNow-current.observedAt>2*3600000||
-     !config?.serviceCleanup?.enabled||config.version!==current.policyVersion||
+     cleanupEnabled!==true||!config||config.version!==current.policyVersion||
      chat.length!==1||!chat[0]!.approved||chat[0]!.version!==current.chatVersion||
      !this.policy.canUseChat(state,current.chatId,'navigation')){
     current.status='SKIPPED';
