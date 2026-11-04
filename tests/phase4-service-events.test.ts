@@ -186,3 +186,50 @@ test('P4 Telegram cleanup gateway checks actual bot administrator delete rights 
  assert.equal(await denied.canDelete(GROUP),false);
  assert.equal(deletions,0);
 });
+
+for(const engine of ['json','sqlite'] as const){
+ test('P4 '+engine+': malformed group-title events cannot enter audit without a positive Telegram message id',async()=>{
+  const f=await fixture(engine);try{
+   await f.approve('CHANGE_LOG_ON');
+   const valid=serviceUpdate(979,title());
+   const malformed={...valid,message:{...valid.message,message_id:0}};
+   const output=await f.app().handle(malformed);
+   assert.equal(output.status,'DENIED');
+   assert.equal((await f.store.snapshot()).phase4Community?.serviceChanges?.length??0,0);
+   const missing={...valid,message:{...valid.message,message_id:undefined}};
+   assert.equal((await f.app().handle({...missing,update_id:980})).status,'DENIED');
+  }finally{await f.close();}
+ });
+ test('P4 '+engine+': cleanup rejects absent Telegram rights before making any delete request',async()=>{
+  const f=await fixture(engine);try{
+   await f.approve('SERVICE_CLEANUP_ON');
+   await f.app().handle(serviceUpdate(981,memberJoined()));
+   const key=(await f.store.snapshot()).phase4Community!.cleanupJobs![0]!.key;
+   let calls=0;
+   const gateway={canDelete:async()=>false,
+    deleteMessage:async()=>{calls++;return 'CONFIRMED' as const;}};
+   f.advance(120001);
+   const dispatcher=new Phase4ServiceCleanupDispatcher(f.store,f.policy,gateway,f.clock);
+   assert.equal(await dispatcher.dispatch(key),'FAILED_CONFIRMED');
+   assert.equal(calls,0);
+   assert.equal(await dispatcher.dispatch(key),'FAILED_CONFIRMED');
+  }finally{await f.close();}
+ });
+ test('P4 '+engine+': racing cleanup instances cannot delete one service message twice',async()=>{
+  const f=await fixture(engine);try{
+   await f.approve('SERVICE_CLEANUP_ON');
+   await f.app().handle(serviceUpdate(982,memberJoined()));
+   const key=(await f.store.snapshot()).phase4Community!.cleanupJobs![0]!.key;
+   let sends=0;
+   const gateway={canDelete:async()=>true,
+    deleteMessage:async()=>{sends++;return 'CONFIRMED' as const;}};
+   f.advance(120001);
+   const first=new Phase4ServiceCleanupDispatcher(f.store,f.policy,gateway,f.clock);
+   const second=new Phase4ServiceCleanupDispatcher(new BotStore(f.path,{engine}),f.policy,gateway,f.clock);
+   const outcomes=await Promise.all([first.dispatch(key),second.dispatch(key)]);
+   assert.ok(outcomes.includes('CONFIRMED'));
+   assert.equal(sends,1);
+   assert.equal((await f.store.snapshot()).phase4Community?.cleanupJobs?.[0]?.status,'CONFIRMED');
+  }finally{await f.close();}
+ });
+}
