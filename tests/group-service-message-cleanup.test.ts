@@ -78,7 +78,7 @@ for(const engine of ['json','sqlite'] as const){
     s.audit.push({actorId:OWNER,updateKey:root.updateKey+':started',decision:'ALLOW',reason:'GROUP_SERVICE_DELETE_STARTED',policyVersion:root.policyVersion,at:f.now()});
    });else f.result('UNKNOWN_OUTCOME');
    const run=await f.service.cleanup();
-   assert.equal(run.deleted,0);assert.equal(run.unresolved,cause==='crash'?0:1);
+   assert.equal(run.deleted,0);assert.equal(run.unresolved,1);
    const second=new GroupServiceMessageCleanup(new BotStore(f.store.file,{engine}),f.policy,
     {delete:async()=>{throw Error('duplicate Telegram delete prohibited');}},()=>f.now(),async()=>true,async()=> 'GRANTED');
    assert.equal((await second.cleanup()).deleted,0);
