@@ -225,4 +225,28 @@ for(const engine of ['json','sqlite'] as const){
   assert.doesNotMatch(repeated.plan!.text,/مرحبًا بك بعد إكمال التحقق/u);
   assert.equal((await f.store.snapshot()).audit.filter(a=>a.updateKey.startsWith('onboarding:welcome:')).length,1);
  }finally{await f.close();}});
+
+ test(engine+' standalone CAPTCHA shows one welcome only after restriction is safely released',async()=>{const f=await fixture();try{
+  await f.enable();f.advance();const at=f.now();
+  await f.app.handle({update_id:230,message:{message_id:230,date:at/1000,from:{id:100,is_bot:false},chat:{id:Number(G),type:'supergroup'},new_chat_members:[{id:300,is_bot:false}]}});
+  f.advance();const initial=await f.app.handle({update_id:231,message:{message_id:231,from:{id:300,is_bot:false},chat:{id:300,type:'private'},text:'/start'}}),answer=pick({text:initial.plan!.text,keyboard:initial.plan!.inlineMarkup!},'تحقق بديل');
+  assert.doesNotMatch(initial.plan!.text,/مرحبًا بك بعد إكمال التحقق/u);
+  const result=await f.app.handle({update_id:232,callback_query:{id:'standalone-welcome',from:{id:300,is_bot:false},data:answer,message:{message_id:232,from:{id:999,is_bot:true},chat:{id:300,type:'private'}}}});
+  assert.equal(result.reason,'CAPTCHA_CHALLENGE_VIEW');
+  assert.match(result.plan!.text,/مرحبًا بك بعد إكمال التحقق/u);
+  assert.equal(f.target().status,'member');
+  assert.equal((await f.store.snapshot()).audit.filter(a=>a.updateKey.startsWith('onboarding:welcome:')).length,1);
+  const repeated=await f.app.handle({update_id:233,message:{message_id:233,from:{id:300,is_bot:false},chat:{id:300,type:'private'},text:'/start'}});
+  assert.doesNotMatch(repeated.plan?.text??'',/مرحبًا بك بعد إكمال التحقق/u);
+  assert.equal((await f.store.snapshot()).audit.filter(a=>a.updateKey.startsWith('onboarding:welcome:')).length,1);
+ }finally{await f.close();}});
+ test(engine+' an unrelated active sanction prevents a standalone welcome after CAPTCHA',async()=>{const f=await fixture();try{
+  await f.enable();f.advance();const at=f.now();
+  await f.app.handle({update_id:234,message:{message_id:234,date:at/1000,from:{id:100,is_bot:false},chat:{id:Number(G),type:'supergroup'},new_chat_members:[{id:300,is_bot:false}]}});
+  await f.store.transaction(s=>{s.moderationReasons.push({chatId:G,memberId:'300',source:'MANUAL',reference:'independent',kind:'BAN',createdBy:'100',active:true});});
+  f.advance();const initial=await f.app.handle({update_id:235,message:{message_id:235,from:{id:300,is_bot:false},chat:{id:300,type:'private'},text:'/start'}}),answer=pick({text:initial.plan!.text,keyboard:initial.plan!.inlineMarkup!},'تحقق بديل');
+  const result=await f.app.handle({update_id:236,callback_query:{id:'independent-welcome-block',from:{id:300,is_bot:false},data:answer,message:{message_id:236,from:{id:999,is_bot:true},chat:{id:300,type:'private'}}}});
+  assert.doesNotMatch(result.plan!.text,/مرحبًا بك بعد إكمال التحقق/u);
+  assert.equal((await f.store.snapshot()).audit.filter(a=>a.updateKey.startsWith('onboarding:welcome:')).length,0);
+ }finally{await f.close();}});
 }
