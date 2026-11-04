@@ -354,7 +354,7 @@ export async function phase4CommunityScreen(service:Phase4CommunityService,actor
    if(config.welcomeByJoin?.[kind])rows.push([btn('🗑️ إزالة قالب '+label,'p4c:1:b:'+id+':'+code)]);
   }
   rows.push([btn('↩️ إعدادات المجموعة','p4c:1:g:'+id)]);
-  return {text:'<b>🚪 قوالب الترحيب حسب نوع الانضمام</b>\nالمجموعة: <code>'+id+'</code>+
+  return {text:'<b>🚪 قوالب الترحيب حسب نوع الانضمام</b>\nالمجموعة: <code>'+id+'</code>'+
    '\n\n'+kinds.map(([kind,label])=>
     '• '+label+' ('+kind+'): '+
     (config.welcomeByJoin?.[kind]?esc(config.welcomeByJoin[kind]!.slice(0,100)):'القالب العام أو المترجم')).join('\n')+
