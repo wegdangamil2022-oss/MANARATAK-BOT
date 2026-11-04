@@ -1,7 +1,7 @@
 import {Phase4CommunityService,type DraftRequest} from './phase4-community.js';
 import type {OwnerInlineScreen,TelegramInlineKeyboard} from './telegram-inline-owner.js';
 import type {CommunityDraftKind,ReplyMatch,CommunityLanguage,CommunityCalendar,CommunityClockFormat,CommunityJoinKind,CommunityLeaveKind} from './phase4-community-model.js';
-import {validCommunityRulesUrl,validCommunityTimeZone} from './phase4-community-model.js';
+import {validCommunityRulesUrl,validCommunityTimeZone,validCommunityFAQId} from './phase4-community-model.js';
 import {validCommunityLinkButton,validCommunityPhotoId} from './phase4-community-rich.js';
 const group=/^-[1-9]\d{0,15}$/u,hex=/^[a-f0-9]{24}$/u;
 const route=/^p4c:1:(?:q:-[1-9]\d{0,15}|b:-[1-9]\d{0,15}(?::[sam])?|m:-[1-9]\d{0,15}(?::[sr])?|s:-[1-9]\d{0,15}|k:-[1-9]\d{0,15}|z:-[1-9]\d{0,15}|n:-[1-9]\d{0,15}|a:-[1-9]\d{0,15}|y:-[1-9]\d{0,15}(?::[1-9]\d{0,9})?|l:(?:0|[1-9]\d{0,2})|g:-[1-9]\d{0,15}|h:-[1-9]\d{0,15}|v:-[1-9]\d{0,15}:[wf]|j:-[1-9]\d{0,15}:[wf]:[pb]|r:-[1-9]\d{0,15}:(?:0|[1-9]\d{0,2})|t:-[1-9]\d{0,15}:[wfrsgbdpujl]:[01]|d:-[1-9]\d{0,15}:[a-f0-9]{12}|e:-[1-9]\d{0,15}:[a-f0-9]{12}:[01]|u:-[1-9]\d{0,15}:(?:ar|en)|o:-[1-9]\d{0,15}:(?:12|24):[gh]|[cx]:[a-f0-9]{24})$/u;
@@ -23,6 +23,9 @@ const help='للتعديل أرسل في خاص البوت أحد الأوامر
  +'<code>/farewellremovedon -100123</code>\n'
  +'<code>/farewellremovedoff -100123</code>\n'
  +'<code>/replyadd -100123 WORD منحة | راجع قسم المنح الدراسية</code>\n'
+ +'<code>/replynote -100123 WORD تنبيه | نص الملاحظة الثابتة</code>\n'
+ +'<code>/replyrules -100123 WORD القوانين</code>\n'
+ +'<code>/replyfaq -100123 WORD القبول | معرف_FAQ_المعتمد</code>\n'
  +'<code>/replyadd -100123 topic:777 COMMAND m_grants | رابط المنح</code>\n'
  +'<code>/replycheck -100123 منحة دراسية</code>\n'
  +'<code>/replylog -100123</code>\n'
@@ -185,6 +188,27 @@ export function parsePhase4CommunityCommand(text:string):
   return {kind:'DIAGNOSE',chatId:check[1]!,sample:check[3]!,
    ...(topic!==undefined?{topicId:topic}:{})};
  }
+ // Owner-reviewed fixed notes, approved rules URLs and live publication-backed
+ // FAQ answers share the existing 8/minute, actor and topic quota machinery.
+ const sourced=/^\/(replynote|replyfaq|replyrules) (-[1-9]\d{0,15}) (?:(?:topic:([1-9]\d{0,9}) )?)(EXACT|WORD|CONTAINS|COMMAND) ([^\u0000-\u001f\u007f|]{1,80})(?: \| ([^\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]{1,1200}))?$/u.exec(text);
+ if(sourced){
+  const [,command,chatId,topicRaw,matchType,rawTrigger,payload]=sourced;
+  const topic=topicRaw===undefined?undefined:Number(topicRaw),trigger=rawTrigger!.trim();
+  if(!trigger||topic!==undefined&&(!Number.isSafeInteger(topic)||topic>2147483647)||
+    matchType==='COMMAND'&&!/^m_[a-z][a-z0-9_]{0,23}$/u.test(trigger))return null;
+  const common={kind:'REPLY_ADD' as const,match:matchType! as ReplyMatch,trigger,
+   ...(topic!==undefined?{topicId:topic}:{})};
+  if(command==='replyfaq'){
+   if(!validCommunityFAQId(payload))return null;
+   return {kind:'EDIT',chatId:chatId!,request:{...common,source:'FAQ',sourceFaqId:payload}};
+  }
+  if(command==='replyrules'){
+   if(payload!==undefined)return null;
+   return {kind:'EDIT',chatId:chatId!,request:{...common,source:'RULES'}};
+  }
+  if(!payload?.trim()||Array.from(payload.trim()).length>800)return null;
+  return {kind:'EDIT',chatId:chatId!,request:{...common,source:'NOTE',text:payload.trim()}};
+ }
  const match=/^\/(setwelcome|setfarewell|replyadd|replydel) (-[1-9]\d{0,15}) ([^\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]+)$/u.exec(text);
  if(!match)return null;
  const [,kind,chatId,rest]=match;
@@ -215,6 +239,7 @@ export async function phase4CommunityScreen(service:Phase4CommunityService,actor
    diagnostic.status==='QUIET_HOURS'?'الردود متوقفة حاليًا بسبب ساعات الهدوء المعتمدة للمجموعة.':
    diagnostic.status==='RULE_DISABLED'?'القاعدة المطابقة <code>'+diagnostic.ruleId+'</code> معطّلة.':
    diagnostic.status==='TOPIC_MISMATCH'?'القاعدة المطابقة <code>'+diagnostic.ruleId+'</code> مخصصة لموضوع Forum آخر.':
+   diagnostic.status==='SOURCE_UNAVAILABLE'?'مصدر الرد المعتمد غير متاح حاليًا (سؤال FAQ أو منشوره أو رابط القوانين). لم يُرسل رد.':
    'لا توجد قاعدة ترد على هذه الرسالة في هذا الموضوع.';
   return {text:'<b>🧪 تشخيص الردود دون إرسال</b>\n'+text+
    '\nلا تحسب هذه المعاينة حدود المعدّل أو عضوية الطلاب.',
@@ -593,10 +618,13 @@ export async function phase4CommunityScreen(service:Phase4CommunityService,actor
   if(nav.length)rows.push(nav);
   rows.push([btn('↩️ المجموعة','p4c:1:g:'+c.chatId)]);
   return {text:'<b>🤖 الردود المحفوظة</b>\n'+(selected.length?
-   selected.map(r=>'<code>'+r.id+'</code> • '+r.match+' • '+esc(r.trigger.slice(0,65))+
+   selected.map(r=>'<code>'+r.id+'</code> • '+(r.source??'رد ثابت')+' • '+r.match+' • '+esc(r.trigger.slice(0,65))+
+   (r.source==='FAQ'?' • مرجع FAQ معتمد':'')+
    (r.enabled?' • نشط':' • متوقف')+' • '+(r.cooldownMs/1000)+' ثانية'+
    (r.topicId?' • موضوع '+r.topicId:'')).join('\n'):'لا توجد ردود.')+
-   '\n\nإضافة رد: <code>/replyadd '+c.chatId+' WORD كلمة | نص الرد</code>',
+   '\n\nرد ثابت: <code>/replynote '+c.chatId+' WORD تنبيه | نص الملاحظة</code>'+
+   '\nقوانين معتمدة: <code>/replyrules '+c.chatId+' WORD القوانين</code>'+
+   '\nFAQ معتمد: <code>/replyfaq '+c.chatId+' WORD القبول | UUID</code>',
    keyboard:k(rows)};
  }
  const perRule=/^p4c:1:e:(-[1-9]\d{0,15}):([a-f0-9]{12}):([01])$/u.exec(data);
