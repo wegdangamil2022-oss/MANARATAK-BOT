@@ -109,6 +109,7 @@ export interface TelegramResult { status: 'APPLIED' | 'DUPLICATE' | 'DENIED' | '
 type ProcessedReply={status:TelegramResult['status'];reason:string;plan?:TelegramReplyPlan;
  groupQuestionAccess?:TelegramReplyJob['groupQuestionAccess'];
  groupMenuAccess?:TelegramReplyJob['groupMenuAccess'];
+ communityAutomation?:TelegramReplyJob['communityAutomation'];
  privateGroupAccess?:TelegramReplyJob['privateGroupAccess'];
  adminUIAccess?:TelegramReplyJob['adminUIAccess'];
  privateLibraryAccess?:TelegramReplyJob['privateLibraryAccess'];communityAccess?:TelegramReplyJob['communityAccess'];communityClose?:TelegramReplyJob['communityClose']};
@@ -462,6 +463,7 @@ export class TelegramUpdateApplication {
        !Number.isSafeInteger(now)||now<0||now>8640000000000000-120000)
       return null;
     return {status:'APPLIED',reason:'PHASE4_COMMUNITY_PLANNED',
+     communityAutomation:{kind:proposal.kind,configVersion:proposal.policyVersion},
      plan:{chatId:event.chatId,parseMode:'HTML',text:proposal.text,
       ...(proposal.photoFileId?{photoFileId:proposal.photoFileId}:{}),
       ...(proposal.communityLinks?{communityLinks:proposal.communityLinks}:{}),
@@ -1466,9 +1468,9 @@ export class TelegramUpdateApplication {
     // Commit the decision and outbound reply intent in one durable transaction.
     // No external call occurs before the outbox row exists.
     await this.opts.store.finish(key,audit,handled.plan,handled.groupQuestionAccess,
-     handled.groupMenuAccess,handled.privateGroupAccess,handled.adminUIAccess,handled.privateLibraryAccess,studioInput&&!!handled.adminUIAccess,handled.communityAccess,handled.communityClose);
+     handled.groupMenuAccess,handled.privateGroupAccess,handled.adminUIAccess,handled.privateLibraryAccess,studioInput&&!!handled.adminUIAccess,handled.communityAccess,handled.communityClose,handled.communityAutomation);
     // Temporary actor IDs are only stored in the guarded queue, never returned.
-    const {groupQuestionAccess:_,groupMenuAccess:__,privateGroupAccess:___,adminUIAccess:____,privateLibraryAccess:_____,communityAccess:______,communityClose:_______,...publicResult}=handled;
+    const {groupQuestionAccess:_,groupMenuAccess:__,privateGroupAccess:___,adminUIAccess:____,privateLibraryAccess:_____,communityAccess:______,communityClose:_______,communityAutomation:________,...publicResult}=handled;
     const visible=publicResult.plan?{...publicResult,deliveryKey:key}:publicResult;
     return event.callbackQueryId?{...visible,callbackQueryId:event.callbackQueryId}:visible;
   }
