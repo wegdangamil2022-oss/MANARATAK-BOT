@@ -4,7 +4,7 @@ import type {CommunityDraftKind,ReplyMatch,CommunityLanguage,CommunityCalendar,C
 import {validCommunityRulesUrl,validCommunityTimeZone} from './phase4-community-model.js';
 import {validCommunityLinkButton,validCommunityPhotoId} from './phase4-community-rich.js';
 const group=/^-[1-9]\d{0,15}$/u,hex=/^[a-f0-9]{24}$/u;
-const route=/^p4c:1:(?:q:-[1-9]\d{0,15}|b:-[1-9]\d{0,15}(?::[sam])?|k:-[1-9]\d{0,15}|z:-[1-9]\d{0,15}|n:-[1-9]\d{0,15}|a:-[1-9]\d{0,15}|y:-[1-9]\d{0,15}(?::[1-9]\d{0,9})?|l:(?:0|[1-9]\d{0,2})|g:-[1-9]\d{0,15}|h:-[1-9]\d{0,15}|v:-[1-9]\d{0,15}:[wf]|j:-[1-9]\d{0,15}:[wf]:[pb]|r:-[1-9]\d{0,15}:(?:0|[1-9]\d{0,2})|t:-[1-9]\d{0,15}:[wfrsgbd]:[01]|d:-[1-9]\d{0,15}:[a-f0-9]{12}|e:-[1-9]\d{0,15}:[a-f0-9]{12}:[01]|u:-[1-9]\d{0,15}:(?:ar|en)|o:-[1-9]\d{0,15}:(?:12|24):[gh]|[cx]:[a-f0-9]{24})$/u;
+const route=/^p4c:1:(?:q:-[1-9]\d{0,15}|b:-[1-9]\d{0,15}(?::[sam])?|k:-[1-9]\d{0,15}|z:-[1-9]\d{0,15}|n:-[1-9]\d{0,15}|a:-[1-9]\d{0,15}|y:-[1-9]\d{0,15}(?::[1-9]\d{0,9})?|l:(?:0|[1-9]\d{0,2})|g:-[1-9]\d{0,15}|h:-[1-9]\d{0,15}|v:-[1-9]\d{0,15}:[wf]|j:-[1-9]\d{0,15}:[wf]:[pb]|r:-[1-9]\d{0,15}:(?:0|[1-9]\d{0,2})|t:-[1-9]\d{0,15}:[wfrsgbdp]:[01]|d:-[1-9]\d{0,15}:[a-f0-9]{12}|e:-[1-9]\d{0,15}:[a-f0-9]{12}:[01]|u:-[1-9]\d{0,15}:(?:ar|en)|o:-[1-9]\d{0,15}:(?:12|24):[gh]|[cx]:[a-f0-9]{24})$/u;
 export const validPhase4CommunityRoute=(s:unknown):s is string=>typeof s==='string'&&
  Buffer.byteLength(s,'utf8')<=64&&route.test(s);
 const esc=(s:string):string=>s.replace(/&/gu,'&amp;').replace(/</gu,'&lt;')
@@ -14,6 +14,8 @@ const btn=(text:string,data:string)=>({text,callback_data:data});
 const help='للتعديل أرسل في خاص البوت أحد الأوامر:\n'
  +'<code>/setwelcome -100123 نص الترحيب {العضو}</code>\n'
  +'<code>/welcomevariant -100123 SELF أهلًا {العضو}</code>\n'
+ +'<code>/privatewelcomeon -100123</code>\n'
+ +'<code>/privatewelcomeoff -100123</code>\n'
  +'<code>/clearwelcomevariant -100123 SELF</code>\n'
  +'<code>/setfarewell -100123 نص الوداع</code>\n'
  +'<code>/replyadd -100123 WORD منحة | راجع قسم المنح الدراسية</code>\n'
@@ -49,6 +51,9 @@ export function parsePhase4CommunityCommand(text:string):
  {kind:'DIAGNOSE';chatId:string;sample:string;topicId?:number}|
  {kind:'DECISIONS';chatId:string}|null{
  if(text==='/community')return {kind:'HOME'};
+ const privateGreeting=/^\/privatewelcome(on|off) (-[1-9]\d{0,15})$/u.exec(text);
+ if(privateGreeting)return {kind:'EDIT',chatId:privateGreeting[2]!,
+  request:{kind:privateGreeting[1]==='on'?'PRIVATE_WELCOME_ON':'PRIVATE_WELCOME_OFF'}};
  const variant=/^\/welcomevariant (-[1-9]\d{0,15}) (SELF|ADDED|BATCH) ([^\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]{1,800})$/u.exec(text);
  if(variant)return {kind:'EDIT',chatId:variant[1]!,request:{
   kind:'WELCOME_VARIANT_SET',joinKind:variant[2]! as CommunityJoinKind,text:variant[3]!.trim()}};
@@ -243,6 +248,7 @@ export async function phase4CommunityScreen(service:Phase4CommunityService,actor
    '\nقالب الترحيب المترجم: '+(c.welcome.localized?.[c.language??'ar']?'متاح':'غير محدد')+
    '\nقالب الوداع المترجم: '+(c.farewell.localized?.[c.language??'ar']?'متاح':'غير محدد')+
    '\nأنواع الترحيب المخصصة: '+Object.keys(c.welcomeByJoin??{}).length+' من 3'+
+   '\nترحيب خاص بطلب العضو: '+label(c.privateWelcomeEnabled??false)+
    '\nصورة الترحيب: '+(c.welcome.photoFileId?'معتمدة':'غير مضافة')+
    '\nصورة الوداع: '+(c.farewell.photoFileId?'معتمدة':'غير مضافة')+
    '\nأزرار الترحيب الخارجية: '+(c.welcome.buttons?.length??0)+
@@ -258,6 +264,8 @@ export async function phase4CommunityScreen(service:Phase4CommunityService,actor
      'p4c:1:t:'+id+':d:'+(c.decisionLogEnabled?'0':'1'))],
     [btn('🌙 ساعات الهدوء','p4c:1:q:'+id),btn('🧵 حدود الموضوعات','p4c:1:y:'+id)],
     [btn('🚪 أنواع الانضمام','p4c:1:b:'+id)],
+    [btn('🔒 '+(c.privateWelcomeEnabled?'إيقاف':'تفعيل')+' الترحيب الخاص الاختياري',
+     'p4c:1:t:'+id+':p:'+(c.privateWelcomeEnabled?'0':'1'))],
     [btn('🖼️ وسائط الترحيب','p4c:1:v:'+id+':w'),
      btn('🖼️ وسائط الوداع','p4c:1:v:'+id+':f')],
     [btn('🌐 اللغة: '+(c.language??'ar'),'p4c:1:u:'+id+':'+((c.language??'ar')==='ar'?'en':'ar'))],
@@ -472,7 +480,7 @@ export async function phase4CommunityScreen(service:Phase4CommunityService,actor
   const field=toggle[2]!,value=toggle[3]!;
   const kind:CommunityDraftKind=(field==='w'?'WELCOME_':field==='f'?'FAREWELL_':
     field==='r'?'REPLIES_':field==='s'?'SERVICE_CLEANUP_':field==='b'?'REPLY_CLEANUP_':
-    field==='d'?'DECISION_LOG_':'CHANGE_LOG_')+
+    field==='d'?'DECISION_LOG_':field==='p'?'PRIVATE_WELCOME_':'CHANGE_LOG_')+
    (value==='1'?'ON':'OFF') as CommunityDraftKind;
   const draft=await service.pending(actorId,{kind},toggle[1]!);
   return {text:'<b>تأكيد تغيير تفاعل المجموعة</b>\n'+service.preview(draft)+
