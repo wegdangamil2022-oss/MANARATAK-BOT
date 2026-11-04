@@ -60,13 +60,13 @@ for(const engine of ['json','sqlite'] as const){
  test(engine+' a trusted CAPTCHA join emits one anonymous public link and deletes only its receipt after expiry',async()=>{
   const f=await fixture();try{
    await f.enable();assert.equal(await f.observe('b3-webhook:captcha-join:11',42),1);
-   assert.equal(await f.notices.drain(),{sent:1,unresolved:0});
+   assert.deepEqual(await f.notices.drain(),{sent:1,unresolved:0});
    assert.equal(f.sent.length,1);
    assert.deepEqual(f.sent[0],{chatId:G,botUsername:'ManaratakBot',topicId:42,kind:'CAPTCHA'});
    assert.equal(await f.notices.observe(G,['300'],'b3-webhook:captcha-join:11',f.now(),42),0);
    assert.equal((await f.notices.drain()).sent,0);
    assert.equal((await f.notices.cleanup()).deleted,0);
-   f.advance(60000);assert.equal(await f.notices.cleanup(),{deleted:1,unresolved:0});
+   f.advance(60000);assert.deepEqual(await f.notices.cleanup(),{deleted:1,unresolved:0});
    assert.deepEqual(f.deleted,[{chat:G,messageId:404}]);
    assert.equal((await f.notices.cleanup()).deleted,0);
    assert.equal((await f.store.snapshot()).audit.filter(a=>a.updateKey.endsWith(':delete-outcome')).length,1);
