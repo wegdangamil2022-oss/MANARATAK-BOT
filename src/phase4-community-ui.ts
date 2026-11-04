@@ -1,10 +1,10 @@
 import {Phase4CommunityService,type DraftRequest} from './phase4-community.js';
 import type {OwnerInlineScreen,TelegramInlineKeyboard} from './telegram-inline-owner.js';
 import type {CommunityDraftKind,ReplyMatch,CommunityLanguage,CommunityCalendar,CommunityClockFormat,CommunityJoinKind,CommunityLeaveKind} from './phase4-community-model.js';
-import {validCommunityRulesUrl,validCommunityTimeZone,validCommunityFAQId} from './phase4-community-model.js';
+import {validCommunityRulesUrl,validCommunityTimeZone,validCommunityFAQId,validCommunityProfileTitle} from './phase4-community-model.js';
 import {validCommunityLinkButton,validCommunityPhotoId} from './phase4-community-rich.js';
 const group=/^-[1-9]\d{0,15}$/u,hex=/^[a-f0-9]{24}$/u;
-const route=/^p4c:1:(?:q:-[1-9]\d{0,15}|b:-[1-9]\d{0,15}(?::[sam])?|m:-[1-9]\d{0,15}(?::[sr])?|f:-[1-9]\d{0,15}:(?:0|[1-9]\d{0,2})|s:-[1-9]\d{0,15}|k:-[1-9]\d{0,15}|z:-[1-9]\d{0,15}|n:-[1-9]\d{0,15}|a:-[1-9]\d{0,15}|y:-[1-9]\d{0,15}(?::[1-9]\d{0,9})?|l:(?:0|[1-9]\d{0,2})|g:-[1-9]\d{0,15}|h:-[1-9]\d{0,15}|v:-[1-9]\d{0,15}:[wf]|j:-[1-9]\d{0,15}:[wf]:[pb]|r:-[1-9]\d{0,15}:(?:0|[1-9]\d{0,2})|t:-[1-9]\d{0,15}:[wfrsgbdpujl]:[01]|d:-[1-9]\d{0,15}:[a-f0-9]{12}|e:-[1-9]\d{0,15}:[a-f0-9]{12}:[01]|u:-[1-9]\d{0,15}:(?:ar|en)|o:-[1-9]\d{0,15}:(?:12|24):[gh]|[cx]:[a-f0-9]{24})$/u;
+const route=/^p4c:1:(?:q:-[1-9]\d{0,15}|b:-[1-9]\d{0,15}(?::[sam])?|m:-[1-9]\d{0,15}(?::[sr])?|p:-[1-9]\d{0,15}|f:-[1-9]\d{0,15}:(?:0|[1-9]\d{0,2})|s:-[1-9]\d{0,15}|k:-[1-9]\d{0,15}|z:-[1-9]\d{0,15}|n:-[1-9]\d{0,15}|a:-[1-9]\d{0,15}|y:-[1-9]\d{0,15}(?::[1-9]\d{0,9})?|l:(?:0|[1-9]\d{0,2})|g:-[1-9]\d{0,15}|h:-[1-9]\d{0,15}|v:-[1-9]\d{0,15}:[wf]|j:-[1-9]\d{0,15}:[wf]:[pb]|r:-[1-9]\d{0,15}:(?:0|[1-9]\d{0,2})|t:-[1-9]\d{0,15}:[wfrsgbdpujlv]:[01]|d:-[1-9]\d{0,15}:[a-f0-9]{12}|e:-[1-9]\d{0,15}:[a-f0-9]{12}:[01]|u:-[1-9]\d{0,15}:(?:ar|en)|o:-[1-9]\d{0,15}:(?:12|24):[gh]|[cx]:[a-f0-9]{24})$/u;
 export const validPhase4CommunityRoute=(s:unknown):s is string=>typeof s==='string'&&
  Buffer.byteLength(s,'utf8')<=64&&route.test(s);
 const esc=(s:string):string=>s.replace(/&/gu,'&amp;').replace(/</gu,'&lt;')
@@ -18,6 +18,10 @@ const help='للتعديل أرسل في خاص البوت أحد الأوامر
  +'<code>/privatewelcomeoff -100123</code>\n'
  +'<code>/clearwelcomevariant -100123 SELF</code>\n'
  +'<code>/setfarewell -100123 نص الوداع</code>\n'
+ +'<code>/groupediton -100123</code>\n'
+ +'<code>/groupeditoff -100123</code>\n'
+ +'<code>/groupname -100123 اسم المجموعة الجديد</code>\n'
+ +'<code>/groupclearphoto -100123</code>\n'
  +'<code>/farewellvariant -100123 SELF مع السلامة {العضو}</code>\n'
  +'<code>/clearfarewellvariant -100123 SELF</code>\n'
  +'<code>/farewellremovedon -100123</code>\n'
@@ -60,6 +64,18 @@ export function parsePhase4CommunityCommand(text:string):
  {kind:'DIAGNOSE';chatId:string;sample:string;topicId?:number}|
  {kind:'DECISIONS';chatId:string}|null{
  if(text==='/community')return {kind:'HOME'};
+ const profileSwitch=/^\/groupedit(on|off) (-[1-9]\d{0,15})$/u.exec(text);
+ if(profileSwitch)return {kind:'EDIT',chatId:profileSwitch[2]!,
+  request:{kind:profileSwitch[1]==='on'?'GROUP_PROFILE_ON':'GROUP_PROFILE_OFF'}};
+ const profileName=/^\/groupname (-[1-9]\d{0,15}) ([^\u0000-\u001f\u007f]{1,256})$/u.exec(text);
+ if(profileName){
+  const title=profileName[2]!.trim();
+  return validCommunityProfileTitle(title)?
+   {kind:'EDIT',chatId:profileName[1]!,request:{kind:'GROUP_TITLE_SET',text:title}}:null;
+ }
+ const profilePhoto=/^\/groupclearphoto (-[1-9]\d{0,15})$/u.exec(text);
+ if(profilePhoto)return {kind:'EDIT',chatId:profilePhoto[1]!,request:{kind:'GROUP_PHOTO_REMOVE'}};
+
  const cleanupKind=/^\/service(join|leave)(on|off) (-[1-9]\d{0,15})$/u.exec(text);
  if(cleanupKind)return {kind:'EDIT',chatId:cleanupKind[3]!,
   request:{kind:('SERVICE_'+cleanupKind[1]!.toUpperCase()+'_'+cleanupKind[2]!.toUpperCase()) as CommunityDraftKind}};
@@ -278,6 +294,7 @@ export async function phase4CommunityScreen(service:Phase4CommunityService,actor
    '\nالردود: '+label(c.repliesEnabled)+'\nالقواعد: '+c.rules.length+
    '\nسجل قرارات الردود: '+label(c.decisionLogEnabled??false)+
    '\nتسجيل تغييرات المجموعة: '+label(c.changeLogEnabled??false)+
+   '\nتعديل اسم/صورة المجموعة: '+label(c.profileEditingEnabled??false)+
    '\nالرسائل الخدمية: '+label(c.serviceCleanup?.enabled??false)+
    '\nحذف ردود البوت المؤقتة: '+label(c.replyCleanup?.enabled??false)+
    '\nمهلة حذف الردود: '+((c.replyCleanup?.delayMs??120000)/1000)+' ثانية'+
@@ -326,6 +343,7 @@ export async function phase4CommunityScreen(service:Phase4CommunityService,actor
     [btn('🧼 '+(c.replyCleanup?.enabled?'إيقاف':'تفعيل')+' حذف ردود البوت','p4c:1:t:'+id+':b:'+(c.replyCleanup?.enabled?'0':'1'))],
     [btn('📝 '+(c.changeLogEnabled?'إيقاف':'تفعيل')+' سجل تغييرات المجموعة','p4c:1:t:'+id+':g:'+(c.changeLogEnabled?'0':'1'))],
     [btn('🕘 تغييرات اسم/صورة المجموعة','p4c:1:h:'+id)],
+    [btn('🛠️ تعديل اسم وصورة المجموعة','p4c:1:p:'+id)],
     [btn('↩️ المجموعات','p4c:1:l:0'),btn('🏠 لوحة المالك','mi:1:h')]
    ])};
  }
@@ -574,6 +592,30 @@ export async function phase4CommunityScreen(service:Phase4CommunityService,actor
     [btn('❌ إلغاء','p4c:1:x:'+draft.id)],
     [btn('↩️ المنطقة الزمنية','p4c:1:n:'+draft.chatId)]])};
  }
+ const groupProfile=/^p4c:1:p:(-[1-9]\d{0,15})$/u.exec(data);
+ if(groupProfile){
+  const id=groupProfile[1]!,config=await service.view(actorId,id);
+  const jobs=await service.recentProfileOperations(actorId,id);
+  const enabled=config.profileEditingEnabled===true;
+  return {text:'<b>🛠️ تغيير اسم المجموعة أو حذف صورتها</b>\nالمجموعة: <code>'+id+'</code>'+
+   '\nالتفعيل: '+(enabled?'مسموح بعد مراجعة كل طلب':'متوقف افتراضيًا')+
+   '\n\nكل عملية تحتاج: صلاحية المالك، موافقة جديدة، اعتماد المجموعة،'+
+   ' مفتاح تشغيل منفصل في الخادم، وصلاحية can_change_info في Telegram.'+
+   '\n\nالأوامر في خاص المالك:'+
+   '\n<code>/groupname '+id+' اسم المجموعة الجديد</code>'+
+   '\n<code>/groupclearphoto '+id+'</code>'+
+   '\n<code>/groupediton '+id+'</code> أو <code>/groupeditoff '+id+'</code>'+
+   '\n\nحذف الصورة لا يدعم رفع صورة جديدة؛ Telegram يشترط رفع InputFile منفصلًا.'+
+   '\n\nآخر طلبات التعديل:\n'+(jobs.length?jobs.map(job=>
+    '• '+(job.kind==='TITLE_SET'?'تعديل الاسم':'حذف الصورة')+
+    ' — '+esc(job.status)+' — '+new Date(job.createdAt).toISOString().slice(0,16).replace('T',' ')+' UTC'
+   ).join('\n'):'لا توجد طلبات تعديل محفوظة.')+
+   '\nلا يعرض السجل عنوان المجموعة المطلوب بعد محاولة الإرسال، ولا يكرر الطلب عند نتيجة مجهولة.',
+   keyboard:k([[btn((enabled?'⛔ إيقاف':'🔐 تفعيل')+' صلاحية تعديل المجموعة',
+    'p4c:1:t:'+id+':v:'+(enabled?'0':'1'))],
+    [btn('🕘 سجل تغييرات الاسم/الصورة','p4c:1:h:'+id)],
+    [btn('↩️ إعدادات المجموعة','p4c:1:g:'+id)]])};
+ }
  const history=/^p4c:1:h:(-[1-9]\d{0,15})$/u.exec(data);
  if(history){
   const rows=await service.recentChanges(actorId,history[1]!);
@@ -587,14 +629,14 @@ export async function phase4CommunityScreen(service:Phase4CommunityService,actor
    '\n\nلا يُخزّن هذا السجل الأسماء والصور نفسها.',
    keyboard:k([[btn('↩️ إعدادات المجموعة','p4c:1:g:'+history[1])]])};
  }
- const toggle=/^p4c:1:t:(-[1-9]\d{0,15}):([wfrsgbdpujl]):([01])$/u.exec(data);
+ const toggle=/^p4c:1:t:(-[1-9]\d{0,15}):([wfrsgbdpujlv]):([01])$/u.exec(data);
  if(toggle){
   const field=toggle[2]!,value=toggle[3]!;
   const kind:CommunityDraftKind=(field==='w'?'WELCOME_':field==='f'?'FAREWELL_':
     field==='r'?'REPLIES_':field==='s'?'SERVICE_CLEANUP_':field==='b'?'REPLY_CLEANUP_':
     field==='d'?'DECISION_LOG_':field==='p'?'PRIVATE_WELCOME_':
     field==='u'?'FAREWELL_REMOVED_':field==='j'?'SERVICE_JOIN_':
-    field==='l'?'SERVICE_LEAVE_':'CHANGE_LOG_')+
+    field==='l'?'SERVICE_LEAVE_':field==='v'?'GROUP_PROFILE_':'CHANGE_LOG_')+
    (value==='1'?'ON':'OFF') as CommunityDraftKind;
   const draft=await service.pending(actorId,{kind},toggle[1]!);
   return {text:'<b>تأكيد تغيير تفاعل المجموعة</b>\n'+service.preview(draft)+
