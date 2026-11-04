@@ -2,12 +2,13 @@ import {createHash,randomBytes} from 'node:crypto';
 import {BotStore,type BotState} from './store.js';
 import {Policy} from './policy.js';
 import {defaultCommunityConfig,emptyCommunityState,validCommunityConfig,
- matchCommunityRule,renderCommunityTemplate,selectCommunityRule,normalizeCommunityMatch,validCommunityRulesUrl,
+ matchCommunityRule,renderCommunityTemplate,selectCommunityRule,selectCommunityGreeting,normalizeCommunityMatch,validCommunityRulesUrl,
  type CommunityConfig,type CommunityInput,type CommunityDraft,type CommunityDraftKind,
  type ReplyMatch,type CommunityAutomationState,type CommunityEventKind,type CommunityServiceKind,
- type CommunityServiceChange} from './phase4-community-model.js';
+ type CommunityServiceChange,type CommunityLanguage,type CommunityCalendar,type CommunityClockFormat} from './phase4-community-model.js';
 
-export type DraftRequest={kind:CommunityDraftKind;text?:string;trigger?:string;match?:ReplyMatch;ruleId?:string;topicId?:number;cooldownMs?:number;delayMs?:number};
+export type DraftRequest={kind:CommunityDraftKind;text?:string;trigger?:string;match?:ReplyMatch;ruleId?:string;topicId?:number;cooldownMs?:number;delayMs?:number;
+ language?:CommunityLanguage;calendar?:CommunityCalendar;clockFormat?:CommunityClockFormat;utcOffsetMinutes?:number};
 export interface CommunitySendProposal{
  readonly text:string;readonly chatId:string;readonly actorId:string;
  readonly kind:CommunityEventKind;readonly policyVersion:number;readonly topicId?:number;
@@ -75,6 +76,17 @@ export class Phase4CommunityService{
     throw Error('COMMUNITY_SERVICE_DELAY_INVALID');
    if(kind==='RULES_LINK_SET'&&!validCommunityRulesUrl(request.text))
     throw Error('COMMUNITY_RULES_URL_INVALID');
+   if((kind==='WELCOME_LOCALIZED'||kind==='FAREWELL_LOCALIZED'||kind==='GROUP_LANGUAGE')&&
+     !['ar','en'].includes(request.language??''))
+    throw Error('COMMUNITY_LANGUAGE_INVALID');
+   if((kind==='WELCOME_LOCALIZED'||kind==='FAREWELL_LOCALIZED')&&
+     (typeof request.text!=='string'||request.text.trim().length===0))
+    throw Error('COMMUNITY_LOCALIZED_TEMPLATE_REQUIRED');
+   if(kind==='GROUP_CLOCK'&&(!Number.isInteger(request.utcOffsetMinutes)||
+     request.utcOffsetMinutes===undefined||request.utcOffsetMinutes< -720||request.utcOffsetMinutes>840||
+     !['12','24'].includes(request.clockFormat??'')||
+     !['gregorian','hijri'].includes(request.calendar??'')))
+    throw Error('COMMUNITY_CLOCK_SETTINGS_INVALID');
    if(kind==='REPLY_ADD'&&request.match==='COMMAND'&&!/^m_[a-z][a-z0-9_]{0,23}$/u.test(request.trigger??''))
     throw Error('COMMUNITY_COMMAND_INVALID');
    const id=randomBytes(12).toString('hex');
@@ -86,7 +98,11 @@ export class Phase4CommunityService{
     ...(request.ruleId!==undefined?{ruleId:request.ruleId}:{}),
     ...(request.topicId!==undefined?{topicId:request.topicId}:{}),
     ...(request.cooldownMs!==undefined?{cooldownMs:request.cooldownMs}:{}),
-    ...(request.delayMs!==undefined?{delayMs:request.delayMs}:{})};
+    ...(request.delayMs!==undefined?{delayMs:request.delayMs}:{}),
+    ...(request.language!==undefined?{language:request.language}:{}),
+    ...(request.clockFormat!==undefined?{clockFormat:request.clockFormat}:{}),
+    ...(request.calendar!==undefined?{calendar:request.calendar}:{}),
+    ...(request.utcOffsetMinutes!==undefined?{utcOffsetMinutes:request.utcOffsetMinutes}:{})};
    s.phase4Community??=emptyCommunityState();
    const st=s.phase4Community;
    st.drafts=st.drafts.filter(d=>d.actorId!==actorId&&d.expiresAt>now).slice(-90);
@@ -118,6 +134,15 @@ export class Phase4CommunityService{
    const config=configured(s,draft.chatId);
    if(config.version!==draft.configVersion)throw Error('COMMUNITY_DRAFT_STALE');
    switch(draft.kind){
+    case 'WELCOME_LOCALIZED':
+     config.welcome.localized={...config.welcome.localized,[draft.language!]:draft.text!};break;
+    case 'FAREWELL_LOCALIZED':
+     config.farewell.localized={...config.farewell.localized,[draft.language!]:draft.text!};break;
+    case 'GROUP_LANGUAGE':config.language=draft.language!;break;
+    case 'GROUP_CLOCK':
+     config.utcOffsetMinutes=draft.utcOffsetMinutes!;
+     config.clockFormat=draft.clockFormat!;
+     config.calendar=draft.calendar!;break;
     case 'RULES_LINK_SET':config.rulesUrl=draft.text!;break;
     case 'RULES_LINK_CLEAR':delete config.rulesUrl;break;
     case 'WELCOME_TEXT':config.welcome.text=draft.text!;break;
@@ -241,7 +266,9 @@ export class Phase4CommunityService{
    memberName:'الطالب التجريبي',groupName:'مجموعة منارتك التجريبية',
    messageText:sample,...(topicId!==undefined?{topicId}:{})};
   return {status:'MATCH',ruleId:rule.id,
-   preview:renderCommunityTemplate(rule.response,input,now+config.utcOffsetMinutes*60000,config.rulesUrl??'')};
+   preview:renderCommunityTemplate(rule.response,input,now+config.utcOffsetMinutes*60000,
+    config.rulesUrl??'',{language:config.language??'ar',clockFormat:config.clockFormat??'24',
+     calendar:config.calendar??'gregorian'})};
  }
  /** Atomically applies quotas and reserves an outbound event exactly once.
   * A reservation is at-most-once: its provider outcome is managed separately
@@ -261,8 +288,8 @@ export class Phase4CommunityService{
       !this.policy.canUseChat(s,input.chatId,'navigation')||
       s.chats.filter(c=>c.id===input.chatId&&c.approved).length!==1)return null;
    let template:string,ruleId:string|undefined;
-   if(input.kind==='JOIN'){if(!config.welcome.enabled)return null;template=config.welcome.text;}
-   else if(input.kind==='LEAVE'){if(!config.farewell.enabled)return null;template=config.farewell.text;}
+   if(input.kind==='JOIN'){if(!config.welcome.enabled)return null;template=selectCommunityGreeting(config,'welcome');}
+   else if(input.kind==='LEAVE'){if(!config.farewell.enabled)return null;template=selectCommunityGreeting(config,'farewell');}
    else{
     const rule=selectCommunityRule(config,input.messageText!,input.topicId);
     if(!rule)return null;
@@ -280,7 +307,9 @@ export class Phase4CommunityService{
        x.ruleId===ruleId&&now-x.at<actorPeriod))return null;
    let text:string;
    try{text=renderCommunityTemplate(template,input,
-     now+config.utcOffsetMinutes*60000,config.rulesUrl??'');}
+     now+config.utcOffsetMinutes*60000,config.rulesUrl??'',
+     {language:config.language??'ar',clockFormat:config.clockFormat??'24',
+      calendar:config.calendar??'gregorian'});}
    catch{return null;}
    const receipt={key,chatId:input.chatId,at:now,kind:input.kind,actorDigest,
     ...(ruleId?{ruleId}:{})};
@@ -293,6 +322,16 @@ export class Phase4CommunityService{
  /** Preview never calls the Telegram gateway, writes a send or records a vote. */
  preview(draft:CommunityDraft):string{
   const clean=(x:string)=>safe(x.slice(0,250));
+  if(draft.kind==='WELCOME_LOCALIZED'||draft.kind==='FAREWELL_LOCALIZED')
+   return '<b>معاينة قالب '+(draft.kind==='WELCOME_LOCALIZED'?'الترحيب':'الوداع')+
+    ' بلغة '+draft.language+'</b>\n'+clean(draft.text??'');
+  if(draft.kind==='GROUP_LANGUAGE')
+   return '<b>لغة رسائل المجموعة</b>\n'+draft.language+
+    '\nإذا لم يوجد قالب مترجم، يُستخدم القالب الأساسي للمجموعة.';
+  if(draft.kind==='GROUP_CLOCK')
+   return '<b>معاينة التوقيت والتقويم</b>\nUTC'+
+    (draft.utcOffsetMinutes!>=0?'+':'')+draft.utcOffsetMinutes!+' دقيقة'+
+    '\nالساعة: '+draft.clockFormat+'\nالتقويم: '+draft.calendar;
   if(draft.kind==='RULES_LINK_SET')return '<b>اعتماد رابط القوانين</b>\n'+clean(draft.text??'')+
     '\nهذا الرابط سيظهر في القوالب التي تستخدم متغير {رابط_القوانين}.';
   if(draft.kind==='RULES_LINK_CLEAR')return 'اعتماد مسح رابط القوانين: سيختفي من الرسائل التالية.';
