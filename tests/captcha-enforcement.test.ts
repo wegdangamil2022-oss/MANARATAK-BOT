@@ -123,7 +123,7 @@ for(const engine of ['json','sqlite'] as const){
  test(engine+' joint owner consents enforce CAPTCHA then current rules then channel verification before release',async()=>{const f=await fixture(true);try{
   await f.policy.approveChat('100','-200',['verification']);
   await f.store.transaction(s=>{s.subscriptionRequirements.push({chatId:G,channelIds:['-200'],mode:'ALL',version:1});assert.equal(recordSubscriptionEnforcementConsent(s,f.policy,'100',G,true,f.now()),true);});
-  const rules=new TelegramGroupRules(f.store,f.policy,()=>f.now()),published=await rules.preview('100','/setrules '+G+'\\nاحترام الجميع');assert.ok(await rules.handle('100',pick(published,'اعتماد الإصدار')));
+  const rules=new TelegramGroupRules(f.store,f.policy,()=>f.now()),published=await rules.preview('100','/setrules '+G+'\nاحترام الجميع');assert.ok(await rules.handle('100',pick(published,'اعتماد الإصدار')));
   const root=await f.ui.handle('100','mi:1:i:04:07'),edit=await f.ui.handle('100',pick(root,G)),preview=await f.ui.handle('100',pick(edit,'تفعيل موافقة القوانين'));assert.ok(await f.ui.handle('100',pick(preview,'تأكيد')));
   await f.enable();f.channelMembership.set('-200','300','NOT_MEMBER');f.advance();const at=f.now();
   await f.app.handle({update_id:180,message:{message_id:180,date:at/1000,from:{id:100,is_bot:false},chat:{id:Number(G),type:'supergroup'},new_chat_members:[{id:300,is_bot:false}]}});
