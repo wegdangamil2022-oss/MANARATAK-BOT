@@ -2,7 +2,7 @@ import {Phase4CommunityService,type DraftRequest} from './phase4-community.js';
 import type {OwnerInlineScreen,TelegramInlineKeyboard} from './telegram-inline-owner.js';
 import type {CommunityDraftKind,ReplyMatch} from './phase4-community-model.js';
 const group=/^-[1-9]\d{0,15}$/u,hex=/^[a-f0-9]{24}$/u;
-const route=/^p4c:1:(?:l:(?:0|[1-9]\d{0,2})|g:-[1-9]\d{0,15}|r:-[1-9]\d{0,15}:(?:0|[1-9]\d{0,2})|t:-[1-9]\d{0,15}:[wfr]:[01]|d:-[1-9]\d{0,15}:[a-f0-9]{12}|e:-[1-9]\d{0,15}:[a-f0-9]{12}:[01]|[cx]:[a-f0-9]{24})$/u;
+const route=/^p4c:1:(?:l:(?:0|[1-9]\d{0,2})|g:-[1-9]\d{0,15}|h:-[1-9]\d{0,15}|r:-[1-9]\d{0,15}:(?:0|[1-9]\d{0,2})|t:-[1-9]\d{0,15}:[wfrsg]:[01]|d:-[1-9]\d{0,15}:[a-f0-9]{12}|e:-[1-9]\d{0,15}:[a-f0-9]{12}:[01]|[cx]:[a-f0-9]{24})$/u;
 export const validPhase4CommunityRoute=(s:unknown):s is string=>typeof s==='string'&&
  Buffer.byteLength(s,'utf8')<=64&&route.test(s);
 const esc=(s:string):string=>s.replace(/&/gu,'&amp;').replace(/</gu,'&lt;')
@@ -17,11 +17,19 @@ const help='للتعديل أرسل في خاص البوت أحد الأوامر
  +'<code>/replycheck -100123 منحة دراسية</code>\n'
  +'<code>/replydel -100123 معرف_القاعدة</code>\n'
  +'<code>/replyrate -100123 معرف_القاعدة 90</code>\n'
+ +'<code>/servicedelay -100123 120</code>\n'
  +'يظهر تأكيد مستقل لكل تعديل، وتظل الميزات مغلقة حتى تفعّلها.';
 export function parsePhase4CommunityCommand(text:string):
  {kind:'HOME'}|{kind:'VIEW';chatId:string}|{kind:'EDIT';chatId:string;request:DraftRequest}|
  {kind:'DIAGNOSE';chatId:string;sample:string;topicId?:number}|null{
  if(text==='/community')return {kind:'HOME'};
+ const serviceDelay=/^\/servicedelay (-[1-9]\d{0,15}) ([1-9]\d{0,3})$/u.exec(text);
+ if(serviceDelay){
+  const seconds=Number(serviceDelay[2]);
+  if(seconds<30||seconds>3600)return null;
+  return {kind:'EDIT',chatId:serviceDelay[1]!,
+   request:{kind:'SERVICE_CLEANUP_DELAY',delayMs:seconds*1000}};
+ }
  const rate=/^\/replyrate (-[1-9]\d{0,15}) ([a-f0-9]{12}) (0|[1-9]\d{0,4})$/u.exec(text);
  if(rate){
   const seconds=Number(rate[3]);
@@ -76,7 +84,7 @@ export async function phase4CommunityScreen(service:Phase4CommunityService,actor
     [btn('❌ إلغاء','p4c:1:x:'+draft.id)],
     [btn('↩️ إعدادات المجموعة','p4c:1:g:'+draft.chatId)]])};
  }
- if(data==='mi:1:i:09:01'||data==='mi:1:i:09:05'||data==='mi:1:i:07:10'||data==='p4c:1:l:0'||
+ if(['mi:1:i:09:01','mi:1:i:09:04','mi:1:i:09:05','mi:1:i:09:15','mi:1:i:09:16','mi:1:i:07:10','p4c:1:l:0'].includes(data)||
    /^p4c:1:l:(?:0|[1-9]\d{0,2})$/u.test(data)){
   const page=data.startsWith('p4c:1:l:')?Number(data.slice(8)):0;
   const groups=await service.listGroups(actorId);
@@ -100,19 +108,39 @@ export async function phase4CommunityScreen(service:Phase4CommunityService,actor
    '\nالإصدار: '+c.version+'\nالترحيب: '+label(c.welcome.enabled)+
    '\nالوداع: '+label(c.farewell.enabled)+
    '\nالردود: '+label(c.repliesEnabled)+'\nالقواعد: '+c.rules.length+
+   '\nتسجيل تغييرات المجموعة: '+label(c.changeLogEnabled??false)+
+   '\nالرسائل الخدمية: '+label(c.serviceCleanup?.enabled??false)+
+   '\nمدة حذف رسائل الخدمة: '+((c.serviceCleanup?.delayMs??120000)/1000)+' ثانية'+
    '\nفاصل ردود المجموعة: '+Math.floor(c.groupCooldownMs/1000)+' ثوانٍ\n\n'+help,
    keyboard:k([
     [btn('👋 '+(c.welcome.enabled?'إيقاف':'تفعيل')+' الترحيب','p4c:1:t:'+id+':w:'+(c.welcome.enabled?'0':'1'))],
     [btn('👋 '+(c.farewell.enabled?'إيقاف':'تفعيل')+' الوداع','p4c:1:t:'+id+':f:'+(c.farewell.enabled?'0':'1'))],
     [btn('🤖 '+(c.repliesEnabled?'إيقاف':'تفعيل')+' الردود','p4c:1:t:'+id+':r:'+(c.repliesEnabled?'0':'1'))],
     [btn('📋 قائمة الردود','p4c:1:r:'+id+':0')],
+    [btn('🧹 '+(c.serviceCleanup?.enabled?'إيقاف':'تفعيل')+' تنظيف رسائل الخدمة','p4c:1:t:'+id+':s:'+(c.serviceCleanup?.enabled?'0':'1'))],
+    [btn('📝 '+(c.changeLogEnabled?'إيقاف':'تفعيل')+' سجل تغييرات المجموعة','p4c:1:t:'+id+':g:'+(c.changeLogEnabled?'0':'1'))],
+    [btn('🕘 تغييرات اسم/صورة المجموعة','p4c:1:h:'+id)],
     [btn('↩️ المجموعات','p4c:1:l:0'),btn('🏠 لوحة المالك','mi:1:h')]
    ])};
  }
- const toggle=/^p4c:1:t:(-[1-9]\d{0,15}):([wfr]):([01])$/u.exec(data);
+ const history=/^p4c:1:h:(-[1-9]\d{0,15})$/u.exec(data);
+ if(history){
+  const rows=await service.recentChanges(actorId,history[1]!);
+  const labels:{[key:string]:string}={
+   TITLE_CHANGED:'تغيير اسم المجموعة',PHOTO_CHANGED:'تغيير صورة المجموعة',
+   PHOTO_REMOVED:'حذف صورة المجموعة'};
+  return {text:'<b>🕘 سجل تغييرات المجموعة</b>\n'+
+   (rows.length?rows.map(row=>
+    '• '+labels[row.kind]+' — '+new Date(row.at).toISOString().slice(0,16).replace('T',' ')+' UTC'
+   ).join('\n'):'لا توجد تغييرات مسجلة في الأيام السبعة الماضية.')+
+   '\n\nلا يُخزّن هذا السجل الأسماء والصور نفسها.',
+   keyboard:k([[btn('↩️ إعدادات المجموعة','p4c:1:g:'+history[1])]])};
+ }
+ const toggle=/^p4c:1:t:(-[1-9]\d{0,15}):([wfrsg]):([01])$/u.exec(data);
  if(toggle){
   const field=toggle[2]!,value=toggle[3]!;
-  const kind:CommunityDraftKind=(field==='w'?'WELCOME_':field==='f'?'FAREWELL_':'REPLIES_')+
+  const kind:CommunityDraftKind=(field==='w'?'WELCOME_':field==='f'?'FAREWELL_':
+    field==='r'?'REPLIES_':field==='s'?'SERVICE_CLEANUP_':'CHANGE_LOG_')+
    (value==='1'?'ON':'OFF') as CommunityDraftKind;
   const draft=await service.pending(actorId,{kind},toggle[1]!);
   return {text:'<b>تأكيد تغيير تفاعل المجموعة</b>\n'+service.preview(draft)+
