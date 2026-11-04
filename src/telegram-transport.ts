@@ -333,7 +333,8 @@ function eventFrom(value:unknown):{event?:Event;reason:string} {
    ...(msg.entities!==undefined?{entities:msg.entities}:{}),...(msg.message_thread_id!==undefined?{topicId:msg.message_thread_id as number}:{}),
    ...(msg.message_id!==undefined?{messageId:msg.message_id as number}:{}),
    ...(msg.reply_to_message!==undefined?{replyTo:msg.reply_to_message}:{}),
-   ...(kind==='group'?{memberName:typeof msg.from.first_name==='string'?msg.from.first_name:'عضو',groupName:typeof msg.chat.title==='string'?msg.chat.title:'المجموعة'}:{})},reason:'VALID'};
+   ...(kind==='group'?{memberName:typeof msg.from.first_name==='string'?msg.from.first_name:'عضو',groupName:typeof msg.chat.title==='string'?msg.chat.title:'المجموعة'}:
+       {memberName:typeof msg.from.first_name==='string'?msg.from.first_name.slice(0,75):'عضو'})},reason:'VALID'};
 }
 
 /** Immutable local authorization witness for a B6 group question. Membership
@@ -511,9 +512,19 @@ export class TelegramUpdateApplication {
     if(!this.opts.policy.canUseChat(snapshot,event.chatId,'navigation')||
        !Number.isSafeInteger(now)||now<0||now>8640000000000000-120000)
       return null;
+    // Telegram has no generic private-to-one group message. A public link
+    // lets a new member voluntarily open the bot DM; no user IDs/tokens in it.
+    const config=snapshot.phase4Community?.configs.find(c=>c.chatId===event.chatId&&
+      c.version===proposal.policyVersion);
+    const optIn=event.communityKind==='JOIN'&&config?.privateWelcomeEnabled===true&&
+      /^[A-Za-z][A-Za-z0-9_]{4,31}$/u.test(this.opts.botUsername)?
+      '\\n🔒 <a href="https://t.me/'+this.opts.botUsername+'?start=welcome_'+event.chatId.slice(1)+
+       '">افتح ترحيبك الخاص في البوت (اختياري)</a>':'';
+    const welcomeText=optIn&&Buffer.byteLength(proposal.text+optIn,'utf8')<=
+      (proposal.photoFileId?1024:4096)?proposal.text+optIn:proposal.text;
     return {status:'APPLIED',reason:'PHASE4_COMMUNITY_PLANNED',
      communityAutomation:{kind:proposal.kind,configVersion:proposal.policyVersion},
-     plan:{chatId:event.chatId,parseMode:'HTML',text:proposal.text,
+     plan:{chatId:event.chatId,parseMode:'HTML',text:welcomeText,
       ...(proposal.photoFileId?{photoFileId:proposal.photoFileId}:{}),
       ...(proposal.communityLinks?{communityLinks:proposal.communityLinks}:{}),
       ...(event.topicId!==undefined?{messageThreadId:event.topicId}:{})},
@@ -943,6 +954,20 @@ export class TelegramUpdateApplication {
        actorId,text,Object.values(m).some(label=>label===text)||isOwnerMenuText(text));
       if(editorResult)return {status:editorResult.status,reason:editorResult.reason,
        plan:this.plan(chatId,editorResult.screen.text,undefined,editorResult.screen.keyboard)};
+      const privateWelcome=/^(?:\/start welcome_|\/mywelcome -)([1-9]\d{0,15})$/u.exec(text);
+      if(privateWelcome){
+       if(!this.opts.community)return {status:'DENIED',reason:'PRIVATE_WELCOME_DISABLED'};
+       const scope='-'+privateWelcome[1]!;
+       // User explicitly started a private conversation; no auto-DM on join.
+       // This check is external membership proof, fenced by the same group
+       // approval/subscription witness used by other scoped private resources.
+       const denied=await this.authorizePrivateGroupBrowse(scope,actorId);
+       if(denied)return {status:'DENIED',reason:'PRIVATE_WELCOME_ACCESS_DENIED'};
+       await markPrivateGroupSource(scope);
+       const welcome=await this.opts.community.claimPrivateWelcome(actorId,scope,event.memberName??'عضو');
+       if(!welcome)return result('لا يوجد ترحيب خاص متاح لهذه العضوية الآن. يمكنك متابعة التصفح من القائمة الرئيسية.');
+       return result('<b>🔒 ترحيب خاص بطلبك</b>\n'+welcome);
+      }
       if(cmd==='/start'||cmd==='/help'||text===m.home||text===m.back)return main();
       if(text==='/ownerrecover'){
        if(!owner)return {status:'DENIED',reason:'OWNER_ONLY'};
