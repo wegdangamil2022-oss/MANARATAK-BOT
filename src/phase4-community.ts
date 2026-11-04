@@ -4,15 +4,15 @@ import {Policy} from './policy.js';
 import {validCommunityPhotoId,validCommunityLinkButtons,communityLinkKeyboard,
  type CommunityLinkKeyboard} from './phase4-community-rich.js';
 import {defaultCommunityConfig,emptyCommunityState,validCommunityConfig,
- matchCommunityRule,renderCommunityTemplate,selectCommunityRule,selectCommunityGreeting,normalizeCommunityMatch,validCommunityRulesUrl,inCommunityQuietHours,validCommunityTimeZone,
+ matchCommunityRule,renderCommunityTemplate,selectCommunityRule,selectCommunityGreeting,normalizeCommunityMatch,validCommunityRulesUrl,inCommunityQuietHours,validCommunityTimeZone,validCommunityJoinKind,
  type CommunityConfig,type CommunityInput,type CommunityDraft,type CommunityDraftKind,
  type ReplyMatch,type CommunityAutomationState,type CommunityEventKind,type CommunityServiceKind,
- type CommunityServiceChange,type CommunityLanguage,type CommunityCalendar,type CommunityClockFormat,
+ type CommunityServiceChange,type CommunityLanguage,type CommunityCalendar,type CommunityClockFormat,type CommunityJoinKind,
  type CommunityDecision,type CommunityDecisionReason} from './phase4-community-model.js';
 
 export type DraftRequest={kind:CommunityDraftKind;text?:string;trigger?:string;match?:ReplyMatch;ruleId?:string;topicId?:number;cooldownMs?:number;delayMs?:number;startMinute?:number;endMinute?:number;
  language?:CommunityLanguage;calendar?:CommunityCalendar;clockFormat?:CommunityClockFormat;utcOffsetMinutes?:number;timeZone?:string;
- photoFileId?:string;buttonText?:string;buttonUrl?:string};
+ photoFileId?:string;buttonText?:string;buttonUrl?:string;joinKind?:CommunityJoinKind;};
 export interface CommunitySendProposal{
  readonly text:string;readonly chatId:string;readonly actorId:string;
  readonly kind:CommunityEventKind;readonly policyVersion:number;readonly topicId?:number;
@@ -70,6 +70,13 @@ export class Phase4CommunityService{
     throw Error('COMMUNITY_TEMPLATE_REQUIRED');
    if(kind==='REPLY_ADD'&&(typeof request.trigger!=='string'||!request.trigger.trim()||
        !['EXACT','WORD','CONTAINS','COMMAND'].includes(request.match??'')))throw Error('COMMUNITY_TRIGGER_REQUIRED');
+   if(kind==='WELCOME_VARIANT_SET'||kind==='WELCOME_VARIANT_CLEAR'){
+    if(!validCommunityJoinKind(request.joinKind))throw Error('COMMUNITY_JOIN_KIND_INVALID');
+    if(kind==='WELCOME_VARIANT_SET'&&(!request.text||!request.text.trim()))
+     throw Error('COMMUNITY_TEMPLATE_REQUIRED');
+    if(kind==='WELCOME_VARIANT_CLEAR'&&!current.welcomeByJoin?.[request.joinKind])
+     throw Error('COMMUNITY_WELCOME_VARIANT_MISSING');
+   }
    if(kind==='REPLY_ADD'&&current.rules.length>=30)throw Error('COMMUNITY_RULE_CAPACITY');
    if(['REPLY_REMOVE','REPLY_ENABLE','REPLY_DISABLE','REPLY_COOLDOWN'].includes(kind)&&
       (!request.ruleId||!current.rules.some(r=>r.id===request.ruleId)))
@@ -132,6 +139,7 @@ export class Phase4CommunityService{
    const draft:CommunityDraft={id,actorId,chatId,chatVersion,configVersion:current.version,kind,
     createdAt:now,expiresAt:now+120000,
     ...(request.text!==undefined?{text:request.text}:{}),
+    ...(request.joinKind!==undefined?{joinKind:request.joinKind}:{}),
     ...(request.trigger!==undefined?{trigger:request.trigger}:{}),
     ...(request.match!==undefined?{match:request.match}:{}),
     ...(request.ruleId!==undefined?{ruleId:request.ruleId}:{}),
@@ -210,6 +218,14 @@ export class Phase4CommunityService{
     case 'RULES_LINK_SET':config.rulesUrl=draft.text!;break;
     case 'RULES_LINK_CLEAR':delete config.rulesUrl;break;
     case 'WELCOME_TEXT':config.welcome.text=draft.text!;break;
+    case 'WELCOME_VARIANT_SET':
+     config.welcomeByJoin={...config.welcomeByJoin,[draft.joinKind!]:draft.text!};break;
+    case 'WELCOME_VARIANT_CLEAR':{
+     const kept={...config.welcomeByJoin};delete kept[draft.joinKind!];
+     if(Object.keys(kept).length)config.welcomeByJoin=kept;
+     else delete config.welcomeByJoin;
+     break;
+    }
     case 'FAREWELL_TEXT':config.farewell.text=draft.text!;break;
     case 'WELCOME_ON':config.welcome.enabled=true;break;
     case 'WELCOME_OFF':config.welcome.enabled=false;break;
@@ -387,7 +403,8 @@ export class Phase4CommunityService{
   if(!validNow(now)||!isGroup(input.chatId)||
    !/^[1-9]\d{0,15}$/u.test(input.actorId)||
    !/^b3-webhook:[A-Za-z0-9_-]{1,80}:\d+$/u.test(updateKey)||
-   input.edited||input.forwarded||input.fromBot)return null;
+   input.edited||input.forwarded||input.fromBot||
+   (input.joinKind!==undefined&&(input.kind!=='JOIN'||!validCommunityJoinKind(input.joinKind))))return null;
   if(input.kind==='TEXT'&&(!input.messageText||input.messageText.length>4096))return null;
   const key=hex('P4:EVENT:'+updateKey);
   return this.store.transaction(s=>{
@@ -416,7 +433,8 @@ export class Phase4CommunityService{
     if(!target.enabled){
      record(input.kind==='JOIN'?'WELCOME_DISABLED':'FAREWELL_DISABLED');return null;
     }
-    template=selectCommunityGreeting(config,input.kind==='JOIN'?'welcome':'farewell');
+    template=selectCommunityGreeting(config,input.kind==='JOIN'?'welcome':'farewell',
+     input.kind==='JOIN'?input.joinKind:undefined);
     photoFileId=target.photoFileId;
     communityLinks=communityLinkKeyboard(target.buttons);
    }else{
@@ -489,6 +507,10 @@ export class Phase4CommunityService{
     '\nالوجهة: '+clean(draft.buttonUrl??'')+'\nزر رابط فقط؛ لا يستدعي أمرًا داخل البوت.';
   if(draft.kind==='WELCOME_BUTTONS_CLEAR'||draft.kind==='FAREWELL_BUTTONS_CLEAR')
    return '<b>حذف جميع أزرار الرابط</b> من '+(draft.kind==='WELCOME_BUTTONS_CLEAR'?'الترحيب':'الوداع');
+  if(draft.kind==='WELCOME_VARIANT_SET')return '<b>معاينة ترحيب حسب نوع الدخول: '+
+   safe(draft.joinKind??'')+'</b>\n'+safe(draft.text??'')+'\nلن يُرسل حتى تفعيل الترحيب.';
+  if(draft.kind==='WELCOME_VARIANT_CLEAR')return '<b>مسح ترحيب نوع الدخول: '+
+   safe(draft.joinKind??'')+'</b>\nبعد الاعتماد يعود هذا النوع إلى قالب الترحيب العام أو المترجم.';
   if(draft.kind==='WELCOME_LOCALIZED'||draft.kind==='FAREWELL_LOCALIZED')
    return '<b>معاينة قالب '+(draft.kind==='WELCOME_LOCALIZED'?'الترحيب':'الوداع')+
     ' بلغة '+draft.language+'</b>\n'+clean(draft.text??'');
