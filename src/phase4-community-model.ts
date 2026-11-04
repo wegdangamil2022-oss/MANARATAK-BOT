@@ -45,12 +45,15 @@ export interface CommunityConfig{
  /** Missing in old snapshots means disabled. */
  changeLogEnabled?:boolean;
  serviceCleanup?:{enabled:boolean;delayMs:number};
+ /** Optional expiry of confirmed bot-authored community responses. Disabled by default. */
+ replyCleanup?:{enabled:boolean;delayMs:number};
 }
 export type CommunityDraftKind='WELCOME_TEXT'|'FAREWELL_TEXT'|'REPLY_ADD'|'REPLY_REMOVE'|
  'WELCOME_ON'|'WELCOME_OFF'|'FAREWELL_ON'|'FAREWELL_OFF'|'REPLIES_ON'|'REPLIES_OFF'|
  'REPLY_ENABLE'|'REPLY_DISABLE'|'REPLY_COOLDOWN'|
  'QUIET_HOURS_SET'|'QUIET_HOURS_CLEAR'|'TOPIC_COOLDOWN_SET'|'TOPIC_COOLDOWN_CLEAR'|
  'CHANGE_LOG_ON'|'CHANGE_LOG_OFF'|'SERVICE_CLEANUP_ON'|'SERVICE_CLEANUP_OFF'|'SERVICE_CLEANUP_DELAY'|
+ 'REPLY_CLEANUP_ON'|'REPLY_CLEANUP_OFF'|'REPLY_CLEANUP_DELAY'|
  'RULES_LINK_SET'|'RULES_LINK_CLEAR'|
  'WELCOME_LOCALIZED'|'FAREWELL_LOCALIZED'|'GROUP_LANGUAGE'|'GROUP_CLOCK'|
  'WELCOME_PHOTO_SET'|'WELCOME_PHOTO_CLEAR'|'FAREWELL_PHOTO_SET'|'FAREWELL_PHOTO_CLEAR'|
@@ -76,7 +79,7 @@ export interface CommunityServiceChange{
 export type CommunityCleanupStatus='QUEUED'|'SENDING'|'CONFIRMED'|'FAILED_CONFIRMED'|'UNKNOWN_OUTCOME'|'SKIPPED';
 export interface CommunityCleanupJob{
  key:string;chatId:string;chatVersion:number;policyVersion:number;
- messageId:number;kind:CommunityServiceKind;observedAt:number;dueAt:number;
+ messageId:number;kind:CommunityServiceKind|'AUTOMATIC_REPLY';observedAt:number;dueAt:number;
  status:CommunityCleanupStatus;attemptId?:string;
 }
 export interface CommunityAutomationState{
@@ -126,6 +129,7 @@ const kinds=new Set<CommunityDraftKind>(['WELCOME_TEXT','FAREWELL_TEXT','REPLY_A
  'REPLY_ENABLE','REPLY_DISABLE','REPLY_COOLDOWN',
  'QUIET_HOURS_SET','QUIET_HOURS_CLEAR','TOPIC_COOLDOWN_SET','TOPIC_COOLDOWN_CLEAR',
  'CHANGE_LOG_ON','CHANGE_LOG_OFF','SERVICE_CLEANUP_ON','SERVICE_CLEANUP_OFF','SERVICE_CLEANUP_DELAY',
+ 'REPLY_CLEANUP_ON','REPLY_CLEANUP_OFF','REPLY_CLEANUP_DELAY',
  'RULES_LINK_SET','RULES_LINK_CLEAR',
  'WELCOME_LOCALIZED','FAREWELL_LOCALIZED','GROUP_LANGUAGE','GROUP_CLOCK',
  'WELCOME_PHOTO_SET','WELCOME_PHOTO_CLEAR','FAREWELL_PHOTO_SET','FAREWELL_PHOTO_CLEAR',
@@ -160,7 +164,10 @@ export function validCommunityConfig(value:unknown):value is CommunityConfig{
   (x.changeLogEnabled!==undefined&&typeof x.changeLogEnabled!=='boolean')||
   (x.serviceCleanup!==undefined&&(!x.serviceCleanup||typeof x.serviceCleanup!=='object'||
     typeof x.serviceCleanup.enabled!=='boolean'||!Number.isInteger(x.serviceCleanup.delayMs)||
-    x.serviceCleanup.delayMs<30000||x.serviceCleanup.delayMs>3600000)))return false;
+    x.serviceCleanup.delayMs<30000||x.serviceCleanup.delayMs>3600000))||
+  (x.replyCleanup!==undefined&&(!x.replyCleanup||typeof x.replyCleanup!=='object'||
+    typeof x.replyCleanup.enabled!=='boolean'||!Number.isInteger(x.replyCleanup.delayMs)||
+    x.replyCleanup.delayMs<30000||x.replyCleanup.delayMs>3600000)))return false;
  for(const item of [x.welcome,x.farewell]){
   if(!item||typeof item!=='object'||typeof item.enabled!=='boolean'||!validTemplate(item.text))return false;
   if(item.photoFileId!==undefined&&!validCommunityPhotoId(item.photoFileId)||
@@ -215,7 +222,7 @@ export function validCommunityState(value:unknown):value is CommunityAutomationS
     !Number.isSafeInteger(row.messageId)||row.messageId<=0||row.messageId>2147483647||
     !Number.isSafeInteger(row.chatVersion)||row.chatVersion<1||
     !Number.isSafeInteger(row.policyVersion)||row.policyVersion<1||
-    !serviceKinds.has(row.kind)||!validClock(row.observedAt)||!validClock(row.dueAt)||
+    !(serviceKinds.has(row.kind as CommunityServiceKind)||row.kind==='AUTOMATIC_REPLY')||!validClock(row.observedAt)||!validClock(row.dueAt)||
     row.dueAt-row.observedAt<30000||row.dueAt-row.observedAt>3600000||
     !statuses.has(row.status)||
     (row.attemptId!==undefined&&(typeof row.attemptId!=='string'||!/^[a-f0-9]{24}$/u.test(row.attemptId)))||
@@ -260,7 +267,7 @@ export function validCommunityState(value:unknown):value is CommunityAutomationS
    d.kind==='QUIET_HOURS_SET'&&(!validMinute(d.startMinute)||!validMinute(d.endMinute)||d.startMinute===d.endMinute)||
    (d.kind==='TOPIC_COOLDOWN_SET'||d.kind==='TOPIC_COOLDOWN_CLEAR')&&!validTopic(d.topicId)||
    d.kind==='TOPIC_COOLDOWN_SET'&&(!Number.isInteger(d.cooldownMs)||d.cooldownMs===undefined||d.cooldownMs<1000||d.cooldownMs>600000)||
-   d.kind==='SERVICE_CLEANUP_DELAY'&&d.delayMs===undefined||
+   (d.kind==='SERVICE_CLEANUP_DELAY'||d.kind==='REPLY_CLEANUP_DELAY')&&d.delayMs===undefined||
    d.kind==='RULES_LINK_SET'&&!validCommunityRulesUrl(d.text)||
    (d.kind==='WELCOME_LOCALIZED'||d.kind==='FAREWELL_LOCALIZED')&&
       (!d.language||!validTemplate(d.text))||
