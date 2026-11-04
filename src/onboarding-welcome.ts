@@ -67,8 +67,9 @@ export class VerifiedOnboardingWelcome{
   const started=this.clock();
   if(!validTime(started)||typeof expectedChallengeEpoch!=='string'||
      !/^[a-f0-9]{64}$/u.test(expectedChallengeEpoch))return false;
-  const before=await this.store.snapshot(),initial=this.proof(before,chat,member,started);
-  if(initial!==null)return false; // Standalone calls never borrow channel proof.
+  const before=await this.store.snapshot();
+  if(subscriptionRequirementMode(before,chat)!=='NONE'&&
+     subscriptionRequirementMode(before,chat)!=='PAUSED'||this.captcha.challenge(before,chat,member)?.epoch!==expectedChallengeEpoch)return false;
   return this.store.transaction(s=>{
    const now=this.clock(),challenge=this.captcha.challenge(s,chat,member);
    if(!validTime(now)||now<started||now>=started+120000||
