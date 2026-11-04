@@ -164,3 +164,44 @@ test('P4 rich sender: sendPhoto is an opt-in one-shot payload, never an HTTP pho
   photoFileId:'https://evil.test/photo'});
  assert.equal(invalid.status,'FAILED_CONFIRMED');assert.equal(calls.length,1);
 });
+
+const ownerPhoto=(id:number,actor:number,caption:string,fileId=PHOTO)=>({
+ update_id:id,message:{message_id:id,chat:{id:actor,type:'private'},
+  from:{id:actor,is_bot:false,first_name:'صاحب الصورة'},
+  caption,photo:[{file_id:fileId,file_unique_id:'UniquePhotoEntryA12',width:320,height:240,file_size:51000},
+   {file_id:fileId,file_unique_id:'UniquePhotoEntryB34',width:640,height:480,file_size:80000}]}
+});
+const ownerPhotoConfirm=(id:number,data:string)=>({
+ update_id:id,callback_query:{id:'r'+id,data,from:{id:Number(OWNER),is_bot:false},
+  message:{message_id:90,chat:{id:Number(OWNER),type:'private'},from:{id:900,is_bot:true}}}
+});
+for(const engine of ['json','sqlite'] as const){
+ test('P4 rich '+engine+': owner sends an actual Telegram photo with group command caption, previews and confirms without exposing file_id',async()=>{
+  const f=await setup(engine);
+  try{
+   const preview=await f.app.handle(ownerPhoto(1100,Number(OWNER),'/welcomephoto '+CHAT));
+   assert.equal(preview.status,'APPLIED');
+   assert.match(preview.plan?.text??'',/معاينة صورة الترحيب/);
+   assert.equal(JSON.stringify(preview.plan).includes(PHOTO),false);
+   assert.equal((await f.community.view(OWNER,CHAT)).welcome.photoFileId,undefined);
+   const approve=preview.plan?.inlineMarkup?.inline_keyboard.flat()
+    .find(b=>b.callback_data.startsWith('p4c:1:c:'))?.callback_data;
+   assert.ok(approve);
+   const confirmed=await f.app.handle(ownerPhotoConfirm(1101,approve!));
+   assert.equal(confirmed.status,'APPLIED');
+   assert.equal((await f.community.view(OWNER,CHAT)).welcome.photoFileId,PHOTO);
+  }finally{await f.close();}
+ });
+ test('P4 rich '+engine+': forged, missing-caption or non-owner photo uploads cannot update greeting',async()=>{
+  const f=await setup(engine);
+  try{
+   const notOwner=await f.app.handle(ownerPhoto(1110,501,'/welcomephoto '+CHAT));
+   assert.equal(notOwner.status,'DENIED');
+   const missing=await f.app.handle(ownerPhoto(1111,Number(OWNER),''));
+   assert.notEqual(missing.status,'APPLIED');
+   const bad=await f.app.handle(ownerPhoto(1112,Number(OWNER),'/welcomephoto '+CHAT,'BAD_FILE'));
+   assert.notEqual(bad.status,'APPLIED');
+   assert.equal((await f.community.view(OWNER,CHAT)).welcome.photoFileId,undefined);
+  }finally{await f.close();}
+ });
+}
