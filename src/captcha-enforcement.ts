@@ -50,6 +50,33 @@ export class CaptchaEnforcement{
   });
  }
  #source(s:BotState,chat:string,member:string){const consent=this.consent(s,chat),challenge=this.captcha.challenge(s,chat,member);if(!consent?.enabled||!challenge)return null;const ownership=s.audit.filter(a=>a.updateKey==='captcha:enforced:'+challenge.reference);let operationId:string|undefined;try{operationId=JSON.parse(ownership[0]?.reason??'null')?.operationId;}catch{}return {consent,challenge,epoch:this.epoch(s,chat),status:this.captcha.status(s,chat,member),rulesStatus:this.rules.status(s,chat,member),rulesEpoch:this.rules.epoch(s,chat),subscriptionEpoch:subscriptionConfigEpoch(s),ownership,attempts:s.moderationOperations.filter(o=>o.id===operationId)};}
+ /** Read-only proof that this CAPTCHA, not a coincidentally named manual
+  * reason, owns the current confirmed remote mute. Used to avoid attempting
+  * a second subscription restriction over an already restricted member. */
+ holdsConfirmedMute(s:BotState,chat:string,member:string):boolean{
+  const source=this.#source(s,chat,member),reference=source?.challenge.reference;
+  if(!reference||!source?.consent.enabled)return false;
+  const reasons=s.moderationReasons.filter(r=>r.chatId===chat&&r.memberId===member&&r.active);
+  if(reasons.length!==1||reasons[0]?.source!=='MANUAL'||reasons[0]?.kind!=='MUTE'||
+     reasons[0].reference!==reference||reasons[0].createdBy!==this.policy.ownerId)return false;
+  const receipts=s.audit.filter(a=>a.updateKey==='captcha:enforced:'+reference),receipt=receipts[0];
+  if(receipts.length!==1||!receipt||receipt.actorId!==this.policy.ownerId||
+     receipt.decision!=='ALLOW'||receipt.policyVersion!==this.policy.chatRevision(s,chat)||
+     !validTime(receipt.at)||receipt.at>this.clock())return false;
+  try{
+   const v=JSON.parse(receipt.reason) as Record<string,unknown>;
+   if(Object.keys(v).sort().join(',')!=='digest,operationId,reference'||v.reference!==reference)return false;
+   const operations=s.moderationOperations.filter(o=>o.chatId===chat&&o.memberId===member),
+    recorded=operations.filter(o=>o.id===v.operationId),op=recorded[0];
+   if(recorded.length!==1||!op||op.actorId!==this.policy.ownerId||op.kind!=='MUTE'||
+      op.status!=='CONFIRMED'||op.attemptGateway!=='TELEGRAM_API'||
+      op.baselineMode!=='INHERIT_GROUP_DEFAULTS'||op.policyVersion!==receipt.policyVersion||
+      receipt.at<op.createdAt||v.digest!==retirementOperationDigest(op))return false;
+   // No more recent successful or ambiguous operation may supersede the proof.
+   return !operations.some(o=>o.id!==op.id&&
+     (o.createdAt>=op.createdAt||o.status==='INTENT'||o.status==='STARTED'||o.status==='UNKNOWN_OUTCOME'));
+  }catch{return false;}
+ }
  async admit(chat:string,member:string,updateKey:string,sentAt:number):Promise<ModerationResult>{
   const now=this.clock();if(!this.available()||!validTime(now)||!validTime(sentAt)||now<sentAt||now-sentAt>30000)return denied('CAPTCHA_ENFORCEMENT_UNAVAILABLE');
   const before=await this.store.snapshot(),source=this.#source(before,chat,member);if(!source||source.status!=='PENDING'||source.rulesStatus==='UNAVAILABLE'||source.challenge.issued<source.consent.at||sentAt<source.consent.at||!/^b3-webhook:[A-Za-z0-9_-]{1,80}:[0-9]{1,16}$/u.test(updateKey))return denied('CAPTCHA_ENFORCEMENT_NOT_APPROVED');
