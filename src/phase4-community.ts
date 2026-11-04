@@ -4,10 +4,11 @@ import {Policy} from './policy.js';
 import {validCommunityPhotoId,validCommunityLinkButtons,communityLinkKeyboard,
  type CommunityLinkKeyboard} from './phase4-community-rich.js';
 import {defaultCommunityConfig,emptyCommunityState,validCommunityConfig,
- matchCommunityRule,renderCommunityTemplate,selectCommunityRule,selectCommunityGreeting,normalizeCommunityMatch,validCommunityRulesUrl,inCommunityQuietHours,validCommunityTimeZone,
+ matchCommunityRule,renderCommunityTemplate,selectCommunityRule,selectCommunityGreeting,normalizeCommunityMatch,validCommunityRulesUrl,inCommunityQuietHours,validCommunityTimeZone,matchCommunityRule,
  type CommunityConfig,type CommunityInput,type CommunityDraft,type CommunityDraftKind,
  type ReplyMatch,type CommunityAutomationState,type CommunityEventKind,type CommunityServiceKind,
- type CommunityServiceChange,type CommunityLanguage,type CommunityCalendar,type CommunityClockFormat} from './phase4-community-model.js';
+ type CommunityServiceChange,type CommunityLanguage,type CommunityCalendar,type CommunityClockFormat,
+ type CommunityDecision,type CommunityDecisionReason} from './phase4-community-model.js';
 
 export type DraftRequest={kind:CommunityDraftKind;text?:string;trigger?:string;match?:ReplyMatch;ruleId?:string;topicId?:number;cooldownMs?:number;delayMs?:number;startMinute?:number;endMinute?:number;
  language?:CommunityLanguage;calendar?:CommunityCalendar;clockFormat?:CommunityClockFormat;utcOffsetMinutes?:number;timeZone?:string;
@@ -19,6 +20,7 @@ export interface CommunitySendProposal{
 }
 /** Read-only administrative explanation, never stored with student text. */
 export type CommunityDiagnostic={status:'REPLIES_DISABLED'|'NO_MATCH'|'QUIET_HOURS'}|
+ {status:'RULE_DISABLED'|'TOPIC_MISMATCH';ruleId:string}|
  {status:'MATCH';ruleId:string;preview:string};
 const isGroup=(s:string):boolean=>/^-[1-9]\d{0,15}$/u.test(s)&&Number.isSafeInteger(Number(s));
 const validNow=(n:number):boolean=>Number.isSafeInteger(n)&&n>=0&&n<=8_640_000_000_000_000-120000;
@@ -217,6 +219,11 @@ export class Phase4CommunityService{
     case 'REPLIES_OFF':config.repliesEnabled=false;break;
     case 'CHANGE_LOG_ON':config.changeLogEnabled=true;break;
     case 'CHANGE_LOG_OFF':config.changeLogEnabled=false;break;
+    case 'DECISION_LOG_ON':config.decisionLogEnabled=true;break;
+    case 'DECISION_LOG_OFF':
+     config.decisionLogEnabled=false;
+     st!.decisionLog=(st!.decisionLog??[]).filter(x=>x.chatId!==config.chatId);
+     break;
     case 'SERVICE_CLEANUP_ON':config.serviceCleanup={...config.serviceCleanup??{delayMs:120000},enabled:true};break;
     case 'SERVICE_CLEANUP_OFF':config.serviceCleanup={...config.serviceCleanup??{delayMs:120000},enabled:false};break;
     case 'SERVICE_CLEANUP_DELAY':config.serviceCleanup={...config.serviceCleanup??{enabled:false},delayMs:draft.delayMs!};break;
@@ -317,6 +324,15 @@ export class Phase4CommunityService{
    return recorded;
   });
  }
+ /** Owner-only, bounded seven-day history without raw student content. */
+ async recentDecisions(actorId:string,chatId:string):Promise<CommunityDecision[]>{
+  const s=await this.store.snapshot();groupAvailable(s,this.policy,actorId,chatId);
+  const config=configured(s,chatId),now=this.clock();
+  if(!validNow(now))throw Error('COMMUNITY_CLOCK_INVALID');
+  if(!validCommunityConfig(config)||config.decisionLogEnabled!==true)return [];
+  return structuredClone((s.phase4Community?.decisionLog??[]).filter(x=>x.chatId===chatId&&
+   x.at<=now&&now-x.at<7*86400000).slice(-20).reverse());
+ }
  async recentChanges(actorId:string,chatId:string):Promise<CommunityServiceChange[]>{
   const state=await this.store.snapshot();
   groupAvailable(state,this.policy,actorId,chatId);
@@ -339,7 +355,19 @@ export class Phase4CommunityService{
   if(config.quietHours&&inCommunityQuietHours(config.quietHours,this.clock(),config.utcOffsetMinutes,config.timeZone))
    return {status:'QUIET_HOURS'};
   const rule=selectCommunityRule(config,sample,topicId);
-  if(!rule)return {status:'NO_MATCH'};
+  if(!rule){
+   // Diagnose disabled and topic-scoped matches without consuming quota.
+   if(!/^@\w+/u.test(sample.trimStart())){
+    const isCommand=sample.trimStart().startsWith('/');
+    const candidates=config.rules.filter(r=>
+     (isCommand?r.match==='COMMAND':r.match!=='COMMAND')&&matchCommunityRule(r,sample));
+    const disabled=candidates.find(r=>!r.enabled&&(r.topicId===undefined||r.topicId===topicId));
+    if(disabled)return {status:'RULE_DISABLED',ruleId:disabled.id};
+    const wrongTopic=candidates.find(r=>r.enabled&&r.topicId!==undefined&&r.topicId!==topicId);
+    if(wrongTopic)return {status:'TOPIC_MISMATCH',ruleId:wrongTopic.id};
+   }
+   return {status:'NO_MATCH'};
+  }
   const now=this.clock();
   if(!validNow(now))throw Error('COMMUNITY_CLOCK_INVALID');
   const input:CommunityInput={kind:'TEXT',chatId,actorId:'1',
@@ -470,6 +498,8 @@ export class Phase4CommunityService{
    ': '+(draft.cooldownMs!/1000)+' ثانية. الحد العام 8 رسائل في الدقيقة يبقى.';
   if(draft.kind==='TOPIC_COOLDOWN_CLEAR')return 'مراجعة إزالة تخصيص حد موضوع '+draft.topicId+
    ' والعودة إلى فاصل المجموعة الافتراضي.';
+  if(draft.kind==='DECISION_LOG_ON')return 'تفعيل سجل قرارات الردود المنقح لهذه المجموعة فقط.\nيُحفظ سبب القرار وإصدار الإعدادات دون رسالة الطالب أو هويته. لا يثبت حجز الإرسال التسليم عبر Telegram.';
+  if(draft.kind==='DECISION_LOG_OFF')return 'إيقاف سجل قرارات الردود وحذف تاريخه فور اعتماد الإلغاء.';
   if(draft.kind==='REPLY_CLEANUP_DELAY')return 'تحديد مدة حذف ردود البوت المؤقتة بعد إثبات الإرسال: '+
    (draft.delayMs!/1000)+' ثانية. الحذف يتطلب صلاحية حديثة.';
   if(draft.kind==='REPLY_CLEANUP_ON')return 'تفعيل تنظيف ردود منارتك المؤكدة فقط بعد المهلة. لا يُحذف محتوى الأعضاء.';
