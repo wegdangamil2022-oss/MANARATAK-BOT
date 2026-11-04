@@ -23,6 +23,8 @@ export interface CommunityGreeting{
  /** External HTTPS links only, no callback handlers or hidden actor IDs. */
  buttons?:CommunityLinkButton[];
 }
+export interface CommunityQuietHours { startMinute:number;endMinute:number; }
+export interface CommunityTopicCooldown { topicId:number;cooldownMs:number; }
 export interface CommunityConfig{
  chatId:string;version:number;welcome:CommunityGreeting;farewell:CommunityGreeting;
  repliesEnabled:boolean;rules:CommunityReplyRule[];
@@ -30,6 +32,10 @@ export interface CommunityConfig{
  utcOffsetMinutes:number;
  /** A group-wide minimum gap between any two automatic group replies. */
  groupCooldownMs:number;
+ /** Absent means no scheduled quiet period; configured local clock offset applies. */
+ quietHours?:CommunityQuietHours;
+ /** Topic-local reply gaps override the group gap only for those topics. */
+ topicCooldowns?:CommunityTopicCooldown[];
  /** Optional for backward compatibility with pre-localization snapshots. */
  language?:CommunityLanguage;
  clockFormat?:CommunityClockFormat;
@@ -43,6 +49,7 @@ export interface CommunityConfig{
 export type CommunityDraftKind='WELCOME_TEXT'|'FAREWELL_TEXT'|'REPLY_ADD'|'REPLY_REMOVE'|
  'WELCOME_ON'|'WELCOME_OFF'|'FAREWELL_ON'|'FAREWELL_OFF'|'REPLIES_ON'|'REPLIES_OFF'|
  'REPLY_ENABLE'|'REPLY_DISABLE'|'REPLY_COOLDOWN'|
+ 'QUIET_HOURS_SET'|'QUIET_HOURS_CLEAR'|'TOPIC_COOLDOWN_SET'|'TOPIC_COOLDOWN_CLEAR'|
  'CHANGE_LOG_ON'|'CHANGE_LOG_OFF'|'SERVICE_CLEANUP_ON'|'SERVICE_CLEANUP_OFF'|'SERVICE_CLEANUP_DELAY'|
  'RULES_LINK_SET'|'RULES_LINK_CLEAR'|
  'WELCOME_LOCALIZED'|'FAREWELL_LOCALIZED'|'GROUP_LANGUAGE'|'GROUP_CLOCK'|
@@ -54,12 +61,13 @@ export interface CommunityDraft{
  text?:string;trigger?:string;match?:ReplyMatch;ruleId?:string;topicId?:number;cooldownMs?:number;delayMs?:number;
  language?:CommunityLanguage;clockFormat?:CommunityClockFormat;calendar?:CommunityCalendar;utcOffsetMinutes?:number;
  photoFileId?:string;buttonText?:string;buttonUrl?:string;
+ startMinute?:number;endMinute?:number;
 }
 export interface CommunityReceipt{
  /** An opaque hash of the inbound Telegram update and bot identifier. */
  key:string;chatId:string;at:number;kind:CommunityEventKind;
  /** A short-lived digest, not a raw student message or display name. */
- actorDigest:string;ruleId?:string;
+ actorDigest:string;ruleId?:string;topicId?:number;
 }
 export interface CommunityServiceChange{
  key:string;chatId:string;kind:'TITLE_CHANGED'|'PHOTO_CHANGED'|'PHOTO_REMOVED';
@@ -103,9 +111,20 @@ export function validCommunityRulesUrl(value:unknown):value is string{
  }catch{return false;}
 }
 const validTopic=(n:unknown):n is number=>typeof n==='number'&&Number.isSafeInteger(n)&&n>0&&n<=2147483647;
+const validMinute=(v:unknown):v is number=>typeof v==='number'&&Number.isInteger(v)&&v>=0&&v<1440;
+export function inCommunityQuietHours(hours:CommunityQuietHours,now:number,utcOffsetMinutes:number):boolean{
+ if(!validClock(now)||!Number.isInteger(utcOffsetMinutes)||utcOffsetMinutes< -720||utcOffsetMinutes>840||
+    !validMinute(hours.startMinute)||!validMinute(hours.endMinute)||hours.startMinute===hours.endMinute)
+   throw Error('COMMUNITY_QUIET_HOURS_INVALID');
+ const minute=((Math.floor(now/60000)+utcOffsetMinutes)%1440+1440)%1440;
+ return hours.startMinute<hours.endMinute?
+  minute>=hours.startMinute&&minute<hours.endMinute:
+  minute>=hours.startMinute||minute<hours.endMinute;
+}
 const kinds=new Set<CommunityDraftKind>(['WELCOME_TEXT','FAREWELL_TEXT','REPLY_ADD','REPLY_REMOVE',
  'WELCOME_ON','WELCOME_OFF','FAREWELL_ON','FAREWELL_OFF','REPLIES_ON','REPLIES_OFF',
  'REPLY_ENABLE','REPLY_DISABLE','REPLY_COOLDOWN',
+ 'QUIET_HOURS_SET','QUIET_HOURS_CLEAR','TOPIC_COOLDOWN_SET','TOPIC_COOLDOWN_CLEAR',
  'CHANGE_LOG_ON','CHANGE_LOG_OFF','SERVICE_CLEANUP_ON','SERVICE_CLEANUP_OFF','SERVICE_CLEANUP_DELAY',
  'RULES_LINK_SET','RULES_LINK_CLEAR',
  'WELCOME_LOCALIZED','FAREWELL_LOCALIZED','GROUP_LANGUAGE','GROUP_CLOCK',
@@ -126,6 +145,14 @@ export function validCommunityConfig(value:unknown):value is CommunityConfig{
   !Number.isInteger(x.utcOffsetMinutes)||x.utcOffsetMinutes< -720||x.utcOffsetMinutes>840||
   !Number.isInteger(x.groupCooldownMs)||x.groupCooldownMs<1000||x.groupCooldownMs>600000||
   !Array.isArray(x.rules)||x.rules.length>30||
+  (x.quietHours!==undefined&&
+    (!x.quietHours||!validMinute(x.quietHours.startMinute)||
+     !validMinute(x.quietHours.endMinute)||x.quietHours.startMinute===x.quietHours.endMinute))||
+  (x.topicCooldowns!==undefined&&
+    (!Array.isArray(x.topicCooldowns)||x.topicCooldowns.length>30||
+     x.topicCooldowns.some(row=>!row||!validTopic(row.topicId)||
+       !Number.isInteger(row.cooldownMs)||row.cooldownMs<1000||row.cooldownMs>600000)||
+     new Set(x.topicCooldowns.map(row=>row.topicId)).size!==x.topicCooldowns.length))||
   (x.rulesUrl!==undefined&&!validCommunityRulesUrl(x.rulesUrl))||
   (x.language!==undefined&&x.language!=='ar'&&x.language!=='en')||
   (x.clockFormat!==undefined&&x.clockFormat!=='12'&&x.clockFormat!=='24')||
@@ -211,6 +238,8 @@ export function validCommunityState(value:unknown):value is CommunityAutomationS
    (d.ruleId!==undefined&&!/^[a-f0-9]{12}$/u.test(d.ruleId))||
    (d.topicId!==undefined&&!validTopic(d.topicId))||
    (d.cooldownMs!==undefined&&(!Number.isInteger(d.cooldownMs)||d.cooldownMs<1000||d.cooldownMs>86400000))||
+   (d.startMinute!==undefined&&!validMinute(d.startMinute))||
+   (d.endMinute!==undefined&&!validMinute(d.endMinute))||
    (d.delayMs!==undefined&&(!Number.isInteger(d.delayMs)||d.delayMs<30000||d.delayMs>3600000))||
    (d.language!==undefined&&d.language!=='ar'&&d.language!=='en')||
    (d.clockFormat!==undefined&&d.clockFormat!=='12'&&d.clockFormat!=='24')||
@@ -228,6 +257,9 @@ export function validCommunityState(value:unknown):value is CommunityAutomationS
    d.kind==='REPLY_ADD'&&(!d.text||!d.trigger||!d.match)||
    (['REPLY_REMOVE','REPLY_ENABLE','REPLY_DISABLE','REPLY_COOLDOWN'] as string[]).includes(d.kind)&&!d.ruleId||
    d.kind==='REPLY_COOLDOWN'&&d.cooldownMs===undefined||
+   d.kind==='QUIET_HOURS_SET'&&(!validMinute(d.startMinute)||!validMinute(d.endMinute)||d.startMinute===d.endMinute)||
+   (d.kind==='TOPIC_COOLDOWN_SET'||d.kind==='TOPIC_COOLDOWN_CLEAR')&&!validTopic(d.topicId)||
+   d.kind==='TOPIC_COOLDOWN_SET'&&(!Number.isInteger(d.cooldownMs)||d.cooldownMs===undefined||d.cooldownMs<1000||d.cooldownMs>600000)||
    d.kind==='SERVICE_CLEANUP_DELAY'&&d.delayMs===undefined||
    d.kind==='RULES_LINK_SET'&&!validCommunityRulesUrl(d.text)||
    (d.kind==='WELCOME_LOCALIZED'||d.kind==='FAREWELL_LOCALIZED')&&
@@ -247,7 +279,8 @@ export function validCommunityState(value:unknown):value is CommunityAutomationS
    receiptIds.has(x.key)||!validGroup(x.chatId)||!validClock(x.at)||
    !['JOIN','LEAVE','TEXT'].includes(x.kind)||typeof x.actorDigest!=='string'||
    !/^[a-f0-9]{64}$/u.test(x.actorDigest)||
-   (x.ruleId!==undefined&&!/^[a-f0-9]{12}$/u.test(x.ruleId)))return false;
+   (x.ruleId!==undefined&&!/^[a-f0-9]{12}$/u.test(x.ruleId))||
+   (x.topicId!==undefined&&!validTopic(x.topicId)))return false;
   receiptIds.add(x.key);
  }
  return true;
