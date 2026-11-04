@@ -183,7 +183,8 @@ export function validCommunityState(value:unknown):value is CommunityAutomationS
    d.kind==='REPLY_ADD'&&(!d.text||!d.trigger||!d.match)||
    (['REPLY_REMOVE','REPLY_ENABLE','REPLY_DISABLE','REPLY_COOLDOWN'] as string[]).includes(d.kind)&&!d.ruleId||
    d.kind==='REPLY_COOLDOWN'&&d.cooldownMs===undefined||
-   d.kind==='SERVICE_CLEANUP_DELAY'&&d.delayMs===undefined)return false;
+   d.kind==='SERVICE_CLEANUP_DELAY'&&d.delayMs===undefined||
+   d.kind==='RULES_LINK_SET'&&!validCommunityRulesUrl(d.text))return false;
   draftIds.add(d.id);
  }
  const receiptIds=new Set<string>();
