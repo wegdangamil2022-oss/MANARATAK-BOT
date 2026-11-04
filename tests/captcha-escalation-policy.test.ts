@@ -46,7 +46,7 @@ for(const engine of ['json','sqlite'] as const){
   const round3=f.captcha.challenge(await f.store.snapshot(),G,'300')!;
   f.advance(60000);
   view=await f.captcha.view('300','cp:1:o:'+round3.nonce);
-  assert.match(view!.text,/مراجعة بشرية/u);
+  assert.match(view!.text,/المراجعة البشرية/u);
   assert.equal(f.captcha.reviewCases(await f.store.snapshot(),OWNER).length,1);
   assert.equal((await f.store.snapshot()).audit.filter(a=>a.updateKey.startsWith('captcha:escalation-used:')).length,3);
  }finally{await f.close();}});
@@ -55,7 +55,10 @@ for(const engine of ['json','sqlite'] as const){
   assert.match((await f.captcha.view('300','cp:1:o:'+issued.nonce))!.text,/180 ثانية/u);
   assert.equal(await f.escalation.configure(OWNER,G,'STANDARD',f.escalation.epoch(await f.store.snapshot(),G)),true);
   assert.match((await f.captcha.view('300','cp:1:o:'+issued.nonce))!.text,/180 ثانية/u);
-  f.advance(60000);assert.equal(await f.captcha.view('300','cp:1:r:'+issued.nonce),null);
+  f.advance(60000);
+  const tooEarly=await f.captcha.view('300','cp:1:r:'+issued.nonce);
+  assert.match(tooEarly!.text,/120 ثانية/u);
+  assert.equal(f.captcha.challenge(await f.store.snapshot(),G,'300')?.nonce,issued.nonce);
   f.advance(120000);assert.ok(await f.captcha.view('300','cp:1:r:'+issued.nonce));
   const newRound=f.captcha.challenge(await f.store.snapshot(),G,'300')!;
   f.advance(60000);assert.match((await f.captcha.view('300','cp:1:o:'+newRound.nonce))!.text,/120 ثانية/u);
@@ -70,12 +73,18 @@ for(const engine of ['json','sqlite'] as const){
   await f.enabled();const first=await f.joined();f.advance(60000);
   const reopened=new CaptchaService(new BotStore(f.store.file,{engine}),f.policy,f.membership,f.clock);
   assert.match((await reopened.view('300','cp:1:o:'+first.nonce))!.text,/180 ثانية/u);
-  assert.equal((await reopened.view('300','cp:1:r:'+first.nonce)),null);
+  const tooEarly=await reopened.view('300','cp:1:r:'+first.nonce);
+  assert.match(tooEarly!.text,/180 ثانية/u);
+  assert.equal(reopened.challenge(await f.store.snapshot(),G,'300')?.nonce,first.nonce);
  }finally{await f.close();}});
  test(engine+' stale owner approval and unrelated group changes cannot arm escalation',async()=>{const f=await fixture();try{
   const epoch=f.escalation.epoch(await f.store.snapshot(),G);
   await f.store.transaction(s=>{s.chats.find(x=>x.id===G)!.version++;});
   assert.equal(await f.escalation.configure(OWNER,G,'EXTENDED',epoch),false);
+  // The old challenge configuration also belongs to the previous group approval.
+  // Reapprove it explicitly before attempting a new escalation consent.
+  assert.equal(await f.captcha.configure(OWNER,G,{enabled:true,timeout:60,attempts:3},
+   captchaSource(await f.store.snapshot())),true);
   await f.policy.approveChat(OWNER,'-100987',['moderation']);
   const current=f.escalation.epoch(await f.store.snapshot(),G);
   assert.equal(await f.escalation.configure(OWNER,G,'EXTENDED',current),true);
