@@ -1,10 +1,10 @@
 import {Phase4CommunityService,type DraftRequest} from './phase4-community.js';
 import type {OwnerInlineScreen,TelegramInlineKeyboard} from './telegram-inline-owner.js';
 import type {CommunityDraftKind,ReplyMatch,CommunityLanguage,CommunityCalendar,CommunityClockFormat} from './phase4-community-model.js';
-import {validCommunityRulesUrl} from './phase4-community-model.js';
+import {validCommunityRulesUrl,validCommunityTimeZone} from './phase4-community-model.js';
 import {validCommunityLinkButton,validCommunityPhotoId} from './phase4-community-rich.js';
 const group=/^-[1-9]\d{0,15}$/u,hex=/^[a-f0-9]{24}$/u;
-const route=/^p4c:1:(?:q:-[1-9]\d{0,15}|z:-[1-9]\d{0,15}|y:-[1-9]\d{0,15}(?::[1-9]\d{0,9})?|l:(?:0|[1-9]\d{0,2})|g:-[1-9]\d{0,15}|h:-[1-9]\d{0,15}|v:-[1-9]\d{0,15}:[wf]|j:-[1-9]\d{0,15}:[wf]:[pb]|r:-[1-9]\d{0,15}:(?:0|[1-9]\d{0,2})|t:-[1-9]\d{0,15}:[wfrsgb]:[01]|d:-[1-9]\d{0,15}:[a-f0-9]{12}|e:-[1-9]\d{0,15}:[a-f0-9]{12}:[01]|u:-[1-9]\d{0,15}:(?:ar|en)|o:-[1-9]\d{0,15}:(?:12|24):[gh]|[cx]:[a-f0-9]{24})$/u;
+const route=/^p4c:1:(?:q:-[1-9]\d{0,15}|z:-[1-9]\d{0,15}|n:-[1-9]\d{0,15}|a:-[1-9]\d{0,15}|y:-[1-9]\d{0,15}(?::[1-9]\d{0,9})?|l:(?:0|[1-9]\d{0,2})|g:-[1-9]\d{0,15}|h:-[1-9]\d{0,15}|v:-[1-9]\d{0,15}:[wf]|j:-[1-9]\d{0,15}:[wf]:[pb]|r:-[1-9]\d{0,15}:(?:0|[1-9]\d{0,2})|t:-[1-9]\d{0,15}:[wfrsgb]:[01]|d:-[1-9]\d{0,15}:[a-f0-9]{12}|e:-[1-9]\d{0,15}:[a-f0-9]{12}:[01]|u:-[1-9]\d{0,15}:(?:ar|en)|o:-[1-9]\d{0,15}:(?:12|24):[gh]|[cx]:[a-f0-9]{24})$/u;
 export const validPhase4CommunityRoute=(s:unknown):s is string=>typeof s==='string'&&
  Buffer.byteLength(s,'utf8')<=64&&route.test(s);
 const esc=(s:string):string=>s.replace(/&/gu,'&amp;').replace(/</gu,'&lt;')
@@ -32,6 +32,8 @@ const help='للتعديل أرسل في خاص البوت أحد الأوامر
  +'<code>/greetinglang -100123 en</code>\n'
  +'<code>/greetingtext -100123 welcome en Welcome {العضو}</code>\n'
  +'<code>/greetingclock -100123 +03:00 12 hijri</code>\n'
+ +'<code>/greetingzone -100123 Asia/Aden</code>\n'
+ +'<code>/greetingzoneoff -100123</code>\n'
  +'<code>/welcomephoto -100123 PHOTO_FILE_ID</code>\n'
  +'<code>/clearwelcomephoto -100123</code>\n'
  +'<code>/welcomebutton -100123 دليل القوانين | https://t.me/StudyinEurope3</code>\n'
@@ -100,6 +102,11 @@ export function parsePhase4CommunityCommand(text:string):
  if(translated)return {kind:'EDIT',chatId:translated[1]!,request:{
   kind:translated[2]==='welcome'?'WELCOME_LOCALIZED':'FAREWELL_LOCALIZED',
   language:translated[3]! as CommunityLanguage,text:translated[4]!.trim()}};
+ const zone=/^\/greetingzone (-[1-9]\d{0,15}) (\S{1,64})$/u.exec(text);
+ if(zone)return validCommunityTimeZone(zone[2])?
+  {kind:'EDIT',chatId:zone[1]!,request:{kind:'GROUP_TIMEZONE',timeZone:zone[2]!}}:null;
+ const zoneOff=/^\/greetingzoneoff (-[1-9]\d{0,15})$/u.exec(text);
+ if(zoneOff)return {kind:'EDIT',chatId:zoneOff[1]!,request:{kind:'GROUP_TIMEZONE_CLEAR'}};
  const clock=/^\/greetingclock (-[1-9]\d{0,15}) ([+-])([01]\d):([0-5]\d) (12|24) (gregorian|hijri)$/u.exec(text);
  if(clock){
   const offset=(clock[2]==='-'?-1:1)*(Number(clock[3])*60+Number(clock[4]));
@@ -210,7 +217,8 @@ export async function phase4CommunityScreen(service:Phase4CommunityService,actor
    '\nساعات الهدوء: '+(c.quietHours?'محددة':'غير مفعّلة')+
    '\nحدود الموضوعات: '+(c.topicCooldowns?.length??0)+
    '\nاللغة: '+(c.language??'ar')+'\nنظام الوقت: '+(c.clockFormat??'24')+
-   '\nالتقويم: '+(c.calendar??'gregorian')+'\nإزاحة UTC: '+c.utcOffsetMinutes+' دقيقة'+
+   '\nالتقويم: '+(c.calendar??'gregorian')+'\nإزاحة UTC الاحتياطية: '+c.utcOffsetMinutes+' دقيقة'+
+   '\nالمنطقة الزمنية: '+(c.timeZone??'غير محددة — إزاحة ثابتة')+
    '\nقالب الترحيب المترجم: '+(c.welcome.localized?.[c.language??'ar']?'متاح':'غير محدد')+
    '\nقالب الوداع المترجم: '+(c.farewell.localized?.[c.language??'ar']?'متاح':'غير محدد')+
    '\nصورة الترحيب: '+(c.welcome.photoFileId?'معتمدة':'غير مضافة')+
@@ -229,6 +237,7 @@ export async function phase4CommunityScreen(service:Phase4CommunityService,actor
     [btn('🌐 اللغة: '+(c.language??'ar'),'p4c:1:u:'+id+':'+((c.language??'ar')==='ar'?'en':'ar'))],
     [btn('🕒 الساعة: '+(c.clockFormat??'24'),'p4c:1:o:'+id+':'+((c.clockFormat??'24')==='24'?'12':'24')+':'+((c.calendar??'gregorian')==='hijri'?'h':'g'))],
     [btn('📅 التقويم: '+(c.calendar??'gregorian'),'p4c:1:o:'+id+':'+(c.clockFormat??'24')+':'+((c.calendar??'gregorian')==='hijri'?'g':'h'))],
+    [btn('🌍 المنطقة الزمنية','p4c:1:n:'+id)],
     [btn('🧹 '+(c.serviceCleanup?.enabled?'إيقاف':'تفعيل')+' تنظيف رسائل الخدمة','p4c:1:t:'+id+':s:'+(c.serviceCleanup?.enabled?'0':'1'))],
     [btn('🧼 '+(c.replyCleanup?.enabled?'إيقاف':'تفعيل')+' حذف ردود البوت','p4c:1:t:'+id+':b:'+(c.replyCleanup?.enabled?'0':'1'))],
     [btn('📝 '+(c.changeLogEnabled?'إيقاف':'تفعيل')+' سجل تغييرات المجموعة','p4c:1:t:'+id+':g:'+(c.changeLogEnabled?'0':'1'))],
@@ -244,7 +253,8 @@ export async function phase4CommunityScreen(service:Phase4CommunityService,actor
    const rows=[[btn('↩️ المجموعة','p4c:1:g:'+id)]];
    if(conf.quietHours)rows.unshift([btn('⛔ إلغاء ساعات الهدوء','p4c:1:z:'+id)]);
    return {text:'<b>🌙 ساعات هدوء الردود التلقائية</b>\n'+
-    'المجموعة: <code>'+id+'</code>\nالوقت المحلي مضبوط بإزاحة UTC '+conf.utcOffsetMinutes+' دقيقة.'+
+    'المجموعة: <code>'+id+'</code>\nالوقت المحلي: '+
+    (conf.timeZone?esc(conf.timeZone)+' (مع التوقيت الصيفي)':'UTC '+conf.utcOffsetMinutes+' دقيقة ثابتة')+'.'+
     '\nالفترة: '+(conf.quietHours?hhmm(conf.quietHours.startMinute)+' — '+hhmm(conf.quietHours.endMinute):'غير محددة')+
     '\n\nتخص الردود النصية فقط، ولا توقف الترحيب والوداع أو الحماية.'+
     '\nللتعديل اكتب في الخاص:\n<code>/replyquiet '+id+' 22:00 07:00</code>'+
@@ -340,6 +350,28 @@ export async function phase4CommunityScreen(service:Phase4CommunityService,actor
    keyboard:k([[btn('✅ اعتماد','p4c:1:c:'+draft.id)],
     [btn('❌ إلغاء','p4c:1:x:'+draft.id)],
     [btn('↩️ المجموعة','p4c:1:g:'+draft.chatId)]])};
+ }
+ const zoneView=/^p4c:1:n:(-[1-9]\d{0,15})$/u.exec(data);
+ if(zoneView){
+  const id=zoneView[1]!,conf=await service.view(actorId,id);
+  return {text:'<b>🌍 المنطقة الزمنية للمجموعة</b>\n'+
+   'المجموعة: <code>'+id+'</code>\nالمنطقة الحالية: '+(conf.timeZone?esc(conf.timeZone):'غير محددة')+
+   '\nالإزاحة الاحتياطية: UTC '+conf.utcOffsetMinutes+' دقيقة'+
+   '\n\nلا يجري تخمين منطقة الطلاب من Telegram. إعداد المنطقة من اختيار المالك، ووقت الصيف يُحسب تلقائيًا.'+
+   '\nلتحديد منطقة:\n<code>/greetingzone '+id+' Asia/Aden</code>'+
+   '\nللعودة للإزاحة اليدوية:\n<code>/greetingzoneoff '+id+'</code>',
+   keyboard:k([...(conf.timeZone?[[btn('🗑️ إلغاء منطقة IANA','p4c:1:a:'+id)]]:[]),
+    [btn('↩️ إعدادات المجموعة','p4c:1:g:'+id)]])};
+ }
+ const zoneClear=/^p4c:1:a:(-[1-9]\d{0,15})$/u.exec(data);
+ if(zoneClear){
+  const config=await service.view(actorId,zoneClear[1]!);
+  if(!config.timeZone)return null;
+  const draft=await service.pending(actorId,{kind:'GROUP_TIMEZONE_CLEAR'},zoneClear[1]!);
+  return {text:service.preview(draft)+'\nلا يُطبّق الإلغاء حتى يعتمد المالك.',
+   keyboard:k([[btn('✅ اعتماد الإلغاء','p4c:1:c:'+draft.id)],
+    [btn('❌ إلغاء','p4c:1:x:'+draft.id)],
+    [btn('↩️ المنطقة الزمنية','p4c:1:n:'+draft.chatId)]])};
  }
  const history=/^p4c:1:h:(-[1-9]\d{0,15})$/u.exec(data);
  if(history){
