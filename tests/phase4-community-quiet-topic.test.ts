@@ -6,6 +6,11 @@ import {tmpdir} from 'node:os';
 import {BotStore} from '../src/store.js';
 import {Policy} from '../src/policy.js';
 import {Phase4CommunityService} from '../src/phase4-community.js';
+import {EducationService} from '../src/education.js';
+import {EducationAdminFacade} from '../src/education-admin.js';
+import {ApprovedAnswerService,ResourceLinkService} from '../src/education-interactions.js';
+import {TelegramUpdateApplication} from '../src/telegram-transport.js';
+import {TelegramReplyDispatcher} from '../src/telegram-replies.js';
 import {defaultCommunityConfig,validCommunityConfig,inCommunityQuietHours} from '../src/phase4-community-model.js';
 import {parsePhase4CommunityCommand} from '../src/phase4-community-ui.js';
 import {groupMenuEpochDigest} from '../src/telegram-group-access.js';
@@ -15,9 +20,9 @@ const message=(actorId:string,topicId?:number)=>({
  kind:'TEXT' as const,chatId:GROUP,actorId,memberName:'طالب',groupName:'منارتك',
  messageText:'منحة',...(topicId===undefined?{}:{topicId})
 });
-async function fixture(engine:'json'|'sqlite'){
+async function fixture(engine:'json'|'sqlite',startAt=NOW){
  const dir=await mkdtemp(join(tmpdir(),'p4-quiet-topic-')),file=join(dir,engine==='json'?'state.json':'state.sqlite');
- let now=NOW;
+ let now=startAt;
  const clock=()=>now,store=new BotStore(file,{engine}),policy=new Policy(store,OWNER,clock);
  await policy.approveChat(OWNER,GROUP,['navigation']);
  await policy.setPresence(GROUP,true);
@@ -125,6 +130,40 @@ for(const engine of ['json','sqlite'] as const){
    const old=await f.service.pending(OWNER,{kind:'TOPIC_COOLDOWN_SET',topicId:777,cooldownMs:3000},GROUP);
    await f.apply({kind:'QUIET_HOURS_SET',startMinute:120,endMinute:240});
    await assert.rejects(f.service.approve(OWNER,old.id),/COMMUNITY_DRAFT_NOT_FOUND|COMMUNITY_DRAFT_STALE/);
+  }finally{await f.close()}
+ });
+}
+
+for(const engine of ['json','sqlite'] as const){
+ test('P4 '+engine+': text reply queued before quiet hour must not send after crossing the quiet boundary',async()=>{
+  const t0=Date.parse('2026-11-04T22:59:30Z');
+  const f=await fixture(engine,t0);try{
+   await f.apply({kind:'REPLY_ADD',match:'WORD',trigger:'منحة',text:'أهلًا'});
+   await f.apply({kind:'REPLIES_ON'});
+   await f.apply({kind:'QUIET_HOURS_SET',startMinute:120,endMinute:240});
+   const education=new EducationService(f.store,f.policy,f.clock);
+   const admin=new EducationAdminFacade(f.store,f.policy,education);
+   const faq=new ApprovedAnswerService(f.store,f.policy),links=new ResourceLinkService(f.store,f.policy);
+   const app=new TelegramUpdateApplication({store:f.store,policy:f.policy,education,admin,faq,links,
+    botId:'bot-main',botUsername:'ManaratakBot',membership:async()=> 'VERIFIED',
+    community:f.service,clock:f.clock});
+   const inbound={update_id:987654,message:{message_id:987654,
+    chat:{id:Number(GROUP),type:'supergroup',title:'منارتك'},
+    from:{id:301,is_bot:false,first_name:'طالب'},text:'منحة'}};
+   const queued=await app.handle(inbound);
+   assert.equal(queued.status,'APPLIED');
+   assert.ok(queued.deliveryKey);
+   const stored=(await f.store.snapshot()).telegramReplyJobs?.find(x=>x.updateKey===queued.deliveryKey);
+   assert.deepEqual(stored?.communityAutomation,{kind:'TEXT',configVersion:3});
+   f.set(Date.parse('2026-11-04T23:00:00Z'));
+   let sent=0;
+   const dispatcher=new TelegramReplyDispatcher(f.store,f.policy,{
+    send:async()=>{sent++;return {status:'CONFIRMED',messageId:987};}
+   },f.clock);
+   assert.equal((await dispatcher.dispatch(queued.deliveryKey!)).status,'FAILED_CONFIRMED');
+   assert.equal(sent,0);
+   assert.equal((await dispatcher.dispatch(queued.deliveryKey!)).status,'FAILED_CONFIRMED');
+   assert.equal((await f.store.snapshot()).telegramReplyJobs?.find(x=>x.updateKey===queued.deliveryKey)?.status,'FAILED_CONFIRMED');
   }finally{await f.close()}
  });
 }
