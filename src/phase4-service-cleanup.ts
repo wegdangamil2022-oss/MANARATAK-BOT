@@ -102,7 +102,10 @@ export class Phase4ServiceCleanupDispatcher{
    // Never delete old service messages, messages from a revoked group,
    // or messages under a policy that changed after the event was admitted.
    const cleanupEnabled=current.kind==='AUTOMATIC_REPLY'?
-     config?.replyCleanup?.enabled:config?.serviceCleanup?.enabled;
+     config?.replyCleanup?.enabled:
+     config?.serviceCleanup?.enabled===true&&
+     (current.kind==='JOIN'?config.serviceCleanup.joinEnabled!==false:
+      current.kind==='LEAVE'?config.serviceCleanup.leaveEnabled!==false:true);
    if(liveNow<current.observedAt||liveNow-current.observedAt>2*3600000||
      cleanupEnabled!==true||!config||config.version!==current.policyVersion||
      chat.length!==1||!chat[0]!.approved||chat[0]!.version!==current.chatVersion||
