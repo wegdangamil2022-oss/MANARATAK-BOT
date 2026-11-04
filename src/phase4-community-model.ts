@@ -77,7 +77,7 @@ export interface CommunityConfig{
 export type CommunityDraftKind='WELCOME_TEXT'|'FAREWELL_TEXT'|'REPLY_ADD'|'REPLY_REMOVE'|
  'WELCOME_ON'|'WELCOME_OFF'|'FAREWELL_ON'|'FAREWELL_OFF'|'REPLIES_ON'|'REPLIES_OFF'|
  'PRIVATE_WELCOME_ON'|'PRIVATE_WELCOME_OFF'|
- 'GROUP_PROFILE_ON'|'GROUP_PROFILE_OFF'|'GROUP_TITLE_SET'|'GROUP_PHOTO_REMOVE'|
+ 'GROUP_PROFILE_ON'|'GROUP_PROFILE_OFF'|'GROUP_TITLE_SET'|'GROUP_PHOTO_SET'|'GROUP_PHOTO_REMOVE'|
  'REPLY_ENABLE'|'REPLY_DISABLE'|'REPLY_COOLDOWN'|
  'QUIET_HOURS_SET'|'QUIET_HOURS_CLEAR'|'TOPIC_COOLDOWN_SET'|'TOPIC_COOLDOWN_CLEAR'|
  'CHANGE_LOG_ON'|'CHANGE_LOG_OFF'|'DECISION_LOG_ON'|'DECISION_LOG_OFF'|'SERVICE_CLEANUP_ON'|'SERVICE_CLEANUP_OFF'|'SERVICE_CLEANUP_DELAY'|
@@ -136,8 +136,8 @@ export type CommunityProfileStatus='QUEUED'|'SENDING'|'CONFIRMED'|'FAILED_CONFIR
  * confirmed/attempted job discards the title before contacting the provider. */
 export interface CommunityProfileJob{
  key:string;chatId:string;chatVersion:number;policyVersion:number;
- kind:'TITLE_SET'|'PHOTO_REMOVE';status:CommunityProfileStatus;
- createdAt:number;profileEpoch:number;title?:string;attemptId?:string;
+ kind:'TITLE_SET'|'PHOTO_SET'|'PHOTO_REMOVE';status:CommunityProfileStatus;
+ createdAt:number;profileEpoch:number;title?:string;photoFileId?:string;attemptId?:string;
 }
 export interface CommunityProfileObservation{key:string;chatId:string;at:number;messageDigest?:string;}
 export interface CommunityProfileRevision{chatId:string;revision:number;lastKey:string;}
@@ -220,7 +220,7 @@ export function inCommunityQuietHours(hours:CommunityQuietHours,now:number,utcOf
 }
 const kinds=new Set<CommunityDraftKind>(['WELCOME_TEXT','FAREWELL_TEXT','REPLY_ADD','REPLY_REMOVE',
  'WELCOME_ON','WELCOME_OFF','PRIVATE_WELCOME_ON','PRIVATE_WELCOME_OFF',
- 'GROUP_PROFILE_ON','GROUP_PROFILE_OFF','GROUP_TITLE_SET','GROUP_PHOTO_REMOVE','FAREWELL_ON','FAREWELL_OFF','REPLIES_ON','REPLIES_OFF',
+ 'GROUP_PROFILE_ON','GROUP_PROFILE_OFF','GROUP_TITLE_SET','GROUP_PHOTO_SET','GROUP_PHOTO_REMOVE','FAREWELL_ON','FAREWELL_OFF','REPLIES_ON','REPLIES_OFF',
  'REPLY_ENABLE','REPLY_DISABLE','REPLY_COOLDOWN',
  'QUIET_HOURS_SET','QUIET_HOURS_CLEAR','TOPIC_COOLDOWN_SET','TOPIC_COOLDOWN_CLEAR',
  'CHANGE_LOG_ON','CHANGE_LOG_OFF','DECISION_LOG_ON','DECISION_LOG_OFF','SERVICE_CLEANUP_ON','SERVICE_CLEANUP_OFF','SERVICE_CLEANUP_DELAY',
@@ -348,14 +348,16 @@ export function validCommunityState(value:unknown):value is CommunityAutomationS
   const states=new Set<CommunityProfileStatus>(['QUEUED','SENDING','CONFIRMED','FAILED_CONFIRMED','UNKNOWN_OUTCOME','SKIPPED']);
   for(const job of v.profileJobs){
    if(!job||typeof job!=='object'||Array.isArray(job)||
-     Object.keys(job).some(k=>!['key','chatId','chatVersion','policyVersion','kind','status','createdAt','profileEpoch','title','attemptId'].includes(k))||
+     Object.keys(job).some(k=>!['key','chatId','chatVersion','policyVersion','kind','status','createdAt','profileEpoch','title','photoFileId','attemptId'].includes(k))||
      typeof job.key!=='string'||!/^[a-f0-9]{24}$/u.test(job.key)||seen.has(job.key)||
      !validGroup(job.chatId)||!Number.isSafeInteger(job.chatVersion)||job.chatVersion<1||
      !Number.isSafeInteger(job.policyVersion)||job.policyVersion<1||
-     !['TITLE_SET','PHOTO_REMOVE'].includes(job.kind)||!states.has(job.status)||
+     !['TITLE_SET','PHOTO_SET','PHOTO_REMOVE'].includes(job.kind)||!states.has(job.status)||
      !validClock(job.createdAt)||!Number.isSafeInteger(job.profileEpoch)||job.profileEpoch<0||job.profileEpoch>2000000000||
      (job.title!==undefined&&(job.kind!=='TITLE_SET'||job.status!=='QUEUED'||!validCommunityProfileTitle(job.title)))||
      (job.kind==='TITLE_SET'&&job.status==='QUEUED'&&!validCommunityProfileTitle(job.title))||
+     (job.photoFileId!==undefined&&(job.kind!=='PHOTO_SET'||job.status!=='QUEUED'||!validCommunityPhotoId(job.photoFileId)))||
+     (job.kind==='PHOTO_SET'&&job.status==='QUEUED'&&!validCommunityPhotoId(job.photoFileId))||
      (job.attemptId!==undefined&&(typeof job.attemptId!=='string'||!/^[a-f0-9]{24}$/u.test(job.attemptId)))||
      (job.status==='SENDING'&&!job.attemptId)||
      (job.status==='QUEUED'&&job.attemptId!==undefined))return false;
@@ -461,7 +463,8 @@ export function validCommunityState(value:unknown):value is CommunityAutomationS
         url:d.buttonUrl}]))) )return false;
   if((d.kind==='WELCOME_TEXT'||d.kind==='FAREWELL_TEXT')&&!d.text||
    d.kind==='GROUP_TITLE_SET'&&!validCommunityProfileTitle(d.text)||
-   (d.kind==='GROUP_TITLE_SET'||d.kind==='GROUP_PHOTO_REMOVE')&&d.profileEpoch===undefined||
+   (d.kind==='GROUP_TITLE_SET'||d.kind==='GROUP_PHOTO_SET'||d.kind==='GROUP_PHOTO_REMOVE')&&d.profileEpoch===undefined||
+   d.kind==='GROUP_PHOTO_SET'&&!validCommunityPhotoId(d.photoFileId)||
    d.kind==='REPLY_ADD'&&(!d.trigger||!d.match||
       (d.source===undefined||d.source==='NOTE')&&!validTemplate(d.text))||
    (['REPLY_REMOVE','REPLY_ENABLE','REPLY_DISABLE','REPLY_COOLDOWN'] as string[]).includes(d.kind)&&!d.ruleId||
