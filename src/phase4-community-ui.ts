@@ -529,7 +529,8 @@ export async function phase4CommunityScreen(service:Phase4CommunityService,actor
  if(serviceCleanupMenu){
   const id=serviceCleanupMenu[1]!,config=await service.view(actorId,id);
   const clean=config.serviceCleanup;
-  const join=clean?.joinEnabled!==false,leave=clean?.leaveEnabled!==false;
+  const join=clean?.joinEnabled!==false,leave=clean?.leaveEnabled!==false,
+   profile=clean?.profileEnabled!==false;
   const rows=[
    [btn((clean?.enabled?'⛔ إيقاف':'✅ تفعيل')+' تنظيف رسائل الخدمة',
     'p4c:1:t:'+id+':s:'+(clean?.enabled?'0':'1'))],
@@ -537,17 +538,22 @@ export async function phase4CommunityScreen(service:Phase4CommunityService,actor
     'p4c:1:t:'+id+':j:'+(join?'0':'1'))],
    [btn((leave?'⛔ إيقاف':'✅ تفعيل')+' تنظيف المغادرة',
     'p4c:1:t:'+id+':l:'+(leave?'0':'1'))],
+   [btn((profile?'⛔ إيقاف':'✅ تفعيل')+' تنظيف تغيير الاسم/الصورة',
+    'p4c:1:t:'+id+':m:'+(profile?'0':'1'))],
    [btn('↩️ إعدادات المجموعة','p4c:1:g:'+id)]
   ];
   return {text:'<b>🧹 تنظيف رسائل خدمة الدخول والمغادرة</b>\nالمجموعة: <code>'+id+'</code>'+
    '\nالتنظيف العام: '+(clean?.enabled?'مفعّل':'متوقف')+
    '\nرسائل الدخول: '+(join?'مسموح عند تفعيل العام':'مستبعدة')+
    '\nرسائل المغادرة: '+(leave?'مسموح عند تفعيل العام':'مستبعدة')+
+   '\nرسائل تغيير الاسم والصورة: '+(profile?'مسموح عند تفعيل العام':'مستبعدة')+
    '\nالمهلة: '+((clean?.delayMs??120000)/1000)+' ثانية.'+
    '\n\nلا يُحذف شيء دون صلاحية can_delete_messages والتحقق النهائي من النسخة والحقوق.'+
    '\nالأوامر في خاص المالك: <code>/servicejoinoff '+id+'</code> أو'+
    ' <code>/servicejoinon '+id+'</code> وكذلك'+
    ' <code>/serviceleaveoff '+id+'</code> و<code>/serviceleaveon '+id+'</code>.'+
+   '\nولتنظيف تغييرات اسم/صورة المجموعة: <code>/serviceprofileon '+id+'</code> أو'+
+   ' <code>/serviceprofileoff '+id+'</code>.'+
    '\nلتغيير المهلة: <code>/servicedelay '+id+' 120</code>.'+
    '\nكل تعديل يخضع للمراجعة والاعتماد، ولا يمكن التراجع عن حذف رسالة تم تأكيده.',
    keyboard:k(rows)};
@@ -666,14 +672,15 @@ export async function phase4CommunityScreen(service:Phase4CommunityService,actor
    '\n\nلا يُخزّن هذا السجل الأسماء والصور نفسها.',
    keyboard:k([[btn('↩️ إعدادات المجموعة','p4c:1:g:'+history[1])]])};
  }
- const toggle=/^p4c:1:t:(-[1-9]\d{0,15}):([wfrsgbdpujlv]):([01])$/u.exec(data);
+ const toggle=/^p4c:1:t:(-[1-9]\d{0,15}):([wfrsgbdpujlvm]):([01])$/u.exec(data);
  if(toggle){
   const field=toggle[2]!,value=toggle[3]!;
   const kind:CommunityDraftKind=(field==='w'?'WELCOME_':field==='f'?'FAREWELL_':
     field==='r'?'REPLIES_':field==='s'?'SERVICE_CLEANUP_':field==='b'?'REPLY_CLEANUP_':
     field==='d'?'DECISION_LOG_':field==='p'?'PRIVATE_WELCOME_':
     field==='u'?'FAREWELL_REMOVED_':field==='j'?'SERVICE_JOIN_':
-    field==='l'?'SERVICE_LEAVE_':field==='v'?'GROUP_PROFILE_':'CHANGE_LOG_')+
+    field==='l'?'SERVICE_LEAVE_':field==='v'?'GROUP_PROFILE_':
+    field==='m'?'SERVICE_PROFILE_':'CHANGE_LOG_')+
    (value==='1'?'ON':'OFF') as CommunityDraftKind;
   const draft=await service.pending(actorId,{kind},toggle[1]!);
   return {text:'<b>تأكيد تغيير تفاعل المجموعة</b>\n'+service.preview(draft)+
