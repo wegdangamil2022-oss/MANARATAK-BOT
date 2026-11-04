@@ -131,7 +131,7 @@ for(const engine of ['json','sqlite'] as const){
 
  test(engine+' owner welcome and farewell section opens actual group-specific cleanup controls',async()=>{const f=await fixture();try{
   const view=await f.app.handle({update_id:70,callback_query:{id:'service-owner-root',from:{id:100,is_bot:false},
-   data:'mi:1:i:09:01',message:{message_id:70,from:{id:999,is_bot:true},chat:{id:100,type:'private'}}}});
+   data:'mi:1:i:09:04',message:{message_id:70,from:{id:999,is_bot:true},chat:{id:100,type:'private'}}}});
   assert.equal(view.status,'APPLIED');
   assert.equal(view.reason,'CAPTCHA_OWNER_VIEW');
   assert.match(view.plan!.text,/الدخول والخروج/u);
