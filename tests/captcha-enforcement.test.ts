@@ -249,4 +249,16 @@ for(const engine of ['json','sqlite'] as const){
   assert.doesNotMatch(result.plan!.text,/مرحبًا بك بعد إكمال التحقق/u);
   assert.equal((await f.store.snapshot()).audit.filter(a=>a.updateKey.startsWith('onboarding:welcome:')).length,0);
  }finally{await f.close();}});
+
+ test(engine+' owner CAPTCHA settings explain missing channel enforcement consent without claiming integration is unavailable',async()=>{const f=await fixture(true);try{
+  await f.policy.approveChat('100','-200',['verification']);
+  await f.store.transaction(s=>{s.subscriptionRequirements.push({chatId:G,channelIds:['-200'],mode:'ALL',version:1});});
+  let root=await f.ui.handle('100','mi:1:i:04:07'),edit=await f.ui.handle('100',pick(root,G));
+  assert.match(edit!.text,/تفعيل إنفاذ الاشتراك أولًا/u);
+  assert.doesNotMatch(edit!.text,/يلزم استكمال الربط بين المسارين/u);
+  assert.equal(edit!.keyboard.inline_keyboard.flat().filter(b=>b.text.includes('تفعيل إنفاذ CAPTCHA')).length,0);
+  await f.store.transaction(s=>{assert.equal(recordSubscriptionEnforcementConsent(s,f.policy,'100',G,true,f.now()),true);});
+  root=await f.ui.handle('100','mi:1:i:04:07');edit=await f.ui.handle('100',pick(root,G));
+  assert.equal(edit!.keyboard.inline_keyboard.flat().filter(b=>b.text.includes('تفعيل إنفاذ CAPTCHA')).length,1);
+ }finally{await f.close();}});
 }
