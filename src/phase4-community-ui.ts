@@ -330,7 +330,7 @@ export async function phase4CommunityScreen(service:Phase4CommunityService,actor
    '\nصورة الوداع: '+(c.farewell.photoFileId?'معتمدة':'غير مضافة')+
    '\nأزرار الترحيب الخارجية: '+(c.welcome.buttons?.length??0)+
    '\nأزرار الوداع الخارجية: '+(c.farewell.buttons?.length??0)+
-   '\n\n'+help,
+   '\n\nلشرح الأوامر التفصيلي افتح /community، ثم اختر المجموعة؛ هذه الشاشة مخصصة للإعدادات الحالية والأزرار.',
    keyboard:k([
     [btn('👋 '+(c.welcome.enabled?'إيقاف':'تفعيل')+' الترحيب','p4c:1:t:'+id+':w:'+(c.welcome.enabled?'0':'1'))],
     [btn('👋 '+(c.farewell.enabled?'إيقاف':'تفعيل')+' الوداع','p4c:1:t:'+id+':f:'+(c.farewell.enabled?'0':'1'))],
