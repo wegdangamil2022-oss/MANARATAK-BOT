@@ -4,7 +4,7 @@ import type {CommunityDraftKind,ReplyMatch,CommunityLanguage,CommunityCalendar,C
 import {validCommunityRulesUrl,validCommunityTimeZone} from './phase4-community-model.js';
 import {validCommunityLinkButton,validCommunityPhotoId} from './phase4-community-rich.js';
 const group=/^-[1-9]\d{0,15}$/u,hex=/^[a-f0-9]{24}$/u;
-const route=/^p4c:1:(?:q:-[1-9]\d{0,15}|z:-[1-9]\d{0,15}|n:-[1-9]\d{0,15}|a:-[1-9]\d{0,15}|y:-[1-9]\d{0,15}(?::[1-9]\d{0,9})?|l:(?:0|[1-9]\d{0,2})|g:-[1-9]\d{0,15}|h:-[1-9]\d{0,15}|v:-[1-9]\d{0,15}:[wf]|j:-[1-9]\d{0,15}:[wf]:[pb]|r:-[1-9]\d{0,15}:(?:0|[1-9]\d{0,2})|t:-[1-9]\d{0,15}:[wfrsgb]:[01]|d:-[1-9]\d{0,15}:[a-f0-9]{12}|e:-[1-9]\d{0,15}:[a-f0-9]{12}:[01]|u:-[1-9]\d{0,15}:(?:ar|en)|o:-[1-9]\d{0,15}:(?:12|24):[gh]|[cx]:[a-f0-9]{24})$/u;
+const route=/^p4c:1:(?:q:-[1-9]\d{0,15}|k:-[1-9]\d{0,15}|z:-[1-9]\d{0,15}|n:-[1-9]\d{0,15}|a:-[1-9]\d{0,15}|y:-[1-9]\d{0,15}(?::[1-9]\d{0,9})?|l:(?:0|[1-9]\d{0,2})|g:-[1-9]\d{0,15}|h:-[1-9]\d{0,15}|v:-[1-9]\d{0,15}:[wf]|j:-[1-9]\d{0,15}:[wf]:[pb]|r:-[1-9]\d{0,15}:(?:0|[1-9]\d{0,2})|t:-[1-9]\d{0,15}:[wfrsgbd]:[01]|d:-[1-9]\d{0,15}:[a-f0-9]{12}|e:-[1-9]\d{0,15}:[a-f0-9]{12}:[01]|u:-[1-9]\d{0,15}:(?:ar|en)|o:-[1-9]\d{0,15}:(?:12|24):[gh]|[cx]:[a-f0-9]{24})$/u;
 export const validPhase4CommunityRoute=(s:unknown):s is string=>typeof s==='string'&&
  Buffer.byteLength(s,'utf8')<=64&&route.test(s);
 const esc=(s:string):string=>s.replace(/&/gu,'&amp;').replace(/</gu,'&lt;')
@@ -17,6 +17,9 @@ const help='للتعديل أرسل في خاص البوت أحد الأوامر
  +'<code>/replyadd -100123 WORD منحة | راجع قسم المنح الدراسية</code>\n'
  +'<code>/replyadd -100123 topic:777 COMMAND m_grants | رابط المنح</code>\n'
  +'<code>/replycheck -100123 منحة دراسية</code>\n'
+ +'<code>/replylog -100123</code>\n'
+ +'<code>/replylogon -100123</code>\n'
+ +'<code>/replylogoff -100123</code>\n'
  +'<code>/replydel -100123 معرف_القاعدة</code>\n'
  +'<code>/setruleslink -100123 https://t.me/manaratak_rules</code>\n'
  +'<code>/clearruleslink -100123</code>\n'
@@ -41,8 +44,14 @@ const help='للتعديل أرسل في خاص البوت أحد الأوامر
  +'يظهر تأكيد مستقل لكل تعديل، وتظل الميزات مغلقة حتى تفعّلها.';
 export function parsePhase4CommunityCommand(text:string):
  {kind:'HOME'}|{kind:'VIEW';chatId:string}|{kind:'EDIT';chatId:string;request:DraftRequest}|
- {kind:'DIAGNOSE';chatId:string;sample:string;topicId?:number}|null{
+ {kind:'DIAGNOSE';chatId:string;sample:string;topicId?:number}|
+ {kind:'DECISIONS';chatId:string}|null{
  if(text==='/community')return {kind:'HOME'};
+ const decisionSwitch=/^\/replylog(on|off) (-[1-9]\d{0,15})$/u.exec(text);
+ if(decisionSwitch)return {kind:'EDIT',chatId:decisionSwitch[2]!,
+  request:{kind:decisionSwitch[1]==='on'?'DECISION_LOG_ON':'DECISION_LOG_OFF'}};
+ const decisionView=/^\/replylog (-[1-9]\d{0,15})$/u.exec(text);
+ if(decisionView)return {kind:'DECISIONS',chatId:decisionView[1]!};
  const replyCleanup=/^\/replycleanup (-[1-9]\d{0,15}) ([1-9]\d{0,3})$/u.exec(text);
  if(replyCleanup){
   const seconds=Number(replyCleanup[2]);
@@ -165,13 +174,16 @@ export function parsePhase4CommunityCommand(text:string):
 export async function phase4CommunityScreen(service:Phase4CommunityService,actorId:string,
  input:string):Promise<OwnerInlineScreen|null>{
  const cmd=parsePhase4CommunityCommand(input);
- const data=cmd?.kind==='HOME'?'p4c:1:l:0':cmd?.kind==='VIEW'?'p4c:1:g:'+cmd.chatId:input;
+ const data=cmd?.kind==='HOME'?'p4c:1:l:0':cmd?.kind==='VIEW'?'p4c:1:g:'+cmd.chatId:
+  cmd?.kind==='DECISIONS'?'p4c:1:k:'+cmd.chatId:input;
  if(cmd?.kind==='DIAGNOSE'){
   const diagnostic=await service.diagnose(actorId,cmd.chatId,cmd.sample,cmd.topicId);
   const text=diagnostic.status==='MATCH'?
    '✅ توجد قاعدة مطابقة: <code>'+diagnostic.ruleId+'</code>\nنص تجريبي: '+diagnostic.preview:
    diagnostic.status==='REPLIES_DISABLED'?'الردود التلقائية متوقفة في هذه المجموعة.':
    diagnostic.status==='QUIET_HOURS'?'الردود متوقفة حاليًا بسبب ساعات الهدوء المعتمدة للمجموعة.':
+   diagnostic.status==='RULE_DISABLED'?'القاعدة المطابقة <code>'+diagnostic.ruleId+'</code> معطّلة.':
+   diagnostic.status==='TOPIC_MISMATCH'?'القاعدة المطابقة <code>'+diagnostic.ruleId+'</code> مخصصة لموضوع Forum آخر.':
    'لا توجد قاعدة ترد على هذه الرسالة في هذا الموضوع.';
   return {text:'<b>🧪 تشخيص الردود دون إرسال</b>\n'+text+
    '\nلا تحسب هذه المعاينة حدود المعدّل أو عضوية الطلاب.',
@@ -208,6 +220,7 @@ export async function phase4CommunityScreen(service:Phase4CommunityService,actor
    '\nالإصدار: '+c.version+'\nرابط القوانين: '+(c.rulesUrl?esc(c.rulesUrl):'غير محدد')+'\nالترحيب: '+label(c.welcome.enabled)+
    '\nالوداع: '+label(c.farewell.enabled)+
    '\nالردود: '+label(c.repliesEnabled)+'\nالقواعد: '+c.rules.length+
+   '\nسجل قرارات الردود: '+label(c.decisionLogEnabled??false)+
    '\nتسجيل تغييرات المجموعة: '+label(c.changeLogEnabled??false)+
    '\nالرسائل الخدمية: '+label(c.serviceCleanup?.enabled??false)+
    '\nحذف ردود البوت المؤقتة: '+label(c.replyCleanup?.enabled??false)+
@@ -231,6 +244,9 @@ export async function phase4CommunityScreen(service:Phase4CommunityService,actor
     [btn('👋 '+(c.farewell.enabled?'إيقاف':'تفعيل')+' الوداع','p4c:1:t:'+id+':f:'+(c.farewell.enabled?'0':'1'))],
     [btn('🤖 '+(c.repliesEnabled?'إيقاف':'تفعيل')+' الردود','p4c:1:t:'+id+':r:'+(c.repliesEnabled?'0':'1'))],
     [btn('📋 قائمة الردود','p4c:1:r:'+id+':0')],
+    [btn('🧾 تقرير قرارات الردود','p4c:1:k:'+id)],
+    [btn('🧾 '+(c.decisionLogEnabled?'إيقاف':'تفعيل')+' السجل المنقح',
+     'p4c:1:t:'+id+':d:'+(c.decisionLogEnabled?'0':'1'))],
     [btn('🌙 ساعات الهدوء','p4c:1:q:'+id),btn('🧵 حدود الموضوعات','p4c:1:y:'+id)],
     [btn('🖼️ وسائط الترحيب','p4c:1:v:'+id+':w'),
      btn('🖼️ وسائط الوداع','p4c:1:v:'+id+':f')],
@@ -244,6 +260,27 @@ export async function phase4CommunityScreen(service:Phase4CommunityService,actor
     [btn('🕘 تغييرات اسم/صورة المجموعة','p4c:1:h:'+id)],
     [btn('↩️ المجموعات','p4c:1:l:0'),btn('🏠 لوحة المالك','mi:1:h')]
    ])};
+ }
+ const decisionReport=/^p4c:1:k:(-[1-9]\d{0,15})$/u.exec(data);
+ if(decisionReport){
+  const chatId=decisionReport[1]!;
+  const config=await service.view(actorId,chatId);
+  const events=await service.recentDecisions(actorId,chatId);
+  const counts=new Map<string,number>();
+  for(const item of events)counts.set(item.reason,(counts.get(item.reason)??0)+1);
+  const summary=[...counts].map(([reason,count])=>esc(reason)+': '+count).join('، ');
+  return {text:'<b>🧾 سجل قرارات الردود — خاص بالمالك</b>\n'+
+   'المجموعة: <code>'+chatId+'</code>\nالحالة: '+
+   (config.decisionLogEnabled?'مفعّل':'متوقف — لا يجمع بيانات')+
+   '\nآخر '+events.length+' قرار ضمن 7 أيام (الحد 20 في هذا العرض).'+
+   '\nالأعداد حسب السبب: '+(summary||'لا توجد قرارات محفوظة.')+
+   (events.length?'\n\n'+events.slice(0,12).map(row=>
+    '• '+new Date(row.at).toISOString().slice(0,16).replace('T',' ')+' UTC'+
+    ' | '+esc(row.kind)+' | '+esc(row.reason)+' | v'+row.configVersion+
+    (row.ruleId?' | قاعدة <code>'+row.ruleId+'</code>':'')).join('\n'):'')+
+   '\n\nلا يُحفظ نص الطالب أو اسمه أو معرف حسابه. RESERVED تعني حجز إرسال محليًا، لا إثبات تسليم Telegram.'+
+   '\nالسجل محصور بأحدث 1000 قرار لمدة أقصاها 7 أيام، ويُمسح عند إيقافه.',
+   keyboard:k([[btn('↩️ إعدادات المجموعة','p4c:1:g:'+chatId)]])};
  }
  const showQuiet=/^p4c:1:q:(-[1-9]\d{0,15})$/u.exec(data);
   if(showQuiet){
@@ -386,11 +423,12 @@ export async function phase4CommunityScreen(service:Phase4CommunityService,actor
    '\n\nلا يُخزّن هذا السجل الأسماء والصور نفسها.',
    keyboard:k([[btn('↩️ إعدادات المجموعة','p4c:1:g:'+history[1])]])};
  }
- const toggle=/^p4c:1:t:(-[1-9]\d{0,15}):([wfrsgb]):([01])$/u.exec(data);
+ const toggle=/^p4c:1:t:(-[1-9]\d{0,15}):([wfrsgbd]):([01])$/u.exec(data);
  if(toggle){
   const field=toggle[2]!,value=toggle[3]!;
   const kind:CommunityDraftKind=(field==='w'?'WELCOME_':field==='f'?'FAREWELL_':
-    field==='r'?'REPLIES_':field==='s'?'SERVICE_CLEANUP_':field==='b'?'REPLY_CLEANUP_':'CHANGE_LOG_')+
+    field==='r'?'REPLIES_':field==='s'?'SERVICE_CLEANUP_':field==='b'?'REPLY_CLEANUP_':
+    field==='d'?'DECISION_LOG_':'CHANGE_LOG_')+
    (value==='1'?'ON':'OFF') as CommunityDraftKind;
   const draft=await service.pending(actorId,{kind},toggle[1]!);
   return {text:'<b>تأكيد تغيير تفاعل المجموعة</b>\n'+service.preview(draft)+
