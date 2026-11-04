@@ -174,6 +174,39 @@ function eventFrom(value:unknown):{event?:Event;reason:string} {
     chatId:String(cb.message.chat.id),kind,text:'',
     callbackData:cb.data,callbackQueryId:cb.id,callbackMessageId:cb.message.message_id,...(cb.message.message_thread_id!==undefined?{topicId:cb.message.message_thread_id as number}:{})},reason:'VALID'};
   }
+  // Telegram ChatMemberUpdated is NOT a join request: only a transition from
+  // absent to present constitutes a confirmed join. A bot must explicitly
+  // subscribe to chat_member updates and be a chat administrator to receive it.
+  if(value.chat_member!==undefined){
+   if(value.message!==undefined||value.callback_query!==undefined||
+     value.edited_message!==undefined||value.my_chat_member!==undefined)
+    return {reason:'INVALID_CHAT_MEMBER_UPDATE'};
+   const cm=value.chat_member;
+   if(!isObject(cm)||!isObject(cm.chat)||!chatId(cm.chat.id)||cm.chat.id>=0||
+     !['group','supergroup'].includes(String(cm.chat.type))||
+     !isObject(cm.from)||!positiveId(cm.from.id)||cm.from.is_bot!==false||
+     !positiveId(cm.date)||cm.date>8_640_000_000_000||
+     !isObject(cm.old_chat_member)||!isObject(cm.new_chat_member))
+    return {reason:'INVALID_CHAT_MEMBER_UPDATE'};
+   const before=cm.old_chat_member,after=cm.new_chat_member;
+   if(!isObject(before.user)||!isObject(after.user)||!positiveId(before.user.id)||
+      before.user.id!==after.user.id||before.user.is_bot!==false||after.user.is_bot!==false)
+    return {reason:'INVALID_CHAT_MEMBER_UPDATE'};
+   const oldAbsent=before.status==='left'||before.status==='kicked'||
+      before.status==='restricted'&&before.is_member===false;
+   const newPresent=after.status==='member'||after.status==='administrator'||
+      after.status==='creator'||after.status==='restricted'&&after.is_member===true;
+   if(!oldAbsent||!newPresent)return {reason:'UNSUPPORTED_EVENT'};
+   const user=after.user;
+   const memberName=typeof user.first_name==='string'&&user.first_name.trim()?
+      user.first_name.trim().slice(0,75):'عضو';
+   return {reason:'VALID',event:{updateId:value.update_id as number,actorId:String(cm.from.id),
+     chatId:String(cm.chat.id),kind:'group',text:'',communityKind:'JOIN',
+     communityJoinKind:cm.from.id===user.id?'SELF':'ADDED',
+     communityMemberId:String(user.id),memberName,
+     groupName:typeof cm.chat.title==='string'?cm.chat.title:'المجموعة',
+     serviceSentAtMs:(cm.date as number)*1000}};
+  }
   if(!isObject(value.message))return {reason:'UNSUPPORTED_EVENT'};
   const msg=value.message;
   if(!isObject(msg.chat)||!isObject(msg.from)||!positiveId(msg.from.id)||msg.from.is_bot!==false||!chatId(msg.chat.id))return {reason:'INVALID_ACTOR_OR_CHAT'};
@@ -454,6 +487,13 @@ export class TelegramUpdateApplication {
     // Only /m_ custom commands may match, enforced by the scoped rule matcher.
     // Standard Telegram and moderation commands can never match this namespace.
     if(!event.communityKind&&!event.text)return null;
+    // Membership changes have no service message_id and cannot be deleted.
+    // Discard old/replayed events; never greet someone who joined long ago.
+    if(event.communityKind&&!event.messageId){
+      const now=this.clock(),sent=event.serviceSentAtMs;
+      if(sent===undefined||!Number.isSafeInteger(sent)||sent>now+60000||
+       now-sent>900000)return null;
+    }
     const input:CommunityInput={kind:event.communityKind??'TEXT',chatId:event.chatId,
       actorId:event.communityMemberId??event.actorId,
       memberName:event.memberName??'عضو',groupName:event.groupName??'المجموعة',
