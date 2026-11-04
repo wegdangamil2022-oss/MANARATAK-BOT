@@ -221,3 +221,32 @@ for(const engine of ['json','sqlite'] as const){
   }finally{await f.close();}
  });
 }
+
+
+for(const engine of ['json','sqlite'] as const){
+ test('P4 WELCOME-001 '+engine+': mixed callback and membership payloads never become owner UI updates',async()=>{
+  const f=await setup(engine);
+  try{
+   await f.approve({kind:'WELCOME_ON'});
+   const update={update_id:3333,
+    chat_member:{
+     chat:{id:Number(CHAT),type:'supergroup',title:'منارتك'},
+     from:{id:301,is_bot:false},date:Math.floor(f.clock()/1000),
+     old_chat_member:{status:'left',user:{id:301,is_bot:false}},
+     new_chat_member:{status:'member',user:{id:301,is_bot:false,first_name:'طالب'}}
+    },
+    callback_query:{id:'Q3333',data:'mi:1:h',from:{id:Number(OWNER),is_bot:false},
+     message:{message_id:50,chat:{id:Number(OWNER),type:'private'},
+      from:{id:900,is_bot:true}}}
+   };
+   const mixed=await f.app.handle(update);
+   assert.equal(mixed.plan,undefined);
+   assert.equal((await f.store.snapshot()).phase4Community?.receipts.length??0,0);
+   const onlyRequest=await f.app.handle({update_id:3334,chat_join_request:{
+    chat:{id:Number(CHAT),type:'supergroup'},from:{id:400,is_bot:false},
+    date:Math.floor(f.clock()/1000),user_chat_id:400
+   }});
+   assert.equal(onlyRequest.plan,undefined);
+  }finally{await f.close();}
+ });
+}
