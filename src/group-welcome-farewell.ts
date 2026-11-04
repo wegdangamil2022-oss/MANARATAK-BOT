@@ -73,6 +73,11 @@ export class GroupWelcomeFarewell{
    s.chats.filter(c=>c.id===chat),s.grants.filter(g=>g.chatId===chat),
    s.privateFeatures,s.privateSettingsRevision??null]);
  }
+ preview(s:BotState,chat:string,type:GreetingKind,id:string,revision:number):GroupGreetingPayload|null{
+  if(!group(chat)||!kind(type)||!this.policyAccess.canUseChat(s,chat,'moderation'))return null;
+  const v=savedGreetingVersion(s,id,revision),text=v?format(v.content,type,this.clock()):null,buttons=v?links(v.content):null;
+  return text&&buttons?{chatId:chat,text,buttons}:null;
+ }
  epoch(s:BotState,chat:string,type:GreetingKind):string{
   return digest([this.stamp(s,chat),rows(s,POLICY+chat+':'+type)]);
  }
