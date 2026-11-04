@@ -30,6 +30,7 @@ import {TelegramEphemeralTextSender} from './telegram-ephemeral-sender.js';
 import {TelegramTemporaryGroupSender} from './telegram-temporary-group-sender.js';
 import {CaptchaJoinNotices} from './captcha-join-notices.js';
 import {GroupServiceMessageCleanup} from './group-service-message-cleanup.js';
+import {CaptchaEscalationPolicy} from './captcha-escalation-policy.js';
 import {CaptchaService} from './captcha.js';
 
 export interface LiveTelegramConfig{
@@ -204,11 +205,14 @@ export async function createLiveTelegramServer(config:LiveTelegramConfig,
     const gateway=new TelegramBotApiModerationGateway(check.token,request,safetyGate);
     return (await gateway.inspectBotAdminRights(chat)).delete;
    }):undefined;
+ const captchaEscalation=phase3?new CaptchaEscalationPolicy(store,policy,
+  new CaptchaService(store,policy,(chat,actor)=>membership.verifyMembership(chat,actor),Date.now),Date.now):undefined;
  const app=new TelegramUpdateApplication({store,policy,education,admin,faq,links,
   botId:check.botId,botUsername:check.botUsername,
   ...(messageMetadata?{messageMetadata}:{}),
   ...(joinNotices?{joinNotices}:{}),
   ...(serviceCleanup?{serviceCleanup}:{}),
+  ...(captchaEscalation?{captchaEscalation}:{}),
   ...(phase3?{adminRoles:new TelegramAdminRoleGateway(check.token,request,safetyGate),moderation:phase3.moderation,purge:phase3.purge,groupPermissions:phase3.groupPermissions,protectionEnforcer:phase3.protectionEnforcer,moderationRights:{gateway:new TelegramBotApiModerationGateway(check.token,request,safetyGate),safety:safetyGate},ephemeralVerification:true}:{}),
   membership:(chatId,actorId)=>membership.verifyMembership(chatId,actorId),subscription,
   documentDownload:new TelegramBotApiDocumentDownloader(check.token,request,safetyGate),
