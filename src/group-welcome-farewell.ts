@@ -238,9 +238,9 @@ export class GroupWelcomeFarewell{
    const outcome=await this.store.transaction(s=>{
     const now=this.clock(),safe=this.eligible(s,claimed,now)&&
      this.begun(s,claimed,now,':started','GROUP_GREETING_SEND_STARTED');
-    const received=result.status==='CONFIRMED'&&message(result.messageId);
-    if(safe&&received&&!s.audit.some(a=>a.reason.startsWith('GROUP_GREETING_RECEIPT:'+claimed.chat+':'+result.messageId+':'))){
-     const reason='GROUP_GREETING_RECEIPT:'+claimed.chat+':'+result.messageId+':'+digest([claimed,result.messageId]);
+    const confirmedId=result.status==='CONFIRMED'&&message(result.messageId)?result.messageId:null;
+    if(safe&&confirmedId!==null&&!s.audit.some(a=>a.reason.startsWith('GROUP_GREETING_RECEIPT:'+claimed.chat+':'+confirmedId+':'))){
+     const reason='GROUP_GREETING_RECEIPT:'+claimed.chat+':'+confirmedId+':'+digest([claimed,confirmedId]);
      s.audit.push({actorId:this.policyAccess.ownerId,updateKey:claimed.key+':receipt',decision:'ALLOW',
       reason,policyVersion:claimed.version,at:now});
      this.mark(s,claimed,':outcome','GROUP_GREETING_SEND_CONFIRMED',now);
