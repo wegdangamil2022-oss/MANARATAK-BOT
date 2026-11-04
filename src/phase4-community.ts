@@ -4,12 +4,12 @@ import {Policy} from './policy.js';
 import {validCommunityPhotoId,validCommunityLinkButtons,communityLinkKeyboard,
  type CommunityLinkKeyboard} from './phase4-community-rich.js';
 import {defaultCommunityConfig,emptyCommunityState,validCommunityConfig,
- matchCommunityRule,renderCommunityTemplate,selectCommunityRule,selectCommunityGreeting,normalizeCommunityMatch,validCommunityRulesUrl,
+ matchCommunityRule,renderCommunityTemplate,selectCommunityRule,selectCommunityGreeting,normalizeCommunityMatch,validCommunityRulesUrl,inCommunityQuietHours,
  type CommunityConfig,type CommunityInput,type CommunityDraft,type CommunityDraftKind,
  type ReplyMatch,type CommunityAutomationState,type CommunityEventKind,type CommunityServiceKind,
  type CommunityServiceChange,type CommunityLanguage,type CommunityCalendar,type CommunityClockFormat} from './phase4-community-model.js';
 
-export type DraftRequest={kind:CommunityDraftKind;text?:string;trigger?:string;match?:ReplyMatch;ruleId?:string;topicId?:number;cooldownMs?:number;delayMs?:number;
+export type DraftRequest={kind:CommunityDraftKind;text?:string;trigger?:string;match?:ReplyMatch;ruleId?:string;topicId?:number;cooldownMs?:number;delayMs?:number;startMinute?:number;endMinute?:number;
  language?:CommunityLanguage;calendar?:CommunityCalendar;clockFormat?:CommunityClockFormat;utcOffsetMinutes?:number;
  photoFileId?:string;buttonText?:string;buttonUrl?:string};
 export interface CommunitySendProposal{
@@ -18,7 +18,7 @@ export interface CommunitySendProposal{
  readonly photoFileId?:string;readonly communityLinks?:CommunityLinkKeyboard;
 }
 /** Read-only administrative explanation, never stored with student text. */
-export type CommunityDiagnostic={status:'REPLIES_DISABLED'|'NO_MATCH'}|
+export type CommunityDiagnostic={status:'REPLIES_DISABLED'|'NO_MATCH'|'QUIET_HOURS'}|
  {status:'MATCH';ruleId:string;preview:string};
 const isGroup=(s:string):boolean=>/^-[1-9]\d{0,15}$/u.test(s)&&Number.isSafeInteger(Number(s));
 const validNow=(n:number):boolean=>Number.isSafeInteger(n)&&n>=0&&n<=8_640_000_000_000_000-120000;
@@ -75,6 +75,26 @@ export class Phase4CommunityService{
    if(kind==='REPLY_COOLDOWN'&&(!Number.isInteger(request.cooldownMs)||
       request.cooldownMs===undefined||request.cooldownMs<1000||request.cooldownMs>86400000))
     throw Error('COMMUNITY_COOLDOWN_INVALID');
+   if(kind==='QUIET_HOURS_SET'&&(!Number.isInteger(request.startMinute)||
+     !Number.isInteger(request.endMinute)||request.startMinute===undefined||request.endMinute===undefined||
+     request.startMinute<0||request.endMinute<0||request.startMinute>=1440||
+     request.endMinute>=1440||request.startMinute===request.endMinute))
+    throw Error('COMMUNITY_QUIET_HOURS_INVALID');
+   if(kind==='TOPIC_COOLDOWN_SET'||kind==='TOPIC_COOLDOWN_CLEAR'){
+    if(!Number.isSafeInteger(request.topicId)||request.topicId===undefined||
+      request.topicId<1||request.topicId>2147483647)
+     throw Error('COMMUNITY_TOPIC_INVALID');
+    if(kind==='TOPIC_COOLDOWN_SET'&&(!Number.isInteger(request.cooldownMs)||
+      request.cooldownMs===undefined||request.cooldownMs<1000||request.cooldownMs>600000))
+     throw Error('COMMUNITY_TOPIC_RATE_INVALID');
+    if(kind==='TOPIC_COOLDOWN_SET'&&
+      !current.topicCooldowns?.some(x=>x.topicId===request.topicId)&&
+      (current.topicCooldowns?.length??0)>=30)
+     throw Error('COMMUNITY_TOPIC_CAPACITY');
+    if(kind==='TOPIC_COOLDOWN_CLEAR'&&
+      !current.topicCooldowns?.some(x=>x.topicId===request.topicId))
+     throw Error('COMMUNITY_TOPIC_NOT_CONFIGURED');
+   }
    if(kind==='SERVICE_CLEANUP_DELAY'&&(!Number.isInteger(request.delayMs)||
       request.delayMs===undefined||request.delayMs<30000||request.delayMs>3600000))
     throw Error('COMMUNITY_SERVICE_DELAY_INVALID');
@@ -114,6 +134,8 @@ export class Phase4CommunityService{
     ...(request.topicId!==undefined?{topicId:request.topicId}:{}),
     ...(request.cooldownMs!==undefined?{cooldownMs:request.cooldownMs}:{}),
     ...(request.delayMs!==undefined?{delayMs:request.delayMs}:{}),
+    ...(request.startMinute!==undefined?{startMinute:request.startMinute}:{}),
+    ...(request.endMinute!==undefined?{endMinute:request.endMinute}:{}),
     ...(request.language!==undefined?{language:request.language}:{}),
     ...(request.clockFormat!==undefined?{clockFormat:request.clockFormat}:{}),
     ...(request.calendar!==undefined?{calendar:request.calendar}:{}),
@@ -197,6 +219,19 @@ export class Phase4CommunityService{
     case 'REPLY_ENABLE':config.rules.find(r=>r.id===draft.ruleId)!.enabled=true;break;
     case 'REPLY_DISABLE':config.rules.find(r=>r.id===draft.ruleId)!.enabled=false;break;
     case 'REPLY_COOLDOWN':config.rules.find(r=>r.id===draft.ruleId)!.cooldownMs=draft.cooldownMs!;break;
+    case 'QUIET_HOURS_SET':config.quietHours={startMinute:draft.startMinute!,endMinute:draft.endMinute!};break;
+    case 'QUIET_HOURS_CLEAR':delete config.quietHours;break;
+    case 'TOPIC_COOLDOWN_SET':{
+     const kept=(config.topicCooldowns??[]).filter(r=>r.topicId!==draft.topicId);
+     config.topicCooldowns=[...kept,{topicId:draft.topicId!,cooldownMs:draft.cooldownMs!}]
+      .sort((a,b)=>a.topicId-b.topicId);
+     break;
+    }
+    case 'TOPIC_COOLDOWN_CLEAR':{
+     config.topicCooldowns=(config.topicCooldowns??[]).filter(r=>r.topicId!==draft.topicId);
+     if(!config.topicCooldowns.length)delete config.topicCooldowns;
+     break;
+    }
     case 'REPLY_ADD':{
      const same=config.rules.some(r=>r.match===draft.match&&r.topicId===draft.topicId&&
        normalizeCommunityMatch(r.trigger)===normalizeCommunityMatch(draft.trigger!));
@@ -293,6 +328,8 @@ export class Phase4CommunityService{
   const config=configured(state,chatId);
   if(!validCommunityConfig(config))throw Error('COMMUNITY_CONFIG_INVALID');
   if(!config.repliesEnabled)return {status:'REPLIES_DISABLED'};
+  if(config.quietHours&&inCommunityQuietHours(config.quietHours,this.clock(),config.utcOffsetMinutes))
+   return {status:'QUIET_HOURS'};
   const rule=selectCommunityRule(config,sample,topicId);
   if(!rule)return {status:'NO_MATCH'};
   const now=this.clock();
@@ -332,6 +369,7 @@ export class Phase4CommunityService{
     communityLinks=communityLinkKeyboard(target.buttons);
    }
    else{
+    if(config.quietHours&&inCommunityQuietHours(config.quietHours,now,config.utcOffsetMinutes))return null;
     const rule=selectCommunityRule(config,input.messageText!,input.topicId);
     if(!rule)return null;
     template=rule.response;ruleId=rule.id;
@@ -341,8 +379,13 @@ export class Phase4CommunityService{
    if(existing.some(x=>x.key===key)||existing.some(x=>x.chatId===input.chatId&&x.at>now))return null;
    const active=existing.filter(x=>x.at>now-86400000);
    const inGroup=active.filter(x=>x.chatId===input.chatId);
-   if(inGroup.filter(x=>x.at>now-60000).length>=8||
-      inGroup.some(x=>now-x.at<config.groupCooldownMs))return null;
+   if(inGroup.filter(x=>x.at>now-60000).length>=8)return null;
+   const topicRate=input.kind==='TEXT'&&input.topicId!==undefined?
+    config.topicCooldowns?.find(x=>x.topicId===input.topicId)?.cooldownMs:undefined;
+   // Per-topic overrides are isolated; the group-wide eight/minute guard remains.
+   if(topicRate!==undefined?
+     inGroup.some(x=>x.kind==='TEXT'&&x.topicId===input.topicId&&now-x.at<topicRate):
+     inGroup.some(x=>now-x.at<config.groupCooldownMs))return null;
    const actorPeriod=ruleId?config.rules.find(x=>x.id===ruleId)!.cooldownMs:600000;
    if(inGroup.some(x=>x.actorDigest===actorDigest&&x.kind===input.kind&&
        x.ruleId===ruleId&&now-x.at<actorPeriod))return null;
@@ -356,7 +399,7 @@ export class Phase4CommunityService{
    // enqueue a job which the Bot API would reject after quota reservation.
    if(photoFileId&&Buffer.byteLength(text,'utf8')>1024)return null;
    const receipt={key,chatId:input.chatId,at:now,kind:input.kind,actorDigest,
-    ...(ruleId?{ruleId}:{})};
+    ...(ruleId?{ruleId}:{}),...(input.topicId!==undefined?{topicId:input.topicId}:{})};
    s.phase4Community??=emptyCommunityState();
    s.phase4Community.receipts=[...active.slice(-2499),receipt];
    return {text,chatId:input.chatId,actorId:input.actorId,kind:input.kind,
@@ -405,6 +448,15 @@ export class Phase4CommunityService{
    return 'مراجعة '+(draft.kind==='REPLY_ENABLE'?'تفعيل':'إيقاف')+' القاعدة: '+clean(draft.ruleId??'');
   if(draft.kind==='REPLY_COOLDOWN')return 'مراجعة فاصل الرد للقاعدة '+clean(draft.ruleId??'')+
     ': '+(draft.cooldownMs!/1000)+' ثانية';
+  if(draft.kind==='QUIET_HOURS_SET')return 'ساعات الهدوء للردود التلقائية: '+
+   String(Math.floor(draft.startMinute!/60)).padStart(2,'0')+':'+String(draft.startMinute!%60).padStart(2,'0')+
+   ' إلى '+String(Math.floor(draft.endMinute!/60)).padStart(2,'0')+':'+String(draft.endMinute!%60).padStart(2,'0')+
+   ' حسب إزاحة UTC المعتمدة. الترحيب والوداع لا يتوقفان.';
+  if(draft.kind==='QUIET_HOURS_CLEAR')return 'مراجعة إلغاء ساعات الهدوء للردود التلقائية.';
+  if(draft.kind==='TOPIC_COOLDOWN_SET')return 'مراجعة فاصل ردود موضوع '+draft.topicId+
+   ': '+(draft.cooldownMs!/1000)+' ثانية. الحد العام 8 رسائل في الدقيقة يبقى.';
+  if(draft.kind==='TOPIC_COOLDOWN_CLEAR')return 'مراجعة إزالة تخصيص حد موضوع '+draft.topicId+
+   ' والعودة إلى فاصل المجموعة الافتراضي.';
   if(draft.kind==='SERVICE_CLEANUP_DELAY')return 'تحديد تأخير تنظيف الرسائل الخدمية: '+
    (draft.delayMs!/1000)+' ثانية';
   return 'معاينة التغيير: '+draft.kind;
