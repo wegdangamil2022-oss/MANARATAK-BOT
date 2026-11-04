@@ -1,4 +1,7 @@
 import {subscriptionEnforcementConsent,subscriptionEnforcementStamp} from './subscription-enforcement-policy.js';
+import {CaptchaService} from './captcha.js';
+import {CaptchaRuleGate} from './captcha-rules.js';
+import {CaptchaEnforcement} from './captcha-enforcement.js';
 import { BotStore, type BotState } from './store.js';
 import { Policy } from './policy.js';
 import { ModerationService, type ModerationResult } from './moderation.js';
@@ -256,8 +259,29 @@ export class SubscriptionGate {
       if(graceResult.status==='WAIT')return {status:'NO_CHANGE',reason:'SUBSCRIPTION_LEAVE_GRACE'};
       const priorCheck=stillCurrent,expected=graceResult.witness;stillCurrent=s=>priorCheck(s)&&JSON.stringify((s.subscriptionGraceMembers??[]).filter(r=>r.chatId===chatId&&r.memberId===memberId))===expected;
     }
-    if(result.status==='MEMBER'||result.status==='NOT_REQUIRED')
+    if(result.status==='MEMBER'||result.status==='NOT_REQUIRED'){
+      // For a newly admitted member under BOTH independently approved gates,
+      // a channel success alone must not lift a subscription-owned restriction
+      // before CAPTCHA and the published rules have been accepted. No new
+      // restriction is created merely because verification is pending.
+      const captcha=new CaptchaService(this.store,this.policy,async()=> 'UNKNOWN',this.clock);
+      const enforcement=new CaptchaEnforcement(this.store,this.policy,captcha,undefined,undefined,this.clock);
+      const joined=enforcement.consent(before,chatId)?.enabled===true&&
+        subscriptionRequirementMode(before,chatId)==='ACTIVE'&&
+        captcha.challenge(before,chatId,memberId)!==null;
+      if(joined){
+        const rules=new CaptchaRuleGate(this.store,this.policy,captcha,async()=> 'UNKNOWN',this.clock);
+        const complete=(s:BotState)=>enforcement.consent(s,chatId)?.enabled===true&&
+         captcha.status(s,chatId,memberId)==='PASSED'&&
+         ['ACCEPTED','NOT_REQUIRED'].includes(rules.status(s,chatId,memberId));
+        if(!complete(before))return {status:'NO_CHANGE',reason:'ONBOARDING_PREREQUISITE_PENDING'};
+        const prior=stillCurrent,challenge=captcha.challenge(before,chatId,memberId),
+         rulesEpoch=rules.epoch(before,chatId),enforcementEpoch=enforcement.epoch(before,chatId);
+        stillCurrent=s=>prior(s)&&complete(s)&&captcha.challenge(s,chatId,memberId)?.epoch===challenge?.epoch&&
+         rules.epoch(s,chatId)===rulesEpoch&&enforcement.epoch(s,chatId)===enforcementEpoch;
+      }
       return this.moderation.setSubscriptionReason(chatId,memberId,'subscription-gate',false,stillCurrent);
+    }
     if(result.status==='NOT_MEMBER')
       return this.moderation.setSubscriptionReason(chatId,memberId,'subscription-gate',true,stillCurrent);
     return result; // Unavailable is NOT a confirmed violation or punishment.
