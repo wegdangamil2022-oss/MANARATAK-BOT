@@ -460,9 +460,30 @@ export class TelegramUpdateApplication {
      const view=rulesCallback?null:await captcha.view(event.actorId,event.callbackData),valid=accepted||!!view||event.callbackData===undefined;
      const stateBeforeSettlement=await this.opts.store.snapshot(),completedBeforeSettlement=acceptedGroup??(view&&event.callbackData?captcha.completedGroupForRoute(stateBeforeSettlement,event.actorId,event.callbackData):null);
      const joinedBeforeSettlement=completedBeforeSettlement!==null&&subscriptionRequirementMode(stateBeforeSettlement,completedBeforeSettlement)==='ACTIVE';
-     const settled=valid&&!joinedBeforeSettlement?await captchaEnforcement.releaseMember(event.actorId):{attempted:0,pending:0,remaining:0};
+     // /start must resume a completed CAPTCHA with an outstanding owned
+     // restriction. Do not strand the member on the generic CAPTCHA screen
+     // after a missed/delayed subscription callback, nor repeat the challenge.
+     const resumableJoined=valid&&event.callbackData===undefined&&event.text==='/start'&&this.opts.subscription
+       ?[...new Set(stateBeforeSettlement.wizards.filter(w=>w.userId===event.actorId&&typeof w.flow==='string'&&w.flow.startsWith('captcha-member:')).flatMap(w=>{
+        try{const session=JSON.parse(w.flow.slice('captcha-member:'.length));return typeof session?.group==='string'?[session.group as string]:[];}catch{return [];}
+       }))].filter(group=>{
+        if(subscriptionRequirementMode(stateBeforeSettlement,group)!=='ACTIVE'||captcha.status(stateBeforeSettlement,group,event.actorId)!=='PASSED'||
+           !['ACCEPTED','NOT_REQUIRED'].includes(captchaRules.status(stateBeforeSettlement,group,event.actorId)))return false;
+        const challenge=captcha.challenge(stateBeforeSettlement,group,event.actorId);
+        return !!challenge&&stateBeforeSettlement.moderationReasons.some(reason=>reason.chatId===group&&reason.memberId===event.actorId&&reason.active&&
+         (reason.source==='SUBSCRIPTION'&&reason.reference==='subscription-gate'||reason.source==='MANUAL'&&reason.reference===challenge.reference&&reason.kind==='MUTE'&&reason.createdBy===this.opts.policy.ownerId));
+       }).sort((a,b)=>(captcha.challenge(stateBeforeSettlement,b,event.actorId)?.issued??0)-(captcha.challenge(stateBeforeSettlement,a,event.actorId)?.issued??0)||a.localeCompare(b)):[];
+     const settled=valid&&!joinedBeforeSettlement&&resumableJoined.length===0?await captchaEnforcement.releaseMember(event.actorId):{attempted:0,pending:0,remaining:0};
      let unavailableSubscription=false;if(valid){const state=await this.opts.store.snapshot(),completed=acceptedGroup??(view&&event.callbackData?captcha.completedGroupForRoute(state,event.actorId,event.callbackData):null);if(completed&&subscriptionRequirementMode(state,completed)==='ACTIVE'&&['ACCEPTED','NOT_REQUIRED'].includes(captchaRules.status(state,completed,event.actorId))){const challenge=captcha.challenge(state,completed,event.actorId),rulesEpoch=captchaRules.epoch(state,completed);if(challenge&&this.opts.subscription){const guard=(s:BotState)=>captcha.status(s,completed,event.actorId)==='PASSED'&&captcha.challenge(s,completed,event.actorId)?.epoch===challenge.epoch&&captchaRules.epoch(s,completed)===rulesEpoch&&['ACCEPTED','NOT_REQUIRED'].includes(captchaRules.status(s,completed,event.actorId));const result=await this.subscriptionVerification(event,completed,undefined,undefined,guard);if(result.plan&&settled.pending>0&&!result.plan.text.includes('تعذر إكمال رفع قيد التحقق آليًا'))result.plan.text+='\nتعذر إكمال رفع قيد التحقق آليًا؛ راجع المشرف. لم يُغيَّر أي قيد مستقل.';return result;}unavailableSubscription=true;}}
      if(valid)for(const chat of await captchaRules.pendingBatch(event.actorId)){const rulesView=await captchaRules.open(event.actorId,chat);if(rulesView)return {status:'APPLIED',reason:'CAPTCHA_RULES_VIEW',privateGroupAccess:rulesView.verificationAccess,verificationScoped:true,plan:this.plan(event.actorId,rulesView.text,undefined,rulesView.keyboard,event.callbackMessageId)};}
+     if(valid&&resumableJoined.length&&this.opts.subscription){
+      const group=resumableJoined[0]!,challenge=captcha.challenge(stateBeforeSettlement,group,event.actorId),rulesEpoch=captchaRules.epoch(stateBeforeSettlement,group);
+      if(challenge){const guard=(state:BotState)=>captcha.status(state,group,event.actorId)==='PASSED'&&
+       captcha.challenge(state,group,event.actorId)?.epoch===challenge.epoch&&
+       captchaRules.epoch(state,group)===rulesEpoch&&['ACCEPTED','NOT_REQUIRED'].includes(captchaRules.status(state,group,event.actorId));
+       const continued=await this.subscriptionVerification(event,group,undefined,undefined,guard);
+       if(continued.plan)return continued;}
+     }
      const pending='تعذر إكمال رفع قيد التحقق آليًا؛ راجع المشرف. لم يُغيَّر أي قيد مستقل.';
      if(view||accepted||settled.attempted>0||settled.pending>0||settled.remaining>0){const screen=view??{text:accepted?'✅ حُفظت موافقتك على القوانين. تبقى القيود والمتطلبات المستقلة حسب شروطها.':'✅ اكتملت خطوة CAPTCHA. تبقى القيود والمتطلبات المستقلة حسب شروطها.',keyboard:{inline_keyboard:[[{text:'🏠 الرئيسية',callback_data:'pn:1:h'}]]}};return {status:'APPLIED',reason:'CAPTCHA_CHALLENGE_VIEW',plan:this.plan(event.actorId,screen.text+(unavailableSubscription?'\nفحص الاشتراك المطلوب غير متاح حاليًا؛ راجع المشرف.':'')+(settled.pending>0?'\n'+pending:'')+(settled.remaining>0?'\nتوجد مجموعات أخرى لم تُراجع بعد؛ افتح البوت مجددًا.':''),undefined,screen.keyboard,event.callbackMessageId)};}
      if(event.callbackData?.startsWith('cp:1:')||event.text==='/captcha')return {status:'DENIED',reason:'CAPTCHA_UNAVAILABLE'};
