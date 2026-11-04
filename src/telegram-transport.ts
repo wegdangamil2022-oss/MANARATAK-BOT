@@ -1,6 +1,7 @@
 import {CaptchaEnforcement} from './captcha-enforcement.js';
 import type {CaptchaJoinNotices} from './captcha-join-notices.js';
 import type {GroupServiceMessageCleanup} from './group-service-message-cleanup.js';
+import type {CaptchaEscalationPolicy} from './captcha-escalation-policy.js';
 import {VerifiedOnboardingWelcome} from './onboarding-welcome.js';
 import {CaptchaRuleGate} from './captcha-rules.js';
 import {TelegramRuleActions} from './telegram-rule-actions.js';
@@ -168,6 +169,8 @@ export interface TelegramApplicationOptions {
   joinNotices?:CaptchaJoinNotices;
   /** Original Telegram join/leave service message cleanup, separately owner-approved. */
   serviceCleanup?:GroupServiceMessageCleanup;
+  /** Local safe graduated CAPTCHA retry policy; separate owner approval. */
+  captchaEscalation?:CaptchaEscalationPolicy;
 }
 
 type Event = {updateId: number; actorId: string; chatId: string; kind: 'private' | 'group'; text: string; displayName?:string; username?:string; topicId?:number; entities?:unknown; messageId?:number; sentAt?:number; replyTo?:unknown; joins?:string[]; serviceKind?:'JOIN'|'LEAVE'; pinnedMessageId?:number; document?: IncomingDocument; protectionMedia?:ProtectionMedia; edited?:true; forwarded?:true; callbackData?:string; callbackQueryId?:string; callbackMessageId?:number};
@@ -480,7 +483,7 @@ export class TelegramUpdateApplication {
     const captcha=new CaptchaService(this.opts.store,this.opts.policy,this.opts.membership,this.clock),captchaEnforcement=new CaptchaEnforcement(this.opts.store,this.opts.policy,captcha,this.opts.moderation,this.opts.moderationRights,this.clock,this.opts.subscription),captchaRules=new CaptchaRuleGate(this.opts.store,this.opts.policy,captcha,this.opts.membership,this.clock);
     if(event.kind==='private'&&!event.callbackData?.startsWith('cr:1:')&&!event.callbackData?.startsWith('cp:1:')&&(event.callbackData!==undefined||!['/start','/captcha'].includes(event.text)))await captchaRules.cancel(event.actorId);
     if(event.kind==='private'&&this.opts.policy.isOwner(event.actorId)){
-     const owner=new TelegramCaptchaOwner(this.opts.store,this.opts.policy,captcha,this.clock,captchaEnforcement,this.opts.joinNotices,this.opts.serviceCleanup);
+     const owner=new TelegramCaptchaOwner(this.opts.store,this.opts.policy,captcha,this.clock,captchaEnforcement,this.opts.joinNotices,this.opts.serviceCleanup,this.opts.captchaEscalation);
      if(event.callbackData==='mi:1:i:04:07'||event.callbackData==='mi:1:i:04:10'||event.callbackData?.startsWith('ca:1:')){const view=await owner.handle(event.actorId,event.callbackData);return view?{status:'APPLIED',reason:'CAPTCHA_OWNER_VIEW',adminUIAccess:view.access,plan:this.plan(event.actorId,view.text,undefined,view.keyboard,event.callbackMessageId)}:{status:'DENIED',reason:'CAPTCHA_OWNER_UNAVAILABLE'};}
      await owner.cancel(event.actorId);
     }
