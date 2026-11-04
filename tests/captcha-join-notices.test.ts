@@ -141,6 +141,27 @@ for(const engine of ['json','sqlite'] as const){
    assert.equal(f.sent.length,1);
   }finally{await f.close();}
  });
+ test(engine+' public CAPTCHA notices throttle rapid joins to one per group per minute',async()=>{
+  const f=await fixture();try{
+   await f.enable();
+   assert.equal(await f.observe('b3-webhook:captcha-join:11'),1);
+   assert.equal(await f.captcha.observe(G,['301'],'b3-webhook:captcha-join:12',f.now()),1);
+   assert.equal(await f.notices.observe(G,['301'],'b3-webhook:captcha-join:12',f.now()),0);
+   assert.equal((await f.store.snapshot()).audit.filter(a=>/^captcha:join-notice-job:[a-f0-9]{64}$/u.test(a.updateKey)).length,1);
+   f.advance(61000);
+   assert.equal(await f.captcha.observe(G,['302'],'b3-webhook:captcha-join:13',f.now()),1);
+   assert.equal(await f.notices.observe(G,['302'],'b3-webhook:captcha-join:13',f.now()),1);
+   assert.equal((await f.store.snapshot()).audit.filter(a=>/^captcha:join-notice-job:[a-f0-9]{64}$/u.test(a.updateKey)).length,2);
+  }finally{await f.close();}
+ });
+ test(engine+' unrelated grant changes do not silently revoke the approved join link policy',async()=>{
+  const f=await fixture();try{
+   await f.enable();
+   await f.store.transaction(s=>{s.grants.push({actor:'555',chatId:'-100456',capability:'education.navigate',grantedBy:'100',revoked:false,expiresAt:NOW+600000});});
+   assert.equal(f.notices.policy(await f.store.snapshot(),G)?.enabled,true);
+   assert.equal(await f.observe(),1);
+  }finally{await f.close();}
+ });
  test(engine+' owner menu uses preview, confirmation and stable proof for public link toggle',async()=>{
   const f=await fixture();try{
    const ui=new TelegramCaptchaOwner(f.store,f.policy,f.captcha,()=>f.now(),undefined,f.notices);
