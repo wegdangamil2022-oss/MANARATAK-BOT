@@ -4,13 +4,13 @@ import {Policy} from './policy.js';
 import {validCommunityPhotoId,validCommunityLinkButtons,communityLinkKeyboard,
  type CommunityLinkKeyboard} from './phase4-community-rich.js';
 import {defaultCommunityConfig,emptyCommunityState,validCommunityConfig,
- matchCommunityRule,renderCommunityTemplate,selectCommunityRule,selectCommunityGreeting,normalizeCommunityMatch,validCommunityRulesUrl,inCommunityQuietHours,
+ matchCommunityRule,renderCommunityTemplate,selectCommunityRule,selectCommunityGreeting,normalizeCommunityMatch,validCommunityRulesUrl,inCommunityQuietHours,validCommunityTimeZone,
  type CommunityConfig,type CommunityInput,type CommunityDraft,type CommunityDraftKind,
  type ReplyMatch,type CommunityAutomationState,type CommunityEventKind,type CommunityServiceKind,
  type CommunityServiceChange,type CommunityLanguage,type CommunityCalendar,type CommunityClockFormat} from './phase4-community-model.js';
 
 export type DraftRequest={kind:CommunityDraftKind;text?:string;trigger?:string;match?:ReplyMatch;ruleId?:string;topicId?:number;cooldownMs?:number;delayMs?:number;startMinute?:number;endMinute?:number;
- language?:CommunityLanguage;calendar?:CommunityCalendar;clockFormat?:CommunityClockFormat;utcOffsetMinutes?:number;
+ language?:CommunityLanguage;calendar?:CommunityCalendar;clockFormat?:CommunityClockFormat;utcOffsetMinutes?:number;timeZone?:string;
  photoFileId?:string;buttonText?:string;buttonUrl?:string};
 export interface CommunitySendProposal{
  readonly text:string;readonly chatId:string;readonly actorId:string;
@@ -111,7 +111,9 @@ export class Phase4CommunityService{
      !['12','24'].includes(request.clockFormat??'')||
      !['gregorian','hijri'].includes(request.calendar??'')))
     throw Error('COMMUNITY_CLOCK_SETTINGS_INVALID');
-   if(kind==='REPLY_ADD'&&request.match==='COMMAND'&&!/^m_[a-z][a-z0-9_]{0,23}$/u.test(request.trigger??''))
+   if(kind==='GROUP_TIMEZONE'&&!validCommunityTimeZone(request.timeZone))
+     throw Error('COMMUNITY_TIMEZONE_INVALID');
+    if(kind==='REPLY_ADD'&&request.match==='COMMAND'&&!/^m_[a-z][a-z0-9_]{0,23}$/u.test(request.trigger??''))
     throw Error('COMMUNITY_COMMAND_INVALID');
    if((kind==='WELCOME_PHOTO_SET'||kind==='FAREWELL_PHOTO_SET')&&
      !validCommunityPhotoId(request.photoFileId))throw Error('COMMUNITY_PHOTO_ID_INVALID');
@@ -140,6 +142,7 @@ export class Phase4CommunityService{
     ...(request.clockFormat!==undefined?{clockFormat:request.clockFormat}:{}),
     ...(request.calendar!==undefined?{calendar:request.calendar}:{}),
     ...(request.utcOffsetMinutes!==undefined?{utcOffsetMinutes:request.utcOffsetMinutes}:{}),
+     ...(request.timeZone!==undefined?{timeZone:request.timeZone}:{}),
     ...(request.photoFileId!==undefined?{photoFileId:request.photoFileId}:{}),
     ...(request.buttonText!==undefined?{buttonText:request.buttonText}:{}),
     ...(request.buttonUrl!==undefined?{buttonUrl:request.buttonUrl}:{})};
@@ -196,6 +199,8 @@ export class Phase4CommunityService{
     case 'FAREWELL_LOCALIZED':
      config.farewell.localized={...config.farewell.localized,[draft.language!]:draft.text!};break;
     case 'GROUP_LANGUAGE':config.language=draft.language!;break;
+     case 'GROUP_TIMEZONE':config.timeZone=draft.timeZone!;break;
+     case 'GROUP_TIMEZONE_CLEAR':delete config.timeZone;break;
     case 'GROUP_CLOCK':
      config.utcOffsetMinutes=draft.utcOffsetMinutes!;
      config.clockFormat=draft.clockFormat!;
@@ -331,7 +336,7 @@ export class Phase4CommunityService{
   const config=configured(state,chatId);
   if(!validCommunityConfig(config))throw Error('COMMUNITY_CONFIG_INVALID');
   if(!config.repliesEnabled)return {status:'REPLIES_DISABLED'};
-  if(config.quietHours&&inCommunityQuietHours(config.quietHours,this.clock(),config.utcOffsetMinutes))
+  if(config.quietHours&&inCommunityQuietHours(config.quietHours,this.clock(),config.utcOffsetMinutes,config.timeZone))
    return {status:'QUIET_HOURS'};
   const rule=selectCommunityRule(config,sample,topicId);
   if(!rule)return {status:'NO_MATCH'};
@@ -341,9 +346,9 @@ export class Phase4CommunityService{
    memberName:'الطالب التجريبي',groupName:'مجموعة منارتك التجريبية',
    messageText:sample,...(topicId!==undefined?{topicId}:{})};
   return {status:'MATCH',ruleId:rule.id,
-   preview:renderCommunityTemplate(rule.response,input,now+config.utcOffsetMinutes*60000,
+   preview:renderCommunityTemplate(rule.response,input,now+(config.timeZone?0:config.utcOffsetMinutes*60000),
     config.rulesUrl??'',{language:config.language??'ar',clockFormat:config.clockFormat??'24',
-     calendar:config.calendar??'gregorian'})};
+     calendar:config.calendar??'gregorian',...(config.timeZone?{timeZone:config.timeZone}:{})})};
  }
  /** Atomically applies quotas and reserves an outbound event exactly once.
   * A reservation is at-most-once: its provider outcome is managed separately
@@ -372,7 +377,7 @@ export class Phase4CommunityService{
     communityLinks=communityLinkKeyboard(target.buttons);
    }
    else{
-    if(config.quietHours&&inCommunityQuietHours(config.quietHours,now,config.utcOffsetMinutes))return null;
+    if(config.quietHours&&inCommunityQuietHours(config.quietHours,now,config.utcOffsetMinutes,config.timeZone))return null;
     const rule=selectCommunityRule(config,input.messageText!,input.topicId);
     if(!rule)return null;
     template=rule.response;ruleId=rule.id;
@@ -394,9 +399,9 @@ export class Phase4CommunityService{
        x.ruleId===ruleId&&now-x.at<actorPeriod))return null;
    let text:string;
    try{text=renderCommunityTemplate(template,input,
-     now+config.utcOffsetMinutes*60000,config.rulesUrl??'',
+     now+(config.timeZone?0:config.utcOffsetMinutes*60000),config.rulesUrl??'',
      {language:config.language??'ar',clockFormat:config.clockFormat??'24',
-      calendar:config.calendar??'gregorian'});}
+      calendar:config.calendar??'gregorian',...(config.timeZone?{timeZone:config.timeZone}:{})});}
    catch{return null;}
    // A Telegram photo caption has a 1024-byte post-escaping budget; do not
    // enqueue a job which the Bot API would reject after quota reservation.
@@ -433,6 +438,11 @@ export class Phase4CommunityService{
   if(draft.kind==='GROUP_LANGUAGE')
    return '<b>لغة رسائل المجموعة</b>\n'+draft.language+
     '\nإذا لم يوجد قالب مترجم، يُستخدم القالب الأساسي للمجموعة.';
+  if(draft.kind==='GROUP_TIMEZONE')
+   return '<b>معاينة المنطقة الزمنية (IANA)</b>\n'+safe(draft.timeZone!)+
+    '\nسيُحدّث الوقت تلقائيًا عند تغيّر التوقيت الصيفي. التوقيت اليدوي يبقى احتياطيًا.';
+  if(draft.kind==='GROUP_TIMEZONE_CLEAR')
+   return '<b>إلغاء المنطقة الزمنية</b>\nسيعود البوت إلى إزاحة UTC اليدوية المعتمدة.';
   if(draft.kind==='GROUP_CLOCK')
    return '<b>معاينة التوقيت والتقويم</b>\nUTC'+
     (draft.utcOffsetMinutes!>=0?'+':'')+draft.utcOffsetMinutes!+' دقيقة'+
