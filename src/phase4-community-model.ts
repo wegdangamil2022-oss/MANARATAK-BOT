@@ -97,6 +97,8 @@ export interface CommunityDraft{
  joinKind?:CommunityJoinKind;leaveKind?:CommunityLeaveKind;
  photoFileId?:string;buttonText?:string;buttonUrl?:string;
  startMinute?:number;endMinute?:number;
+ /** Binds owner review to the last observed group profile event. */
+ profileEpoch?:number;
 }
 export interface CommunityReceipt{
  /** An opaque hash of the inbound Telegram update and bot identifier. */
@@ -136,6 +138,7 @@ export interface CommunityProfileJob{
  createdAt:number;profileEpoch:number;title?:string;attemptId?:string;
 }
 export interface CommunityProfileObservation{key:string;chatId:string;at:number;}
+export interface CommunityProfileRevision{chatId:string;revision:number;lastKey:string;}
 export function validCommunityProfileTitle(value:unknown):value is string{
  return typeof value==='string'&&value.trim()===value&&
   Array.from(value).length>=1&&Array.from(value).length<=128&&
@@ -147,6 +150,8 @@ export interface CommunityAutomationState{
  profileJobs?:CommunityProfileJob[];
  /** Opaque arrival witnesses when editing is enabled, not visible in audit UI. */
  profileObservations?:CommunityProfileObservation[];
+ /** Monotonic per-group revision; never inferred from truncated observation list length. */
+ profileRevisions?:CommunityProfileRevision[];
  /** Event audit contains kind and opaque digests only, never titles or images. */
  serviceChanges?:CommunityServiceChange[];
  cleanupJobs?:CommunityCleanupJob[];
@@ -312,7 +317,20 @@ export function validCommunityState(value:unknown):value is CommunityAutomationS
   (v.decisionLog!==undefined&&(!Array.isArray(v.decisionLog)||v.decisionLog.length>1000))||
   (v.privateWelcomes!==undefined&&(!Array.isArray(v.privateWelcomes)||v.privateWelcomes.length>2500))||
   (v.profileJobs!==undefined&&(!Array.isArray(v.profileJobs)||v.profileJobs.length>500))||
-  (v.profileObservations!==undefined&&(!Array.isArray(v.profileObservations)||v.profileObservations.length>1000)))return false;
+  (v.profileObservations!==undefined&&(!Array.isArray(v.profileObservations)||v.profileObservations.length>1000))||
+  (v.profileRevisions!==undefined&&(!Array.isArray(v.profileRevisions)||v.profileRevisions.length>500)))return false;
+ if(v.profileRevisions){
+  const ids=new Set<string>();
+  for(const row of v.profileRevisions){
+   if(!row||typeof row!=='object'||Array.isArray(row)||
+     Object.keys(row).some(k=>!['chatId','revision','lastKey'].includes(k))||
+     !validGroup(row.chatId)||ids.has(row.chatId)||
+     !Number.isSafeInteger(row.revision)||row.revision<1||row.revision>2_000_000_000||
+     typeof row.lastKey!=='string'||!/^[a-f0-9]{64}$/u.test(row.lastKey))return false;
+   ids.add(row.chatId);
+  }
+ }
+
  if(v.profileObservations){
   const seen=new Set<string>();
   for(const o of v.profileObservations){
@@ -411,6 +429,7 @@ export function validCommunityState(value:unknown):value is CommunityAutomationS
    !kinds.has(d.kind)||!validClock(d.createdAt)||!validClock(d.expiresAt)||
    d.expiresAt<=d.createdAt||d.expiresAt-d.createdAt>120000||
    (d.text!==undefined&&(d.kind==='GROUP_TITLE_SET'?!validCommunityProfileTitle(d.text):!validTemplate(d.text)))||
+   (d.profileEpoch!==undefined&&(!Number.isSafeInteger(d.profileEpoch)||d.profileEpoch<0||d.profileEpoch>2_000_000_000))||
    (d.trigger!==undefined&&!validText(d.trigger,80))||
    (d.match!==undefined&&!matches.has(d.match))||
    (d.source!==undefined&&!['NOTE','RULES','FAQ'].includes(d.source))||
@@ -438,6 +457,7 @@ export function validCommunityState(value:unknown):value is CommunityAutomationS
         url:d.buttonUrl}]))) )return false;
   if((d.kind==='WELCOME_TEXT'||d.kind==='FAREWELL_TEXT')&&!d.text||
    d.kind==='GROUP_TITLE_SET'&&!validCommunityProfileTitle(d.text)||
+   (d.kind==='GROUP_TITLE_SET'||d.kind==='GROUP_PHOTO_REMOVE')&&d.profileEpoch===undefined||
    d.kind==='REPLY_ADD'&&(!d.trigger||!d.match||
       (d.source===undefined||d.source==='NOTE')&&!validTemplate(d.text))||
    (['REPLY_REMOVE','REPLY_ENABLE','REPLY_DISABLE','REPLY_COOLDOWN'] as string[]).includes(d.kind)&&!d.ruleId||
