@@ -7,6 +7,8 @@ import {BotStore} from '../src/store.js';
 import {Policy} from '../src/policy.js';
 import {CaptchaService,captchaSource} from '../src/captcha.js';
 import {CaptchaEnforcement} from '../src/captcha-enforcement.js';
+import {CaptchaJoinNotices} from '../src/captcha-join-notices.js';
+import type {TemporaryGroupNotice} from '../src/telegram-temporary-group-sender.js';
 import {TelegramCaptchaOwner} from '../src/telegram-captcha-owner.js';
 import type {OwnerInlineScreen} from '../src/telegram-inline-owner.js';
 import {ModerationService} from '../src/moderation.js';
@@ -24,7 +26,7 @@ import {recordSubscriptionEnforcementConsent} from '../src/subscription-enforcem
 const NOW=1700000000000,G='-100123',TOKEN='123456789:ABCDEFGHIJKLMNOPQRSTUVWXYZabcde';
 const pick=(view:OwnerInlineScreen|null,label:string)=>{assert.ok(view);const b=view.keyboard.inline_keyboard.flat().find(b=>b.text.includes(label));assert.ok(b,label);return b.callback_data;};
 for(const engine of ['json','sqlite'] as const){
- async function fixture(withSubscription=false){
+ async function fixture(withSubscription=false,withJoinNotices=false){
   const dir=await mkdtemp(join(tmpdir(),'captcha-enforcement-')),store=new BotStore(join(dir,'state.'+engine),{engine});let now=NOW,running=true,rights=true,lost=false,groupType='supergroup';let hook:(()=>Promise<void>)|undefined,writeHook:(()=>Promise<void>)|undefined;
   const members=new Map<string,Record<string,unknown>>(),writes:string[]=[];
   const target=(id='300')=>members.get(id)??{status:'member',user:{id:Number(id),is_bot:false}};
@@ -38,8 +40,13 @@ for(const engine of ['json','sqlite'] as const){
   const preview=async()=>{const root=await ui.handle('100','mi:1:i:04:07'),edit=await ui.handle('100',pick(root,G));return ui.handle('100',pick(edit,'تفعيل إنفاذ'));};
   const enable=async()=>{const view=await preview();assert.ok(await ui.handle('100',pick(view,'تأكيد الإنفاذ')));};
   const channelMembership=Object.assign(new FakeMembershipGateway(),{joinURL:async()=> 'https://t.me/RequiredChannel'}),subscription=withSubscription?new SubscriptionGate(store,policy,channelMembership,moderation,()=>now):undefined;
-  const education=new EducationService(store,policy,()=>now),app=new TelegramUpdateApplication({store,policy,education,admin:new EducationAdminFacade(store,policy,education,()=>now),faq:new ApprovedAnswerService(store,policy,()=>now),links:new ResourceLinkService(store,policy,()=>now),membership,clock:()=>now,botId:'captcha-enforce',botUsername:'ManaratakBot',moderation,moderationRights:probe,...(subscription?{subscription}:{})});
-  return {store,policy,captcha,enforcer,moderation,membership,channelMembership,subscription,ui,app,writes,target,preview,enable,now:()=>now,advance:(n=1000)=>{now+=n;},stop:()=>{running=false;},run:()=>{running=true;},noRights:()=>{rights=false;},basicGroup:()=>{groupType='group';},lose:()=>{lost=true;},hook:(h:()=>Promise<void>)=>{hook=h;},onWrite:(h:()=>Promise<void>)=>{writeHook=h;},close:()=>rm(dir,{recursive:true,force:true})};
+  const sentJoin:TemporaryGroupNotice[]=[];
+  const joinNotices=withJoinNotices?new CaptchaJoinNotices(store,policy,captcha,{
+   send:async(input,verify)=>{if(!await verify())return {status:'NOT_SENT'} as const;sentJoin.push(input);return {status:'CONFIRMED',messageId:456} as const;},
+   delete:async()=> 'ACKNOWLEDGED' as const
+  },'ManaratakBot',()=>now,async()=>running):undefined;
+  const education=new EducationService(store,policy,()=>now),app=new TelegramUpdateApplication({store,policy,education,admin:new EducationAdminFacade(store,policy,education,()=>now),faq:new ApprovedAnswerService(store,policy,()=>now),links:new ResourceLinkService(store,policy,()=>now),membership,clock:()=>now,botId:'captcha-enforce',botUsername:'ManaratakBot',moderation,moderationRights:probe,...(subscription?{subscription}:{}),...(joinNotices?{joinNotices}:{})});
+  return {store,policy,captcha,enforcer,moderation,membership,channelMembership,subscription,joinNotices,sentJoin,ui,app,writes,target,preview,enable,now:()=>now,advance:(n=1000)=>{now+=n;},stop:()=>{running=false;},run:()=>{running=true;},noRights:()=>{rights=false;},basicGroup:()=>{groupType='group';},lose:()=>{lost=true;},hook:(h:()=>Promise<void>)=>{hook=h;},onWrite:(h:()=>Promise<void>)=>{writeHook=h;},close:()=>rm(dir,{recursive:true,force:true})};
  }
  test(engine+' separate owner consent connects trusted joins and private CAPTCHA success to an owned restriction',async()=>{const f=await fixture();try{assert.equal(f.enforcer.consent(await f.store.snapshot(),G),null);await f.enable();f.advance();const at=f.now();await f.app.handle({update_id:1,message:{message_id:1,date:at/1000,from:{id:100,is_bot:false},chat:{id:Number(G),type:'supergroup'},new_chat_members:[{id:300,is_bot:false}]}});assert.equal(f.target().status,'restricted');assert.equal(f.writes.length,1);f.advance();const start=await f.app.handle({update_id:2,message:{message_id:2,from:{id:300,is_bot:false},chat:{id:300,type:'private'},text:'/start'}}),data=pick({text:start.plan!.text,keyboard:start.plan!.inlineMarkup!},'تحقق بديل');const passed=await f.app.handle({update_id:3,callback_query:{id:'pass',from:{id:300,is_bot:false},data,message:{message_id:3,from:{id:999,is_bot:true},chat:{id:300,type:'private'}}}});assert.equal(passed.status,'APPLIED');assert.equal(f.target().status,'member');assert.equal(f.writes.length,2);assert.equal((await f.store.snapshot()).moderationReasons[0]!.active,false);}finally{await f.close();}});
  test(engine+' trial joins cannot become restrictions retroactively even at the same timestamp',async()=>{const f=await fixture();try{await f.captcha.observe(G,['300'],'b3-webhook:captcha-enforce:1',NOW);assert.notEqual((await f.enforcer.admit(G,'300','b3-webhook:captcha-enforce:1',NOW)).status,'APPLIED');await f.enable();assert.notEqual((await f.enforcer.admit(G,'300','b3-webhook:captcha-enforce:1',NOW)).status,'APPLIED');assert.equal(f.writes.length,0);}finally{await f.close();}});
@@ -260,5 +267,25 @@ for(const engine of ['json','sqlite'] as const){
   await f.store.transaction(s=>{assert.equal(recordSubscriptionEnforcementConsent(s,f.policy,'100',G,true,f.now()),true);});
   root=await f.ui.handle('100','mi:1:i:04:07');edit=await f.ui.handle('100',pick(root,G));
   assert.equal(edit!.keyboard.inline_keyboard.flat().filter(b=>b.text.includes('تفعيل إنفاذ CAPTCHA')).length,1);
+ }finally{await f.close();}});
+
+ test(engine+' authenticated Telegram join routes once into optional CAPTCHA public notice with original topic',async()=>{const f=await fixture(false,true);try{
+  assert.ok(f.joinNotices);assert.equal(await f.joinNotices.configure('100',G,true,f.joinNotices.epoch(await f.store.snapshot(),G)),true);
+  f.advance();const at=f.now(),join={update_id:248,message:{message_id:248,date:at/1000,from:{id:100,is_bot:false},
+   chat:{id:Number(G),type:'supergroup'},message_thread_id:42,new_chat_members:[{id:300,is_bot:false}]}};
+  const first=await f.app.handle(join);assert.equal(first.status,'IGNORED');
+  assert.equal((await f.store.snapshot()).audit.filter(a=>/^captcha:join-notice-job:[a-f0-9]{64}$/u.test(a.updateKey)).length,1);
+  assert.equal((await f.joinNotices.drain()).sent,1);
+  assert.deepEqual(f.sentJoin,[{chatId:G,botUsername:'ManaratakBot',kind:'CAPTCHA',topicId:42}]);
+  await f.app.handle(join);
+  assert.equal(f.sentJoin.length,1);
+  assert.equal((await f.store.snapshot()).audit.filter(a=>/^captcha:join-notice-job:[a-f0-9]{64}$/u.test(a.updateKey)).length,1);
+ }finally{await f.close();}});
+ test(engine+' malformed Telegram join service message cannot create CAPTCHA public notice',async()=>{const f=await fixture(false,true);try{
+  assert.ok(f.joinNotices);assert.equal(await f.joinNotices.configure('100',G,true,f.joinNotices.epoch(await f.store.snapshot(),G)),true);
+  f.advance();const at=f.now();
+  const forged=await f.app.handle({update_id:249,message:{message_id:249,date:at/1000,from:{id:100,is_bot:false},chat:{id:Number(G),type:'supergroup'},
+   new_chat_members:[{id:300,is_bot:false}],text:'fake join'}});
+  assert.equal(forged.status,'DENIED');assert.equal((await f.joinNotices.drain()).sent,0);assert.equal(f.sentJoin.length,0);
  }finally{await f.close();}});
 }
