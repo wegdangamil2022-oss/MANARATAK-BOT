@@ -773,7 +773,7 @@ export class Phase4CommunityService{
    ' حسب إزاحة UTC المعتمدة. الترحيب والوداع لا يتوقفان.';
   if(draft.kind==='QUIET_HOURS_CLEAR')return 'مراجعة إلغاء ساعات الهدوء للردود التلقائية.';
   if(draft.kind==='TOPIC_COOLDOWN_SET')return 'مراجعة فاصل ردود موضوع '+draft.topicId+
-   ': '+(draft.cooldownMs!/1000)+' ثانية. الحد العام 8 رسائل في الدقيقة يبقى.';
+   ': '+(draft.cooldownMs!/1000)+' ثانية. سقف المجموعة العام المعتمد يبقى.';
   if(draft.kind==='TOPIC_COOLDOWN_CLEAR')return 'مراجعة إزالة تخصيص حد موضوع '+draft.topicId+
    ' والعودة إلى فاصل المجموعة الافتراضي.';
   if(draft.kind==='DECISION_LOG_ON')return 'تفعيل سجل قرارات الردود المنقح لهذه المجموعة فقط.\nيُحفظ سبب القرار وإصدار الإعدادات دون رسالة الطالب أو هويته. لا يثبت حجز الإرسال التسليم عبر Telegram.';
@@ -785,8 +785,7 @@ export class Phase4CommunityService{
   if(draft.kind==='AUTO_LIMIT_SET')return '<b>اعتماد ميزانية الإعلانات الآلية</b>\n'+
    'السقف: '+draft.autoMessagesPerMinute+' رسائل خلال أي 60 ثانية في المجموعة، بما فيها الترحيب والوداع والردود الآلية. '+
    'فترات الحماية الحالية للمجموعة والعضو والموضوع لا تتغير، والسقف الأقصى 8.';
-  if(draft.kind==='SERVICE_PROFILE_ON'||draft.kind==='SERVICE_PROFILE_OFF')return
-   '<b>تغيير تنظيف رسائل تغيير اسم/صورة المجموعة</b>\n'+
+  if(draft.kind==='SERVICE_PROFILE_ON'||draft.kind==='SERVICE_PROFILE_OFF')return    '<b>تغيير تنظيف رسائل تغيير اسم/صورة المجموعة</b>\n'+
    (draft.kind==='SERVICE_PROFILE_ON'?'السماح بحذفها بعد المهلة':'استبعادها من التنظيف')+
    '. الرسائل المسجلة سابقًا لا تُحذف عند الإيقاف بسبب تغير إصدار السياسة. '+
    'يتطلب التنظيف العام وصلاحيات Telegram السارية.';
