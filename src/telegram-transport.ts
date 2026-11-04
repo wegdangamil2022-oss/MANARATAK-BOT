@@ -423,7 +423,11 @@ export class TelegramUpdateApplication {
    // The subscription check and CAPTCHA settlement share this private flow.
    // Never infer channels from CAPTCHA or release on NOT_MEMBER / UNKNOWN.
    const captchaForSettlement=new CaptchaService(this.opts.store,this.opts.policy,this.opts.membership,this.clock);
-   const joinedSettlement=event.kind==='private'&&result.decision.status==='MEMBER'
+   const settlementSnapshot=await this.opts.store.snapshot(),settlementNow=this.clock();
+   const maySettle=subscriptionConfigEpoch(settlementSnapshot)===subscriptionConfigEpoch(before)&&
+      (!onboardingGuard||onboardingGuard(settlementSnapshot))&&
+      subscriptionVerificationEpoch(settlementSnapshot,this.opts.policy,actor,group,settlementNow)!==null;
+   const joinedSettlement=event.kind==='private'&&result.decision.status==='MEMBER'&&maySettle
      ?await new CaptchaEnforcement(this.opts.store,this.opts.policy,captchaForSettlement,this.opts.moderation,this.opts.moderationRights,this.clock,gate).release(group,actor)
      :undefined;
    const targets=await gate.joinTargets(group),state=await this.opts.store.snapshot(),now=this.clock(),epoch=subscriptionVerificationEpoch(state,this.opts.policy,actor,group,now);
