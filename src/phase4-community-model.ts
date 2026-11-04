@@ -105,7 +105,7 @@ export interface CommunityReceipt{
 export type CommunityDecisionReason=
  'RESERVED'|'WELCOME_DISABLED'|'FAREWELL_DISABLED'|'REPLIES_DISABLED'|'QUIET_HOURS'|
  'NO_MATCH'|'CLOCK_SKEW'|'GROUP_LIMIT'|'TOPIC_COOLDOWN'|'GROUP_COOLDOWN'|'REMOVAL_SUPPRESSED'|
- 'ACTOR_COOLDOWN'|'TEMPLATE_INVALID'|'CAPTION_LIMIT';
+ 'ACTOR_COOLDOWN'|'TEMPLATE_INVALID'|'CAPTION_LIMIT'|'SOURCE_UNAVAILABLE';
 export interface CommunityDecision {
  key:string;chatId:string;at:number;kind:CommunityEventKind;configVersion:number;
  reason:CommunityDecisionReason;ruleId?:string;
@@ -303,7 +303,7 @@ export function validCommunityState(value:unknown):value is CommunityAutomationS
  }
  const validReasons=new Set<CommunityDecisionReason>(['RESERVED','WELCOME_DISABLED','FAREWELL_DISABLED',
   'REPLIES_DISABLED','QUIET_HOURS','NO_MATCH','CLOCK_SKEW','GROUP_LIMIT','TOPIC_COOLDOWN',
-  'GROUP_COOLDOWN','ACTOR_COOLDOWN','TEMPLATE_INVALID','CAPTION_LIMIT','REMOVAL_SUPPRESSED']);
+  'GROUP_COOLDOWN','ACTOR_COOLDOWN','TEMPLATE_INVALID','CAPTION_LIMIT','REMOVAL_SUPPRESSED','SOURCE_UNAVAILABLE']);
  if(v.decisionLog){
   const keys=new Set<string>();
   for(const entry of v.decisionLog){
@@ -314,7 +314,7 @@ export function validCommunityState(value:unknown):value is CommunityAutomationS
       !['JOIN','LEAVE','TEXT'].includes(entry.kind)||!validReasons.has(entry.reason)||
       !Number.isSafeInteger(entry.configVersion)||entry.configVersion<1||entry.configVersion>2_000_000_000||
       (entry.ruleId!==undefined&&(!/^[a-f0-9]{12}$/u.test(entry.ruleId)||
-        !['RESERVED','GROUP_LIMIT','TOPIC_COOLDOWN','GROUP_COOLDOWN','ACTOR_COOLDOWN','TEMPLATE_INVALID','CAPTION_LIMIT'].includes(entry.reason))))return false;
+        !['RESERVED','GROUP_LIMIT','TOPIC_COOLDOWN','GROUP_COOLDOWN','ACTOR_COOLDOWN','TEMPLATE_INVALID','CAPTION_LIMIT','SOURCE_UNAVAILABLE'].includes(entry.reason))))return false;
    keys.add(entry.key);
   }
  }
