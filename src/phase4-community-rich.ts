@@ -16,6 +16,7 @@ export function validCommunityLinkUrl(v:unknown):v is string{
   const url=new URL(v);
   return url.protocol==='https:'&&url.href===v&&!url.username&&!url.password&&
    !url.port&&!url.search&&!url.hash&&url.hostname!=='localhost'&&
+   (url.hostname==='t.me'||!(/(?:^|\.)t\.me\./u.test(url.hostname)||url.hostname.endsWith('.t.me')))&&
    !url.hostname.split('.').some(label=>label.startsWith('xn--'))&&
    /^(?=.{4,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,24}$/u.test(url.hostname);
  }catch{return false;}
