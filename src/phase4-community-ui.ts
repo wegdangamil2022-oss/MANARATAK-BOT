@@ -4,7 +4,7 @@ import type {CommunityDraftKind,ReplyMatch,CommunityLanguage,CommunityCalendar,C
 import {validCommunityRulesUrl} from './phase4-community-model.js';
 import {validCommunityLinkButton,validCommunityPhotoId} from './phase4-community-rich.js';
 const group=/^-[1-9]\d{0,15}$/u,hex=/^[a-f0-9]{24}$/u;
-const route=/^p4c:1:(?:l:(?:0|[1-9]\d{0,2})|g:-[1-9]\d{0,15}|h:-[1-9]\d{0,15}|r:-[1-9]\d{0,15}:(?:0|[1-9]\d{0,2})|t:-[1-9]\d{0,15}:[wfrsg]:[01]|d:-[1-9]\d{0,15}:[a-f0-9]{12}|e:-[1-9]\d{0,15}:[a-f0-9]{12}:[01]|u:-[1-9]\d{0,15}:(?:ar|en)|o:-[1-9]\d{0,15}:(?:12|24):[gh]|[cx]:[a-f0-9]{24})$/u;
+const route=/^p4c:1:(?:l:(?:0|[1-9]\d{0,2})|g:-[1-9]\d{0,15}|h:-[1-9]\d{0,15}|v:-[1-9]\d{0,15}:[wf]|j:-[1-9]\d{0,15}:[wf]:[pb]|r:-[1-9]\d{0,15}:(?:0|[1-9]\d{0,2})|t:-[1-9]\d{0,15}:[wfrsg]:[01]|d:-[1-9]\d{0,15}:[a-f0-9]{12}|e:-[1-9]\d{0,15}:[a-f0-9]{12}:[01]|u:-[1-9]\d{0,15}:(?:ar|en)|o:-[1-9]\d{0,15}:(?:12|24):[gh]|[cx]:[a-f0-9]{24})$/u;
 export const validPhase4CommunityRoute=(s:unknown):s is string=>typeof s==='string'&&
  Buffer.byteLength(s,'utf8')<=64&&route.test(s);
 const esc=(s:string):string=>s.replace(/&/gu,'&amp;').replace(/</gu,'&lt;')
@@ -179,6 +179,8 @@ export async function phase4CommunityScreen(service:Phase4CommunityService,actor
     [btn('👋 '+(c.farewell.enabled?'إيقاف':'تفعيل')+' الوداع','p4c:1:t:'+id+':f:'+(c.farewell.enabled?'0':'1'))],
     [btn('🤖 '+(c.repliesEnabled?'إيقاف':'تفعيل')+' الردود','p4c:1:t:'+id+':r:'+(c.repliesEnabled?'0':'1'))],
     [btn('📋 قائمة الردود','p4c:1:r:'+id+':0')],
+    [btn('🖼️ وسائط الترحيب','p4c:1:v:'+id+':w'),
+     btn('🖼️ وسائط الوداع','p4c:1:v:'+id+':f')],
     [btn('🌐 اللغة: '+(c.language??'ar'),'p4c:1:u:'+id+':'+((c.language??'ar')==='ar'?'en':'ar'))],
     [btn('🕒 الساعة: '+(c.clockFormat??'24'),'p4c:1:o:'+id+':'+((c.clockFormat??'24')==='24'?'12':'24')+':'+((c.calendar??'gregorian')==='hijri'?'h':'g'))],
     [btn('📅 التقويم: '+(c.calendar??'gregorian'),'p4c:1:o:'+id+':'+(c.clockFormat??'24')+':'+((c.calendar??'gregorian')==='hijri'?'g':'h'))],
@@ -187,6 +189,39 @@ export async function phase4CommunityScreen(service:Phase4CommunityService,actor
     [btn('🕘 تغييرات اسم/صورة المجموعة','p4c:1:h:'+id)],
     [btn('↩️ المجموعات','p4c:1:l:0'),btn('🏠 لوحة المالك','mi:1:h')]
    ])};
+ }
+ const mediaView=/^p4c:1:v:(-[1-9]\d{0,15}):([wf])$/u.exec(data);
+ if(mediaView){
+  const id=mediaView[1]!,kind=mediaView[2]!,config=await service.view(actorId,id);
+  const media=kind==='w'?config.welcome:config.farewell;
+  const heading=kind==='w'?'الترحيب':'الوداع';
+  const photoCommand=kind==='w'?'welcomephoto':'farewellphoto';
+  const buttonCommand=kind==='w'?'welcomebutton':'farewellbutton';
+  const rows:{text:string;callback_data:string}[][]=[];
+  if(media.photoFileId)rows.push([btn('🗑️ مسح صورة '+heading,'p4c:1:j:'+id+':'+kind+':p')]);
+  if(media.buttons?.length)rows.push([btn('🗑️ مسح جميع أزرار '+heading,'p4c:1:j:'+id+':'+kind+':b')]);
+  rows.push([btn('↩️ إعدادات المجموعة','p4c:1:g:'+id)]);
+  return {text:'<b>🖼️ وسائط '+heading+'</b>\n'+
+   'الصورة: '+(media.photoFileId?'معتمدة':'لا توجد')+
+   '\nأزرار الروابط الخارجية: '+(media.buttons?.length??0)+' من 3'+
+   '\n\nلإضافة صورة: أرسل صورة في خاص البوت، واكتب في وصفها:\n'+
+   '<code>/'+photoCommand+' '+id+'</code>'+
+   '\n\nلإضافة زر خارجي، اكتب في خاص البوت:\n'+
+   '<code>/'+buttonCommand+' '+id+' دليل المنح | https://t.me/StudyinEurope3</code>'+
+   '\n\nلن تُعتمد الصورة أو الأزرار حتى تظهر شاشة المعاينة ويؤكدها المالك.'+
+   '\nمعرف ملف الصورة لا يُعرض في شاشة المالك.',
+   keyboard:k(rows)};
+ }
+ const mediaClear=/^p4c:1:j:(-[1-9]\d{0,15}):([wf]):([pb])$/u.exec(data);
+ if(mediaClear){
+  const kind=mediaClear[2]!,part=mediaClear[3]!;
+  const draft=await service.pending(actorId,{kind:kind==='w'?
+   (part==='p'?'WELCOME_PHOTO_CLEAR':'WELCOME_BUTTONS_CLEAR'):
+   (part==='p'?'FAREWELL_PHOTO_CLEAR':'FAREWELL_BUTTONS_CLEAR')},mediaClear[1]!);
+  return {text:service.preview(draft)+'\nلا تُطبّق التغييرات إلا بعد الاعتماد.',
+   keyboard:k([[btn('✅ اعتماد الحذف','p4c:1:c:'+draft.id)],
+    [btn('❌ إلغاء','p4c:1:x:'+draft.id)],
+    [btn('↩️ الوسائط','p4c:1:v:'+draft.chatId+':'+kind)]])};
  }
  const localeClick=/^p4c:1:u:(-[1-9]\d{0,15}):(ar|en)$/u.exec(data);
  if(localeClick){
