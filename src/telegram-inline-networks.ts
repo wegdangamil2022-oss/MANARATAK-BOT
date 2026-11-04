@@ -3,6 +3,8 @@ import type {BotStore,BotState,Chat} from './store.js';
 import type {GroupNetwork} from './group-network-model.js';
 import {validNetworkName} from './group-network-model.js';
 import type {Policy} from './policy.js';
+import {defaultCommunityConfig,emptyCommunityState,validCommunityConfig,
+ type CommunityConfig} from './phase4-community-model.js';
 import {isValidGroupProtectionRecord,isValidProtectionPolicy,
  type GroupProtectionRecord,type ProtectionPolicy} from './protection-rules.js';
 import type {OwnerInlineScreen} from './telegram-inline-owner.js';
@@ -21,6 +23,8 @@ const pick=new RegExp('^nw:1:g:'+net+':'+page+'$','u');
 const stalePage=new RegExp('^nw:1:s:'+net+':'+page+'$','u');
 const policySources=new RegExp('^nw:1:y:'+net+':'+page+'$','u');
 const policyPreview=new RegExp('^nw:1:z:'+net+':'+group+':'+page+'$','u');
+const greetingSources=new RegExp('^nw:1:w:'+net+':'+page+'$','u');
+const greetingPreview=new RegExp('^nw:1:v:'+net+':'+group+':'+page+'$','u');
 const stalePick=new RegExp('^nw:1:q:'+net+':'+revision+':'+group+':'+revision+':'+page+'$','u');
 const staleBatch=new RegExp('^nw:1:b:'+net+':'+revision+':'+page+'$','u');
 const toggle=new RegExp('^nw:1:t:'+net+':'+revision+':'+group+':'+revision+':'+page+'$','u');
@@ -37,7 +41,7 @@ const validClock=(value:number)=>Number.isSafeInteger(value)&&value>=0&&value<=8
 export function validOwnerNetworkRoute(data:unknown):boolean{
  if(typeof data!=='string'||Buffer.byteLength(data,'utf8')>64)return false;
  return data==='mi:1:i:01:03'||home.test(data)||begin.test(data)||
-  [list,detail,rename,remove,pick,toggle,stalePage,stalePick,staleBatch,policySources,policyPreview,confirm,cancel,historyPage,historyView].some(re=>re.test(data));
+  [list,detail,rename,remove,pick,toggle,stalePage,stalePick,staleBatch,policySources,policyPreview,greetingSources,greetingPreview,confirm,cancel,historyPage,historyView].some(re=>re.test(data));
 }
 function approved(s:BotState,policy:Policy,actor:string,now:number):Chat[]{
  const counts=new Map<string,number>();
@@ -118,6 +122,7 @@ export class OwnerNetworkEditor{
    'المجموعات الفعالة هي المعتمدة بنفس إصدار ارتباطها فقط؛ لا تُنقل إليها حقوق البوت.',
    [[btn('👥 إدارة المجموعات','nw:1:g:'+n.id+':0')],
     [btn('📑 سياسات الشبكة المشتركة','nw:1:y:'+n.id+':0')],
+    [btn('👋 قوالب الترحيب المشتركة','nw:1:w:'+n.id+':0')],
     ...(stale>0?[[btn('🧹 مراجعة الارتباطات القديمة','nw:1:s:'+n.id+':0')]]:[]),
     [btn('✏️ إعادة تسمية الشبكة','nw:1:e:'+n.id)],
     ...(n.members.length===0?[[btn('🗑️ حذف الشبكة','nw:1:x:'+n.id)]]:[]),
@@ -264,6 +269,110 @@ export class OwnerNetworkEditor{
      [btn('✖ إلغاء المعاينة','nw:1:k:'+ref.slice(2))],
      ...(nav.length?[nav]:[]),
      [btn('↩️ اختيار المصدر','nw:1:y:'+id+':0')]]);
+  });
+ }
+
+
+ /** NETWORK-002 greeting templates are separate from operational policies.
+  * The source and EVERY destination require current per-chat authorization.
+  * An existing destination config is an unconditional local override, even if
+  * greetings are disabled; it must never be silently replaced by the network. */
+ private greetingSourceList(s:BotState,actor:string,now:number,n:GroupNetwork):
+  {chat:Chat;config:CommunityConfig}[]{
+  const current=approved(s,this.policy,actor,now);
+  const configs=s.phase4Community?.configs??[];
+  return n.members.flatMap(member=>{
+   const chat=current.find(c=>c.id===member.chatId&&c.version===member.version);
+   if(!chat||!chat.scopes.includes('navigation')||
+      !this.policy.canUseChat(s,chat.id,'navigation'))return [];
+   const rows=configs.filter(c=>c.chatId===chat.id);
+   const config=rows[0];
+   if(rows.length!==1||!validCommunityConfig(config)||
+      config.version<1)return [];
+   return [{chat,config}];
+  }).sort((a,b)=>a.chat.id.localeCompare(b.chat.id));
+ }
+ private greetingSelection(s:BotState,actor:string,now:number,
+  id:string,sourceId:string):{
+   network:GroupNetwork;source:CommunityConfig;targets:Chat[];digest:string
+  }|null{
+  if(!this.auth(s,actor,now))return null;
+  const network=this.find(s,id);
+  if(!network)return null;
+  const source=this.greetingSourceList(s,actor,now,network).find(
+   x=>x.chat.id===sourceId);
+  if(!source)return null;
+  const current=approved(s,this.policy,actor,now);
+  const configs=s.phase4Community?.configs??[];
+  const targets=network.members.flatMap(m=>{
+   if(m.chatId===sourceId)return [];
+   const chat=current.find(c=>c.id===m.chatId&&c.version===m.version);
+   if(!chat||!chat.scopes.includes('navigation')||
+      !this.policy.canUseChat(s,chat.id,'navigation')||
+      configs.some(c=>c.chatId===chat.id))return [];
+   return [chat];
+  }).sort((a,b)=>a.id.localeCompare(b.id));
+  // Owner approval is the authority, not this digest. The transaction
+  // reevaluates both authority and ALL inputs when consuming the receipt.
+  const digest=createHash('sha256').update(JSON.stringify([
+   network,s.chats,configs,s.privateSettingsRevision??0,
+   s.privateFeatures['owner.dashboard']
+  ])).digest('hex');
+  return {network,source:source.config,targets,digest};
+ }
+ private greetingSourcesScreen(s:BotState,actor:string,now:number,
+  id:string,p:number):OwnerInlineScreen|null{
+  const network=this.find(s,id);if(!network)return null;
+  const sources=this.greetingSourceList(s,actor,now,network);
+  const pages=Math.max(1,Math.ceil(sources.length/SIZE));
+  if(p<0||p>=pages)return null;
+  const rows=sources.slice(p*SIZE,(p+1)*SIZE).map(x=>[
+   btn('👋 المصدر '+x.chat.id+' · v'+x.config.version,
+    'nw:1:v:'+id+':'+x.chat.id+':0')]);
+  const nav:{text:string;callback_data:string}[]=[];
+  if(p)nav.push(btn('⬅️ السابق','nw:1:w:'+id+':'+(p-1)));
+  if((p+1)*SIZE<sources.length)nav.push(btn('➡️ التالي','nw:1:w:'+id+':'+(p+1)));
+  if(nav.length)rows.push(nav);
+  rows.push([btn('↩️ بطاقة الشبكة','nw:1:d:'+id),btn('🏠 لوحة المالك','mi:1:h')]);
+  return ui('<b>👋 قوالب الترحيب والوداع للشبكة</b>\n'+
+   'اختر المجموعة المصدر المعتمدة لنسخ القوالب النصية فقط إلى مجموعات الشبكة غير المضبوطة.\n'+
+   'مصادر متاحة: '+sources.length+' · صفحة '+(p+1)+' من '+pages+'\n'+
+   'النسخ لا يشغل الترحيب أو الوداع أو الردود أو أي إجراء Telegram.\n'+
+   'لا تُنسخ الصور والأزرار والروابط والإعدادات التشغيلية أو الأسرار.',rows);
+ }
+ private async previewGreeting(actor:string,id:string,sourceId:string,p:number):
+  Promise<OwnerInlineScreen|null>{
+  return this.store.transaction(s=>{
+   const now=this.clock();
+   const ctx=this.greetingSelection(s,actor,now,id,sourceId);
+   if(!ctx||p<0||p>999||p>=Math.ceil(ctx.targets.length/SIZE))return null;
+   const selected=ctx.targets.slice(p*SIZE,(p+1)*SIZE);
+   if(!selected.length||selected.length>SIZE)return null;
+   const ref='c_'+randomBytes(18).toString('base64url');
+   if(s.callbacks.some(c=>c.ref===ref))return null;
+   s.callbacks.push({ref,action:PREFIX+'greeting:'+JSON.stringify([
+    id,ctx.network.revision,sourceId,p,selected.map(c=>c.id),ctx.digest]),
+    actorId:actor,chatId:'private',policyVersion:0,
+    expiresAt:now+TTL,oneShot:true,used:false,revoked:false});
+   const nav:{text:string;callback_data:string}[]=[];
+   if(p)nav.push(btn('⬅️ السابق','nw:1:v:'+id+':'+sourceId+':'+(p-1)));
+   if((p+1)*SIZE<ctx.targets.length)nav.push(
+    btn('➡️ التالي','nw:1:v:'+id+':'+sourceId+':'+(p+1)));
+   return ui('<b>🔎 معاينة نشر قالب الترحيب المحلي</b>\n'+
+    'الشبكة: '+escape(ctx.network.name)+' · v'+ctx.network.revision+'\n'+
+    'المصدر: <code>'+sourceId+'</code> · إعداد v'+ctx.source.version+'\n'+
+    'النطاق: '+selected.length+' مجموعات (حد أقصى 8 لكل اعتماد)\n'+
+    selected.map(c=>'• <code>'+c.id+'</code> · v'+c.version).join('\n')+'\n'+
+    'مثال نص الترحيب: '+escape(ctx.source.welcome.text.slice(0,180))+'\n'+
+    'قوالب الانضمام المخصصة: '+Object.keys(ctx.source.welcomeByJoin??{}).length+'\n'+
+    'النسخ يشمل نصوص الترحيب والوداع وترجماتها وأنواع الانضمام والمغادرة فقط.\n'+
+    'لن تُنسخ أي صورة أو زر أو رابط أو إعداد تشغيل أو قواعد رد، ولن يُفعل إرسال.\n'+
+    'تُستثنى كل مجموعة لديها إعداد خاص ولو كان معطّلًا.\n'+
+    'التأكيد لمرة واحدة خلال دقيقتين مع فحص الصلاحيات والإصدارات مجددًا.',
+    [[btn('✅ تأكيد نسخ قوالب الترحيب','nw:1:c:'+ref.slice(2))],
+     [btn('✖ إلغاء المعاينة','nw:1:k:'+ref.slice(2))],
+     ...(nav.length?[nav]:[]),
+     [btn('↩️ اختيار المصدر','nw:1:w:'+id+':0')]]);
   });
  }
 
@@ -555,6 +664,61 @@ export class OwnerNetworkEditor{
       [btn('📑 مصادر السياسة','nw:1:y:'+id+':0')]]);
    }
 
+
+   if(receipt.action.startsWith(PREFIX+'greeting:')){
+    try{data=JSON.parse(receipt.action.slice((PREFIX+'greeting:').length));}
+    catch{return null;}
+    if(!Array.isArray(data)||data.length!==6||
+     typeof data[0]!=='string'||!/^[a-f0-9]{12}$/u.test(data[0])||
+     !Number.isSafeInteger(data[1])||data[1]<1||data[1]>9_999_999_999||
+     typeof data[2]!=='string'||!validId(data[2])||
+     !Number.isSafeInteger(data[3])||data[3]<0||data[3]>999||
+     !Array.isArray(data[4])||data[4].length<1||data[4].length>SIZE||
+     data[4].some((id:unknown)=>typeof id!=='string'||!validId(id))||
+     new Set(data[4]).size!==data[4].length||
+     typeof data[5]!=='string'||!/^[a-f0-9]{64}$/u.test(data[5]))return null;
+    const [id,revision,sourceId,p,ids,digest]=data as
+     [string,number,string,number,string[],string];
+    const ctx=this.greetingSelection(s,actor,now,id,sourceId);
+    if(!ctx||ctx.network.revision!==revision||ctx.digest!==digest||
+     JSON.stringify(ctx.targets.slice(p*SIZE,(p+1)*SIZE).map(c=>c.id))!==
+      JSON.stringify(ids))return null;
+    const selected=ctx.targets.slice(p*SIZE,(p+1)*SIZE);
+    if((s.phase4Community?.configs.length??0)+selected.length>500)return null;
+    const drafts=selected.map(chat=>{
+     const result=defaultCommunityConfig(chat.id);
+     result.version=1;
+     result.welcome.text=ctx.source.welcome.text;
+     if(ctx.source.welcome.localized)
+      result.welcome.localized=structuredClone(ctx.source.welcome.localized);
+     if(ctx.source.welcomeByJoin)
+      result.welcomeByJoin=structuredClone(ctx.source.welcomeByJoin);
+     result.farewell.text=ctx.source.farewell.text;
+     if(ctx.source.farewell.localized)
+      result.farewell.localized=structuredClone(ctx.source.farewell.localized);
+     if(ctx.source.farewellByLeave)
+      result.farewellByLeave=structuredClone(ctx.source.farewellByLeave);
+     // Disabled by construction: no buttons/photos, URLs, user IDs,
+     // automatic replies, operational flags or moderation rights.
+     return result;
+    });
+    if(drafts.length!==ids.length||drafts.some(d=>!validCommunityConfig(d)||
+     d.welcome.enabled||d.farewell.enabled||d.repliesEnabled))return null;
+    s.phase4Community??=emptyCommunityState();
+    s.phase4Community.configs.push(...drafts);
+    receipt.used=true;
+    s.audit.push({actorId:actor,updateKey:'owner-network:'+nonce,
+     decision:'ALLOW',reason:'OWNER_NETWORK_GREETING_TEMPLATES_COPIED',
+     policyVersion:revision,at:now});
+    return ui('<b>✅ حُفظت قوالب الترحيب والوداع</b>\n'+
+     'الشبكة: '+escape(ctx.network.name)+'\n'+
+     'عدد المجموعات: '+drafts.length+'\n'+
+     'جميع قوالب المجموعة الجديدة معطّلة حتى يفعّلها مالك المجموعة.\n'+
+     'لم تُنسخ الوسائط أو الروابط أو إعدادات التشغيل، ولا اتصال Telegram.',
+     [[btn('🌐 بطاقة الشبكة','nw:1:d:'+id)],
+      [btn('👋 قوالب الترحيب','nw:1:w:'+id+':0')]]);
+   }
+
    if(receipt.action.startsWith(PREFIX+'clean-batch:')){
     try{data=JSON.parse(receipt.action.slice((PREFIX+'clean-batch:').length));}
     catch{return null;}
@@ -685,7 +849,8 @@ export class OwnerNetworkEditor{
   const reasons=new Set(['OWNER_NETWORK_CREATED','OWNER_NETWORK_RENAMED',
    'OWNER_NETWORK_DELETED','OWNER_NETWORK_MEMBER_ADDED','OWNER_NETWORK_MEMBER_REMOVED',
    'OWNER_NETWORK_STALE_MEMBER_REMOVED','OWNER_NETWORK_STALE_MEMBERS_PRUNED',
-   'OWNER_NETWORK_MONITOR_POLICIES_COPIED']);
+   'OWNER_NETWORK_MONITOR_POLICIES_COPIED',
+   'OWNER_NETWORK_GREETING_TEMPLATES_COPIED']);
   const entries:{nonce:string;reason:string;at:number;description:string}[]=[];
   for(const a of s.audit){
    if(!reasons.has(a.reason))continue;
@@ -707,6 +872,7 @@ export class OwnerNetworkEditor{
    else if(c.action.startsWith(PREFIX+'clean:'))prefix=PREFIX+'clean:';
    else if(c.action.startsWith(PREFIX+'clean-batch:'))prefix=PREFIX+'clean-batch:';
    else if(c.action.startsWith(PREFIX+'policy:'))prefix=PREFIX+'policy:';
+   else if(c.action.startsWith(PREFIX+'greeting:'))prefix=PREFIX+'greeting:';
    else continue;
    try{values=JSON.parse(c.action.slice(prefix.length));}catch{continue;}
    if(!Array.isArray(values))continue;
@@ -776,6 +942,19 @@ export class OwnerNetworkEditor{
     description='الشبكة: '+values[0]+' · نسخ السياسة من '+values[2]+
      ' إلى '+values[4].length+' مجموعات';
    }
+   if(description===null&&prefix===PREFIX+'greeting:'&&
+    a.reason==='OWNER_NETWORK_GREETING_TEMPLATES_COPIED'&&values.length===6&&
+    typeof values[0]==='string'&&/^[a-f0-9]{12}$/u.test(values[0])&&
+    Number.isSafeInteger(values[1])&&values[1]>=1&&
+    a.policyVersion===values[1]&&typeof values[2]==='string'&&validId(values[2])&&
+    Number.isSafeInteger(values[3])&&values[3]>=0&&values[3]<=999&&
+    Array.isArray(values[4])&&values[4].length>=1&&values[4].length<=SIZE&&
+    values[4].every((id:unknown)=>typeof id==='string'&&validId(id))&&
+    new Set(values[4]).size===values[4].length&&typeof values[5]==='string'&&
+    /^[a-f0-9]{64}$/u.test(values[5])){
+    description='الشبكة: '+values[0]+' · قوالب نصية من '+values[2]+
+     ' إلى '+values[4].length+' مجموعات';
+   }
    if(description!==null)entries.push({nonce:matched[1]!,reason:a.reason,at:a.at,description});
   }
   entries.sort((a,b)=>b.at-a.at||b.nonce.localeCompare(a.nonce));
@@ -793,7 +972,8 @@ export class OwnerNetworkEditor{
     e.reason==='OWNER_NETWORK_MEMBER_ADDED'?'ربط مجموعة':
     e.reason==='OWNER_NETWORK_STALE_MEMBER_REMOVED'?'تنظيف ارتباط قديم':
     e.reason==='OWNER_NETWORK_STALE_MEMBERS_PRUNED'?'تنظيف جماعي':
-    e.reason==='OWNER_NETWORK_MONITOR_POLICIES_COPIED'?'نسخ سياسة الشبكة':'فصل مجموعة')+
+    e.reason==='OWNER_NETWORK_MONITOR_POLICIES_COPIED'?'نسخ سياسة الشبكة':
+    e.reason==='OWNER_NETWORK_GREETING_TEMPLATES_COPIED'?'نسخ قوالب الترحيب':'فصل مجموعة')+
     ' · '+new Date(e.at).toISOString().slice(0,16).replace('T',' '),
     'nw:1:r:v:'+e.nonce)]);
   const nav:{text:string;callback_data:string}[]=[];
@@ -843,6 +1023,10 @@ export class OwnerNetworkEditor{
   if(py)return this.policySourceList(state,actor,now,py[1]!,Number(py[2]));
   const pz=policyPreview.exec(data);
   if(pz)return this.previewNetworkPolicy(actor,pz[1]!,pz[2]!,Number(pz[3]));
+  const gw=greetingSources.exec(data);
+  if(gw)return this.greetingSourcesScreen(state,actor,now,gw[1]!,Number(gw[2]));
+  const gv=greetingPreview.exec(data);
+  if(gv)return this.previewGreeting(actor,gv[1]!,gv[2]!,Number(gv[3]));
   const sp=stalePage.exec(data);
   if(sp)return this.staleMembersPage(state,actor,now,sp[1]!,Number(sp[2]));
   const sq=stalePick.exec(data);
