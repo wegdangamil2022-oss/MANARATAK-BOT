@@ -349,7 +349,7 @@ export class Phase4CommunityService{
   */
  async claimPrivateWelcome(actorId:string,chatId:string,memberName:string):Promise<string|null>{
   const now=this.clock();
-  if(!validNow(now)||!isGroup(chatId)||!/^[1-9]\\d{0,15}$/u.test(actorId)||
+  if(!validNow(now)||!isGroup(chatId)||!/^[1-9]\d{0,15}$/u.test(actorId)||
       !Number.isSafeInteger(Number(actorId))||typeof memberName!=='string'||
       memberName.length>200)return null;
   return this.store.transaction(s=>{
@@ -547,8 +547,8 @@ export class Phase4CommunityService{
     '\nالوجهة: '+clean(draft.buttonUrl??'')+'\nزر رابط فقط؛ لا يستدعي أمرًا داخل البوت.';
   if(draft.kind==='WELCOME_BUTTONS_CLEAR'||draft.kind==='FAREWELL_BUTTONS_CLEAR')
    return '<b>حذف جميع أزرار الرابط</b> من '+(draft.kind==='WELCOME_BUTTONS_CLEAR'?'الترحيب':'الوداع');
-  if(draft.kind==='PRIVATE_WELCOME_ON')return 'تفعيل رابط ترحيب خاص اختياري بعد الانضمام.\\nلا يرسل البوت رسالة للعضو دون فتحه الخاص بنفسه؛ يتطلب عضوية حقيقية وانضمامًا حديثًا.\\nالرسالة العامة ما تزال ظاهرة لأعضاء المجموعة.';
-  if(draft.kind==='PRIVATE_WELCOME_OFF')return 'إيقاف رابط الترحيب الخاص وإبطال رسائل الخاص المعلقة ذات الإعداد القديم.\\nلا يعطل الترحيب العام.';
+  if(draft.kind==='PRIVATE_WELCOME_ON')return 'تفعيل رابط ترحيب خاص اختياري بعد الانضمام.\nلا يرسل البوت رسالة للعضو دون فتحه الخاص بنفسه؛ يتطلب عضوية حقيقية وانضمامًا حديثًا.\nالرسالة العامة ما تزال ظاهرة لأعضاء المجموعة.';
+  if(draft.kind==='PRIVATE_WELCOME_OFF')return 'إيقاف رابط الترحيب الخاص وإبطال رسائل الخاص المعلقة ذات الإعداد القديم.\nلا يعطل الترحيب العام.';
   if(draft.kind==='WELCOME_VARIANT_SET')return '<b>معاينة ترحيب حسب نوع الدخول: '+
    safe(draft.joinKind??'')+'</b>\n'+safe(draft.text??'')+'\nلن يُرسل حتى تفعيل الترحيب.';
   if(draft.kind==='WELCOME_VARIANT_CLEAR')return '<b>مسح ترحيب نوع الدخول: '+
