@@ -73,7 +73,7 @@ import {parseB6ExplicitMention} from './b6-telegram-mention.js';
 import type {ModerationService} from './moderation.js';
 import {Phase4CommunityService} from './phase4-community.js';
 import {phase4CommunityScreen,parsePhase4CommunityCommand} from './phase4-community-ui.js';
-import type {CommunityInput} from './phase4-community-model.js';
+import type {CommunityInput,CommunityJoinKind} from './phase4-community-model.js';
 import {validCommunityPhotoId} from './phase4-community-rich.js';
 import type {ModerationPurgeService} from './moderation-purge.js';
 import {isReplyDeleteCommand,previewReplyDelete,handleReplyDeleteCallback} from './telegram-reply-delete.js';
@@ -135,7 +135,7 @@ export interface TelegramApplicationOptions {
   community?:Phase4CommunityService;
 }
 
-type Event = {updateId: number; actorId: string; chatId: string; kind: 'private' | 'group'; text: string; communityKind?:'JOIN'|'LEAVE'; communityChange?:'TITLE_CHANGED'|'PHOTO_CHANGED'|'PHOTO_REMOVED'; serviceSentAtMs?:number; communityMemberId?:string; memberName?:string; groupName?:string; topicId?:number; entities?:unknown; messageId?:number; replyTo?:unknown; document?: IncomingDocument; protectionMedia?:ProtectionMedia; edited?:true; forwarded?:true; callbackData?:string; callbackQueryId?:string; callbackMessageId?:number};
+type Event = {updateId: number; actorId: string; chatId: string; kind: 'private' | 'group'; text: string; communityKind?:'JOIN'|'LEAVE'; communityJoinKind?:CommunityJoinKind; communityChange?:'TITLE_CHANGED'|'PHOTO_CHANGED'|'PHOTO_REMOVED'; serviceSentAtMs?:number; communityMemberId?:string; memberName?:string; groupName?:string; topicId?:number; entities?:unknown; messageId?:number; replyTo?:unknown; document?: IncomingDocument; protectionMedia?:ProtectionMedia; edited?:true; forwarded?:true; callbackData?:string; callbackQueryId?:string; callbackMessageId?:number};
 const isObject=(x:unknown):x is Record<string,unknown>=>Boolean(x)&&typeof x==='object'&&!Array.isArray(x);
 const positiveId=(x:unknown): x is number=>typeof x==='number'&&Number.isSafeInteger(x)&&x>0;
 const chatId=(x:unknown): x is number=>typeof x==='number'&&Number.isSafeInteger(x)&&x!==0;
@@ -234,9 +234,13 @@ function eventFrom(value:unknown):{event?:Event;reason:string} {
      m.first_name.trim().slice(0,75):'عضو';
    const memberName=human.length===1?name(first):human.slice(0,3).map(name).join('، ')+
       (human.length>3?' وآخرين':'');
+   // Only Telegram's service fields establish the join category.
+   const communityJoinKind:CommunityJoinKind|undefined=members===undefined?undefined:
+      human.length>1?'BATCH':msg.from.id===first.id?'SELF':'ADDED';
    return {event:{updateId:value.update_id as number,actorId:String(msg.from.id),
      chatId:String(msg.chat.id),kind,text:'',communityKind:members!==undefined?'JOIN':'LEAVE',
-     communityMemberId:String(first.id),memberName,messageId:msg.message_id as number,
+     communityMemberId:String(first.id),memberName,
+     ...(communityJoinKind?{communityJoinKind}:{}),messageId:msg.message_id as number,
      ...(msg.date!==undefined?{serviceSentAtMs:(msg.date as number)*1000}:{}),
      groupName:typeof msg.chat.title==='string'?msg.chat.title:'المجموعة',
      ...(msg.message_thread_id!==undefined?{topicId:msg.message_thread_id as number}:{})},reason:'VALID'};
@@ -454,6 +458,7 @@ export class TelegramUpdateApplication {
       actorId:event.communityMemberId??event.actorId,
       memberName:event.memberName??'عضو',groupName:event.groupName??'المجموعة',
       ...(event.text?{messageText:event.text}:{}),
+      ...(event.communityJoinKind?{joinKind:event.communityJoinKind}:{}),
       ...(event.topicId!==undefined?{topicId:event.topicId}:{})};
     const proposal=await this.opts.community.propose(input,
       'b3-webhook:'+this.opts.botId+':'+event.updateId);
