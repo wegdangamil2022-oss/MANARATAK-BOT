@@ -32,6 +32,8 @@ import {CaptchaJoinNotices} from './captcha-join-notices.js';
 import {GroupServiceMessageCleanup} from './group-service-message-cleanup.js';
 import {CaptchaEscalationPolicy} from './captcha-escalation-policy.js';
 import {CaptchaService} from './captcha.js';
+import {GroupWelcomeFarewell} from './group-welcome-farewell.js';
+import {TelegramGroupGreetingSender} from './telegram-group-greeting-sender.js';
 
 export interface LiveTelegramConfig{
  ownerId:string;botId:string;botUsername:string;stateFile:string;
@@ -207,12 +209,20 @@ export async function createLiveTelegramServer(config:LiveTelegramConfig,
    }):undefined;
  const captchaEscalation=phase3?new CaptchaEscalationPolicy(store,policy,
   new CaptchaService(store,policy,(chat,actor)=>membership.verifyMembership(chat,actor),Date.now),Date.now):undefined;
+ const welcomeFarewell=phase3?new GroupWelcomeFarewell(store,policy,
+  new TelegramGroupGreetingSender(check.token,request),Date.now,safetyGate,
+  async chat=>{
+   if(!await safetyGate())return 'UNKNOWN';
+   const rights=await new TelegramBotApiModerationGateway(check.token,request,safetyGate).inspectBotAdminRights(chat);
+   return rights.delete;
+  }):undefined;
  const app=new TelegramUpdateApplication({store,policy,education,admin,faq,links,
   botId:check.botId,botUsername:check.botUsername,
   ...(messageMetadata?{messageMetadata}:{}),
   ...(joinNotices?{joinNotices}:{}),
   ...(serviceCleanup?{serviceCleanup}:{}),
   ...(captchaEscalation?{captchaEscalation}:{}),
+  ...(welcomeFarewell?{welcomeFarewell}:{}),
   ...(phase3?{adminRoles:new TelegramAdminRoleGateway(check.token,request,safetyGate),moderation:phase3.moderation,purge:phase3.purge,groupPermissions:phase3.groupPermissions,protectionEnforcer:phase3.protectionEnforcer,moderationRights:{gateway:new TelegramBotApiModerationGateway(check.token,request,safetyGate),safety:safetyGate},ephemeralVerification:true}:{}),
   membership:(chatId,actorId)=>membership.verifyMembership(chatId,actorId),subscription,
   documentDownload:new TelegramBotApiDocumentDownloader(check.token,request,safetyGate),
@@ -238,6 +248,7 @@ export async function createLiveTelegramServer(config:LiveTelegramConfig,
    if(phase3&&check.phase3TimersEnabled===true){await messageMetadata!.prune();const verified=await subscription.tickAutomatic(true,safetyGate);if(verified.status==='INVALID')throw Error('SUBSCRIPTION_MAINTENANCE_INVALID');const pending=await dispatcher.drainVerificationFallbacks();if(pending.status==='INVALID')throw Error('SUBSCRIPTION_FALLBACK_INVALID');const cleaned=await dispatcher.cleanupVerificationFallbacks();if(cleaned.status==='INVALID')throw Error('SUBSCRIPTION_CLEANUP_INVALID');}
    if(joinNotices){await joinNotices.drain();await joinNotices.cleanup();}
    if(serviceCleanup)await serviceCleanup.cleanup();
+   if(welcomeFarewell&&check.phase3TimersEnabled===true){await welcomeFarewell.drain();await welcomeFarewell.cleanup();}
    if(notices)await notices.drain();
    if(ruleNotices)await ruleNotices.drain();
    if(subscriptionRightsMonitor)await subscriptionRightsMonitor.tick();
