@@ -282,8 +282,20 @@ export class SubscriptionGate {
       }
       return this.moderation.setSubscriptionReason(chatId,memberId,'subscription-gate',false,stillCurrent);
     }
-    if(result.status==='NOT_MEMBER')
+    if(result.status==='NOT_MEMBER'){
+      // A verified CAPTCHA-owned mute already holds the member during the
+      // channel step. Do not attempt a second remote restriction of an already
+      // restricted Telegram member or create a conflicting local reason.
+      const captcha=new CaptchaService(this.store,this.policy,async()=> 'UNKNOWN',this.clock),
+       enforcement=new CaptchaEnforcement(this.store,this.policy,captcha,undefined,undefined,this.clock),
+       challenge=captcha.challenge(before,chatId,memberId);
+      if(enforcement.consent(before,chatId)?.enabled===true&&challenge&&
+        before.moderationReasons.some(r=>r.chatId===chatId&&r.memberId===memberId&&r.active&&
+          r.source==='MANUAL'&&r.kind==='MUTE'&&r.reference===challenge.reference&&
+          r.createdBy===this.policy.ownerId))
+        return {status:'NO_CHANGE',reason:'CAPTCHA_HOLDS_ONBOARDING_RESTRICTION'};
       return this.moderation.setSubscriptionReason(chatId,memberId,'subscription-gate',true,stillCurrent);
+    }
     return result; // Unavailable is NOT a confirmed violation or punishment.
   }
 }
