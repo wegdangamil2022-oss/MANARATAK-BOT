@@ -56,6 +56,15 @@ export class Phase4CommunityService{
    .map(c=>({chatId:c.id,version:c.version,configured:!!activeConfig(s,c.id)}))
    .sort((a,b)=>a.chatId.localeCompare(b.chatId));
  }
+ /** The owner can bind only currently approved, visible same-group FAQ entries.
+  * Answers and unpublished sources are not displayed or copied into rules. */
+ async listReviewedFAQs(actorId:string,chatId:string):Promise<{id:string;question:string}[]>{
+  const s=await this.store.snapshot();groupAvailable(s,this.policy,actorId,chatId);
+  return s.faqEntries.filter(q=>q.scope===chatId&&q.status==='APPROVED'&&
+    reviewedGroupFAQAnswer(s,chatId,q.id)!==null)
+   .sort((a,b)=>a.question.localeCompare(b.question)||a.id.localeCompare(b.id))
+   .slice(0,200).map(q=>({id:q.id,question:q.question.slice(0,240)}));
+ }
  async view(actorId:string,chatId:string):Promise<CommunityConfig>{
   const s=await this.store.snapshot();groupAvailable(s,this.policy,actorId,chatId);
   return structuredClone(configured(s,chatId));
