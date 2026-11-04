@@ -1,10 +1,10 @@
 import {Phase4CommunityService,type DraftRequest} from './phase4-community.js';
 import type {OwnerInlineScreen,TelegramInlineKeyboard} from './telegram-inline-owner.js';
-import type {CommunityDraftKind,ReplyMatch,CommunityLanguage,CommunityCalendar,CommunityClockFormat,CommunityJoinKind} from './phase4-community-model.js';
+import type {CommunityDraftKind,ReplyMatch,CommunityLanguage,CommunityCalendar,CommunityClockFormat,CommunityJoinKind,CommunityLeaveKind} from './phase4-community-model.js';
 import {validCommunityRulesUrl,validCommunityTimeZone} from './phase4-community-model.js';
 import {validCommunityLinkButton,validCommunityPhotoId} from './phase4-community-rich.js';
 const group=/^-[1-9]\d{0,15}$/u,hex=/^[a-f0-9]{24}$/u;
-const route=/^p4c:1:(?:q:-[1-9]\d{0,15}|b:-[1-9]\d{0,15}(?::[sam])?|k:-[1-9]\d{0,15}|z:-[1-9]\d{0,15}|n:-[1-9]\d{0,15}|a:-[1-9]\d{0,15}|y:-[1-9]\d{0,15}(?::[1-9]\d{0,9})?|l:(?:0|[1-9]\d{0,2})|g:-[1-9]\d{0,15}|h:-[1-9]\d{0,15}|v:-[1-9]\d{0,15}:[wf]|j:-[1-9]\d{0,15}:[wf]:[pb]|r:-[1-9]\d{0,15}:(?:0|[1-9]\d{0,2})|t:-[1-9]\d{0,15}:[wfrsgbdp]:[01]|d:-[1-9]\d{0,15}:[a-f0-9]{12}|e:-[1-9]\d{0,15}:[a-f0-9]{12}:[01]|u:-[1-9]\d{0,15}:(?:ar|en)|o:-[1-9]\d{0,15}:(?:12|24):[gh]|[cx]:[a-f0-9]{24})$/u;
+const route=/^p4c:1:(?:q:-[1-9]\d{0,15}|b:-[1-9]\d{0,15}(?::[sam])?|m:-[1-9]\d{0,15}(?::[sr])?|k:-[1-9]\d{0,15}|z:-[1-9]\d{0,15}|n:-[1-9]\d{0,15}|a:-[1-9]\d{0,15}|y:-[1-9]\d{0,15}(?::[1-9]\d{0,9})?|l:(?:0|[1-9]\d{0,2})|g:-[1-9]\d{0,15}|h:-[1-9]\d{0,15}|v:-[1-9]\d{0,15}:[wf]|j:-[1-9]\d{0,15}:[wf]:[pb]|r:-[1-9]\d{0,15}:(?:0|[1-9]\d{0,2})|t:-[1-9]\d{0,15}:[wfrsgbdpu]:[01]|d:-[1-9]\d{0,15}:[a-f0-9]{12}|e:-[1-9]\d{0,15}:[a-f0-9]{12}:[01]|u:-[1-9]\d{0,15}:(?:ar|en)|o:-[1-9]\d{0,15}:(?:12|24):[gh]|[cx]:[a-f0-9]{24})$/u;
 export const validPhase4CommunityRoute=(s:unknown):s is string=>typeof s==='string'&&
  Buffer.byteLength(s,'utf8')<=64&&route.test(s);
 const esc=(s:string):string=>s.replace(/&/gu,'&amp;').replace(/</gu,'&lt;')
@@ -18,6 +18,10 @@ const help='للتعديل أرسل في خاص البوت أحد الأوامر
  +'<code>/privatewelcomeoff -100123</code>\n'
  +'<code>/clearwelcomevariant -100123 SELF</code>\n'
  +'<code>/setfarewell -100123 نص الوداع</code>\n'
+ +'<code>/farewellvariant -100123 SELF مع السلامة {العضو}</code>\n'
+ +'<code>/clearfarewellvariant -100123 SELF</code>\n'
+ +'<code>/farewellremovedon -100123</code>\n'
+ +'<code>/farewellremovedoff -100123</code>\n'
  +'<code>/replyadd -100123 WORD منحة | راجع قسم المنح الدراسية</code>\n'
  +'<code>/replyadd -100123 topic:777 COMMAND m_grants | رابط المنح</code>\n'
  +'<code>/replycheck -100123 منحة دراسية</code>\n'
@@ -51,6 +55,15 @@ export function parsePhase4CommunityCommand(text:string):
  {kind:'DIAGNOSE';chatId:string;sample:string;topicId?:number}|
  {kind:'DECISIONS';chatId:string}|null{
  if(text==='/community')return {kind:'HOME'};
+ const removalSwitch=/^\/farewellremoved(on|off) (-[1-9]\d{0,15})$/u.exec(text);
+ if(removalSwitch)return {kind:'EDIT',chatId:removalSwitch[2]!,
+  request:{kind:removalSwitch[1]==='on'?'FAREWELL_REMOVED_ON':'FAREWELL_REMOVED_OFF'}};
+ const farewellVariant=/^\/farewellvariant (-[1-9]\d{0,15}) (SELF|REMOVED) ([^\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]{1,800})$/u.exec(text);
+ if(farewellVariant)return {kind:'EDIT',chatId:farewellVariant[1]!,
+  request:{kind:'FAREWELL_VARIANT_SET',leaveKind:farewellVariant[2]! as CommunityLeaveKind,text:farewellVariant[3]!.trim()}};
+ const farewellClear=/^\/clearfarewellvariant (-[1-9]\d{0,15}) (SELF|REMOVED)$/u.exec(text);
+ if(farewellClear)return {kind:'EDIT',chatId:farewellClear[1]!,
+  request:{kind:'FAREWELL_VARIANT_CLEAR',leaveKind:farewellClear[2]! as CommunityLeaveKind}};
  const privateGreeting=/^\/privatewelcome(on|off) (-[1-9]\d{0,15})$/u.exec(text);
  if(privateGreeting)return {kind:'EDIT',chatId:privateGreeting[2]!,
   request:{kind:privateGreeting[1]==='on'?'PRIVATE_WELCOME_ON':'PRIVATE_WELCOME_OFF'}};
@@ -248,6 +261,8 @@ export async function phase4CommunityScreen(service:Phase4CommunityService,actor
    '\nقالب الترحيب المترجم: '+(c.welcome.localized?.[c.language??'ar']?'متاح':'غير محدد')+
    '\nقالب الوداع المترجم: '+(c.farewell.localized?.[c.language??'ar']?'متاح':'غير محدد')+
    '\nأنواع الترحيب المخصصة: '+Object.keys(c.welcomeByJoin??{}).length+' من 3'+
+   '\nأنواع الوداع المخصصة: '+Object.keys(c.farewellByLeave??{}).length+' من 2'+
+   '\nوداع العضو الذي أزالته الإدارة: '+label(c.farewellOnRemoval??false)+
    '\nترحيب خاص بطلب العضو: '+label(c.privateWelcomeEnabled??false)+
    '\nصورة الترحيب: '+(c.welcome.photoFileId?'معتمدة':'غير مضافة')+
    '\nصورة الوداع: '+(c.farewell.photoFileId?'معتمدة':'غير مضافة')+
@@ -264,6 +279,7 @@ export async function phase4CommunityScreen(service:Phase4CommunityService,actor
      'p4c:1:t:'+id+':d:'+(c.decisionLogEnabled?'0':'1'))],
     [btn('🌙 ساعات الهدوء','p4c:1:q:'+id),btn('🧵 حدود الموضوعات','p4c:1:y:'+id)],
     [btn('🚪 أنواع الانضمام','p4c:1:b:'+id)],
+    [btn('👋 أنواع المغادرة','p4c:1:m:'+id)],
     [btn('🔒 '+(c.privateWelcomeEnabled?'إيقاف':'تفعيل')+' الترحيب الخاص الاختياري',
      'p4c:1:t:'+id+':p:'+(c.privateWelcomeEnabled?'0':'1'))],
     [btn('🖼️ وسائط الترحيب','p4c:1:v:'+id+':w'),
@@ -386,6 +402,41 @@ export async function phase4CommunityScreen(service:Phase4CommunityService,actor
     [btn('❌ إلغاء','p4c:1:x:'+draft.id)],
     [btn('↩️ أنواع الانضمام','p4c:1:b:'+id)]])};
  }
+ const farewellKinds=/^p4c:1:m:(-[1-9]\d{0,15})$/u.exec(data);
+ if(farewellKinds){
+  const id=farewellKinds[1]!,config=await service.view(actorId,id);
+  const kinds=[['SELF','غادر بنفسه','s'],['REMOVED','أزالته الإدارة','r']] as const;
+  const rows:{text:string;callback_data:string}[][]=[];
+  for(const [kind,label,code] of kinds){
+   if(config.farewellByLeave?.[kind])
+    rows.push([btn('🗑️ إزالة قالب '+label,'p4c:1:m:'+id+':'+code)]);
+  }
+  rows.push([btn((config.farewellOnRemoval?'⛔ إيقاف':'🔒 تفعيل')+' وداع الإزالة',
+   'p4c:1:t:'+id+':u:'+(config.farewellOnRemoval?'0':'1'))]);
+  rows.push([btn('↩️ إعدادات المجموعة','p4c:1:g:'+id)]);
+  return {text:'<b>👋 قوالب الوداع حسب نوع المغادرة</b>\nالمجموعة: <code>'+id+'</code>'+
+   '\n\n'+kinds.map(([kind,label])=>'• '+label+' ('+kind+'): '+
+    (config.farewellByLeave?.[kind]?esc(config.farewellByLeave[kind]!.slice(0,100)):'القالب العام أو المترجم')).join('\n')+
+   '\n\nوداع الإزالة الإدارية: '+(config.farewellOnRemoval?'مسموح بعد اعتماد المالك':'متوقف افتراضيًا حفاظًا على الخصوصية')+
+   '\nمن حقول Telegram الرسمية فقط، لا يمكن لرسالة طالب ادعاء مغادرة أحد.'+
+   '\nلتخصيص النصوص في خاص المالك:\n'+
+   '<code>/farewellvariant '+id+' SELF بالتوفيق {العضو}</code>\n'+
+   '<code>/farewellvariant '+id+' REMOVED مع السلامة {العضو}</code>\n'+
+   'التخصيص لا يفعّل الوداع أو إعلان الإزالة من تلقاء نفسه. كل تعديل يخضع للمعاينة والموافقة.',
+   keyboard:k(rows)};
+ }
+ const clearFarewellKind=/^p4c:1:m:(-[1-9]\d{0,15}):([sr])$/u.exec(data);
+ if(clearFarewellKind){
+  const id=clearFarewellKind[1]!,kind:CommunityLeaveKind=
+   clearFarewellKind[2]==='s'?'SELF':'REMOVED';
+  const config=await service.view(actorId,id);
+  if(!config.farewellByLeave?.[kind])return null;
+  const draft=await service.pending(actorId,{kind:'FAREWELL_VARIANT_CLEAR',leaveKind:kind},id);
+  return {text:service.preview(draft)+'\nلن يطبق الحذف قبل الاعتماد.',
+   keyboard:k([[btn('✅ اعتماد الحذف','p4c:1:c:'+draft.id)],
+    [btn('❌ إلغاء','p4c:1:x:'+draft.id)],
+    [btn('↩️ أنواع المغادرة','p4c:1:m:'+id)]])};
+ }
  const mediaView=/^p4c:1:v:(-[1-9]\d{0,15}):([wf])$/u.exec(data);
  if(mediaView){
   const id=mediaView[1]!,kind=mediaView[2]!,config=await service.view(actorId,id);
@@ -475,12 +526,13 @@ export async function phase4CommunityScreen(service:Phase4CommunityService,actor
    '\n\nلا يُخزّن هذا السجل الأسماء والصور نفسها.',
    keyboard:k([[btn('↩️ إعدادات المجموعة','p4c:1:g:'+history[1])]])};
  }
- const toggle=/^p4c:1:t:(-[1-9]\d{0,15}):([wfrsgbd]):([01])$/u.exec(data);
+ const toggle=/^p4c:1:t:(-[1-9]\d{0,15}):([wfrsgbdpu]):([01])$/u.exec(data);
  if(toggle){
   const field=toggle[2]!,value=toggle[3]!;
   const kind:CommunityDraftKind=(field==='w'?'WELCOME_':field==='f'?'FAREWELL_':
     field==='r'?'REPLIES_':field==='s'?'SERVICE_CLEANUP_':field==='b'?'REPLY_CLEANUP_':
-    field==='d'?'DECISION_LOG_':field==='p'?'PRIVATE_WELCOME_':'CHANGE_LOG_')+
+    field==='d'?'DECISION_LOG_':field==='p'?'PRIVATE_WELCOME_':
+    field==='u'?'FAREWELL_REMOVED_':'CHANGE_LOG_')+
    (value==='1'?'ON':'OFF') as CommunityDraftKind;
   const draft=await service.pending(actorId,{kind},toggle[1]!);
   return {text:'<b>تأكيد تغيير تفاعل المجموعة</b>\n'+service.preview(draft)+
