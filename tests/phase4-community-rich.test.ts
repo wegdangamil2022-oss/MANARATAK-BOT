@@ -218,7 +218,8 @@ for(const engine of ['json','sqlite'] as const){
    assert.ok(mediaButton);
    const page=await phase4CommunityScreen(f.community,OWNER,mediaButton!.callback_data);
    assert.ok(page);
-   assert.match(page.text,/صورة الترحيب/u);
+   assert.match(page.text,/وسائط الترحيب/u);
+   assert.match(page.text,/الصورة: معتمدة/u);
    assert.match(page.text,/\/welcomephoto/u);
    assert.equal(page.text.includes(PHOTO),false);
    const clearPhoto=page.keyboard.inline_keyboard.flat()
