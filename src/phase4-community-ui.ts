@@ -2,6 +2,7 @@ import {Phase4CommunityService,type DraftRequest} from './phase4-community.js';
 import type {OwnerInlineScreen,TelegramInlineKeyboard} from './telegram-inline-owner.js';
 import type {CommunityDraftKind,ReplyMatch,CommunityLanguage,CommunityCalendar,CommunityClockFormat} from './phase4-community-model.js';
 import {validCommunityRulesUrl} from './phase4-community-model.js';
+import {validCommunityLinkButton,validCommunityPhotoId} from './phase4-community-rich.js';
 const group=/^-[1-9]\d{0,15}$/u,hex=/^[a-f0-9]{24}$/u;
 const route=/^p4c:1:(?:l:(?:0|[1-9]\d{0,2})|g:-[1-9]\d{0,15}|h:-[1-9]\d{0,15}|r:-[1-9]\d{0,15}:(?:0|[1-9]\d{0,2})|t:-[1-9]\d{0,15}:[wfrsg]:[01]|d:-[1-9]\d{0,15}:[a-f0-9]{12}|e:-[1-9]\d{0,15}:[a-f0-9]{12}:[01]|u:-[1-9]\d{0,15}:(?:ar|en)|o:-[1-9]\d{0,15}:(?:12|24):[gh]|[cx]:[a-f0-9]{24})$/u;
 export const validPhase4CommunityRoute=(s:unknown):s is string=>typeof s==='string'&&
@@ -24,11 +25,35 @@ const help='للتعديل أرسل في خاص البوت أحد الأوامر
  +'<code>/greetinglang -100123 en</code>\n'
  +'<code>/greetingtext -100123 welcome en Welcome {العضو}</code>\n'
  +'<code>/greetingclock -100123 +03:00 12 hijri</code>\n'
+ +'<code>/welcomephoto -100123 PHOTO_FILE_ID</code>\n'
+ +'<code>/clearwelcomephoto -100123</code>\n'
+ +'<code>/welcomebutton -100123 دليل القوانين | https://t.me/StudyinEurope3</code>\n'
+ +'<code>/clearwelcomebuttons -100123</code>\n'
  +'يظهر تأكيد مستقل لكل تعديل، وتظل الميزات مغلقة حتى تفعّلها.';
 export function parsePhase4CommunityCommand(text:string):
  {kind:'HOME'}|{kind:'VIEW';chatId:string}|{kind:'EDIT';chatId:string;request:DraftRequest}|
  {kind:'DIAGNOSE';chatId:string;sample:string;topicId?:number}|null{
  if(text==='/community')return {kind:'HOME'};
+ const photo=/^\/(welcomephoto|farewellphoto) (-[1-9]\d{0,15}) ([A-Za-z0-9_-]{25,200})$/u.exec(text);
+ if(photo)return validCommunityPhotoId(photo[3])?
+  {kind:'EDIT',chatId:photo[2]!,request:{
+   kind:photo[1]==='welcomephoto'?'WELCOME_PHOTO_SET':'FAREWELL_PHOTO_SET',
+   photoFileId:photo[3]!}}:null;
+ const clearPhoto=/^\/(clearwelcomephoto|clearfarewellphoto) (-[1-9]\d{0,15})$/u.exec(text);
+ if(clearPhoto)return {kind:'EDIT',chatId:clearPhoto[2]!,request:{
+  kind:clearPhoto[1]==='clearwelcomephoto'?'WELCOME_PHOTO_CLEAR':'FAREWELL_PHOTO_CLEAR'}};
+ const button=/^\/(welcomebutton|farewellbutton) (-[1-9]\d{0,15}) ([^\u0000-\u001f|]{1,70}) \| (\S{15,512})$/u.exec(text);
+ if(button){
+  const label=button[3]!.trim(),url=button[4]!;
+  if(!validCommunityLinkButton({text:label,url}))return null;
+  return {kind:'EDIT',chatId:button[2]!,request:{
+   kind:button[1]==='welcomebutton'?'WELCOME_BUTTON_ADD':'FAREWELL_BUTTON_ADD',
+   buttonText:label,buttonUrl:url}};
+ }
+ const clearButtons=/^\/(clearwelcomebuttons|clearfarewellbuttons) (-[1-9]\d{0,15})$/u.exec(text);
+ if(clearButtons)return {kind:'EDIT',chatId:clearButtons[2]!,request:{
+  kind:clearButtons[1]==='clearwelcomebuttons'?'WELCOME_BUTTONS_CLEAR':'FAREWELL_BUTTONS_CLEAR'}};
+
  const language=/^\/greetinglang (-[1-9]\d{0,15}) (ar|en)$/u.exec(text);
  if(language)return {kind:'EDIT',chatId:language[1]!,
   request:{kind:'GROUP_LANGUAGE',language:language[2]! as CommunityLanguage}};
@@ -144,6 +169,10 @@ export async function phase4CommunityScreen(service:Phase4CommunityService,actor
    '\nالتقويم: '+(c.calendar??'gregorian')+'\nإزاحة UTC: '+c.utcOffsetMinutes+' دقيقة'+
    '\nقالب الترحيب المترجم: '+(c.welcome.localized?.[c.language??'ar']?'متاح':'غير محدد')+
    '\nقالب الوداع المترجم: '+(c.farewell.localized?.[c.language??'ar']?'متاح':'غير محدد')+
+   '\nصورة الترحيب: '+(c.welcome.photoFileId?'معتمدة':'غير مضافة')+
+   '\nصورة الوداع: '+(c.farewell.photoFileId?'معتمدة':'غير مضافة')+
+   '\nأزرار الترحيب الخارجية: '+(c.welcome.buttons?.length??0)+
+   '\nأزرار الوداع الخارجية: '+(c.farewell.buttons?.length??0)+
    '\n\n'+help,
    keyboard:k([
     [btn('👋 '+(c.welcome.enabled?'إيقاف':'تفعيل')+' الترحيب','p4c:1:t:'+id+':w:'+(c.welcome.enabled?'0':'1'))],
