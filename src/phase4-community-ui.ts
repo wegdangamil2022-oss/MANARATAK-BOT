@@ -4,7 +4,7 @@ import type {CommunityDraftKind,ReplyMatch,CommunityLanguage,CommunityCalendar,C
 import {validCommunityRulesUrl,validCommunityTimeZone,validCommunityFAQId,validCommunityProfileTitle} from './phase4-community-model.js';
 import {validCommunityLinkButton,validCommunityPhotoId} from './phase4-community-rich.js';
 const group=/^-[1-9]\d{0,15}$/u,hex=/^[a-f0-9]{24}$/u;
-const route=/^p4c:1:(?:q:-[1-9]\d{0,15}|b:-[1-9]\d{0,15}(?::[sam])?|m:-[1-9]\d{0,15}(?::[sr])?|p:-[1-9]\d{0,15}|f:-[1-9]\d{0,15}:(?:0|[1-9]\d{0,2})|s:-[1-9]\d{0,15}|k:-[1-9]\d{0,15}|z:-[1-9]\d{0,15}|n:-[1-9]\d{0,15}|a:-[1-9]\d{0,15}|y:-[1-9]\d{0,15}(?::[1-9]\d{0,9})?|l:(?:0|[1-9]\d{0,2})|g:-[1-9]\d{0,15}|h:-[1-9]\d{0,15}|v:-[1-9]\d{0,15}:[wf]|j:-[1-9]\d{0,15}:[wf]:[pb]|r:-[1-9]\d{0,15}:(?:0|[1-9]\d{0,2})|t:-[1-9]\d{0,15}:[wfrsgbdpujlv]:[01]|d:-[1-9]\d{0,15}:[a-f0-9]{12}|e:-[1-9]\d{0,15}:[a-f0-9]{12}:[01]|u:-[1-9]\d{0,15}:(?:ar|en)|o:-[1-9]\d{0,15}:(?:12|24):[gh]|[cx]:[a-f0-9]{24})$/u;
+const route=/^p4c:1:(?:q:-[1-9]\d{0,15}|i:-[1-9]\d{0,15}|ac:-[1-9]\d{0,15}:[1-8]|b:-[1-9]\d{0,15}(?::[sam])?|m:-[1-9]\d{0,15}(?::[sr])?|p:-[1-9]\d{0,15}|f:-[1-9]\d{0,15}:(?:0|[1-9]\d{0,2})|s:-[1-9]\d{0,15}|k:-[1-9]\d{0,15}|z:-[1-9]\d{0,15}|n:-[1-9]\d{0,15}|a:-[1-9]\d{0,15}|y:-[1-9]\d{0,15}(?::[1-9]\d{0,9})?|l:(?:0|[1-9]\d{0,2})|g:-[1-9]\d{0,15}|h:-[1-9]\d{0,15}|v:-[1-9]\d{0,15}:[wf]|j:-[1-9]\d{0,15}:[wf]:[pb]|r:-[1-9]\d{0,15}:(?:0|[1-9]\d{0,2})|t:-[1-9]\d{0,15}:[wfrsgbdpujlvm]:[01]|d:-[1-9]\d{0,15}:[a-f0-9]{12}|e:-[1-9]\d{0,15}:[a-f0-9]{12}:[01]|u:-[1-9]\d{0,15}:(?:ar|en)|o:-[1-9]\d{0,15}:(?:12|24):[gh]|[cx]:[a-f0-9]{24})$/u;
 export const validPhase4CommunityRoute=(s:unknown):s is string=>typeof s==='string'&&
  Buffer.byteLength(s,'utf8')<=64&&route.test(s);
 const esc=(s:string):string=>s.replace(/&/gu,'&amp;').replace(/</gu,'&lt;')
@@ -45,6 +45,8 @@ const help='للتعديل أرسل في خاص البوت أحد الأوامر
  +'<code>/replytopicrate -100123 777 10</code>\n'
  +'<code>/replytopicclear -100123 777</code>\n'
  +'<code>/servicedelay -100123 120</code>\n'
+ +'<code>/autocap -100123 3</code>\n'
+ +'<code>/serviceprofileoff -100123</code>\n'
  +'<code>/servicejoinoff -100123</code>\n'
  +'<code>/serviceleaveoff -100123</code>\n'
  +'<code>/replycleanup -100123 45</code>\n'
@@ -65,6 +67,12 @@ export function parsePhase4CommunityCommand(text:string):
  {kind:'DIAGNOSE';chatId:string;sample:string;topicId?:number}|
  {kind:'DECISIONS';chatId:string}|null{
  if(text==='/community')return {kind:'HOME'};
+ const autoLimit=/^\/autocap (-[1-9]\d{0,15}) ([1-8])$/u.exec(text);
+ if(autoLimit)return {kind:'EDIT',chatId:autoLimit[1]!,request:{kind:'AUTO_LIMIT_SET',
+  autoMessagesPerMinute:Number(autoLimit[2])}};
+ const profileService=/^\/serviceprofile(on|off) (-[1-9]\d{0,15})$/u.exec(text);
+ if(profileService)return {kind:'EDIT',chatId:profileService[2]!,request:{kind:profileService[1]==='on'?
+  'SERVICE_PROFILE_ON':'SERVICE_PROFILE_OFF'}};
  const profileSwitch=/^\/groupedit(on|off) (-[1-9]\d{0,15})$/u.exec(text);
  if(profileSwitch)return {kind:'EDIT',chatId:profileSwitch[2]!,
   request:{kind:profileSwitch[1]==='on'?'GROUP_PROFILE_ON':'GROUP_PROFILE_OFF'}};
@@ -306,6 +314,7 @@ export async function phase4CommunityScreen(service:Phase4CommunityService,actor
    '\nتنظيف الدخول: '+label(c.serviceCleanup?.joinEnabled!==false)+
    '\nتنظيف المغادرة: '+label(c.serviceCleanup?.leaveEnabled!==false)+
    '\nفاصل ردود المجموعة: '+Math.floor(c.groupCooldownMs/1000)+' ثوانٍ'+
+   '\nسقف الإعلانات الآلية: '+(c.autoMessagesPerMinute??8)+' رسالة بالدقيقة'+
    '\nساعات الهدوء: '+(c.quietHours?'محددة':'غير مفعّلة')+
    '\nحدود الموضوعات: '+(c.topicCooldowns?.length??0)+
    '\nاللغة: '+(c.language??'ar')+'\nنظام الوقت: '+(c.clockFormat??'24')+
@@ -328,6 +337,7 @@ export async function phase4CommunityScreen(service:Phase4CommunityService,actor
     [btn('🤖 '+(c.repliesEnabled?'إيقاف':'تفعيل')+' الردود','p4c:1:t:'+id+':r:'+(c.repliesEnabled?'0':'1'))],
     [btn('📋 قائمة الردود','p4c:1:r:'+id+':0')],
     [btn('📚 مراجع FAQ المعتمدة','p4c:1:f:'+id+':0')],
+    [btn('🚦 سقف الإعلانات الآلية','p4c:1:i:'+id)],
     [btn('🧾 تقرير قرارات الردود','p4c:1:k:'+id)],
     [btn('🧾 '+(c.decisionLogEnabled?'إيقاف':'تفعيل')+' السجل المنقح',
      'p4c:1:t:'+id+':d:'+(c.decisionLogEnabled?'0':'1'))],
@@ -492,6 +502,28 @@ export async function phase4CommunityScreen(service:Phase4CommunityService,actor
    keyboard:k([[btn('✅ اعتماد الحذف','p4c:1:c:'+draft.id)],
     [btn('❌ إلغاء','p4c:1:x:'+draft.id)],
     [btn('↩️ أنواع المغادرة','p4c:1:m:'+id)]])};
+ }
+ const capView=/^p4c:1:i:(-[1-9]\d{0,15})$/u.exec(data);
+ if(capView){
+  const id=capView[1]!,config=await service.view(actorId,id);
+  const values=[1,2,3,4,6,8] as const;
+  return {text:'<b>🚦 سقف رسائل منارتك الآلية</b>\nالمجموعة: <code>'+id+'</code>'+
+   '\nالسقف الحالي: '+(config.autoMessagesPerMinute??8)+' رسالة خلال أي 60 ثانية.'+
+   '\nيشمل الترحيب والوداع والردود التلقائية ويمتد إلى جميع موضوعات Forum.'+
+   '\n\nاضغط سقفًا جديدًا ثم اعتمده؛ لا يتجاوز 8 رسائل بالدقيقة.'+
+   '\nيمكنك أيضًا كتابة: <code>/autocap '+id+' 3</code>',
+   keyboard:k([...values.map(v=>[btn('🚦 '+v+' / دقيقة'+((config.autoMessagesPerMinute??8)===v?' ✓':''),
+    'p4c:1:ac:'+id+':'+v)]),
+    [btn('↩️ إعدادات المجموعة','p4c:1:g:'+id)]])};
+ }
+ const capEdit=/^p4c:1:ac:(-[1-9]\d{0,15}):([1-8])$/u.exec(data);
+ if(capEdit){
+  const draft=await service.pending(actorId,{kind:'AUTO_LIMIT_SET',
+   autoMessagesPerMinute:Number(capEdit[2])},capEdit[1]!);
+  return {text:service.preview(draft)+'\n\nلا يُطبق السقف قبل اعتماد المالك.',
+   keyboard:k([[btn('✅ اعتماد السقف','p4c:1:c:'+draft.id)],
+    [btn('❌ إلغاء','p4c:1:x:'+draft.id)],
+    [btn('↩️ السقف الحالي','p4c:1:i:'+draft.chatId)]])};
  }
  const serviceCleanupMenu=/^p4c:1:s:(-[1-9]\d{0,15})$/u.exec(data);
  if(serviceCleanupMenu){
