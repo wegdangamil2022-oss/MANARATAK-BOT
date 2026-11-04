@@ -4,7 +4,7 @@ import type {CommunityDraftKind,ReplyMatch,CommunityLanguage,CommunityCalendar,C
 import {validCommunityRulesUrl,validCommunityTimeZone} from './phase4-community-model.js';
 import {validCommunityLinkButton,validCommunityPhotoId} from './phase4-community-rich.js';
 const group=/^-[1-9]\d{0,15}$/u,hex=/^[a-f0-9]{24}$/u;
-const route=/^p4c:1:(?:q:-[1-9]\d{0,15}|b:-[1-9]\d{0,15}(?::[sam])?|m:-[1-9]\d{0,15}(?::[sr])?|k:-[1-9]\d{0,15}|z:-[1-9]\d{0,15}|n:-[1-9]\d{0,15}|a:-[1-9]\d{0,15}|y:-[1-9]\d{0,15}(?::[1-9]\d{0,9})?|l:(?:0|[1-9]\d{0,2})|g:-[1-9]\d{0,15}|h:-[1-9]\d{0,15}|v:-[1-9]\d{0,15}:[wf]|j:-[1-9]\d{0,15}:[wf]:[pb]|r:-[1-9]\d{0,15}:(?:0|[1-9]\d{0,2})|t:-[1-9]\d{0,15}:[wfrsgbdpu]:[01]|d:-[1-9]\d{0,15}:[a-f0-9]{12}|e:-[1-9]\d{0,15}:[a-f0-9]{12}:[01]|u:-[1-9]\d{0,15}:(?:ar|en)|o:-[1-9]\d{0,15}:(?:12|24):[gh]|[cx]:[a-f0-9]{24})$/u;
+const route=/^p4c:1:(?:q:-[1-9]\d{0,15}|b:-[1-9]\d{0,15}(?::[sam])?|m:-[1-9]\d{0,15}(?::[sr])?|s:-[1-9]\d{0,15}|k:-[1-9]\d{0,15}|z:-[1-9]\d{0,15}|n:-[1-9]\d{0,15}|a:-[1-9]\d{0,15}|y:-[1-9]\d{0,15}(?::[1-9]\d{0,9})?|l:(?:0|[1-9]\d{0,2})|g:-[1-9]\d{0,15}|h:-[1-9]\d{0,15}|v:-[1-9]\d{0,15}:[wf]|j:-[1-9]\d{0,15}:[wf]:[pb]|r:-[1-9]\d{0,15}:(?:0|[1-9]\d{0,2})|t:-[1-9]\d{0,15}:[wfrsgbdpujl]:[01]|d:-[1-9]\d{0,15}:[a-f0-9]{12}|e:-[1-9]\d{0,15}:[a-f0-9]{12}:[01]|u:-[1-9]\d{0,15}:(?:ar|en)|o:-[1-9]\d{0,15}:(?:12|24):[gh]|[cx]:[a-f0-9]{24})$/u;
 export const validPhase4CommunityRoute=(s:unknown):s is string=>typeof s==='string'&&
  Buffer.byteLength(s,'utf8')<=64&&route.test(s);
 const esc=(s:string):string=>s.replace(/&/gu,'&amp;').replace(/</gu,'&lt;')
@@ -37,6 +37,8 @@ const help='للتعديل أرسل في خاص البوت أحد الأوامر
  +'<code>/replytopicrate -100123 777 10</code>\n'
  +'<code>/replytopicclear -100123 777</code>\n'
  +'<code>/servicedelay -100123 120</code>\n'
+ +'<code>/servicejoinoff -100123</code>\n'
+ +'<code>/serviceleaveoff -100123</code>\n'
  +'<code>/replycleanup -100123 45</code>\n'
  +'<code>/replycleanupon -100123</code>\n'
  +'<code>/replycleanupoff -100123</code>\n'
@@ -55,6 +57,9 @@ export function parsePhase4CommunityCommand(text:string):
  {kind:'DIAGNOSE';chatId:string;sample:string;topicId?:number}|
  {kind:'DECISIONS';chatId:string}|null{
  if(text==='/community')return {kind:'HOME'};
+ const cleanupKind=/^\/service(join|leave)(on|off) (-[1-9]\d{0,15})$/u.exec(text);
+ if(cleanupKind)return {kind:'EDIT',chatId:cleanupKind[3]!,
+  request:{kind:('SERVICE_'+cleanupKind[1]!.toUpperCase()+'_'+cleanupKind[2]!.toUpperCase()) as CommunityDraftKind}};
  const removalSwitch=/^\/farewellremoved(on|off) (-[1-9]\d{0,15})$/u.exec(text);
  if(removalSwitch)return {kind:'EDIT',chatId:removalSwitch[2]!,
   request:{kind:removalSwitch[1]==='on'?'FAREWELL_REMOVED_ON':'FAREWELL_REMOVED_OFF'}};
@@ -252,6 +257,8 @@ export async function phase4CommunityScreen(service:Phase4CommunityService,actor
    '\nحذف ردود البوت المؤقتة: '+label(c.replyCleanup?.enabled??false)+
    '\nمهلة حذف الردود: '+((c.replyCleanup?.delayMs??120000)/1000)+' ثانية'+
    '\nمدة حذف رسائل الخدمة: '+((c.serviceCleanup?.delayMs??120000)/1000)+' ثانية'+
+   '\nتنظيف الدخول: '+label(c.serviceCleanup?.joinEnabled!==false)+
+   '\nتنظيف المغادرة: '+label(c.serviceCleanup?.leaveEnabled!==false)+
    '\nفاصل ردود المجموعة: '+Math.floor(c.groupCooldownMs/1000)+' ثوانٍ'+
    '\nساعات الهدوء: '+(c.quietHours?'محددة':'غير مفعّلة')+
    '\nحدود الموضوعات: '+(c.topicCooldowns?.length??0)+
@@ -289,6 +296,7 @@ export async function phase4CommunityScreen(service:Phase4CommunityService,actor
     [btn('📅 التقويم: '+(c.calendar??'gregorian'),'p4c:1:o:'+id+':'+(c.clockFormat??'24')+':'+((c.calendar??'gregorian')==='hijri'?'g':'h'))],
     [btn('🌍 المنطقة الزمنية','p4c:1:n:'+id)],
     [btn('🧹 '+(c.serviceCleanup?.enabled?'إيقاف':'تفعيل')+' تنظيف رسائل الخدمة','p4c:1:t:'+id+':s:'+(c.serviceCleanup?.enabled?'0':'1'))],
+    [btn('⚙️ أنواع تنظيف رسائل الخدمة','p4c:1:s:'+id)],
     [btn('🧼 '+(c.replyCleanup?.enabled?'إيقاف':'تفعيل')+' حذف ردود البوت','p4c:1:t:'+id+':b:'+(c.replyCleanup?.enabled?'0':'1'))],
     [btn('📝 '+(c.changeLogEnabled?'إيقاف':'تفعيل')+' سجل تغييرات المجموعة','p4c:1:t:'+id+':g:'+(c.changeLogEnabled?'0':'1'))],
     [btn('🕘 تغييرات اسم/صورة المجموعة','p4c:1:h:'+id)],
@@ -437,6 +445,33 @@ export async function phase4CommunityScreen(service:Phase4CommunityService,actor
     [btn('❌ إلغاء','p4c:1:x:'+draft.id)],
     [btn('↩️ أنواع المغادرة','p4c:1:m:'+id)]])};
  }
+ const serviceCleanupMenu=/^p4c:1:s:(-[1-9]\d{0,15})$/u.exec(data);
+ if(serviceCleanupMenu){
+  const id=serviceCleanupMenu[1]!,config=await service.view(actorId,id);
+  const clean=config.serviceCleanup;
+  const join=clean?.joinEnabled!==false,leave=clean?.leaveEnabled!==false;
+  const rows=[
+   [btn((clean?.enabled?'⛔ إيقاف':'✅ تفعيل')+' تنظيف رسائل الخدمة',
+    'p4c:1:t:'+id+':s:'+(clean?.enabled?'0':'1'))],
+   [btn((join?'⛔ إيقاف':'✅ تفعيل')+' تنظيف الدخول',
+    'p4c:1:t:'+id+':j:'+(join?'0':'1'))],
+   [btn((leave?'⛔ إيقاف':'✅ تفعيل')+' تنظيف المغادرة',
+    'p4c:1:t:'+id+':l:'+(leave?'0':'1'))],
+   [btn('↩️ إعدادات المجموعة','p4c:1:g:'+id)]
+  ];
+  return {text:'<b>🧹 تنظيف رسائل خدمة الدخول والمغادرة</b>\nالمجموعة: <code>'+id+'</code>'+
+   '\nالتنظيف العام: '+(clean?.enabled?'مفعّل':'متوقف')+
+   '\nرسائل الدخول: '+(join?'مسموح عند تفعيل العام':'مستبعدة')+
+   '\nرسائل المغادرة: '+(leave?'مسموح عند تفعيل العام':'مستبعدة')+
+   '\nالمهلة: '+((clean?.delayMs??120000)/1000)+' ثانية.'+
+   '\n\nلا يُحذف شيء دون صلاحية can_delete_messages والتحقق النهائي من النسخة والحقوق.'+
+   '\nالأوامر في خاص المالك: <code>/servicejoinoff '+id+'</code> أو'+
+   ' <code>/servicejoinon '+id+'</code> وكذلك'+
+   ' <code>/serviceleaveoff '+id+'</code> و<code>/serviceleaveon '+id+'</code>.'+
+   '\nلتغيير المهلة: <code>/servicedelay '+id+' 120</code>.'+
+   '\nكل تعديل يخضع للمراجعة والاعتماد، ولا يمكن التراجع عن حذف رسالة تم تأكيده.',
+   keyboard:k(rows)};
+ }
  const mediaView=/^p4c:1:v:(-[1-9]\d{0,15}):([wf])$/u.exec(data);
  if(mediaView){
   const id=mediaView[1]!,kind=mediaView[2]!,config=await service.view(actorId,id);
@@ -526,13 +561,14 @@ export async function phase4CommunityScreen(service:Phase4CommunityService,actor
    '\n\nلا يُخزّن هذا السجل الأسماء والصور نفسها.',
    keyboard:k([[btn('↩️ إعدادات المجموعة','p4c:1:g:'+history[1])]])};
  }
- const toggle=/^p4c:1:t:(-[1-9]\d{0,15}):([wfrsgbdpu]):([01])$/u.exec(data);
+ const toggle=/^p4c:1:t:(-[1-9]\d{0,15}):([wfrsgbdpujl]):([01])$/u.exec(data);
  if(toggle){
   const field=toggle[2]!,value=toggle[3]!;
   const kind:CommunityDraftKind=(field==='w'?'WELCOME_':field==='f'?'FAREWELL_':
     field==='r'?'REPLIES_':field==='s'?'SERVICE_CLEANUP_':field==='b'?'REPLY_CLEANUP_':
     field==='d'?'DECISION_LOG_':field==='p'?'PRIVATE_WELCOME_':
-    field==='u'?'FAREWELL_REMOVED_':'CHANGE_LOG_')+
+    field==='u'?'FAREWELL_REMOVED_':field==='j'?'SERVICE_JOIN_':
+    field==='l'?'SERVICE_LEAVE_':'CHANGE_LOG_')+
    (value==='1'?'ON':'OFF') as CommunityDraftKind;
   const draft=await service.pending(actorId,{kind},toggle[1]!);
   return {text:'<b>تأكيد تغيير تفاعل المجموعة</b>\n'+service.preview(draft)+
