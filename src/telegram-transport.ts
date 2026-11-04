@@ -177,7 +177,7 @@ export interface TelegramApplicationOptions {
   captchaEscalation?:CaptchaEscalationPolicy;
 }
 
-type Event = {updateId: number; actorId: string; chatId: string; kind: 'private' | 'group'; text: string; displayName?:string; username?:string; topicId?:number; entities?:unknown; messageId?:number; sentAt?:number; replyTo?:unknown; joins?:string[]; serviceKind?:'JOIN'|'LEAVE'; pinnedMessageId?:number; document?: IncomingDocument; protectionMedia?:ProtectionMedia; edited?:true; forwarded?:true; callbackData?:string; callbackQueryId?:string; callbackMessageId?:number};
+type Event = {updateId: number; actorId: string; chatId: string; kind: 'private' | 'group'; text: string; displayName?:string; username?:string; topicId?:number; entities?:unknown; messageId?:number; sentAt?:number; replyTo?:unknown; joins?:string[]; serviceKind?:'JOIN'|'LEAVE'; leaveWasHuman?:boolean; pinnedMessageId?:number; document?: IncomingDocument; protectionMedia?:ProtectionMedia; edited?:true; forwarded?:true; callbackData?:string; callbackQueryId?:string; callbackMessageId?:number};
 const isObject=(x:unknown):x is Record<string,unknown>=>Boolean(x)&&typeof x==='object'&&!Array.isArray(x);
 const positiveId=(x:unknown): x is number=>typeof x==='number'&&Number.isSafeInteger(x)&&x>0;
 const chatId=(x:unknown): x is number=>typeof x==='number'&&Number.isSafeInteger(x)&&x!==0;
@@ -257,7 +257,7 @@ function eventFrom(value:unknown):{event?:Event;reason:string} {
        'poll','contact','location','new_chat_members','reply_to_message','pinned_message'].some(k=>msg[k]!==undefined))
      return {reason:'INVALID_GROUP_LEAVE'};
    return {event:{updateId:value.update_id as number,actorId:String(msg.from.id),chatId:String(msg.chat.id),
-    kind,text:'',serviceKind:'LEAVE',messageId:msg.message_id,sentAt:msg.date*1000,
+    kind,text:'',serviceKind:'LEAVE',leaveWasHuman:member.is_bot===false,messageId:msg.message_id,sentAt:msg.date*1000,
     ...(msg.message_thread_id!==undefined?{topicId:msg.message_thread_id as number}:{})},reason:'VALID'};
   }
   if(kind==='group'){
@@ -559,7 +559,7 @@ export class TelegramUpdateApplication {
       return {status:'DENIED',reason:'INVALID_GROUP_LEAVE'};
      if(this.opts.serviceCleanup)await this.opts.serviceCleanup.observeService(event.chatId,'LEAVE',event.messageId,
       'b3-webhook:'+this.opts.botId+':'+event.updateId,event.sentAt);
-     if(this.opts.welcomeFarewell)await this.opts.welcomeFarewell.observe(event.chatId,'FAREWELL',event.messageId,
+     if(this.opts.welcomeFarewell&&event.leaveWasHuman)await this.opts.welcomeFarewell.observe(event.chatId,'FAREWELL',event.messageId,
       'b3-webhook:'+this.opts.botId+':'+event.updateId,event.sentAt,event.topicId);
      return {status:'IGNORED',reason:'GROUP_SERVICE_LEAVE_OBSERVED'};
     }
@@ -568,7 +568,7 @@ export class TelegramUpdateApplication {
      if(this.opts.serviceCleanup&&event.serviceKind==='JOIN'&&event.messageId)
       await this.opts.serviceCleanup.observeService(event.chatId,'JOIN',event.messageId,
        'b3-webhook:'+this.opts.botId+':'+event.updateId,event.sentAt);
-     if(this.opts.welcomeFarewell&&event.serviceKind==='JOIN'&&event.messageId)
+     if(this.opts.welcomeFarewell&&event.serviceKind==='JOIN'&&event.joins.length>0&&event.messageId)
       await this.opts.welcomeFarewell.observe(event.chatId,'WELCOME',event.messageId,
        'b3-webhook:'+this.opts.botId+':'+event.updateId,event.sentAt,event.topicId);
      const trustedJoinKey='b3-webhook:'+this.opts.botId+':'+event.updateId;
