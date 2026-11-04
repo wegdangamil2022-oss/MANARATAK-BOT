@@ -144,6 +144,10 @@ export function escapeTelegramHtml(text:string):string {
 }
 function eventFrom(value:unknown):{event?:Event;reason:string} {
   if(!isObject(value)||!Number.isSafeInteger(value.update_id)||typeof value.update_id!=='number'||value.update_id<0)return {reason:'INVALID_UPDATE_ID'};
+  // Reject ambiguous Telegram envelopes before callback/edited-message dispatch.
+  if(value.chat_member!==undefined&&(value.message!==undefined||value.callback_query!==undefined||
+     value.edited_message!==undefined||value.my_chat_member!==undefined))
+   return {reason:'INVALID_CHAT_MEMBER_UPDATE'};
   if(value.edited_message!==undefined){
    const edited=value.edited_message;
    if(value.message!==undefined||value.callback_query!==undefined||!isObject(edited)||!isObject(edited.chat)||
