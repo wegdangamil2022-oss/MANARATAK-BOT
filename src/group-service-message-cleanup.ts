@@ -119,7 +119,7 @@ export class GroupServiceMessageCleanup{
      stamp:d.stamp,version:Number(d.version)});
    }catch{/* restored/corrupted rows are not deletion evidence */}
   }
-  return result.sort((a,b)=>a.issued-b.issued||a.key.localeCompare(b.key));
+  return result.sort((a,b)=>a.issued-b.issued||a.chat.localeCompare(b.chat)||a.messageId-b.messageId||a.key.localeCompare(b.key));
  }
  private eligible(s:BotState,job:Job,now:number):boolean{
   if(!time(now)||now<job.issued+60000||now>=job.issued+86400000)return false;
