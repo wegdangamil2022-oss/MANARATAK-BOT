@@ -128,4 +128,24 @@ for(const engine of ['json','sqlite'] as const){
   assert.ok(await ui.handle(OWNER,pick(off,'تأكيد')));
   assert.equal(f.service.policy(await f.store.snapshot(),G)?.enabled,false);
  }finally{await f.close();}});
+
+ test(engine+' owner welcome and farewell section opens actual group-specific cleanup controls',async()=>{const f=await fixture();try{
+  const view=await f.app.handle({update_id:70,callback_query:{id:'service-owner-root',from:{id:100,is_bot:false},
+   data:'mi:1:i:09:01',message:{message_id:70,from:{id:999,is_bot:true},chat:{id:100,type:'private'}}}});
+  assert.equal(view.status,'APPLIED');
+  assert.equal(view.reason,'CAPTCHA_OWNER_VIEW');
+  assert.match(view.plan!.text,/الدخول والخروج/u);
+  assert.ok(view.plan!.inlineMarkup!.inline_keyboard.flat().some(x=>x.text===G));
+ }finally{await f.close();}});
+ test(engine+' tampered consent or duplicated restored message identity cannot authorize deletion',async()=>{for(const caseType of ['consent','duplicate'] as const){
+  const f=await fixture();try{
+   await f.enable();await f.observe();f.advance(60000);
+   await f.store.transaction(s=>{
+    if(caseType==='consent')s.audit.find(a=>a.updateKey==='group:service-cleanup-policy:'+G)!.actorId='777';
+    else{const original=s.audit.find(a=>/^group:service-message-job:[a-f0-9]{64}$/u.test(a.updateKey))!;
+      s.audit.push({...original,updateKey:original.updateKey,reason:original.reason});}
+   });
+   assert.equal((await f.service.cleanup()).deleted,0);assert.equal(f.calls.length,0);
+  }finally{await f.close();}
+ }});
 }
