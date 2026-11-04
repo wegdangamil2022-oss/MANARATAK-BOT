@@ -12,7 +12,7 @@ import {TelegramUpdateApplication} from '../src/telegram-transport.js';
 import {TelegramReplyDispatcher} from '../src/telegram-replies.js';
 import {Phase4CommunityService} from '../src/phase4-community.js';
 import {Phase4ServiceCleanupDispatcher} from '../src/phase4-service-cleanup.js';
-import {parsePhase4CommunityCommand} from '../src/phase4-community-ui.js';
+import {parsePhase4CommunityCommand,phase4CommunityScreen,validPhase4CommunityRoute} from '../src/phase4-community-ui.js';
 import {defaultCommunityConfig,validCommunityConfig} from '../src/phase4-community-model.js';
 
 const GROUP='-1001234',OWNER='100',STUDENT='300';
@@ -129,6 +129,31 @@ for(const engine of ['json','sqlite'] as const){
    },f.clock);
    assert.deepEqual((await dispatcher.runDue()).results,['SKIPPED']);
    assert.equal(attempts,0);
+  }finally{await f.close()}
+ });
+}
+
+for(const engine of ['json','sqlite'] as const){
+ test('P4 '+engine+': reply expiration is a real official owner button with separate approval',async()=>{
+  const f=await fixture(engine);try{
+   const callback='p4c:1:t:'+GROUP+':b:1';
+   assert.equal(validPhase4CommunityRoute(callback),true);
+   const home=await phase4CommunityScreen(f.community,OWNER,'p4c:1:g:'+GROUP);
+   assert.ok(home?.keyboard.inline_keyboard.flat().some(x=>x.callback_data===callback));
+   const preview=await phase4CommunityScreen(f.community,OWNER,callback);
+   assert.match(preview?.text??'',/تفعيل تنظيف ردود/);
+   assert.equal((await f.community.view(OWNER,GROUP)).replyCleanup?.enabled,undefined);
+   const confirm=preview?.keyboard.inline_keyboard.flat().find(x=>x.text.includes('اعتماد'))?.callback_data;
+   assert.ok(confirm);
+   await phase4CommunityScreen(f.community,OWNER,confirm!);
+   assert.equal((await f.community.view(OWNER,GROUP)).replyCleanup?.enabled,true);
+   assert.equal((await f.community.view(OWNER,GROUP)).replyCleanup?.delayMs,120000);
+   const stop='p4c:1:t:'+GROUP+':b:0';
+   const off=await phase4CommunityScreen(f.community,OWNER,stop);
+   const offConfirm=off?.keyboard.inline_keyboard.flat().find(x=>x.text.includes('اعتماد'))?.callback_data;
+   assert.ok(offConfirm);
+   await phase4CommunityScreen(f.community,OWNER,offConfirm!);
+   assert.equal((await f.community.view(OWNER,GROUP)).replyCleanup?.enabled,false);
   }finally{await f.close()}
  });
 }
