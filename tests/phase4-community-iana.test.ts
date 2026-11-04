@@ -30,7 +30,7 @@ async function fixture(engine:'json'|'sqlite'){
   const draft=await service.pending(OWNER,request,CHAT);
   return service.approve(OWNER,draft.id);
  };
- return {dir,file,clock,service,apply,setNow:(v:number)=>{now=v;},
+ return {dir,file,store,policy,clock,service,apply,setNow:(v:number)=>{now=v;},
   close:()=>rm(dir,{recursive:true,force:true})};
 }
 
@@ -142,8 +142,7 @@ for(const engine of ['json','sqlite'] as const){
    await f.apply({kind:'REPLIES_ON'});
    await f.apply({kind:'QUIET_HOURS_SET',startMinute:120,endMinute:240});
    await f.apply({kind:'GROUP_TIMEZONE',timeZone:'America/New_York'});
-   const store=new BotStore(f.file,{engine});
-   const policy=new Policy(store,OWNER,f.clock);
+   const store=f.store,policy=f.policy;
    const education=new EducationService(store,policy,f.clock);
    const app=new TelegramUpdateApplication({store,policy,community:f.service,
     education,admin:new EducationAdminFacade(store,policy,education),
