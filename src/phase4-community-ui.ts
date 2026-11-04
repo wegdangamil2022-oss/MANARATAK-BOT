@@ -4,7 +4,7 @@ import type {CommunityDraftKind,ReplyMatch,CommunityLanguage,CommunityCalendar,C
 import {validCommunityRulesUrl,validCommunityTimeZone,validCommunityFAQId} from './phase4-community-model.js';
 import {validCommunityLinkButton,validCommunityPhotoId} from './phase4-community-rich.js';
 const group=/^-[1-9]\d{0,15}$/u,hex=/^[a-f0-9]{24}$/u;
-const route=/^p4c:1:(?:q:-[1-9]\d{0,15}|b:-[1-9]\d{0,15}(?::[sam])?|m:-[1-9]\d{0,15}(?::[sr])?|s:-[1-9]\d{0,15}|k:-[1-9]\d{0,15}|z:-[1-9]\d{0,15}|n:-[1-9]\d{0,15}|a:-[1-9]\d{0,15}|y:-[1-9]\d{0,15}(?::[1-9]\d{0,9})?|l:(?:0|[1-9]\d{0,2})|g:-[1-9]\d{0,15}|h:-[1-9]\d{0,15}|v:-[1-9]\d{0,15}:[wf]|j:-[1-9]\d{0,15}:[wf]:[pb]|r:-[1-9]\d{0,15}:(?:0|[1-9]\d{0,2})|t:-[1-9]\d{0,15}:[wfrsgbdpujl]:[01]|d:-[1-9]\d{0,15}:[a-f0-9]{12}|e:-[1-9]\d{0,15}:[a-f0-9]{12}:[01]|u:-[1-9]\d{0,15}:(?:ar|en)|o:-[1-9]\d{0,15}:(?:12|24):[gh]|[cx]:[a-f0-9]{24})$/u;
+const route=/^p4c:1:(?:q:-[1-9]\d{0,15}|b:-[1-9]\d{0,15}(?::[sam])?|m:-[1-9]\d{0,15}(?::[sr])?|f:-[1-9]\d{0,15}:(?:0|[1-9]\d{0,2})|s:-[1-9]\d{0,15}|k:-[1-9]\d{0,15}|z:-[1-9]\d{0,15}|n:-[1-9]\d{0,15}|a:-[1-9]\d{0,15}|y:-[1-9]\d{0,15}(?::[1-9]\d{0,9})?|l:(?:0|[1-9]\d{0,2})|g:-[1-9]\d{0,15}|h:-[1-9]\d{0,15}|v:-[1-9]\d{0,15}:[wf]|j:-[1-9]\d{0,15}:[wf]:[pb]|r:-[1-9]\d{0,15}:(?:0|[1-9]\d{0,2})|t:-[1-9]\d{0,15}:[wfrsgbdpujl]:[01]|d:-[1-9]\d{0,15}:[a-f0-9]{12}|e:-[1-9]\d{0,15}:[a-f0-9]{12}:[01]|u:-[1-9]\d{0,15}:(?:ar|en)|o:-[1-9]\d{0,15}:(?:12|24):[gh]|[cx]:[a-f0-9]{24})$/u;
 export const validPhase4CommunityRoute=(s:unknown):s is string=>typeof s==='string'&&
  Buffer.byteLength(s,'utf8')<=64&&route.test(s);
 const esc=(s:string):string=>s.replace(/&/gu,'&amp;').replace(/</gu,'&lt;')
@@ -306,6 +306,7 @@ export async function phase4CommunityScreen(service:Phase4CommunityService,actor
     [btn('👋 '+(c.farewell.enabled?'إيقاف':'تفعيل')+' الوداع','p4c:1:t:'+id+':f:'+(c.farewell.enabled?'0':'1'))],
     [btn('🤖 '+(c.repliesEnabled?'إيقاف':'تفعيل')+' الردود','p4c:1:t:'+id+':r:'+(c.repliesEnabled?'0':'1'))],
     [btn('📋 قائمة الردود','p4c:1:r:'+id+':0')],
+    [btn('📚 مراجع FAQ المعتمدة','p4c:1:f:'+id+':0')],
     [btn('🧾 تقرير قرارات الردود','p4c:1:k:'+id)],
     [btn('🧾 '+(c.decisionLogEnabled?'إيقاف':'تفعيل')+' السجل المنقح',
      'p4c:1:t:'+id+':d:'+(c.decisionLogEnabled?'0':'1'))],
@@ -601,6 +602,27 @@ export async function phase4CommunityScreen(service:Phase4CommunityService,actor
    keyboard:k([[btn('✅ اعتماد','p4c:1:c:'+draft.id)],
     [btn('❌ إلغاء','p4c:1:x:'+draft.id)],
     [btn('↩️ رجوع','p4c:1:g:'+draft.chatId)]])};
+ }
+ const reviewedFAQs=/^p4c:1:f:(-[1-9]\d{0,15}):(0|[1-9]\d{0,2})$/u.exec(data);
+ if(reviewedFAQs){
+  const id=reviewedFAQs[1]!,page=Number(reviewedFAQs[2]);
+  const entries=await service.listReviewedFAQs(actorId,id);
+  const pages=Math.max(1,Math.ceil(entries.length/6));
+  if(page>=pages)return null;
+  const rows:{text:string;callback_data:string}[][]=[];
+  if(page>0)rows.push([btn('⬅️ السابق','p4c:1:f:'+id+':'+(page-1))]);
+  if(page+1<pages)rows.push([btn('التالي ➡️','p4c:1:f:'+id+':'+(page+1))]);
+  rows.push([btn('↩️ إعدادات المجموعة','p4c:1:g:'+id)]);
+  return {text:'<b>📚 مصادر الأسئلة الشائعة المعتمدة</b>\nالمجموعة: <code>'+id+'</code>'+
+   '\nتعرض الأسئلة المعتمدة ذات المنشورات والتصنيفات الظاهرة لهذه المجموعة فقط.'+
+   '\n\n'+(entries.length?entries.slice(page*6,page*6+6).map((q,i)=>
+    (i+1+page*6)+'. '+esc(q.question.slice(0,100))+'\n<code>'+q.id+'</code>').join('\n'):
+    'لا توجد أسئلة منشورة ومراجعة صالحة للربط الآن.')+
+   '\n\nلإنشاء رد على كلمة مفتاحية اكتب في خاص البوت:\n'+
+   '<code>/replyfaq '+id+' WORD القبول | UUID</code>\n'+
+   'استبدل UUID بالمعرّف الظاهر أعلاه. تتغير الإجابة تلقائيًا إذا تغيّر سجل FAQ المعتمد،'+
+   ' ويُمنع إرسال الرد عند أرشفة السؤال أو مصدره. جميع التعديلات تخضع لاعتماد المالك.',
+   keyboard:k(rows)};
  }
  const rules=/^p4c:1:r:(-[1-9]\d{0,15}):(0|[1-9]\d{0,2})$/u.exec(data);
  if(rules){
