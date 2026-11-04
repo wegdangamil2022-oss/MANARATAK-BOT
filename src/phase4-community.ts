@@ -635,11 +635,9 @@ export class Phase4CommunityService{
    (draft.delayMs!/1000)+' ثانية. الحذف يتطلب صلاحية حديثة.';
   if(draft.kind==='REPLY_CLEANUP_ON')return 'تفعيل تنظيف ردود منارتك المؤكدة فقط بعد المهلة. لا يُحذف محتوى الأعضاء.';
   if(draft.kind==='REPLY_CLEANUP_OFF')return 'إيقاف حذف ردود منارتك المؤقتة؛ المهام القديمة تُلغى عند الإرسال.';
-  if(draft.kind==='SERVICE_JOIN_ON'||draft.kind==='SERVICE_JOIN_OFF')return
-   'تنظيف رسالة خدمة الدخول: '+(draft.kind==='SERVICE_JOIN_ON'?'مسموح':'متوقف')+
+  if(draft.kind==='SERVICE_JOIN_ON'||draft.kind==='SERVICE_JOIN_OFF')return 'تنظيف رسالة خدمة الدخول: '+(draft.kind==='SERVICE_JOIN_ON'?'مسموح':'متوقف')+
    '. تنظيف رسائل المغادرة مستقل ولا يتأثر بهذا الخيار.';
-  if(draft.kind==='SERVICE_LEAVE_ON'||draft.kind==='SERVICE_LEAVE_OFF')return
-   'تنظيف رسالة خدمة المغادرة: '+(draft.kind==='SERVICE_LEAVE_ON'?'مسموح':'متوقف')+
+  if(draft.kind==='SERVICE_LEAVE_ON'||draft.kind==='SERVICE_LEAVE_OFF')return 'تنظيف رسالة خدمة المغادرة: '+(draft.kind==='SERVICE_LEAVE_ON'?'مسموح':'متوقف')+
    '. تنظيف رسائل الدخول مستقل ولا يتأثر بهذا الخيار.';
   if(draft.kind==='SERVICE_CLEANUP_DELAY')return 'تحديد تأخير تنظيف الرسائل الخدمية: '+
    (draft.delayMs!/1000)+' ثانية';
