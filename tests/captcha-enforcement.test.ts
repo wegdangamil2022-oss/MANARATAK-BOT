@@ -138,7 +138,7 @@ for(const engine of ['json','sqlite'] as const){
   const retry=accepted.plan!.studioMarkup!.inline_keyboard.flat().find(b=>'callback_data' in b&&b.callback_data.startsWith('sv:1:'));assert.ok(retry&&'callback_data' in retry);
   f.channelMembership.set('-200','300','MEMBER');
   const verified=await f.app.handle({update_id:184,callback_query:{id:'joint-channel',from:{id:300,is_bot:false},data:retry.callback_data,message:{message_id:184,from:{id:999,is_bot:true},chat:{id:300,type:'private'}}}});
-  assert.equal(verified.reason,'SUBSCRIPTION_VERIFICATION_VIEW');assert.match(verified.plan!.text,/اكتمل شرط الاشتراك/u);assert.match(verified.plan!.text,/مرحبًا بك بعد إكمال التحقق/u);
+  assert.equal(verified.reason,'SUBSCRIPTION_VERIFICATION_VIEW');assert.match(verified.plan!.text,/اكتمل شرط الاشتراك/u);assert.match(verified.plan!.text,/مرحبًا بك بعد إكمال التحقق/u);assert.match(verified.plan!.text,/سُوّي سبب CAPTCHA المملوك/u);
   assert.equal(f.target().status,'member');assert.equal(f.writes.length,2);
   assert.ok((await f.store.snapshot()).moderationReasons.every(r=>r.memberId!=='300'||!r.active));
  }finally{await f.close();}});
