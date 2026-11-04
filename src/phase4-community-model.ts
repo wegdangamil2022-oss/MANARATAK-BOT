@@ -19,6 +19,8 @@ export interface CommunityConfig{
  utcOffsetMinutes:number;
  /** A group-wide minimum gap between any two automatic group replies. */
  groupCooldownMs:number;
+ /** Explicitly owner-approved Telegram rules page, never inferred from names. */
+ rulesUrl?:string;
  /** Missing in old snapshots means disabled. */
  changeLogEnabled?:boolean;
  serviceCleanup?:{enabled:boolean;delayMs:number};
@@ -26,7 +28,8 @@ export interface CommunityConfig{
 export type CommunityDraftKind='WELCOME_TEXT'|'FAREWELL_TEXT'|'REPLY_ADD'|'REPLY_REMOVE'|
  'WELCOME_ON'|'WELCOME_OFF'|'FAREWELL_ON'|'FAREWELL_OFF'|'REPLIES_ON'|'REPLIES_OFF'|
  'REPLY_ENABLE'|'REPLY_DISABLE'|'REPLY_COOLDOWN'|
- 'CHANGE_LOG_ON'|'CHANGE_LOG_OFF'|'SERVICE_CLEANUP_ON'|'SERVICE_CLEANUP_OFF'|'SERVICE_CLEANUP_DELAY';
+ 'CHANGE_LOG_ON'|'CHANGE_LOG_OFF'|'SERVICE_CLEANUP_ON'|'SERVICE_CLEANUP_OFF'|'SERVICE_CLEANUP_DELAY'|
+ 'RULES_LINK_SET'|'RULES_LINK_CLEAR';
 export interface CommunityDraft{
  id:string;actorId:string;chatId:string;chatVersion:number;configVersion:number;
  kind:CommunityDraftKind;createdAt:number;expiresAt:number;
@@ -66,11 +69,25 @@ const validText=(s:unknown,max:number):s is string=>typeof s==='string'&&
  s.trim().length>0&&Array.from(s).length<=max&&!/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f\u202a-\u202e\u2066-\u2069]/u.test(s);
 const validTemplate=(t:unknown):t is string=>validText(t,800)&&
  !/\{(?!العضو\}|اسم_المجموعة\}|التاريخ\}|الوقت\}|رابط_القوانين\})[^{}]*\}/u.test(t);
+/** No redirects, credentials, fragments, queries or look-alike domains.
+ * Explicit owner approval does not mean the linked contents were audited.
+ */
+export function validCommunityRulesUrl(value:unknown):value is string{
+ if(typeof value!=='string'||value.length<14||value.length>256||
+  /[\s\u0000-\u001f\u007f\\]/u.test(value))return false;
+ try{
+  const url=new URL(value);
+  return url.protocol==='https:'&&url.hostname==='t.me'&&url.port===''&&
+   url.username===''&&url.password===''&&url.search===''&&url.hash===''&&
+   url.href===value&&/^\/(?:[A-Za-z0-9_+\-]{3,64})(?:\/[A-Za-z0-9_+\-]{1,64}){0,3}\/?$/u.test(url.pathname);
+ }catch{return false;}
+}
 const validTopic=(n:unknown):n is number=>typeof n==='number'&&Number.isSafeInteger(n)&&n>0&&n<=2147483647;
 const kinds=new Set<CommunityDraftKind>(['WELCOME_TEXT','FAREWELL_TEXT','REPLY_ADD','REPLY_REMOVE',
  'WELCOME_ON','WELCOME_OFF','FAREWELL_ON','FAREWELL_OFF','REPLIES_ON','REPLIES_OFF',
  'REPLY_ENABLE','REPLY_DISABLE','REPLY_COOLDOWN',
- 'CHANGE_LOG_ON','CHANGE_LOG_OFF','SERVICE_CLEANUP_ON','SERVICE_CLEANUP_OFF','SERVICE_CLEANUP_DELAY']);
+ 'CHANGE_LOG_ON','CHANGE_LOG_OFF','SERVICE_CLEANUP_ON','SERVICE_CLEANUP_OFF','SERVICE_CLEANUP_DELAY',
+ 'RULES_LINK_SET','RULES_LINK_CLEAR']);
 const matches=new Set<ReplyMatch>(['EXACT','WORD','CONTAINS','COMMAND']);
 export function defaultCommunityConfig(chatId:string):CommunityConfig{
  if(!validGroup(chatId))throw Error('COMMUNITY_CHAT_INVALID');
@@ -86,6 +103,7 @@ export function validCommunityConfig(value:unknown):value is CommunityConfig{
   !Number.isInteger(x.utcOffsetMinutes)||x.utcOffsetMinutes< -720||x.utcOffsetMinutes>840||
   !Number.isInteger(x.groupCooldownMs)||x.groupCooldownMs<1000||x.groupCooldownMs>600000||
   !Array.isArray(x.rules)||x.rules.length>30||
+  (x.rulesUrl!==undefined&&!validCommunityRulesUrl(x.rulesUrl))||
   (x.changeLogEnabled!==undefined&&typeof x.changeLogEnabled!=='boolean')||
   (x.serviceCleanup!==undefined&&(!x.serviceCleanup||typeof x.serviceCleanup!=='object'||
     typeof x.serviceCleanup.enabled!=='boolean'||!Number.isInteger(x.serviceCleanup.delayMs)||
