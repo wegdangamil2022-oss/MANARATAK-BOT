@@ -105,7 +105,8 @@ export class Phase4ServiceCleanupDispatcher{
      config?.replyCleanup?.enabled:
      config?.serviceCleanup?.enabled===true&&
      (current.kind==='JOIN'?config.serviceCleanup.joinEnabled!==false:
-      current.kind==='LEAVE'?config.serviceCleanup.leaveEnabled!==false:true);
+      current.kind==='LEAVE'?config.serviceCleanup.leaveEnabled!==false:
+      config.serviceCleanup.profileEnabled!==false);
    if(liveNow<current.observedAt||liveNow-current.observedAt>2*3600000||
      cleanupEnabled!==true||!config||config.version!==current.policyVersion||
      chat.length!==1||!chat[0]!.approved||chat[0]!.version!==current.chatVersion||
