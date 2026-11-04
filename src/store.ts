@@ -116,6 +116,9 @@ export interface TelegramReplyJob {
   * jobs is valid for storage but MUST deny any attempted send.
   */
  groupMenuAccess?:{actorId:string;epoch:string;expiresAt:number};
+ /** Immutable Phase 4 source marker for send-time quiet-hour enforcement.
+  * Removed at irreversible send claim; never contains student message text. */
+ communityAutomation?:{kind:'JOIN'|'LEAVE'|'TEXT';configVersion:number};
  /** Temporary source scope + actor used to recheck DM group browsing at send. */
  privateGroupAccess?:{actorId:string;scope:string;epoch:string;expiresAt:number};
  /** New private replies declare origin; pre-v0.7.56 private QUEUED rows
@@ -367,6 +370,17 @@ export class BotStore {
         const job=raw as Record<string,unknown>;
         if(!validCommunityMessageMetadata(raw as TelegramReplyJob))return true;
         const plan=job.plan as Record<string,unknown>|undefined;
+        if(job.communityAutomation!==undefined){
+         const proof=job.communityAutomation;
+         if(!proof||typeof proof!=='object'||Array.isArray(proof)||
+           Object.keys(proof).length!==2||
+           !['JOIN','LEAVE','TEXT'].includes(String((proof as Record<string,unknown>).kind))||
+           !Number.isSafeInteger((proof as Record<string,unknown>).configVersion)||
+           Number((proof as Record<string,unknown>).configVersion)<1||
+           job.status!=='QUEUED'||job.groupReplyKind!=='GENERAL'||
+           job.groupMenuAccess===undefined||typeof plan?.chatId!=='string'||!plan.chatId.startsWith('-'))
+          return true;
+        }
         if(plan?.messageThreadId!==undefined&&(!Number.isSafeInteger(plan.messageThreadId)||Number(plan.messageThreadId)<1||Number(plan.messageThreadId)>2147483647||typeof plan.chatId!=='string'||!plan.chatId.startsWith('-')||job.groupMenuAccess===undefined))return true;
         if(plan?.photoFileId!==undefined||plan?.communityLinks!==undefined){
          if(typeof plan.chatId!=='string'||!plan.chatId.startsWith('-')||
@@ -747,7 +761,8 @@ export class BotStore {
     groupQuestionAccess?:TelegramReplyJob['groupQuestionAccess'],
     groupMenuAccess?:TelegramReplyJob['groupMenuAccess'],
     privateGroupAccess?:TelegramReplyJob['privateGroupAccess'],
-    adminUIAccess?:TelegramReplyJob['adminUIAccess'],privateLibraryAccess?:TelegramReplyJob['privateLibraryAccess'],studioScoped=false,communityAccess?:TelegramReplyJob['communityAccess'],communityClose?:CommunityMessageReceipt): Promise<void> {
+    adminUIAccess?:TelegramReplyJob['adminUIAccess'],privateLibraryAccess?:TelegramReplyJob['privateLibraryAccess'],studioScoped=false,communityAccess?:TelegramReplyJob['communityAccess'],communityClose?:CommunityMessageReceipt,
+    communityAutomation?:TelegramReplyJob['communityAutomation']): Promise<void> {
     await this.transaction(s => {
       const update = s.updates.find(x => x.key === key);
       if (!update || update.status !== 'CLAIMED') throw new Error('Update not claimed');
@@ -763,6 +778,7 @@ export class BotStore {
            :{privateReplyKind:communityAccess?'COMMUNITY_SCOPED' as const:adminUIAccess?(studioScoped?'STUDIO_SCOPED' as const:'ADMIN_SCOPED' as const):privateGroupAccess?'GROUP_SCOPED' as const:privateLibraryAccess?'LIBRARY_SCOPED' as const:'LOCAL' as const}),
           ...(groupQuestionAccess?{groupQuestionAccess:structuredClone(groupQuestionAccess)}:{}),
           ...(groupMenuAccess?{groupMenuAccess:structuredClone(groupMenuAccess)}:{}),
+          ...(communityAutomation?{communityAutomation:structuredClone(communityAutomation)}:{}),
           ...(privateGroupAccess?{privateGroupAccess:structuredClone(privateGroupAccess)}:{}),
           ...(adminUIAccess?{adminUIAccess:structuredClone(adminUIAccess)}:{}),
           ...(communityAccess?{communityAccess:structuredClone(communityAccess)}:{}),
