@@ -128,7 +128,7 @@ export interface TelegramApplicationOptions {
   community?:Phase4CommunityService;
 }
 
-type Event = {updateId: number; actorId: string; chatId: string; kind: 'private' | 'group'; text: string; communityKind?:'JOIN'|'LEAVE'; communityMemberId?:string; memberName?:string; groupName?:string; topicId?:number; entities?:unknown; messageId?:number; replyTo?:unknown; document?: IncomingDocument; protectionMedia?:ProtectionMedia; edited?:true; forwarded?:true; callbackData?:string; callbackQueryId?:string; callbackMessageId?:number};
+type Event = {updateId: number; actorId: string; chatId: string; kind: 'private' | 'group'; text: string; communityKind?:'JOIN'|'LEAVE'; communityChange?:'TITLE_CHANGED'|'PHOTO_CHANGED'|'PHOTO_REMOVED'; serviceSentAtMs?:number; communityMemberId?:string; memberName?:string; groupName?:string; topicId?:number; entities?:unknown; messageId?:number; replyTo?:unknown; document?: IncomingDocument; protectionMedia?:ProtectionMedia; edited?:true; forwarded?:true; callbackData?:string; callbackQueryId?:string; callbackMessageId?:number};
 const isObject=(x:unknown):x is Record<string,unknown>=>Boolean(x)&&typeof x==='object'&&!Array.isArray(x);
 const positiveId=(x:unknown): x is number=>typeof x==='number'&&Number.isSafeInteger(x)&&x>0;
 const chatId=(x:unknown): x is number=>typeof x==='number'&&Number.isSafeInteger(x)&&x!==0;
@@ -182,9 +182,34 @@ function eventFrom(value:unknown):{event?:Event;reason:string} {
   const kind=msg.chat.type==='private'?'private':msg.chat.type==='group'||msg.chat.type==='supergroup'?'group':null;
   if(!kind || (kind==='private'&&(msg.chat.id!==msg.from.id))||(kind==='group'&&msg.chat.id>=0))return {reason:'INVALID_CHAT_CONTEXT'};
   if(msg.message_thread_id!==undefined&&!positiveId(msg.message_thread_id))return {reason:'INVALID_MESSAGE_TOPIC'};
+  if(kind==='group'&&(msg.new_chat_title!==undefined||msg.new_chat_photo!==undefined||
+    msg.delete_chat_photo!==undefined)){
+   const title=msg.new_chat_title,photo=msg.new_chat_photo,removed=msg.delete_chat_photo;
+   const count=Number(title!==undefined)+Number(photo!==undefined)+Number(removed!==undefined);
+   const validPhoto=Array.isArray(photo)&&photo.length>=1&&photo.length<=8&&
+      photo.every(p=>isObject(p)&&typeof p.file_id==='string'&&
+       /^[A-Za-z0-9_-]{8,512}$/u.test(p.file_id)&&
+       typeof p.file_unique_id==='string'&&/^[A-Za-z0-9_-]{4,512}$/u.test(p.file_unique_id)&&
+       Number.isSafeInteger(p.width)&&Number.isSafeInteger(p.height)&&
+       (p.width as number)>0&&(p.height as number)>0);
+   if(count!==1||msg.text!==undefined||msg.document!==undefined||
+      (title!==undefined&&(typeof title!=='string'||title.trim().length===0||
+       title.length>128||/[\u0000-\u001f\u007f]/u.test(title)))||
+      (photo!==undefined&&!validPhoto)||
+      (removed!==undefined&&removed!==true)||
+      msg.date!==undefined&&(!positiveId(msg.date)||msg.date>8_640_000_000_000))
+    return {reason:'INVALID_SERVICE_EVENT'};
+   const change=title!==undefined?'TITLE_CHANGED' as const:
+       photo!==undefined?'PHOTO_CHANGED' as const:'PHOTO_REMOVED' as const;
+   return {event:{updateId:value.update_id as number,actorId:String(msg.from.id),
+    chatId:String(msg.chat.id),kind,text:'',communityChange:change,
+    messageId:msg.message_id as number,
+    ...(msg.date!==undefined?{serviceSentAtMs:(msg.date as number)*1000}:{})},reason:'VALID'};
+  }
   if(kind==='group'&&(msg.new_chat_members!==undefined||msg.left_chat_member!==undefined)){
    if(msg.new_chat_members!==undefined&&msg.left_chat_member!==undefined)return {reason:'INVALID_SERVICE_EVENT'};
-   if(!positiveId(msg.message_id)||msg.text!==undefined||msg.document!==undefined)return {reason:'INVALID_SERVICE_EVENT'};
+   if(!positiveId(msg.message_id)||msg.text!==undefined||msg.document!==undefined||
+      msg.date!==undefined&&!positiveId(msg.date))return {reason:'INVALID_SERVICE_EVENT'};
    const members=msg.new_chat_members;
    if(members!==undefined&&(!Array.isArray(members)||members.length<1||members.length>20||
      members.some(m=>!isObject(m)||!positiveId(m.id)||typeof m.is_bot!=='boolean')))
@@ -204,7 +229,8 @@ function eventFrom(value:unknown):{event?:Event;reason:string} {
       (human.length>3?' وآخرين':'');
    return {event:{updateId:value.update_id as number,actorId:String(msg.from.id),
      chatId:String(msg.chat.id),kind,text:'',communityKind:members!==undefined?'JOIN':'LEAVE',
-     communityMemberId:String(first.id),memberName,
+     communityMemberId:String(first.id),memberName,messageId:msg.message_id as number,
+     ...(msg.date!==undefined?{serviceSentAtMs:(msg.date as number)*1000}:{}),
      groupName:typeof msg.chat.title==='string'?msg.chat.title:'المجموعة',
      ...(msg.message_thread_id!==undefined?{topicId:msg.message_thread_id as number}:{})},reason:'VALID'};
   }
@@ -414,9 +440,23 @@ export class TelegramUpdateApplication {
       expiresAt:now+120000}};
   }
   private async process(event:Event):Promise<ProcessedReply> {
-    if(event.communityKind){
+    if(event.communityKind||event.communityChange){
+     // Only authenticated service-message updates pass this branch. Never
+     // submit user-supplied text/media for deletion or audit processing.
+     if(event.edited)return {status:'IGNORED',reason:'COMMUNITY_SERVICE_EDIT_IGNORED'};
+     const recorded=this.opts.community&&event.messageId!==undefined?
+      await this.opts.community.recordServiceEvent({
+       chatId:event.chatId,actorId:event.actorId,messageId:event.messageId,
+       kind:event.communityChange??event.communityKind!,
+       updateKey:'b3-webhook:'+this.opts.botId+':'+event.updateId,
+       ...(event.serviceSentAtMs!==undefined?{sentAtMs:event.serviceSentAtMs}:{})
+      }):false;
+     if(event.communityChange)
+      return {status:recorded?'APPLIED':'IGNORED',
+       reason:recorded?'COMMUNITY_SERVICE_CHANGE_OBSERVED':'COMMUNITY_SERVICE_LOG_DISABLED'};
      const output=await this.phase4Reply(event);
-     return output??{status:'IGNORED',reason:'COMMUNITY_POLICY_DISABLED_OR_THROTTLED'};
+     return output??{status:recorded?'APPLIED':'IGNORED',
+      reason:recorded?'COMMUNITY_SERVICE_CLEANUP_QUEUED':'COMMUNITY_POLICY_DISABLED_OR_THROTTLED'};
     }
     if(event.protectionMedia){
      const media=event.protectionMedia;
