@@ -98,7 +98,12 @@ interface IncomingDocument {
 }
 /** Offline B3 application adapter: creates plans, NEVER sends a message or connects to Telegram. */
 export interface TelegramReplyPlan { chatId: string; parseMode: 'HTML'; text: string;
- replyMarkup?:TelegramReplyKeyboard; inlineMarkup?:TelegramInlineKeyboard; studioMarkup?:import('./telegram-studio-rich.js').StudioNativeKeyboard; editMessageId?:number;messageThreadId?:number; }
+ replyMarkup?:TelegramReplyKeyboard; inlineMarkup?:TelegramInlineKeyboard; studioMarkup?:import('./telegram-studio-rich.js').StudioNativeKeyboard;
+ /** Community-only photo: trusted Telegram file_id, never a URL. */
+ photoFileId?:string;
+ /** Community-only external HTTPS links; NEVER a callback or owner action. */
+ communityLinks?:import('./phase4-community-rich.js').CommunityLinkKeyboard;
+ editMessageId?:number;messageThreadId?:number; }
 export interface TelegramResult { status: 'APPLIED' | 'DUPLICATE' | 'DENIED' | 'IGNORED' | 'UNKNOWN'; reason: string; plan?: TelegramReplyPlan; deliveryKey?: string; callbackQueryId?:string; }
 type ProcessedReply={status:TelegramResult['status'];reason:string;plan?:TelegramReplyPlan;
  groupQuestionAccess?:TelegramReplyJob['groupQuestionAccess'];
@@ -434,6 +439,8 @@ export class TelegramUpdateApplication {
       return null;
     return {status:'APPLIED',reason:'PHASE4_COMMUNITY_PLANNED',
      plan:{chatId:event.chatId,parseMode:'HTML',text:proposal.text,
+      ...(proposal.photoFileId?{photoFileId:proposal.photoFileId}:{}),
+      ...(proposal.communityLinks?{communityLinks:proposal.communityLinks}:{}),
       ...(event.topicId!==undefined?{messageThreadId:event.topicId}:{})},
      groupMenuAccess:{actorId:proposal.actorId,
       epoch:groupMenuEpochDigest(snapshot,event.chatId,event.topicId),
