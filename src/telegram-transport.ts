@@ -484,7 +484,7 @@ export class TelegramUpdateApplication {
     if(event.kind==='private'&&!event.callbackData?.startsWith('cr:1:')&&!event.callbackData?.startsWith('cp:1:')&&(event.callbackData!==undefined||!['/start','/captcha'].includes(event.text)))await captchaRules.cancel(event.actorId);
     if(event.kind==='private'&&this.opts.policy.isOwner(event.actorId)){
      const owner=new TelegramCaptchaOwner(this.opts.store,this.opts.policy,captcha,this.clock,captchaEnforcement,this.opts.joinNotices,this.opts.serviceCleanup,this.opts.captchaEscalation);
-     if(event.callbackData==='mi:1:i:04:07'||event.callbackData==='mi:1:i:04:10'||event.callbackData?.startsWith('ca:1:')){const view=await owner.handle(event.actorId,event.callbackData);return view?{status:'APPLIED',reason:'CAPTCHA_OWNER_VIEW',adminUIAccess:view.access,plan:this.plan(event.actorId,view.text,undefined,view.keyboard,event.callbackMessageId)}:{status:'DENIED',reason:'CAPTCHA_OWNER_UNAVAILABLE'};}
+     if(event.callbackData==='mi:1:i:04:07'||event.callbackData==='mi:1:i:04:10'||event.callbackData==='mi:1:i:09:01'||event.callbackData?.startsWith('ca:1:')){const view=await owner.handle(event.actorId,event.callbackData);return view?{status:'APPLIED',reason:'CAPTCHA_OWNER_VIEW',adminUIAccess:view.access,plan:this.plan(event.actorId,view.text,undefined,view.keyboard,event.callbackMessageId)}:{status:'DENIED',reason:'CAPTCHA_OWNER_UNAVAILABLE'};}
      await owner.cancel(event.actorId);
     }
     if(event.kind==='private'&&!event.edited&&!event.forwarded&&(event.callbackData?.startsWith('cp:1:')||event.callbackData?.startsWith('cr:1:')||!event.callbackData&&['/start','/captcha'].includes(event.text))){
