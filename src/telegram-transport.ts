@@ -1,5 +1,7 @@
 import {CaptchaEnforcement} from './captcha-enforcement.js';
 import type {CaptchaJoinNotices} from './captcha-join-notices.js';
+import type {GroupWelcomeFarewell} from './group-welcome-farewell.js';
+import {TelegramWelcomeOwner} from './telegram-welcome-owner.js';
 import type {GroupServiceMessageCleanup} from './group-service-message-cleanup.js';
 import type {CaptchaEscalationPolicy} from './captcha-escalation-policy.js';
 import {VerifiedOnboardingWelcome} from './onboarding-welcome.js';
@@ -167,6 +169,8 @@ export interface TelegramApplicationOptions {
   ephemeralVerification?:boolean;
   /** Optional opt-in CAPTCHA join notice queue; absent in mock-only and unarmed live runtimes. */
   joinNotices?:CaptchaJoinNotices;
+  /** Public welcome/farewell messages, owner-approved per group and saved studio version. */
+  welcomeFarewell?:GroupWelcomeFarewell;
   /** Original Telegram join/leave service message cleanup, separately owner-approved. */
   serviceCleanup?:GroupServiceMessageCleanup;
   /** Local safe graduated CAPTCHA retry policy; separate owner approval. */
@@ -483,6 +487,13 @@ export class TelegramUpdateApplication {
     const captcha=new CaptchaService(this.opts.store,this.opts.policy,this.opts.membership,this.clock),captchaEnforcement=new CaptchaEnforcement(this.opts.store,this.opts.policy,captcha,this.opts.moderation,this.opts.moderationRights,this.clock,this.opts.subscription),captchaRules=new CaptchaRuleGate(this.opts.store,this.opts.policy,captcha,this.opts.membership,this.clock);
     if(event.kind==='private'&&!event.callbackData?.startsWith('cr:1:')&&!event.callbackData?.startsWith('cp:1:')&&(event.callbackData!==undefined||!['/start','/captcha'].includes(event.text)))await captchaRules.cancel(event.actorId);
     if(event.kind==='private'&&this.opts.policy.isOwner(event.actorId)){
+     if(this.opts.welcomeFarewell&&event.kind==='private'&&
+        (event.callbackData==='mi:1:i:09:01'||event.callbackData?.startsWith('wm:1:'))){
+      const view=await new TelegramWelcomeOwner(this.opts.store,this.opts.policy,this.opts.welcomeFarewell,this.clock).handle(event.actorId,event.callbackData!);
+      return view?{status:'APPLIED',reason:'WELCOME_OWNER_VIEW',
+       plan:this.plan(event.chatId,view.text,undefined,view.keyboard,event.callbackMessageId)}:
+       {status:'DENIED',reason:'WELCOME_OWNER_UNAVAILABLE'};
+     }
      const owner=new TelegramCaptchaOwner(this.opts.store,this.opts.policy,captcha,this.clock,captchaEnforcement,this.opts.joinNotices,this.opts.serviceCleanup,this.opts.captchaEscalation);
      if(event.callbackData==='mi:1:i:04:07'||event.callbackData==='mi:1:i:04:10'||event.callbackData==='mi:1:i:09:01'||event.callbackData==='mi:1:i:09:04'||event.callbackData?.startsWith('ca:1:')){const view=await owner.handle(event.actorId,event.callbackData);return view?{status:'APPLIED',reason:'CAPTCHA_OWNER_VIEW',adminUIAccess:view.access,plan:this.plan(event.actorId,view.text,undefined,view.keyboard,event.callbackMessageId)}:{status:'DENIED',reason:'CAPTCHA_OWNER_UNAVAILABLE'};}
      await owner.cancel(event.actorId);
@@ -548,6 +559,8 @@ export class TelegramUpdateApplication {
       return {status:'DENIED',reason:'INVALID_GROUP_LEAVE'};
      if(this.opts.serviceCleanup)await this.opts.serviceCleanup.observeService(event.chatId,'LEAVE',event.messageId,
       'b3-webhook:'+this.opts.botId+':'+event.updateId,event.sentAt);
+     if(this.opts.welcomeFarewell)await this.opts.welcomeFarewell.observe(event.chatId,'FAREWELL',event.messageId,
+      'b3-webhook:'+this.opts.botId+':'+event.updateId,event.sentAt,event.topicId);
      return {status:'IGNORED',reason:'GROUP_SERVICE_LEAVE_OBSERVED'};
     }
     if(event.joins){
@@ -555,6 +568,9 @@ export class TelegramUpdateApplication {
      if(this.opts.serviceCleanup&&event.serviceKind==='JOIN'&&event.messageId)
       await this.opts.serviceCleanup.observeService(event.chatId,'JOIN',event.messageId,
        'b3-webhook:'+this.opts.botId+':'+event.updateId,event.sentAt);
+     if(this.opts.welcomeFarewell&&event.serviceKind==='JOIN'&&event.messageId)
+      await this.opts.welcomeFarewell.observe(event.chatId,'WELCOME',event.messageId,
+       'b3-webhook:'+this.opts.botId+':'+event.updateId,event.sentAt,event.topicId);
      const trustedJoinKey='b3-webhook:'+this.opts.botId+':'+event.updateId;
      await captcha.observe(event.chatId,event.joins,'b3-webhook:'+this.opts.botId+':'+event.updateId,event.sentAt);
      if(this.opts.joinNotices)await this.opts.joinNotices.observe(event.chatId,event.joins,trustedJoinKey,event.sentAt,event.topicId);
