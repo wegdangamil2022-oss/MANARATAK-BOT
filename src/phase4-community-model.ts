@@ -6,6 +6,8 @@ import {validCommunityPhotoId,validCommunityLinkButtons,type CommunityLinkButton
 export type CommunityEventKind='JOIN'|'LEAVE'|'TEXT';
 /** Classified only from verified Telegram service messages; not user-supplied text. */
 export type CommunityJoinKind='SELF'|'ADDED'|'BATCH';
+/** Exit source derived only from a trusted Telegram membership or service event. */
+export type CommunityLeaveKind='SELF'|'REMOVED';
 export type CommunityServiceKind='JOIN'|'LEAVE'|'TITLE_CHANGED'|'PHOTO_CHANGED'|'PHOTO_REMOVED';
 export type ReplyMatch='EXACT'|'WORD'|'CONTAINS'|'COMMAND';
 export type CommunityLanguage='ar'|'en';
@@ -31,6 +33,10 @@ export interface CommunityConfig{
  chatId:string;version:number;welcome:CommunityGreeting;farewell:CommunityGreeting;
  /** Optional templates per trusted join source; fallback to localized welcome. */
  welcomeByJoin?:Partial<Record<CommunityJoinKind,string>>;
+ /** Optional farewell variants; never inferred from students' text. */
+ farewellByLeave?:Partial<Record<CommunityLeaveKind,string>>;
+ /** Removal/ban notices are off by default to avoid unwanted disclosures. */
+ farewellOnRemoval?:boolean;
  /** User-initiated private welcome only, never an unsolicited Telegram DM. */
  privateWelcomeEnabled?:boolean;
  repliesEnabled:boolean;rules:CommunityReplyRule[];
@@ -67,6 +73,7 @@ export type CommunityDraftKind='WELCOME_TEXT'|'FAREWELL_TEXT'|'REPLY_ADD'|'REPLY
  'REPLY_CLEANUP_ON'|'REPLY_CLEANUP_OFF'|'REPLY_CLEANUP_DELAY'|
  'RULES_LINK_SET'|'RULES_LINK_CLEAR'|
  'WELCOME_VARIANT_SET'|'WELCOME_VARIANT_CLEAR'|
+ 'FAREWELL_VARIANT_SET'|'FAREWELL_VARIANT_CLEAR'|'FAREWELL_REMOVED_ON'|'FAREWELL_REMOVED_OFF'|
  'WELCOME_LOCALIZED'|'FAREWELL_LOCALIZED'|'GROUP_LANGUAGE'|'GROUP_CLOCK'|'GROUP_TIMEZONE'|'GROUP_TIMEZONE_CLEAR'|
  'WELCOME_PHOTO_SET'|'WELCOME_PHOTO_CLEAR'|'FAREWELL_PHOTO_SET'|'FAREWELL_PHOTO_CLEAR'|
  'WELCOME_BUTTON_ADD'|'WELCOME_BUTTONS_CLEAR'|'FAREWELL_BUTTON_ADD'|'FAREWELL_BUTTONS_CLEAR';
@@ -75,7 +82,7 @@ export interface CommunityDraft{
  kind:CommunityDraftKind;createdAt:number;expiresAt:number;
  text?:string;trigger?:string;match?:ReplyMatch;ruleId?:string;topicId?:number;cooldownMs?:number;delayMs?:number;
  language?:CommunityLanguage;clockFormat?:CommunityClockFormat;calendar?:CommunityCalendar;utcOffsetMinutes?:number;timeZone?:string;
- joinKind?:CommunityJoinKind;
+ joinKind?:CommunityJoinKind;leaveKind?:CommunityLeaveKind;
  photoFileId?:string;buttonText?:string;buttonUrl?:string;
  startMinute?:number;endMinute?:number;
 }
@@ -83,7 +90,7 @@ export interface CommunityReceipt{
  /** An opaque hash of the inbound Telegram update and bot identifier. */
  key:string;chatId:string;at:number;kind:CommunityEventKind;
  /** A short-lived digest, not a raw student message or display name. */
- actorDigest:string;ruleId?:string;topicId?:number;joinKind?:CommunityJoinKind;
+ actorDigest:string;ruleId?:string;topicId?:number;joinKind?:CommunityJoinKind;leaveKind?:CommunityLeaveKind;
 }
 /** A bounded, opt-in decision record. No message, display name or actor identifier. */
 export type CommunityDecisionReason=
@@ -118,7 +125,7 @@ export interface CommunityAutomationState{
 }
 export interface CommunityInput{
  kind:CommunityEventKind;chatId:string;actorId:string;
- memberName:string;groupName:string;messageText?:string;joinKind?:CommunityJoinKind;
+ memberName:string;groupName:string;messageText?:string;joinKind?:CommunityJoinKind;leaveKind?:CommunityLeaveKind;
  topicId?:number;edited?:boolean;forwarded?:boolean;fromBot?:boolean;
 }
 const validGroup=(s:unknown):s is string=>typeof s==='string'&&/^-[1-9]\d{0,15}$/u.test(s)&&Number.isSafeInteger(Number(s));
@@ -145,6 +152,8 @@ const validTopic=(n:unknown):n is number=>typeof n==='number'&&Number.isSafeInte
 const validMinute=(v:unknown):v is number=>typeof v==='number'&&Number.isInteger(v)&&v>=0&&v<1440;
 export const validCommunityJoinKind=(value:unknown):value is CommunityJoinKind=>
  value==='SELF'||value==='ADDED'||value==='BATCH';
+export const validCommunityLeaveKind=(value:unknown):value is CommunityLeaveKind=>
+ value==='SELF'||value==='REMOVED';
 /** A supported, canonical IANA zone. All zone names are owner-supplied only. */
 export function validCommunityTimeZone(value:unknown):value is string{
  if(typeof value!=='string'||value.length>64||
@@ -180,6 +189,7 @@ const kinds=new Set<CommunityDraftKind>(['WELCOME_TEXT','FAREWELL_TEXT','REPLY_A
  'REPLY_CLEANUP_ON','REPLY_CLEANUP_OFF','REPLY_CLEANUP_DELAY',
  'RULES_LINK_SET','RULES_LINK_CLEAR',
  'WELCOME_VARIANT_SET','WELCOME_VARIANT_CLEAR',
+ 'FAREWELL_VARIANT_SET','FAREWELL_VARIANT_CLEAR','FAREWELL_REMOVED_ON','FAREWELL_REMOVED_OFF',
  'WELCOME_LOCALIZED','FAREWELL_LOCALIZED','GROUP_LANGUAGE','GROUP_CLOCK','GROUP_TIMEZONE','GROUP_TIMEZONE_CLEAR',
  'WELCOME_PHOTO_SET','WELCOME_PHOTO_CLEAR','FAREWELL_PHOTO_SET','FAREWELL_PHOTO_CLEAR',
  'WELCOME_BUTTON_ADD','WELCOME_BUTTONS_CLEAR','FAREWELL_BUTTON_ADD','FAREWELL_BUTTONS_CLEAR']);
@@ -207,6 +217,11 @@ export function validCommunityConfig(value:unknown):value is CommunityConfig{
        !Number.isInteger(row.cooldownMs)||row.cooldownMs<1000||row.cooldownMs>600000)||
      new Set(x.topicCooldowns.map(row=>row.topicId)).size!==x.topicCooldowns.length))||
   (x.privateWelcomeEnabled!==undefined&&typeof x.privateWelcomeEnabled!=='boolean')||
+  (x.farewellOnRemoval!==undefined&&typeof x.farewellOnRemoval!=='boolean')||
+  (x.farewellByLeave!==undefined&&(!x.farewellByLeave||typeof x.farewellByLeave!=='object'||
+    Array.isArray(x.farewellByLeave)||
+    Object.keys(x.farewellByLeave).some(kind=>!validCommunityLeaveKind(kind))||
+    Object.values(x.farewellByLeave).some(text=>!validTemplate(text))))||
   (x.welcomeByJoin!==undefined&&(!x.welcomeByJoin||typeof x.welcomeByJoin!=='object'||
     Array.isArray(x.welcomeByJoin)||
     Object.keys(x.welcomeByJoin).some(kind=>!validCommunityJoinKind(kind))||
@@ -343,6 +358,7 @@ export function validCommunityState(value:unknown):value is CommunityAutomationS
        d.utcOffsetMinutes< -720||d.utcOffsetMinutes>840))||
     (d.timeZone!==undefined&&!validCommunityTimeZone(d.timeZone))||
    (d.joinKind!==undefined&&!validCommunityJoinKind(d.joinKind))||
+   (d.leaveKind!==undefined&&!validCommunityLeaveKind(d.leaveKind))||
    (d.photoFileId!==undefined&&!validCommunityPhotoId(d.photoFileId))||
    (d.buttonText!==undefined&&
       (typeof d.buttonText!=='string'||!validCommunityLinkButtons([{text:d.buttonText,
@@ -364,6 +380,9 @@ export function validCommunityState(value:unknown):value is CommunityAutomationS
    (d.kind==='WELCOME_VARIANT_SET'||d.kind==='WELCOME_VARIANT_CLEAR')&&
      !validCommunityJoinKind(d.joinKind)||
    d.kind==='WELCOME_VARIANT_SET'&&!validTemplate(d.text)||
+   (d.kind==='FAREWELL_VARIANT_SET'||d.kind==='FAREWELL_VARIANT_CLEAR')&&
+     !validCommunityLeaveKind(d.leaveKind)||
+   d.kind==='FAREWELL_VARIANT_SET'&&!validTemplate(d.text)||
    d.kind==='GROUP_LANGUAGE'&&!d.language||
     d.kind==='GROUP_TIMEZONE'&&!validCommunityTimeZone(d.timeZone)||
    d.kind==='GROUP_CLOCK'&&(d.utcOffsetMinutes===undefined||
@@ -382,7 +401,8 @@ export function validCommunityState(value:unknown):value is CommunityAutomationS
    !/^[a-f0-9]{64}$/u.test(x.actorDigest)||
    (x.ruleId!==undefined&&!/^[a-f0-9]{12}$/u.test(x.ruleId))||
    (x.topicId!==undefined&&!validTopic(x.topicId))||
-   (x.joinKind!==undefined&&(x.kind!=='JOIN'||!validCommunityJoinKind(x.joinKind))))return false;
+   (x.joinKind!==undefined&&(x.kind!=='JOIN'||!validCommunityJoinKind(x.joinKind)))||
+   (x.leaveKind!==undefined&&(x.kind!=='LEAVE'||!validCommunityLeaveKind(x.leaveKind))))return false;
   receiptIds.add(x.key);
  }
  return true;
@@ -416,10 +436,12 @@ export function matchCommunityRule(rule:CommunityReplyRule,text:string):boolean{
 /** A localized greeting overrides the legacy template only for the language
  * expressly chosen for this group; otherwise use the existing safe fallback. */
 export function selectCommunityGreeting(config:CommunityConfig,kind:'welcome'|'farewell',
- joinKind?:CommunityJoinKind):string{
+ joinKind?:CommunityJoinKind,leaveKind?:CommunityLeaveKind):string{
  const entry=config[kind],language=config.language??'ar';
  if(kind==='welcome'&&joinKind&&validCommunityJoinKind(joinKind)&&
    config.welcomeByJoin?.[joinKind])return config.welcomeByJoin[joinKind];
+ if(kind==='farewell'&&leaveKind&&validCommunityLeaveKind(leaveKind)&&
+   config.farewellByLeave?.[leaveKind])return config.farewellByLeave[leaveKind];
  return entry.localized?.[language]??entry.text;
 }
 export interface CommunityDateTimeOptions{
