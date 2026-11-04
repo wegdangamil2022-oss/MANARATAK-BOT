@@ -6,6 +6,11 @@ import {tmpdir} from 'node:os';
 import {BotStore} from '../src/store.js';
 import {Policy} from '../src/policy.js';
 import {Phase4CommunityService} from '../src/phase4-community.js';
+import {EducationService} from '../src/education.js';
+import {EducationAdminFacade} from '../src/education-admin.js';
+import {ApprovedAnswerService,ResourceLinkService} from '../src/education-interactions.js';
+import {TelegramUpdateApplication} from '../src/telegram-transport.js';
+import {TelegramReplyDispatcher} from '../src/telegram-replies.js';
 import {defaultCommunityConfig,validCommunityConfig,validCommunityTimeZone,
  formatCommunityDateTime,inCommunityQuietHours,renderCommunityTemplate} from '../src/phase4-community-model.js';
 import {parsePhase4CommunityCommand,phase4CommunityScreen,validPhase4CommunityRoute} from '../src/phase4-community-ui.js';
@@ -125,6 +130,40 @@ for(const engine of ['json','sqlite'] as const){
    assert.equal((await f.service.view(OWNER,CHAT)).timeZone,'America/New_York');
    await phase4CommunityScreen(f.service,OWNER,approve!.callback_data);
    assert.equal((await f.service.view(OWNER,CHAT)).timeZone,undefined);
+  }finally{await f.close();}
+ });
+}
+
+for(const engine of ['json','sqlite'] as const){
+ test('P4 IANA '+engine+': queued reply is withheld when DST enters quiet hours before send',async()=>{
+  const f=await fixture(engine);
+  try{
+   await f.apply({kind:'REPLY_ADD',match:'WORD',trigger:'hello',text:'Now {الوقت}'});
+   await f.apply({kind:'REPLIES_ON'});
+   await f.apply({kind:'QUIET_HOURS_SET',startMinute:120,endMinute:240});
+   await f.apply({kind:'GROUP_TIMEZONE',timeZone:'America/New_York'});
+   const store=new BotStore(f.file,{engine});
+   const policy=new Policy(store,OWNER,f.clock);
+   const education=new EducationService(store,policy,f.clock);
+   const app=new TelegramUpdateApplication({store,policy,community:f.service,
+    education,admin:new EducationAdminFacade(store,policy,education),
+    faq:new ApprovedAnswerService(store,policy),links:new ResourceLinkService(store,policy),
+    botId:'bot-main',botUsername:'ManaratakBot',membership:async()=> 'VERIFIED',
+    clock:f.clock});
+   const inbound={update_id:987654,message:{message_id:987654,
+    chat:{id:Number(CHAT),type:'supergroup',title:'منارتك'},
+    from:{id:301,is_bot:false,first_name:'الطالب'},text:'hello'}};
+   const queued=await app.handle(inbound);
+   assert.equal(queued.status,'APPLIED');
+   assert.ok(queued.deliveryKey);
+   f.setNow(instant('2026-03-08T07:00:00Z'));
+   let sends=0;
+   const dispatcher=new TelegramReplyDispatcher(store,policy,{
+    send:async()=>{sends++;return {status:'CONFIRMED' as const,messageId:901};}
+   },f.clock);
+   assert.equal((await dispatcher.dispatch(queued.deliveryKey!)).status,'FAILED_CONFIRMED');
+   assert.equal(sends,0);
+   assert.equal((await dispatcher.dispatch(queued.deliveryKey!)).status,'FAILED_CONFIRMED');
   }finally{await f.close();}
  });
 }
