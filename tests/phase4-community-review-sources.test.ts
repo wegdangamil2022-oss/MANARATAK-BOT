@@ -12,6 +12,7 @@ import {Phase4CommunityService} from '../src/phase4-community.js';
 import {TelegramUpdateApplication} from '../src/telegram-transport.js';
 import {TelegramReplyDispatcher} from '../src/telegram-replies.js';
 import {defaultCommunityConfig,validCommunityConfig,validCommunityState} from '../src/phase4-community-model.js';
+import {groupMenuEpochDigest} from '../src/telegram-group-access.js';
 import {parsePhase4CommunityCommand,phase4CommunityScreen} from '../src/phase4-community-ui.js';
 
 const GROUP='-1001234578',OWNER='100',MEMBER='311';
@@ -213,6 +214,25 @@ for(const engine of ['json','sqlite'] as const){
    await f.store.transaction(s=>{s.educationCategories.find(c=>c.id===CATEGORY)!.enabled=false;});
    await assert.rejects(f.community.approve(OWNER,draft.id),/COMMUNITY_FAQ_SOURCE_UNAVAILABLE/);
    assert.equal((await f.community.view(OWNER,GROUP)).rules.length,0);
+  }finally{await f.close();}
+ });
+}
+
+
+for(const engine of ['json','sqlite'] as const){
+ test('WELCOME-004 '+engine+': reserve captures source/policy epoch inside same transaction, never from a later snapshot',async()=>{
+  const f=await fixture(engine);
+  try{
+   await f.addFAQ();
+   await f.approve({kind:'REPLY_ADD',source:'FAQ',sourceFaqId:FAQ,match:'WORD',trigger:'القبول'});
+   await f.approve({kind:'REPLIES_ON'});
+   const result=await f.community.propose({kind:'TEXT',chatId:GROUP,actorId:MEMBER,
+    memberName:'طالب',groupName:'منارتك',messageText:'القبول'},'b3-webhook:bot-main:560');
+   assert.ok(result);
+   assert.equal(result.sourceEpoch,groupMenuEpochDigest(await f.store.snapshot(),GROUP));
+   await f.store.transaction(s=>{s.faqEntries.find(q=>q.id===FAQ)!.status='ARCHIVED';});
+   assert.notEqual(result.sourceEpoch,groupMenuEpochDigest(await f.store.snapshot(),GROUP),
+    'a later API snapshot cannot launder the content from the old approved source');
   }finally{await f.close();}
  });
 }
