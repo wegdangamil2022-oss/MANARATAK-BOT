@@ -10,6 +10,7 @@ import {EducationAdminFacade} from '../src/education-admin.js';
 import {ApprovedAnswerService,ResourceLinkService} from '../src/education-interactions.js';
 import {TelegramUpdateApplication} from '../src/telegram-transport.js';
 import {TelegramReplyDispatcher} from '../src/telegram-replies.js';
+import {Phase4ServiceCleanupDispatcher} from '../src/phase4-service-cleanup.js';
 import {Phase4CommunityService} from '../src/phase4-community.js';
 import {defaultCommunityConfig,validCommunityConfig,validCommunityState,selectCommunityGreeting}
  from '../src/phase4-community-model.js';
@@ -259,6 +260,47 @@ for(const engine of ['json','sqlite'] as const){
    assert.ok(screen?.keyboard.inline_keyboard.flat().some(b=>b.callback_data==='p4c:1:t:'+CHAT+':s:0'));
    await assert.rejects(f.community.pending(MEMBER,{kind:'SERVICE_LEAVE_ON'},CHAT),
     /COMMUNITY_OWNER_DENIED/);
+  }finally{await f.close();}
+ });
+}
+
+
+for(const engine of ['json','sqlite'] as const){
+ test('P4 WELCOME-003 '+engine+': queued join cleanup is cancelled after independent join-cleanup revocation',async()=>{
+  const f=await setup(engine);
+  try{
+   await f.approve({kind:'SERVICE_CLEANUP_ON'});
+   await f.community.recordServiceEvent({chatId:CHAT,actorId:MEMBER,kind:'JOIN',
+    messageId:811,updateKey:'b3-webhook:bot-main:811',sentAtMs:f.clock()});
+   const key=(await f.store.snapshot()).phase4Community?.cleanupJobs?.[0]?.key;
+   assert.ok(key);
+   await f.approve({kind:'SERVICE_JOIN_OFF'});
+   f.move(120001);
+   let deleteCalls=0;
+   const dispatcher=new Phase4ServiceCleanupDispatcher(f.store,f.policy,{
+    canDelete:async()=>true,deleteMessage:async()=>{deleteCalls++;return 'CONFIRMED' as const;}
+   },f.clock);
+   assert.equal(await dispatcher.dispatch(key),'SKIPPED');
+   assert.equal(deleteCalls,0);
+   assert.equal((await f.store.snapshot()).phase4Community?.cleanupJobs?.[0]?.status,'SKIPPED');
+  }finally{await f.close();}
+ });
+ test('P4 WELCOME-003 '+engine+': removal farewell may be suppressed while leave service cleanup stays independent',async()=>{
+  const f=await setup(engine);
+  try{
+   await f.approve({kind:'FAREWELL_ON'});
+   await f.approve({kind:'SERVICE_CLEANUP_ON'});
+   const result=await f.app.handle(f.serviceLeave(822,Number(ADMIN),301));
+   assert.equal(result.status,'APPLIED');
+   assert.equal(result.plan,undefined);
+   const jobs=(await f.store.snapshot()).phase4Community?.cleanupJobs??[];
+   assert.equal(jobs.length,1);
+   assert.equal(jobs[0]?.kind,'LEAVE');
+   assert.equal(jobs[0]?.messageId,822);
+   const member=await f.app.handle(f.membershipLeave(823,'member','left',Number(MEMBER),405));
+   assert.ok(member.plan);
+   assert.equal((await f.store.snapshot()).phase4Community?.cleanupJobs?.length,1,
+    'chat_member has no message_id and must never be eligible for deleteMessage');
   }finally{await f.close();}
  });
 }
