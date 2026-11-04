@@ -436,8 +436,15 @@ export class TelegramUpdateApplication {
    const decision=result.decision,rule=state.subscriptionRequirements.find(r=>r.chatId===group),required=rule?(rule.mode==='ANY'?1:rule.mode==='AT_LEAST'?rule.minimumCount??0:rule.channelIds.length):0;
    if(event.kind==='private'&&decision.status==='MEMBER')await this.opts.store.transaction(s=>{const checked=this.clock();if(!Number.isSafeInteger(checked)||checked<now||checked>=at+120000||subscriptionVerificationEpoch(s,this.opts.policy,actor,group,checked)!==epoch||onboardingGuard&&!onboardingGuard(s))return;for(const job of s.telegramReplyJobs??[]){const receipt=job.verificationCleanup;if(job.status!=='SENT'||!validSubscriptionFallbackCleanup(receipt)||receipt.status!=='WAITING'||(receipt.memberId??receipt.chatId)!==actor||receipt.scope!==group||receipt.verifiedAt!==undefined||checked<receipt.createdAt||!subscriptionFallbackReceiptEvidence(s,job,receipt)||(s.telegramReplyJobs??[]).filter(x=>x.updateKey===job.updateKey).length!==1||(s.telegramReplyJobs??[]).filter(x=>x.verificationCleanup?.chatId===receipt.chatId&&x.verificationCleanup?.messageId===receipt.messageId).length!==1||s.audit.some(a=>a.updateKey===job.updateKey+':fallback-verified'))continue;receipt.verifiedAt=checked;s.audit.push({actorId:receipt.chatId,updateKey:job.updateKey+':fallback-verified',decision:'ALLOW',reason:'SUBSCRIPTION_FALLBACK_VERIFIED:'+subscriptionFallbackVerificationDigest(receipt,checked),policyVersion:this.opts.policy.chatRevision(s,group),at:checked});}});
    const moderationEffect='effect' in result?result.effect:undefined;
+   const subscriptionFailed=moderationEffect&&
+      ['DENIED','UNKNOWN_OUTCOME','BLOCKED_UNKNOWN','BLOCKED_PENDING'].includes(moderationEffect.status);
+   // Subscription's attempted reason retirement can be DENIED because the
+   // member is currently muted ONLY by CAPTCHA. That is not a failed final
+   // restoration if the independent owned CAPTCHA release has subsequently
+   // succeeded with an official readback. All remaining reasons and unknown
+   // attempts are rechecked atomically by the welcome claim below.
    const welcomeEligible=event.kind==='private'&&decision.status==='MEMBER'&&
-      !(moderationEffect&&['DENIED','UNKNOWN_OUTCOME','BLOCKED_UNKNOWN','BLOCKED_PENDING'].includes(moderationEffect.status));
+      (!subscriptionFailed||joinedSettlement?.status==='APPLIED');
    const welcome=welcomeEligible?await new VerifiedOnboardingWelcome(this.opts.store,this.opts.policy,captchaForSettlement,this.clock).claim(group,actor,epoch):false;
    const label={MEMBER:'✅ اكتمل شرط الاشتراك في هذا الفحص.',NOT_MEMBER:'لم يكتمل شرط الاشتراك.',NOT_REQUIRED:'لا يلزم اشتراك وفق نتيجة هذا الفحص.',UNAVAILABLE:'تعذر إكمال الفحص؛ لا يُعد ذلك مخالفة.',DENIED:'التحقق غير متاح لهذا النطاق.'}[decision.status];
    const effect='effect' in result?result.effect:undefined;
