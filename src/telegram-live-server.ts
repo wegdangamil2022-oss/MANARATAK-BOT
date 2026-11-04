@@ -1,6 +1,7 @@
 import {GroupProtectionPolicyService} from './group-protection-policy.js';
 import {Phase4CommunityService} from './phase4-community.js';
 import {Phase4ServiceCleanupDispatcher,TelegramBotApiServiceCleanupGateway} from './phase4-service-cleanup.js';
+import {Phase4GroupProfileDispatcher,TelegramBotApiGroupProfileGateway} from './phase4-group-profile.js';
 import {startProtectionMaintenance} from './protection-maintenance.js';
 import {createServer,type Server} from 'node:http';
 import {lstat,realpath} from 'node:fs/promises';
@@ -22,6 +23,8 @@ import {readTelegramSafetySwitch,createTelegramSafetyGate} from './telegram-safe
 export interface LiveTelegramConfig{
  ownerId:string;botId:string;botUsername:string;stateFile:string;
  token:string;webhookSecret:string;listenPort:number;publicWebhookUrl:string;safetySwitchFile:string;
+ /** High-impact group-profile writes require a second, explicit env opt-in. */
+ profileEditsEnabled?:boolean;
 }
 /** An advisory URL syntax and topology gate, NOT DNS/TLS or proxy verification.
  * Reject deceptive/non-HTTPS local endpoints and alternate routing before the
@@ -63,6 +66,8 @@ export function loadLiveTelegramConfig(env:Readonly<Record<string,string|undefin
  const publicWebhookUrl=env.TELEGRAM_WEBHOOK_PUBLIC_URL;
  const safetySwitchFile=env.TELEGRAM_SAFETY_FILE;
  if(env.BOT_ENV!=='production'||env.TELEGRAM_ENABLED!=='true'||
+    (env.TELEGRAM_GROUP_PROFILE_EDITS_ENABLED!==undefined&&
+     !['true','false'].includes(env.TELEGRAM_GROUP_PROFILE_EDITS_ENABLED))||
     env.TELEGRAM_REPLY_DELIVERY_ENABLED!=='true'||
     !validOwner(ownerId)||
     !botId||!/^[A-Za-z0-9_-]{1,80}$/.test(botId)||
@@ -79,7 +84,8 @@ export function loadLiveTelegramConfig(env:Readonly<Record<string,string|undefin
     /[\u0000-\u001f\u007f]/u.test(safetySwitchFile)||
     safetySwitchFile===stateFile)
    throw new Error('LIVE_TELEGRAM_CONFIG_INVALID');
- return {ownerId,botId,botUsername,stateFile,token,webhookSecret,listenPort:port,publicWebhookUrl,safetySwitchFile};
+ return {ownerId,botId,botUsername,stateFile,token,webhookSecret,listenPort:port,publicWebhookUrl,safetySwitchFile,
+  ...(env.TELEGRAM_GROUP_PROFILE_EDITS_ENABLED==='true'?{profileEditsEnabled:true}:{})};
 }
 /** Independently checks a pre-existing local state; never initializes databases.
  * Common verification for both the read-only preflight command and real runtime.
@@ -157,7 +163,8 @@ export async function createLiveTelegramServer(config:LiveTelegramConfig,
   BOT_STATE_FILE:config.stateFile,TELEGRAM_BOT_TOKEN:config.token,
   TELEGRAM_WEBHOOK_SECRET:config.webhookSecret,TELEGRAM_LISTEN_PORT:String(config.listenPort),
   TELEGRAM_WEBHOOK_PUBLIC_URL:config.publicWebhookUrl,
-  TELEGRAM_SAFETY_FILE:config.safetySwitchFile
+  TELEGRAM_SAFETY_FILE:config.safetySwitchFile,
+  TELEGRAM_GROUP_PROFILE_EDITS_ENABLED:config.profileEditsEnabled===true?'true':'false'
  });
  await assertPrivateStateReady(check.stateFile);
  // Both RUN and STOP are valid *protected* states; STOP starts only the local
@@ -190,11 +197,17 @@ export async function createLiveTelegramServer(config:LiveTelegramConfig,
   const protection=new GroupProtectionPolicyService(store,policy);
   const serviceCleaner=new Phase4ServiceCleanupDispatcher(store,policy,
    new TelegramBotApiServiceCleanupGateway(check.token,request),Date.now,safetyGate);
+  const profileEditor=check.profileEditsEnabled===true?
+   new Phase4GroupProfileDispatcher(store,policy,
+    new TelegramBotApiGroupProfileGateway(check.token,request),Date.now,safetyGate):null;
   const cleanup=startProtectionMaintenance(async()=>{
    const result=await protection.cleanupFloodWindows();
    if(result.status==='CLOCK_UNTRUSTED')throw Error('PROTECTION_CLOCK_UNTRUSTED');
    // Explicitly enabled group service deletions only; no retries of unknown API outcomes.
    await serviceCleaner.runDue(4);
+   // Do not create this dispatcher without explicit runtime opt-in.
+   // Every individual job still requires owner approval and current bot rights.
+   if(profileEditor)await profileEditor.runDue(2);
   },undefined,()=>process.stderr.write('PROTECTION_OR_SERVICE_MAINTENANCE_FAILED\n'));
   protectionMaintenanceStops.set(server,cleanup.stop);
   server.once('close',()=>{void cleanup.stop();});
