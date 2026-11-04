@@ -21,11 +21,12 @@ export class VerifiedOnboardingWelcome{
   private readonly captcha:CaptchaService,private readonly clock:()=>number){
   this.rules=new CaptchaRuleGate(store,policy,captcha,async()=> 'UNKNOWN',clock);
  }
- private proof(s:BotState,chat:string,member:string,now:number):string|null{
+ private proof(s:BotState,chat:string,member:string,now:number,kind:'SUBSCRIPTION'|'STANDALONE'):string|null{
+  const mode=subscriptionRequirementMode(s,chat);
   if(!group(chat)||!person(member)||!validTime(now)||this.policy.isOwner(member)||
      this.policy.has(s,member,'chat.manage',chat,now)||
      !this.policy.canUseChat(s,chat,'verification')||!this.policy.canUseChat(s,chat,'navigation')||
-     subscriptionRequirementMode(s,chat)!=='ACTIVE')return null;
+     (kind==='SUBSCRIPTION'?mode!=='ACTIVE':mode!=='NONE'&&mode!=='PAUSED'))return null;
   const captcha=this.captcha.status(s,chat,member),rules=this.rules.status(s,chat,member);
   if(!['PASSED','NOT_REQUIRED'].includes(captcha)||!['ACCEPTED','NOT_REQUIRED'].includes(rules))return null;
   if(s.moderationReasons.some(r=>r.chatId===chat&&r.memberId===member&&r.active)||
@@ -49,11 +50,32 @@ export class VerifiedOnboardingWelcome{
    const now=this.clock();
    if(!validTime(now)||now<started||now>=started+120000||
       subscriptionVerificationEpoch(s,this.policy,member,chat,now)!==verificationEpoch)return false;
-   const digest=this.proof(s,chat,member,now);
+   const digest=this.proof(s,chat,member,now,'SUBSCRIPTION');
    if(!digest)return false;
    const key=ROOT+digest;
    if(s.audit.some(a=>a.updateKey===key))return false;
    s.audit.push({actorId:member,updateKey:key,decision:'ALLOW',
+    reason:'VERIFIED_PRIVATE_WELCOME:'+digest,policyVersion:this.policy.chatRevision(s,chat),at:now});
+   return true;
+  });
+ }
+ /** Called solely from the private CAPTCHA callback after CaptchaService.view
+  * performed a fresh group membership read. No subscription can be active.
+  * The expected challenge epoch keeps this a completion of the current journey,
+  * not a permission inferred from a stale reply or another member's callback. */
+ async claimStandalone(chat:string,member:string,expectedChallengeEpoch:string):Promise<boolean>{
+  const started=this.clock();
+  if(!validTime(started)||typeof expectedChallengeEpoch!=='string'||
+     !/^[a-f0-9]{64}$/u.test(expectedChallengeEpoch))return false;
+  const before=await this.store.snapshot(),initial=this.proof(before,chat,member,started);
+  if(initial!==null)return false; // Standalone calls never borrow channel proof.
+  return this.store.transaction(s=>{
+   const now=this.clock(),challenge=this.captcha.challenge(s,chat,member);
+   if(!validTime(now)||now<started||now>=started+120000||
+      challenge?.epoch!==expectedChallengeEpoch)return false;
+   const digest=this.proof(s,chat,member,now,'STANDALONE');
+   if(!digest||s.audit.some(a=>a.updateKey===ROOT+digest))return false;
+   s.audit.push({actorId:member,updateKey:ROOT+digest,decision:'ALLOW',
     reason:'VERIFIED_PRIVATE_WELCOME:'+digest,policyVersion:this.policy.chatRevision(s,chat),at:now});
    return true;
   });
