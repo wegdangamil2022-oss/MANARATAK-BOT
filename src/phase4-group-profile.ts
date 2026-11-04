@@ -2,8 +2,8 @@ import {randomBytes} from 'node:crypto';
 import {BotStore} from './store.js';
 import {Policy} from './policy.js';
 import {validCommunityConfig,validCommunityProfileTitle,
- validCommunityPhotoId,
  type CommunityProfileStatus} from './phase4-community-model.js';
+import {validCommunityPhotoId} from './phase4-community-rich.js';
 
 export type GroupProfileMutationResult='CONFIRMED'|'FAILED_CONFIRMED'|'UNKNOWN_OUTCOME';
 export interface Phase4GroupProfileGateway{
