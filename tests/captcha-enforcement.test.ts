@@ -156,4 +156,36 @@ for(const engine of ['json','sqlite'] as const){
   assert.equal(result.reason,'SUBSCRIPTION_VERIFICATION_VIEW');assert.equal(f.target().status,'member');assert.equal(f.writes.length,2);
  }finally{await f.close();}});
 
+
+ test(engine+' an existing subscription-owned mute stays until CAPTCHA and current channels are both verified',async()=>{const f=await fixture(true);try{
+  await f.policy.approveChat('100','-200',['verification']);
+  await f.store.transaction(s=>{s.subscriptionRequirements.push({chatId:G,channelIds:['-200'],mode:'ALL',version:1});assert.equal(recordSubscriptionEnforcementConsent(s,f.policy,'100',G,true,f.now()),true);});
+  f.channelMembership.set('-200','300','NOT_MEMBER');
+  assert.equal((await f.subscription!.synchronizeAutomatic(G,'300')).decision.status,'NOT_MEMBER');
+  assert.equal(f.target().status,'restricted');assert.equal(f.writes.length,1);
+  await f.enable();f.advance();const at=f.now();
+  await f.app.handle({update_id:191,message:{message_id:191,date:at/1000,from:{id:100,is_bot:false},chat:{id:Number(G),type:'supergroup'},new_chat_members:[{id:300,is_bot:false}]}});
+  assert.equal(f.writes.length,1);
+  f.channelMembership.set('-200','300','MEMBER');
+  const pending=await f.subscription!.synchronizeAutomatic(G,'300');
+  assert.equal(pending.decision.status,'MEMBER');assert.equal(f.target().status,'restricted');
+  assert.ok((await f.store.snapshot()).moderationReasons.some(r=>r.source==='SUBSCRIPTION'&&r.active));
+  f.advance();const start=await f.app.handle({update_id:192,message:{message_id:192,from:{id:300,is_bot:false},chat:{id:300,type:'private'},text:'/start'}}),answer=pick({text:start.plan!.text,keyboard:start.plan!.inlineMarkup!},'تحقق بديل');
+  const done=await f.app.handle({update_id:193,callback_query:{id:'existing-sub-pass',from:{id:300,is_bot:false},data:answer,message:{message_id:193,from:{id:999,is_bot:true},chat:{id:300,type:'private'}}}});
+  assert.equal(done.reason,'SUBSCRIPTION_VERIFICATION_VIEW');assert.equal(f.target().status,'member');assert.equal(f.writes.length,2);
+  assert.ok((await f.store.snapshot()).moderationReasons.every(r=>r.memberId!=='300'||!r.active));
+ }finally{await f.close();}});
+
+ test(engine+' joined restrictions never lift while the channel API result is unknown',async()=>{const f=await fixture(true);try{
+  await f.policy.approveChat('100','-200',['verification']);
+  await f.store.transaction(s=>{s.subscriptionRequirements.push({chatId:G,channelIds:['-200'],mode:'ALL',version:1});assert.equal(recordSubscriptionEnforcementConsent(s,f.policy,'100',G,true,f.now()),true);});
+  await f.enable();f.advance();const at=f.now();
+  await f.app.handle({update_id:195,message:{message_id:195,date:at/1000,from:{id:100,is_bot:false},chat:{id:Number(G),type:'supergroup'},new_chat_members:[{id:300,is_bot:false}]}});
+  assert.equal(f.target().status,'restricted');f.advance();
+  const start=await f.app.handle({update_id:196,message:{message_id:196,from:{id:300,is_bot:false},chat:{id:300,type:'private'},text:'/start'}}),answer=pick({text:start.plan!.text,keyboard:start.plan!.inlineMarkup!},'تحقق بديل');
+  const result=await f.app.handle({update_id:197,callback_query:{id:'unknown-channel-pass',from:{id:300,is_bot:false},data:answer,message:{message_id:197,from:{id:999,is_bot:true},chat:{id:300,type:'private'}}}});
+  assert.equal(result.reason,'SUBSCRIPTION_VERIFICATION_VIEW');assert.match(result.plan!.text,/تعذر إكمال الفحص/u);
+  assert.equal(f.target().status,'restricted');assert.equal(f.writes.length,1);
+  assert.ok((await f.store.snapshot()).moderationReasons.some(r=>r.source==='MANUAL'&&r.active));
+ }finally{await f.close();}});
 }
