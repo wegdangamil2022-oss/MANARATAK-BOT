@@ -310,7 +310,12 @@ export class Phase4CommunityService{
      break;
     }
     case 'CHANGE_LOG_ON':config.changeLogEnabled=true;break;
-    case 'CHANGE_LOG_OFF':config.changeLogEnabled=false;break;
+    case 'CHANGE_LOG_OFF':
+     config.changeLogEnabled=false;
+     // Disabling the opt-in audit also erases the group's stored history.
+     // Internal edit-fencing observations remain opaque and independent.
+     st!.serviceChanges=(st!.serviceChanges??[]).filter(x=>x.chatId!==config.chatId);
+     break;
     case 'DECISION_LOG_ON':config.decisionLogEnabled=true;break;
     case 'DECISION_LOG_OFF':
      config.decisionLogEnabled=false;
@@ -416,15 +421,16 @@ export class Phase4CommunityService{
    if(!shouldLog&&!shouldClean&&!shouldObserve)return false;
    const chat=s.chats.find(x=>x.id===input.chatId)!;
    const key=hex('P4:SERVICE:'+input.updateKey),actorDigest=hex('P4:SERVICE:ACTOR:'+input.chatId+':'+input.actorId);
+   const messageDigest=hex('P4:SERVICE:MESSAGE:'+input.chatId+':'+input.messageId);
    s.phase4Community??=emptyCommunityState();
    const state=s.phase4Community;
    let recorded=false;
    if(shouldObserve){
     state.profileObservations=(state.profileObservations??[]).filter(x=>
       x.at<=now&&now-x.at<7*86400000);
-    if(!state.profileObservations.some(x=>x.key===key)){
+    if(!state.profileObservations.some(x=>x.key===key||x.messageDigest===messageDigest)){
      state.profileObservations=[...state.profileObservations.slice(-999),
-      {key,chatId:input.chatId,at:now}];
+      {key,chatId:input.chatId,at:now,messageDigest}];
      state.profileRevisions??=[];
      const rev=state.profileRevisions.find(x=>x.chatId===input.chatId);
      if(rev){
@@ -437,10 +443,10 @@ export class Phase4CommunityService{
    }
    if(shouldLog){
     state.serviceChanges=(state.serviceChanges??[]).filter(x=>now-x.at<7*86400000);
-    if(!state.serviceChanges.some(x=>x.key===key)){
+    if(!state.serviceChanges.some(x=>x.key===key||x.messageDigest===messageDigest)){
      const kind=input.kind as CommunityServiceChange['kind'];
      state.serviceChanges=[...state.serviceChanges.slice(-999),
-      {key,chatId:input.chatId,kind,actorDigest,at:now}];
+      {key,chatId:input.chatId,kind,actorDigest,at:now,messageDigest}];
      recorded=true;
     }
    }
