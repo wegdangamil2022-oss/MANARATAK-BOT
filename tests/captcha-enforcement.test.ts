@@ -205,4 +205,24 @@ for(const engine of ['json','sqlite'] as const){
   const done=await f.app.handle({update_id:203,callback_query:{id:'resume-channel',from:{id:300,is_bot:false},data:button.callback_data,message:{message_id:203,from:{id:999,is_bot:true},chat:{id:300,type:'private'}}}});
   assert.equal(done.reason,'SUBSCRIPTION_VERIFICATION_VIEW');assert.equal(f.target().status,'member');assert.equal(f.writes.length,2);
  }finally{await f.close();}});
+
+ test(engine+' welcome appears once after all gates finish and is never sent before channels pass',async()=>{const f=await fixture(true);try{
+  await f.policy.approveChat('100','-200',['verification']);
+  await f.store.transaction(s=>{s.subscriptionRequirements.push({chatId:G,channelIds:['-200'],mode:'ALL',version:1});assert.equal(recordSubscriptionEnforcementConsent(s,f.policy,'100',G,true,f.now()),true);});
+  await f.enable();f.channelMembership.set('-200','300','NOT_MEMBER');f.advance();const at=f.now();
+  await f.app.handle({update_id:220,message:{message_id:220,date:at/1000,from:{id:100,is_bot:false},chat:{id:Number(G),type:'supergroup'},new_chat_members:[{id:300,is_bot:false}]}});
+  f.advance();const initial=await f.app.handle({update_id:221,message:{message_id:221,from:{id:300,is_bot:false},chat:{id:300,type:'private'},text:'/start'}}),answer=pick({text:initial.plan!.text,keyboard:initial.plan!.inlineMarkup!},'تحقق بديل');
+  const before=await f.app.handle({update_id:222,callback_query:{id:'welcome-captcha',from:{id:300,is_bot:false},data:answer,message:{message_id:222,from:{id:999,is_bot:true},chat:{id:300,type:'private'}}}});
+  assert.doesNotMatch(before.plan!.text,/مرحبًا بك بعد إكمال التحقق/u);
+  assert.equal((await f.store.snapshot()).audit.filter(a=>a.updateKey.startsWith('onboarding:welcome:')).length,0);
+  f.channelMembership.set('-200','300','MEMBER');
+  const retry=before.plan!.studioMarkup!.inline_keyboard.flat().find(b=>'callback_data' in b&&b.callback_data.startsWith('sv:1:'));assert.ok(retry&&'callback_data' in retry);
+  const complete=await f.app.handle({update_id:223,callback_query:{id:'welcome-channel',from:{id:300,is_bot:false},data:retry.callback_data,message:{message_id:223,from:{id:999,is_bot:true},chat:{id:300,type:'private'}}}});
+  assert.match(complete.plan!.text,/مرحبًا بك بعد إكمال التحقق/u);
+  assert.equal(f.target().status,'member');
+  assert.equal((await f.store.snapshot()).audit.filter(a=>a.updateKey.startsWith('onboarding:welcome:')).length,1);
+  const repeated=await f.app.handle({update_id:224,callback_query:{id:'welcome-repeat',from:{id:300,is_bot:false},data:retry.callback_data,message:{message_id:224,from:{id:999,is_bot:true},chat:{id:300,type:'private'}}}});
+  assert.doesNotMatch(repeated.plan!.text,/مرحبًا بك بعد إكمال التحقق/u);
+  assert.equal((await f.store.snapshot()).audit.filter(a=>a.updateKey.startsWith('onboarding:welcome:')).length,1);
+ }finally{await f.close();}});
 }
