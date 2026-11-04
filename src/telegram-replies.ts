@@ -5,6 +5,7 @@ import {Policy} from './policy.js';
 import type {TelegramReplyPlan} from './telegram-transport.js';
 import {isValidTelegramReplyKeyboard} from './telegram-menu.js';
 import {isValidTelegramInlineKeyboard} from './telegram-inline-owner.js';
+import {validCommunityPhotoId,validCommunityLinkKeyboard} from './phase4-community-rich.js';
 import {validStudioNativeKeyboard} from './telegram-studio-rich.js';
 import {groupQuestionEpochDigest,groupMenuEpochDigest,privateGroupEpochDigest} from './telegram-group-access.js';
 import {privateLibraryEpoch} from './private-library-access.js';
@@ -25,10 +26,14 @@ const validChat=(chat:string)=>/^(?:[1-9]\d{0,15}|-[1-9]\d{0,15})$/.test(chat)&&
 const validPlan=(p:unknown):p is TelegramReplyPlan=>{
  if(!p||typeof p!=='object'||Array.isArray(p))return false;
  const v=p as Record<string,unknown>;
- return (Object.keys(v).length===(3+(v.replyMarkup===undefined?0:1)+(v.inlineMarkup===undefined?0:1)+(v.studioMarkup===undefined?0:1)+(v.editMessageId===undefined?0:1)+(v.messageThreadId===undefined?0:1)))&&
-  Object.keys(v).every(k=>['chatId','parseMode','text','replyMarkup','inlineMarkup','studioMarkup','editMessageId','messageThreadId'].includes(k))&&
+ return (Object.keys(v).length===(3+(v.replyMarkup===undefined?0:1)+(v.inlineMarkup===undefined?0:1)+(v.studioMarkup===undefined?0:1)+(v.editMessageId===undefined?0:1)+(v.messageThreadId===undefined?0:1)+(v.photoFileId===undefined?0:1)+(v.communityLinks===undefined?0:1)))&&
+  Object.keys(v).every(k=>['chatId','parseMode','text','replyMarkup','inlineMarkup','studioMarkup','editMessageId','messageThreadId','photoFileId','communityLinks'].includes(k))&&
   (v.messageThreadId===undefined||typeof v.chatId==='string'&&v.chatId.startsWith('-')&&Number.isSafeInteger(v.messageThreadId)&&Number(v.messageThreadId)>0&&Number(v.messageThreadId)<=2147483647)&&
-  [v.replyMarkup,v.inlineMarkup,v.studioMarkup].filter(x=>x!==undefined).length<=1&&
+  [v.replyMarkup,v.inlineMarkup,v.studioMarkup,v.communityLinks].filter(x=>x!==undefined).length<=1&&
+  (v.photoFileId===undefined||(typeof v.chatId==='string'&&v.chatId.startsWith('-')&&
+    v.editMessageId===undefined&&validCommunityPhotoId(v.photoFileId)))&&
+  (v.communityLinks===undefined||(typeof v.chatId==='string'&&v.chatId.startsWith('-')&&
+    v.editMessageId===undefined&&validCommunityLinkKeyboard(v.communityLinks)))&&
   (v.replyMarkup===undefined||isValidTelegramReplyKeyboard(v.replyMarkup))&&
   (v.inlineMarkup===undefined||isValidTelegramInlineKeyboard(v.inlineMarkup))&&
   (v.studioMarkup===undefined||typeof v.chatId==='string'&&!v.chatId.startsWith('-')&&validStudioNativeKeyboard(v.studioMarkup))&&
@@ -36,12 +41,12 @@ const validPlan=(p:unknown):p is TelegramReplyPlan=>{
     Number.isSafeInteger(v.editMessageId)&&v.editMessageId>0&&(v.inlineMarkup!==undefined||v.studioMarkup!==undefined)))&&
   v.parseMode==='HTML'&&typeof v.chatId==='string'&&
   validChat(v.chatId)&&typeof v.text==='string'&&v.text.length>0&&
-  Buffer.byteLength(v.text,'utf8')<=4096&& !/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/u.test(v.text);
+  Buffer.byteLength(v.text,'utf8')<=(v.photoFileId===undefined?4096:1024)&& !/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/u.test(v.text);
 };
 /**
  * Real Telegram Bot API boundary, but construction alone performs no network
  * calls. Does not retry ambiguous requests, never returns provider descriptions
- * or the token, and sends only fixed-format HTML text plans.
+ * or the token; sends only validated HTML text or Telegram photo captions.
  */
 export class TelegramBotApiTextSender implements TelegramReplySender {
  constructor(private readonly token:string,private readonly request:typeof fetch=fetch){
@@ -53,13 +58,18 @@ export class TelegramBotApiTextSender implements TelegramReplySender {
   let response:Response;
   try{
    response=await this.request('https://api.telegram.org/bot'+this.token+
-    (plan.editMessageId===undefined?'/sendMessage':'/editMessageText'),{
+    (plan.photoFileId!==undefined?'/sendPhoto':plan.editMessageId===undefined?'/sendMessage':'/editMessageText'),{
     method:'POST',headers:{'content-type':'application/json'},
-    body:JSON.stringify({chat_id:plan.chatId,text:plan.text,parse_mode:'HTML',
-     link_preview_options:{is_disabled:true},
+    body:JSON.stringify({chat_id:plan.chatId,
+     ...(plan.photoFileId!==undefined?{photo:plan.photoFileId,caption:plan.text}:
+      {text:plan.text,link_preview_options:{is_disabled:true}}),
+     parse_mode:'HTML',
      ...(plan.editMessageId===undefined?{protect_content:true}:{message_id:plan.editMessageId}),
      ...(plan.editMessageId===undefined&&plan.messageThreadId!==undefined?{message_thread_id:plan.messageThreadId}:{}),
-     ...(plan.studioMarkup?{reply_markup:plan.studioMarkup}:plan.inlineMarkup?{reply_markup:plan.inlineMarkup}:plan.replyMarkup?{reply_markup:plan.replyMarkup}:{})}),
+     ...(plan.communityLinks?{reply_markup:plan.communityLinks}:
+        plan.studioMarkup?{reply_markup:plan.studioMarkup}:
+        plan.inlineMarkup?{reply_markup:plan.inlineMarkup}:
+        plan.replyMarkup?{reply_markup:plan.replyMarkup}:{})}),
     redirect:'error',signal:AbortSignal.timeout(8000)
    });
   }catch{return {status:'UNKNOWN_OUTCOME'};}
@@ -154,6 +164,10 @@ export function validTelegramReplyJob(v:unknown):v is TelegramReplyJob{
   validCommunityMessageMetadata(v as TelegramReplyJob)&&
   ((j.plan as TelegramReplyPlan|undefined)?.messageThreadId===undefined||j.groupReplyKind==='GENERAL'&&validGroupReplyAccess(j.groupMenuAccess))&&
   (j.status==='QUEUED'?validPlan(j.plan):(j.plan===undefined||validPlan(j.plan)))&&
+  ((j.plan as TelegramReplyPlan|undefined)?.photoFileId===undefined&&
+   (j.plan as TelegramReplyPlan|undefined)?.communityLinks===undefined||
+   (j.status==='QUEUED'&&j.groupReplyKind==='GENERAL'&&
+    validGroupReplyAccess(j.groupMenuAccess)))&&
   (j.queuedAt===undefined||(typeof j.queuedAt==='number'&&Number.isSafeInteger(j.queuedAt)&&j.queuedAt>=0))&&
   (j.startedAt===undefined||(typeof j.startedAt==='number'&&Number.isSafeInteger(j.startedAt)&&j.startedAt>=0))&&
   (j.redactedAt===undefined||(typeof j.redactedAt==='number'&&Number.isSafeInteger(j.redactedAt)&&j.redactedAt>=0))&&
