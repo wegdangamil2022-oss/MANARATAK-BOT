@@ -45,6 +45,10 @@ export function groupMenuEpochDigest(state:BotState,groupId:string,topicId?:numb
 
 /** Scoped private DM browsing uses a separate change-detection domain. */
 export function privateGroupEpochDigest(state:BotState,scope:string):string{
- return createHash('sha256').update('MANARATAK:B6:PRIVATE-GROUP:DISPATCH:v1:')
-  .update(groupQuestionSubscriptionEpoch(state,scope)).digest('hex');
+ return createHash('sha256').update('MANARATAK:B6:PRIVATE-GROUP:DISPATCH:v2:')
+  .update(groupQuestionSubscriptionEpoch(state,scope))
+  // An optional private welcome must be revoked if the owner changes its
+  // source greeting or disables the feature before Telegram delivery.
+  .update(JSON.stringify(state.phase4Community?.configs.filter(c=>c.chatId===scope)??[]))
+  .digest('hex');
 }
