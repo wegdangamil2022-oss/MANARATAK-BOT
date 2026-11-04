@@ -154,7 +154,8 @@ for(const engine of ['json','sqlite'] as const){
     /COMMUNITY_AUTO_LIMIT_INVALID/);
    const draft=await f.community.pending(OWNER,{kind:'AUTO_LIMIT_SET',autoMessagesPerMinute:3},GROUP);
    await f.approve({kind:'WELCOME_ON'});
-   await assert.rejects(f.community.approve(OWNER,draft.id),/COMMUNITY_DRAFT_STALE/);
+   // A newer owner approval discards the earlier unconfirmed draft.
+   await assert.rejects(f.community.approve(OWNER,draft.id),/COMMUNITY_DRAFT_NOT_FOUND/);
   }finally{await f.close();}
  });
 }
