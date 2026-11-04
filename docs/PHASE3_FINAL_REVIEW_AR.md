@@ -97,13 +97,13 @@
 | GATE-011 | 625 | PARTIAL_LOCAL_REVIEW | Related local code and tests identified; full official requirement has not been independently accepted. |
 | GATE-012 | 626 | PARTIAL_LOCAL_REVIEW | Owner-only aggregate verification outcomes, witnessed delivery confirmations, historical rights-loss notice states and separate anonymous bounded unavailable automatic/manual rights-check counts exist locally. Delivery does not prove page opening; other channel/API errors are not covered. The complete funnel remains open. |
 | VERIFY-001 | 632 | PARTIAL_LOCAL_REVIEW | Local join challenge supports random question and accessible alternative; real-client verification deferred. |
-| VERIFY-002 | 633 | PARTIAL_LOCAL_REVIEW | Separately approved CAPTCHA mute is available for a trusted join without an active subscription; existing restrictions and the joined subscription path remain open. |
+| VERIFY-002 | 633 | PARTIAL_LOCAL_REVIEW | Separately approved CAPTCHA mute now supports an active subscription only with a second independently enabled owner consent and valid grace policy. Existing external restrictions and uncertain operations are never overwritten; real Telegram acceptance remains deferred. |
 | VERIFY-003 | 634 | PARTIAL_LOCAL_REVIEW | Timeouts, attempts and bounded retries exist; graduated sanctions and their timing remain open. |
-| VERIFY-004 | 635 | PARTIAL_LOCAL_REVIEW | Owner can require current published rules after CAPTCHA; combined subscription enforcement remains blocked. |
+| VERIFY-004 | 635 | PARTIAL_LOCAL_REVIEW | The owner may require explicit acceptance of the current published rules after CAPTCHA; joined channel enforcement now checks all required proofs before lifting bot-owned restrictions. Current law changes invalidate stale acceptance; real Telegram acceptance remains deferred. |
 | VERIFY-005 | 636 | PARTIAL_LOCAL_REVIEW | Private success is shown after interaction; configurable welcome and hiding join service messages remain open. |
 | VERIFY-006 | 637 | PARTIAL_LOCAL_REVIEW | Private bot interaction is supported; configured join-link notice and safe cleanup remain open. |
 | VERIFY-007 | 638 | PARTIAL_LOCAL_REVIEW | Owner review with approval and rejection exists; Android, iOS and Desktop acceptance is deferred. |
-| VERIFY-008 | 639 | PARTIAL_LOCAL_REVIEW | Member can proceed from CAPTCHA and rules to channel verification without repeating CAPTCHA; combined enforcement and existing restrictions remain open. |
+| VERIFY-008 | 639 | PARTIAL_LOCAL_REVIEW | Joined local journey enforces CAPTCHA, current rules acceptance and independent channel membership before owned restriction settlement, without replaying CAPTCHA. Previously bot-owned subscription mutes are preserved until all gates pass. External and ambiguous restrictions require manual review; real Telegram acceptance is deferred. |
 | VERIFY-009 | 640 | PARTIAL_LOCAL_REVIEW | Future AI Guardians and WebApp support has not been reviewed. |
 | NETWORK-001 | 701 | NOT_REVIEWED_IN_THIS_PASS | لم تكتمل مطابقته في هذه المراجعة. |
 | NETWORK-002 | 702 | NOT_REVIEWED_IN_THIS_PASS | لم تكتمل مطابقته في هذه المراجعة. |
@@ -276,3 +276,11 @@
 | SAFEAI-010 | 1560 | NOT_REVIEWED_IN_THIS_PASS | لم تكتمل مطابقته في هذه المراجعة. |
 
 لا تُغلق المرحلة الثالثة أو هذه الحزم من هذا التقرير؛ يلزم تنفيذ النواقص الصريحة ومعالجة الإخفاقات وفحص الضوابط التفصيلية المرتبطة بالخطة.
+
+## متابعة تنفيذ رحلة الانضمام المشتركة — 2026-11-04
+
+وُصل إنفاذ CAPTCHA مع الاشتراك الإجباري وموافقة إصدار القوانين في مسار تحكم محلي واحد على فرع المراجعة #184: لا رفع لقيد CAPTCHA المملوك قبل اجتياز التحدي/قبول المالك، وموافقة القوانين الحالية (عند طلبها)، وإثبات الاشتراك في القنوات. يستمر سبب الاشتراك المملوك القائم مسبقًا حتى تستوفي الرحلة كل متطلباتها. لا تُستنتج العضوية من نجاح CAPTCHA، ولا تتكرر عقوبة الاشتراك فوق قيد CAPTCHA مؤكد ومملوك للبوت، ولا يُمس قيد خارجي أو غامض.
+
+اجتازت نسخة `6a07ceee` [Ubuntu 41909901843](https://github.com/wegdangamil2022-oss/MANARATAK-BOT/actions/runs/41909901843) بعد **4139 اختبارًا ناجحًا / 4139**، دون فشل أو تخط، مع التدقيقات والمحاكاة. أضيف بعدها حارس صلاحية قبل التسوية والتوثيق؛ قبول آخر نسخة مشروط بنتيجة CI مستقلة. التفاصيل في [PHASE3_JOINED_ONBOARDING_AR.md](PHASE3_JOINED_ONBOARDING_AR.md).
+
+لا يحل ذلك نواقص الإنذار عند الانضمام، والتدرج العقابي، ولا يلغي الإخفاقات الـ214 المثبتة في المراجعة المستقلة القديمة، ولا يثبت التشغيل الحقيقي. حالة المرحلة الثالثة الكاملة: **مفتوحة**.
