@@ -31,6 +31,8 @@ export interface CommunityConfig{
  chatId:string;version:number;welcome:CommunityGreeting;farewell:CommunityGreeting;
  /** Optional templates per trusted join source; fallback to localized welcome. */
  welcomeByJoin?:Partial<Record<CommunityJoinKind,string>>;
+ /** User-initiated private welcome only, never an unsolicited Telegram DM. */
+ privateWelcomeEnabled?:boolean;
  repliesEnabled:boolean;rules:CommunityReplyRule[];
  /** Minutes from UTC. Display-only, never a claim about a real Telegram time zone. */
  utcOffsetMinutes:number;
@@ -58,6 +60,7 @@ export interface CommunityConfig{
 }
 export type CommunityDraftKind='WELCOME_TEXT'|'FAREWELL_TEXT'|'REPLY_ADD'|'REPLY_REMOVE'|
  'WELCOME_ON'|'WELCOME_OFF'|'FAREWELL_ON'|'FAREWELL_OFF'|'REPLIES_ON'|'REPLIES_OFF'|
+ 'PRIVATE_WELCOME_ON'|'PRIVATE_WELCOME_OFF'|
  'REPLY_ENABLE'|'REPLY_DISABLE'|'REPLY_COOLDOWN'|
  'QUIET_HOURS_SET'|'QUIET_HOURS_CLEAR'|'TOPIC_COOLDOWN_SET'|'TOPIC_COOLDOWN_CLEAR'|
  'CHANGE_LOG_ON'|'CHANGE_LOG_OFF'|'DECISION_LOG_ON'|'DECISION_LOG_OFF'|'SERVICE_CLEANUP_ON'|'SERVICE_CLEANUP_OFF'|'SERVICE_CLEANUP_DELAY'|
@@ -80,7 +83,7 @@ export interface CommunityReceipt{
  /** An opaque hash of the inbound Telegram update and bot identifier. */
  key:string;chatId:string;at:number;kind:CommunityEventKind;
  /** A short-lived digest, not a raw student message or display name. */
- actorDigest:string;ruleId?:string;topicId?:number;
+ actorDigest:string;ruleId?:string;topicId?:number;joinKind?:CommunityJoinKind;
 }
 /** A bounded, opt-in decision record. No message, display name or actor identifier. */
 export type CommunityDecisionReason=
@@ -90,6 +93,10 @@ export type CommunityDecisionReason=
 export interface CommunityDecision {
  key:string;chatId:string;at:number;kind:CommunityEventKind;configVersion:number;
  reason:CommunityDecisionReason;ruleId?:string;
+}
+/** At-most-once claim for a user-initiated DM, without user IDs or text. */
+export interface CommunityPrivateWelcome{
+ joinKey:string;chatId:string;actorDigest:string;at:number;
 }
 export interface CommunityServiceChange{
  key:string;chatId:string;kind:'TITLE_CHANGED'|'PHOTO_CHANGED'|'PHOTO_REMOVED';
@@ -107,6 +114,7 @@ export interface CommunityAutomationState{
  serviceChanges?:CommunityServiceChange[];
  cleanupJobs?:CommunityCleanupJob[];
  decisionLog?:CommunityDecision[];
+ privateWelcomes?:CommunityPrivateWelcome[];
 }
 export interface CommunityInput{
  kind:CommunityEventKind;chatId:string;actorId:string;
@@ -165,7 +173,7 @@ export function inCommunityQuietHours(hours:CommunityQuietHours,now:number,utcOf
   minute>=hours.startMinute||minute<hours.endMinute;
 }
 const kinds=new Set<CommunityDraftKind>(['WELCOME_TEXT','FAREWELL_TEXT','REPLY_ADD','REPLY_REMOVE',
- 'WELCOME_ON','WELCOME_OFF','FAREWELL_ON','FAREWELL_OFF','REPLIES_ON','REPLIES_OFF',
+ 'WELCOME_ON','WELCOME_OFF','PRIVATE_WELCOME_ON','PRIVATE_WELCOME_OFF','FAREWELL_ON','FAREWELL_OFF','REPLIES_ON','REPLIES_OFF',
  'REPLY_ENABLE','REPLY_DISABLE','REPLY_COOLDOWN',
  'QUIET_HOURS_SET','QUIET_HOURS_CLEAR','TOPIC_COOLDOWN_SET','TOPIC_COOLDOWN_CLEAR',
  'CHANGE_LOG_ON','CHANGE_LOG_OFF','DECISION_LOG_ON','DECISION_LOG_OFF','SERVICE_CLEANUP_ON','SERVICE_CLEANUP_OFF','SERVICE_CLEANUP_DELAY',
@@ -198,6 +206,7 @@ export function validCommunityConfig(value:unknown):value is CommunityConfig{
      x.topicCooldowns.some(row=>!row||!validTopic(row.topicId)||
        !Number.isInteger(row.cooldownMs)||row.cooldownMs<1000||row.cooldownMs>600000)||
      new Set(x.topicCooldowns.map(row=>row.topicId)).size!==x.topicCooldowns.length))||
+  (x.privateWelcomeEnabled!==undefined&&typeof x.privateWelcomeEnabled!=='boolean')||
   (x.welcomeByJoin!==undefined&&(!x.welcomeByJoin||typeof x.welcomeByJoin!=='object'||
     Array.isArray(x.welcomeByJoin)||
     Object.keys(x.welcomeByJoin).some(kind=>!validCommunityJoinKind(kind))||
@@ -248,7 +257,21 @@ export function validCommunityState(value:unknown):value is CommunityAutomationS
   !Array.isArray(v.receipts)||v.receipts.length>2500||
   (v.serviceChanges!==undefined&&(!Array.isArray(v.serviceChanges)||v.serviceChanges.length>1000))||
   (v.cleanupJobs!==undefined&&(!Array.isArray(v.cleanupJobs)||v.cleanupJobs.length>1000))||
-  (v.decisionLog!==undefined&&(!Array.isArray(v.decisionLog)||v.decisionLog.length>1000)))return false;
+  (v.decisionLog!==undefined&&(!Array.isArray(v.decisionLog)||v.decisionLog.length>1000))||
+  (v.privateWelcomes!==undefined&&(!Array.isArray(v.privateWelcomes)||v.privateWelcomes.length>2500)))return false;
+ if(v.privateWelcomes){
+  const unique=new Set<string>();
+  for(const x of v.privateWelcomes){
+   if(!x||typeof x!=='object'||Array.isArray(x)||
+      Object.keys(x).length!==4||
+      Object.keys(x).some(k=>!['joinKey','chatId','actorDigest','at'].includes(k))||
+      typeof x.joinKey!=='string'||!/^[a-f0-9]{64}$/u.test(x.joinKey)||
+      typeof x.actorDigest!=='string'||!/^[a-f0-9]{64}$/u.test(x.actorDigest)||
+      !validGroup(x.chatId)||!validClock(x.at)||
+      unique.has(x.joinKey+':'+x.actorDigest))return false;
+   unique.add(x.joinKey+':'+x.actorDigest);
+  }
+ }
  const validReasons=new Set<CommunityDecisionReason>(['RESERVED','WELCOME_DISABLED','FAREWELL_DISABLED',
   'REPLIES_DISABLED','QUIET_HOURS','NO_MATCH','CLOCK_SKEW','GROUP_LIMIT','TOPIC_COOLDOWN',
   'GROUP_COOLDOWN','ACTOR_COOLDOWN','TEMPLATE_INVALID','CAPTION_LIMIT']);
@@ -358,7 +381,8 @@ export function validCommunityState(value:unknown):value is CommunityAutomationS
    !['JOIN','LEAVE','TEXT'].includes(x.kind)||typeof x.actorDigest!=='string'||
    !/^[a-f0-9]{64}$/u.test(x.actorDigest)||
    (x.ruleId!==undefined&&!/^[a-f0-9]{12}$/u.test(x.ruleId))||
-   (x.topicId!==undefined&&!validTopic(x.topicId)))return false;
+   (x.topicId!==undefined&&!validTopic(x.topicId))||
+   (x.joinKind!==undefined&&(x.kind!=='JOIN'||!validCommunityJoinKind(x.joinKind))))return false;
   receiptIds.add(x.key);
  }
  return true;
