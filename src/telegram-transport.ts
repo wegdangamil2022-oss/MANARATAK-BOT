@@ -249,9 +249,9 @@ function eventFrom(value:unknown):{event?:Event;reason:string} {
      !Array.isArray(msg.photo)||msg.photo.length<1||msg.photo.length>10||
      msg.photo.some(p=>!isObject(p)||!validCommunityPhotoId(p.file_id)||
        typeof p.file_unique_id!=='string'||!/^[A-Za-z0-9_-]{8,512}$/u.test(p.file_unique_id)||
-       !Number.isSafeInteger(p.width)||p.width<1||p.width>20000||
-       !Number.isSafeInteger(p.height)||p.height<1||p.height>20000||
-       (p.file_size!==undefined&&(!Number.isSafeInteger(p.file_size)||
+       typeof p.width!=='number'||!Number.isSafeInteger(p.width)||p.width<1||p.width>20000||
+       typeof p.height!=='number'||!Number.isSafeInteger(p.height)||p.height<1||p.height>20000||
+       (p.file_size!==undefined&&(typeof p.file_size!=='number'||!Number.isSafeInteger(p.file_size)||
          p.file_size<1||p.file_size>10_000_000))))
      return {reason:'INVALID_OWNER_PHOTO'};
    const photos=msg.photo as Record<string,unknown>[];
