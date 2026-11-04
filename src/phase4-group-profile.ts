@@ -90,7 +90,7 @@ export class TelegramBotApiGroupProfileGateway implements Phase4GroupProfileGate
   const metadata=data.result as Record<string,unknown>;
   if(metadata.file_id!==undefined&&metadata.file_id!==fileId)return null;
   const path=metadata.file_path;
-  if(typeof path!=='string'||!/^photos\\/(?:[A-Za-z0-9_-]{1,64}\\/){0,2}[A-Za-z0-9_-]{1,100}\\.jpe?g$/u.test(path))return null;
+  if(typeof path!=='string'||!/^photos\/(?:[A-Za-z0-9_-]{1,64}\/){0,2}[A-Za-z0-9_-]{1,100}\.jpe?g$/u.test(path))return null;
   const MAX=10*1024*1024;
   if(metadata.file_size!==undefined&&(!Number.isSafeInteger(metadata.file_size)||
     (metadata.file_size as number)<6||(metadata.file_size as number)>MAX))return null;
@@ -104,7 +104,7 @@ export class TelegramBotApiGroupProfileGateway implements Phase4GroupProfileGate
   const mime=response.headers.get('content-type');
   if(mime!==null&&!['image/jpeg','application/octet-stream'].includes(mime.split(';',1)[0]!.trim()))return null;
   const reported=response.headers.get('content-length');
-  if(reported!==null&&(!/^\\d{1,9}$/u.test(reported)||Number(reported)>MAX))return null;
+  if(reported!==null&&(!/^\d{1,9}$/u.test(reported)||Number(reported)>MAX))return null;
   const reader=response.body.getReader();
   const chunks:Uint8Array[]=[];
   let size=0,oversized=false;
