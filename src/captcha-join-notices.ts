@@ -27,7 +27,7 @@ export class CaptchaJoinNotices{
   private readonly clock:()=>number,private readonly safety:()=>Promise<boolean>){}
  private stamp(s:BotState,chat:string):string{
   return hash(['CAPTCHA_JOIN_NOTICE_V1',this.policyAccess.ownerId,chat,s.chats.filter(c=>c.id===chat),
-   s.grants,s.privateFeatures,s.privateSettingsRevision??null,this.captcha.settings(s,chat)]);
+   s.grants.filter(g=>g.chatId===chat),s.privateFeatures,s.privateSettingsRevision??null,this.captcha.settings(s,chat)]);
  }
  epoch(s:BotState,chat:string):string{
   return hash([this.stamp(s,chat),s.audit.filter(a=>a.updateKey===POLICY+chat)]);
@@ -89,6 +89,10 @@ export class CaptchaJoinNotices{
      receipts[0].at===challenge.issued&&receipts[0].policyVersion===this.policyAccess.chatRevision(s,chat);
    });
    if(!eligible)return 0;
+   // Group-wide flood budget: many simultaneous joins yield one anonymous
+   // hint, not a wall of group notices. Include completed/unknown attempts so
+   // reboot or Telegram ambiguity cannot evade the budget.
+   if(this.jobs(s,now).some(n=>n.chat===chat&&now>=n.at&&now-n.at<60000))return 0;
    const key=ROOT+hash([chat,updateKey,sentAt]),rows=s.audit.filter(a=>a.updateKey===key);
    if(rows.length)return 0;
    const at=now,version=this.policyAccess.chatRevision(s,chat);
