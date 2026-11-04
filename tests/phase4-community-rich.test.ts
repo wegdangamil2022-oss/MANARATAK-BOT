@@ -205,3 +205,39 @@ for(const engine of ['json','sqlite'] as const){
   }finally{await f.close();}
  });
 }
+
+for(const engine of ['json','sqlite'] as const){
+ test('P4 rich '+engine+': official owner inline menu shows separate media editors and review-gated clears',async()=>{
+  const f=await setup(engine);
+  try{
+   await f.approve({kind:'WELCOME_PHOTO_SET',photoFileId:PHOTO});
+   await f.approve({kind:'WELCOME_BUTTON_ADD',
+    buttonText:'المكتبة',buttonUrl:'https://t.me/StudyinEurope3'});
+   const group=await phase4CommunityScreen(f.community,OWNER,'p4c:1:g:'+CHAT);
+   const mediaButton=group?.keyboard.inline_keyboard.flat().find(b=>b.callback_data==='p4c:1:v:'+CHAT+':w');
+   assert.ok(mediaButton);
+   const page=await phase4CommunityScreen(f.community,OWNER,mediaButton!.callback_data);
+   assert.ok(page);
+   assert.match(page.text,/صورة الترحيب/u);
+   assert.match(page.text,/\/welcomephoto/u);
+   assert.equal(page.text.includes(PHOTO),false);
+   const clearPhoto=page.keyboard.inline_keyboard.flat()
+    .find(b=>b.callback_data==='p4c:1:j:'+CHAT+':w:p');
+   assert.ok(clearPhoto);
+   const preview=await phase4CommunityScreen(f.community,OWNER,clearPhoto!.callback_data);
+   assert.match(preview?.text??'',/حذف صورة/u);
+   assert.equal((await f.community.view(OWNER,CHAT)).welcome.photoFileId,PHOTO);
+   const confirmed=preview?.keyboard.inline_keyboard.flat()
+    .find(b=>b.callback_data.startsWith('p4c:1:c:'));
+   assert.ok(confirmed);
+   await phase4CommunityScreen(f.community,OWNER,confirmed!.callback_data);
+   assert.equal((await f.community.view(OWNER,CHAT)).welcome.photoFileId,undefined);
+   const clearButtons=await phase4CommunityScreen(f.community,OWNER,'p4c:1:j:'+CHAT+':w:b');
+   const confirm=clearButtons?.keyboard.inline_keyboard.flat()
+    .find(b=>b.callback_data.startsWith('p4c:1:c:'));
+   assert.ok(confirm);
+   await phase4CommunityScreen(f.community,OWNER,confirm!.callback_data);
+   assert.equal((await f.community.view(OWNER,CHAT)).welcome.buttons,undefined);
+  }finally{await f.close();}
+ });
+}
