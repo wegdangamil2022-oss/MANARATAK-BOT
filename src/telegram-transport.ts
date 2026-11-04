@@ -501,12 +501,15 @@ export class TelegramUpdateApplication {
     // Only /m_ custom commands may match, enforced by the scoped rule matcher.
     // Standard Telegram and moderation commands can never match this namespace.
     if(!event.communityKind&&!event.text)return null;
-    // Membership changes have no service message_id and cannot be deleted.
-    // Discard old/replayed events; never greet someone who joined long ago.
-    if(event.communityKind&&!event.messageId){
+    // Every genuine Telegram service event with a trusted timestamp must be
+    // fresh before posting a greeting/farewell. ChatMemberUpdated has no
+    // deletable service message, so a timestamp is mandatory for that shape.
+    // Service messages without a date are tolerated for old test fixtures.
+    if(event.communityKind){
       const now=this.clock(),sent=event.serviceSentAtMs;
-      if(sent===undefined||!Number.isSafeInteger(sent)||sent>now+60000||
-       now-sent>900000)return null;
+      if((event.messageId===undefined&&sent===undefined)||
+        (sent!==undefined&&(!Number.isSafeInteger(sent)||sent>now+60000||
+         now-sent>900000)))return null;
     }
     const input:CommunityInput={kind:event.communityKind??'TEXT',chatId:event.chatId,
       actorId:event.communityMemberId??event.actorId,
