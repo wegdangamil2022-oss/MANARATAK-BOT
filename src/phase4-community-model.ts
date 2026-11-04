@@ -30,6 +30,8 @@ export interface CommunityConfig{
  repliesEnabled:boolean;rules:CommunityReplyRule[];
  /** Minutes from UTC. Display-only, never a claim about a real Telegram time zone. */
  utcOffsetMinutes:number;
+ /** Optional canonical IANA time zone, with automatic DST offset at event time. */
+ timeZone?:string;
  /** A group-wide minimum gap between any two automatic group replies. */
  groupCooldownMs:number;
  /** Absent means no scheduled quiet period; configured local clock offset applies. */
@@ -55,14 +57,14 @@ export type CommunityDraftKind='WELCOME_TEXT'|'FAREWELL_TEXT'|'REPLY_ADD'|'REPLY
  'CHANGE_LOG_ON'|'CHANGE_LOG_OFF'|'SERVICE_CLEANUP_ON'|'SERVICE_CLEANUP_OFF'|'SERVICE_CLEANUP_DELAY'|
  'REPLY_CLEANUP_ON'|'REPLY_CLEANUP_OFF'|'REPLY_CLEANUP_DELAY'|
  'RULES_LINK_SET'|'RULES_LINK_CLEAR'|
- 'WELCOME_LOCALIZED'|'FAREWELL_LOCALIZED'|'GROUP_LANGUAGE'|'GROUP_CLOCK'|
+ 'WELCOME_LOCALIZED'|'FAREWELL_LOCALIZED'|'GROUP_LANGUAGE'|'GROUP_CLOCK'|'GROUP_TIMEZONE'|'GROUP_TIMEZONE_CLEAR'|
  'WELCOME_PHOTO_SET'|'WELCOME_PHOTO_CLEAR'|'FAREWELL_PHOTO_SET'|'FAREWELL_PHOTO_CLEAR'|
  'WELCOME_BUTTON_ADD'|'WELCOME_BUTTONS_CLEAR'|'FAREWELL_BUTTON_ADD'|'FAREWELL_BUTTONS_CLEAR';
 export interface CommunityDraft{
  id:string;actorId:string;chatId:string;chatVersion:number;configVersion:number;
  kind:CommunityDraftKind;createdAt:number;expiresAt:number;
  text?:string;trigger?:string;match?:ReplyMatch;ruleId?:string;topicId?:number;cooldownMs?:number;delayMs?:number;
- language?:CommunityLanguage;clockFormat?:CommunityClockFormat;calendar?:CommunityCalendar;utcOffsetMinutes?:number;
+ language?:CommunityLanguage;clockFormat?:CommunityClockFormat;calendar?:CommunityCalendar;utcOffsetMinutes?:number;timeZone?:string;
  photoFileId?:string;buttonText?:string;buttonUrl?:string;
  startMinute?:number;endMinute?:number;
 }
@@ -115,11 +117,29 @@ export function validCommunityRulesUrl(value:unknown):value is string{
 }
 const validTopic=(n:unknown):n is number=>typeof n==='number'&&Number.isSafeInteger(n)&&n>0&&n<=2147483647;
 const validMinute=(v:unknown):v is number=>typeof v==='number'&&Number.isInteger(v)&&v>=0&&v<1440;
-export function inCommunityQuietHours(hours:CommunityQuietHours,now:number,utcOffsetMinutes:number):boolean{
+/** A supported, canonical IANA zone. All zone names are owner-supplied only. */
+export function validCommunityTimeZone(value:unknown):value is string{
+ if(typeof value!=='string'||value.length>64||
+   !/^(?:UTC|[A-Za-z_-]+(?:\/[A-Za-z_-]+){1,2})$/u.test(value))return false;
+ try{return new Intl.DateTimeFormat('en-US',{timeZone:value}).resolvedOptions().timeZone===value;}
+ catch{return false;}
+}
+export function inCommunityQuietHours(hours:CommunityQuietHours,now:number,utcOffsetMinutes:number,
+ timeZone?:string):boolean{
  if(!validClock(now)||!Number.isInteger(utcOffsetMinutes)||utcOffsetMinutes< -720||utcOffsetMinutes>840||
-    !validMinute(hours.startMinute)||!validMinute(hours.endMinute)||hours.startMinute===hours.endMinute)
+    !validMinute(hours.startMinute)||!validMinute(hours.endMinute)||hours.startMinute===hours.endMinute||
+    (timeZone!==undefined&&!validCommunityTimeZone(timeZone)))
+  throw Error('COMMUNITY_QUIET_HOURS_INVALID');
+ let minute=((Math.floor(now/60000)+utcOffsetMinutes)%1440+1440)%1440;
+ if(timeZone!==undefined){
+  const parts=new Intl.DateTimeFormat('en-US',{timeZone,hour:'2-digit',minute:'2-digit',
+   hourCycle:'h23',numberingSystem:'latn'}).formatToParts(new Date(now));
+  const value=(key:string)=>Number(parts.find(p=>p.type===key)?.value);
+  const hour=value('hour'),minutes=value('minute');
+  if(!Number.isInteger(hour)||hour<0||hour>23||!Number.isInteger(minutes)||minutes<0||minutes>59)
    throw Error('COMMUNITY_QUIET_HOURS_INVALID');
- const minute=((Math.floor(now/60000)+utcOffsetMinutes)%1440+1440)%1440;
+  minute=hour*60+minutes;
+ }
  return hours.startMinute<hours.endMinute?
   minute>=hours.startMinute&&minute<hours.endMinute:
   minute>=hours.startMinute||minute<hours.endMinute;
@@ -131,7 +151,7 @@ const kinds=new Set<CommunityDraftKind>(['WELCOME_TEXT','FAREWELL_TEXT','REPLY_A
  'CHANGE_LOG_ON','CHANGE_LOG_OFF','SERVICE_CLEANUP_ON','SERVICE_CLEANUP_OFF','SERVICE_CLEANUP_DELAY',
  'REPLY_CLEANUP_ON','REPLY_CLEANUP_OFF','REPLY_CLEANUP_DELAY',
  'RULES_LINK_SET','RULES_LINK_CLEAR',
- 'WELCOME_LOCALIZED','FAREWELL_LOCALIZED','GROUP_LANGUAGE','GROUP_CLOCK',
+ 'WELCOME_LOCALIZED','FAREWELL_LOCALIZED','GROUP_LANGUAGE','GROUP_CLOCK','GROUP_TIMEZONE','GROUP_TIMEZONE_CLEAR',
  'WELCOME_PHOTO_SET','WELCOME_PHOTO_CLEAR','FAREWELL_PHOTO_SET','FAREWELL_PHOTO_CLEAR',
  'WELCOME_BUTTON_ADD','WELCOME_BUTTONS_CLEAR','FAREWELL_BUTTON_ADD','FAREWELL_BUTTONS_CLEAR']);
 const matches=new Set<ReplyMatch>(['EXACT','WORD','CONTAINS','COMMAND']);
@@ -158,6 +178,7 @@ export function validCommunityConfig(value:unknown):value is CommunityConfig{
        !Number.isInteger(row.cooldownMs)||row.cooldownMs<1000||row.cooldownMs>600000)||
      new Set(x.topicCooldowns.map(row=>row.topicId)).size!==x.topicCooldowns.length))||
   (x.rulesUrl!==undefined&&!validCommunityRulesUrl(x.rulesUrl))||
+   (x.timeZone!==undefined&&!validCommunityTimeZone(x.timeZone))||
   (x.language!==undefined&&x.language!=='ar'&&x.language!=='en')||
   (x.clockFormat!==undefined&&x.clockFormat!=='12'&&x.clockFormat!=='24')||
   (x.calendar!==undefined&&x.calendar!=='gregorian'&&x.calendar!=='hijri')||
@@ -253,6 +274,7 @@ export function validCommunityState(value:unknown):value is CommunityAutomationS
    (d.calendar!==undefined&&d.calendar!=='gregorian'&&d.calendar!=='hijri')||
    (d.utcOffsetMinutes!==undefined&&(!Number.isInteger(d.utcOffsetMinutes)||
        d.utcOffsetMinutes< -720||d.utcOffsetMinutes>840))||
+    (d.timeZone!==undefined&&!validCommunityTimeZone(d.timeZone))||
    (d.photoFileId!==undefined&&!validCommunityPhotoId(d.photoFileId))||
    (d.buttonText!==undefined&&
       (typeof d.buttonText!=='string'||!validCommunityLinkButtons([{text:d.buttonText,
@@ -272,6 +294,7 @@ export function validCommunityState(value:unknown):value is CommunityAutomationS
    (d.kind==='WELCOME_LOCALIZED'||d.kind==='FAREWELL_LOCALIZED')&&
       (!d.language||!validTemplate(d.text))||
    d.kind==='GROUP_LANGUAGE'&&!d.language||
+    d.kind==='GROUP_TIMEZONE'&&!validCommunityTimeZone(d.timeZone)||
    d.kind==='GROUP_CLOCK'&&(d.utcOffsetMinutes===undefined||
       !d.clockFormat||!d.calendar)||
    (d.kind==='WELCOME_PHOTO_SET'||d.kind==='FAREWELL_PHOTO_SET')&&
@@ -326,27 +349,40 @@ export function selectCommunityGreeting(config:CommunityConfig,kind:'welcome'|'f
 }
 export interface CommunityDateTimeOptions{
  language?:CommunityLanguage;clockFormat?:CommunityClockFormat;calendar?:CommunityCalendar;
+ timeZone?:string;
 }
 export function formatCommunityDateTime(now:number,options:CommunityDateTimeOptions={}):
  {date:string;time:string}{
  if(!validClock(now)||options.language!==undefined&&!['ar','en'].includes(options.language)||
    options.clockFormat!==undefined&&!['12','24'].includes(options.clockFormat)||
-   options.calendar!==undefined&&!['gregorian','hijri'].includes(options.calendar))
+   options.calendar!==undefined&&!['gregorian','hijri'].includes(options.calendar)||
+   (options.timeZone!==undefined&&!validCommunityTimeZone(options.timeZone)))
   throw Error('COMMUNITY_DATE_FORMAT_INVALID');
  const dateObject=new Date(now);
  if(Number.isNaN(dateObject.getTime()))throw Error('COMMUNITY_DATE_FORMAT_INVALID');
+ // The legacy caller passes an already-offset instant; a configured IANA zone
+ // instead uses the original UTC event timestamp to resolve DST correctly.
+ const local=options.timeZone?new Intl.DateTimeFormat('en-US',{
+  timeZone:options.timeZone,year:'numeric',month:'2-digit',day:'2-digit',
+  hour:'2-digit',minute:'2-digit',hourCycle:'h23',numberingSystem:'latn',calendar:'gregory'
+ }).formatToParts(dateObject):undefined;
+ const localValue=(key:string)=>local?.find(p=>p.type===key)?.value??'';
  let day:string;
  if(options.calendar==='hijri'){
   const parts=new Intl.DateTimeFormat('en-US-u-ca-islamic-umalqura',{
-   year:'numeric',month:'2-digit',day:'2-digit',timeZone:'UTC',numberingSystem:'latn'
+   year:'numeric',month:'2-digit',day:'2-digit',
+   timeZone:options.timeZone??'UTC',numberingSystem:'latn'
   }).formatToParts(dateObject);
   const part=(key:string):string=>parts.find(p=>p.type===key)?.value??'';
   if(!/^\d{3,4}$/u.test(part('year'))||!/^\d{1,2}$/u.test(part('month'))||
      !/^\d{1,2}$/u.test(part('day')))throw Error('COMMUNITY_HIJRI_CONVERSION_UNAVAILABLE');
   day=part('year')+'-'+part('month').padStart(2,'0')+'-'+part('day').padStart(2,'0')+' هـ';
- }else day=dateObject.toISOString().slice(0,10);
- const hrs=dateObject.getUTCHours();
- const minutes=String(dateObject.getUTCMinutes()).padStart(2,'0');
+ }else day=local?localValue('year')+'-'+localValue('month')+'-'+localValue('day'):
+  dateObject.toISOString().slice(0,10);
+ const hrs=local?Number(localValue('hour')):dateObject.getUTCHours();
+ const minutes=local?localValue('minute'):String(dateObject.getUTCMinutes()).padStart(2,'0');
+ if(!Number.isInteger(hrs)||hrs<0||hrs>23||!/^\d{2}$/u.test(minutes)||
+    !/^\d{4}-\d{2}-\d{2}(?: هـ)?$/u.test(day))throw Error('COMMUNITY_DATE_FORMAT_INVALID');
  const time=options.clockFormat==='12'?
   String((hrs%12)||12).padStart(2,'0')+':'+minutes+' '+
   (options.language==='en'?(hrs<12?'AM':'PM'):(hrs<12?'ص':'م')):
