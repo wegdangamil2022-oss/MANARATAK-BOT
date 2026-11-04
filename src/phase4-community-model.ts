@@ -3,6 +3,7 @@
  * never from a student-supplied message or a callback parameter.
  */
 export type CommunityEventKind='JOIN'|'LEAVE'|'TEXT';
+export type CommunityServiceKind='JOIN'|'LEAVE'|'TITLE_CHANGED'|'PHOTO_CHANGED'|'PHOTO_REMOVED';
 export type ReplyMatch='EXACT'|'WORD'|'CONTAINS'|'COMMAND';
 export interface CommunityReplyRule{
  id:string;trigger:string;response:string;match:ReplyMatch;
@@ -18,14 +19,18 @@ export interface CommunityConfig{
  utcOffsetMinutes:number;
  /** A group-wide minimum gap between any two automatic group replies. */
  groupCooldownMs:number;
+ /** Missing in old snapshots means disabled. */
+ changeLogEnabled?:boolean;
+ serviceCleanup?:{enabled:boolean;delayMs:number};
 }
 export type CommunityDraftKind='WELCOME_TEXT'|'FAREWELL_TEXT'|'REPLY_ADD'|'REPLY_REMOVE'|
  'WELCOME_ON'|'WELCOME_OFF'|'FAREWELL_ON'|'FAREWELL_OFF'|'REPLIES_ON'|'REPLIES_OFF'|
- 'REPLY_ENABLE'|'REPLY_DISABLE'|'REPLY_COOLDOWN';
+ 'REPLY_ENABLE'|'REPLY_DISABLE'|'REPLY_COOLDOWN'|
+ 'CHANGE_LOG_ON'|'CHANGE_LOG_OFF'|'SERVICE_CLEANUP_ON'|'SERVICE_CLEANUP_OFF'|'SERVICE_CLEANUP_DELAY';
 export interface CommunityDraft{
  id:string;actorId:string;chatId:string;chatVersion:number;configVersion:number;
  kind:CommunityDraftKind;createdAt:number;expiresAt:number;
- text?:string;trigger?:string;match?:ReplyMatch;ruleId?:string;topicId?:number;cooldownMs?:number;
+ text?:string;trigger?:string;match?:ReplyMatch;ruleId?:string;topicId?:number;cooldownMs?:number;delayMs?:number;
 }
 export interface CommunityReceipt{
  /** An opaque hash of the inbound Telegram update and bot identifier. */
@@ -33,8 +38,21 @@ export interface CommunityReceipt{
  /** A short-lived digest, not a raw student message or display name. */
  actorDigest:string;ruleId?:string;
 }
+export interface CommunityServiceChange{
+ key:string;chatId:string;kind:'TITLE_CHANGED'|'PHOTO_CHANGED'|'PHOTO_REMOVED';
+ actorDigest:string;at:number;
+}
+export type CommunityCleanupStatus='QUEUED'|'SENDING'|'CONFIRMED'|'FAILED_CONFIRMED'|'UNKNOWN_OUTCOME'|'SKIPPED';
+export interface CommunityCleanupJob{
+ key:string;chatId:string;chatVersion:number;policyVersion:number;
+ messageId:number;kind:CommunityServiceKind;observedAt:number;dueAt:number;
+ status:CommunityCleanupStatus;attemptId?:string;
+}
 export interface CommunityAutomationState{
  configs:CommunityConfig[];drafts:CommunityDraft[];receipts:CommunityReceipt[];
+ /** Event audit contains kind and opaque digests only, never titles or images. */
+ serviceChanges?:CommunityServiceChange[];
+ cleanupJobs?:CommunityCleanupJob[];
 }
 export interface CommunityInput{
  kind:CommunityEventKind;chatId:string;actorId:string;
@@ -51,13 +69,15 @@ const validTemplate=(t:unknown):t is string=>validText(t,800)&&
 const validTopic=(n:unknown):n is number=>typeof n==='number'&&Number.isSafeInteger(n)&&n>0&&n<=2147483647;
 const kinds=new Set<CommunityDraftKind>(['WELCOME_TEXT','FAREWELL_TEXT','REPLY_ADD','REPLY_REMOVE',
  'WELCOME_ON','WELCOME_OFF','FAREWELL_ON','FAREWELL_OFF','REPLIES_ON','REPLIES_OFF',
- 'REPLY_ENABLE','REPLY_DISABLE','REPLY_COOLDOWN']);
+ 'REPLY_ENABLE','REPLY_DISABLE','REPLY_COOLDOWN',
+ 'CHANGE_LOG_ON','CHANGE_LOG_OFF','SERVICE_CLEANUP_ON','SERVICE_CLEANUP_OFF','SERVICE_CLEANUP_DELAY']);
 const matches=new Set<ReplyMatch>(['EXACT','WORD','CONTAINS','COMMAND']);
 export function defaultCommunityConfig(chatId:string):CommunityConfig{
  if(!validGroup(chatId))throw Error('COMMUNITY_CHAT_INVALID');
  return {chatId,version:0,welcome:{enabled:false,text:'مرحبًا {العضو} في {اسم_المجموعة} 👋'},
   farewell:{enabled:false,text:'نتمنى لك التوفيق يا {العضو} 👋'},
-  repliesEnabled:false,rules:[],utcOffsetMinutes:180,groupCooldownMs:8000};
+  repliesEnabled:false,rules:[],utcOffsetMinutes:180,groupCooldownMs:8000,
+  changeLogEnabled:false,serviceCleanup:{enabled:false,delayMs:120000}};
 }
 export function validCommunityConfig(value:unknown):value is CommunityConfig{
  if(!value||typeof value!=='object'||Array.isArray(value))return false;
@@ -65,7 +85,11 @@ export function validCommunityConfig(value:unknown):value is CommunityConfig{
  if(!validGroup(x.chatId)||!Number.isSafeInteger(x.version)||x.version<0||x.version>2_000_000_000||
   !Number.isInteger(x.utcOffsetMinutes)||x.utcOffsetMinutes< -720||x.utcOffsetMinutes>840||
   !Number.isInteger(x.groupCooldownMs)||x.groupCooldownMs<1000||x.groupCooldownMs>600000||
-  !Array.isArray(x.rules)||x.rules.length>30)return false;
+  !Array.isArray(x.rules)||x.rules.length>30||
+  (x.changeLogEnabled!==undefined&&typeof x.changeLogEnabled!=='boolean')||
+  (x.serviceCleanup!==undefined&&(!x.serviceCleanup||typeof x.serviceCleanup!=='object'||
+    typeof x.serviceCleanup.enabled!=='boolean'||!Number.isInteger(x.serviceCleanup.delayMs)||
+    x.serviceCleanup.delayMs<30000||x.serviceCleanup.delayMs>3600000)))return false;
  for(const item of [x.welcome,x.farewell]){
   if(!item||typeof item!=='object'||typeof item.enabled!=='boolean'||!validTemplate(item.text))return false;
  }
@@ -89,7 +113,39 @@ export function validCommunityState(value:unknown):value is CommunityAutomationS
  if(!Array.isArray(v.configs)||v.configs.length>500||!v.configs.every(validCommunityConfig)||
   new Set(v.configs.map(c=>c.chatId)).size!==v.configs.length||
   !Array.isArray(v.drafts)||v.drafts.length>100||
-  !Array.isArray(v.receipts)||v.receipts.length>2500)return false;
+  !Array.isArray(v.receipts)||v.receipts.length>2500||
+  (v.serviceChanges!==undefined&&(!Array.isArray(v.serviceChanges)||v.serviceChanges.length>1000))||
+  (v.cleanupJobs!==undefined&&(!Array.isArray(v.cleanupJobs)||v.cleanupJobs.length>1000)))return false;
+ const serviceKinds=new Set<CommunityServiceKind>(['JOIN','LEAVE','TITLE_CHANGED','PHOTO_CHANGED','PHOTO_REMOVED']);
+ if(v.serviceChanges){
+  const keys=new Set<string>();
+  for(const row of v.serviceChanges){
+   if(!row||typeof row!=='object'||typeof row.key!=='string'||
+    !/^[a-f0-9]{64}$/u.test(row.key)||keys.has(row.key)||!validGroup(row.chatId)||
+    !['TITLE_CHANGED','PHOTO_CHANGED','PHOTO_REMOVED'].includes(row.kind)||
+    typeof row.actorDigest!=='string'||!/^[a-f0-9]{64}$/u.test(row.actorDigest)||
+    !validClock(row.at))return false;
+   keys.add(row.key);
+  }
+ }
+ if(v.cleanupJobs){
+  const keys=new Set<string>();
+  const statuses=new Set<CommunityCleanupStatus>(['QUEUED','SENDING','CONFIRMED','FAILED_CONFIRMED','UNKNOWN_OUTCOME','SKIPPED']);
+  for(const row of v.cleanupJobs){
+   if(!row||typeof row!=='object'||typeof row.key!=='string'||
+    !/^[a-f0-9]{64}$/u.test(row.key)||keys.has(row.key)||!validGroup(row.chatId)||
+    !Number.isSafeInteger(row.messageId)||row.messageId<=0||row.messageId>2147483647||
+    !Number.isSafeInteger(row.chatVersion)||row.chatVersion<1||
+    !Number.isSafeInteger(row.policyVersion)||row.policyVersion<1||
+    !serviceKinds.has(row.kind)||!validClock(row.observedAt)||!validClock(row.dueAt)||
+    row.dueAt-row.observedAt<30000||row.dueAt-row.observedAt>3600000||
+    !statuses.has(row.status)||
+    (row.attemptId!==undefined&&(typeof row.attemptId!=='string'||!/^[a-f0-9]{24}$/u.test(row.attemptId)))||
+    (row.status==='QUEUED'&&row.attemptId!==undefined)||
+    (row.status==='SENDING'&&!row.attemptId))return false;
+   keys.add(row.key);
+  }
+ }
  const draftIds=new Set<string>();
  for(const d of v.drafts){
   if(!d||typeof d!=='object'||typeof d.id!=='string'||!/^[a-f0-9]{24}$/u.test(d.id)||
@@ -103,11 +159,13 @@ export function validCommunityState(value:unknown):value is CommunityAutomationS
    (d.match!==undefined&&!matches.has(d.match))||
    (d.ruleId!==undefined&&!/^[a-f0-9]{12}$/u.test(d.ruleId))||
    (d.topicId!==undefined&&!validTopic(d.topicId))||
-   (d.cooldownMs!==undefined&&(!Number.isInteger(d.cooldownMs)||d.cooldownMs<1000||d.cooldownMs>86400000)))return false;
+   (d.cooldownMs!==undefined&&(!Number.isInteger(d.cooldownMs)||d.cooldownMs<1000||d.cooldownMs>86400000))||
+   (d.delayMs!==undefined&&(!Number.isInteger(d.delayMs)||d.delayMs<30000||d.delayMs>3600000)))return false;
   if((d.kind==='WELCOME_TEXT'||d.kind==='FAREWELL_TEXT')&&!d.text||
    d.kind==='REPLY_ADD'&&(!d.text||!d.trigger||!d.match)||
    (['REPLY_REMOVE','REPLY_ENABLE','REPLY_DISABLE','REPLY_COOLDOWN'] as string[]).includes(d.kind)&&!d.ruleId||
-   d.kind==='REPLY_COOLDOWN'&&d.cooldownMs===undefined)return false;
+   d.kind==='REPLY_COOLDOWN'&&d.cooldownMs===undefined||
+   d.kind==='SERVICE_CLEANUP_DELAY'&&d.delayMs===undefined)return false;
   draftIds.add(d.id);
  }
  const receiptIds=new Set<string>();
