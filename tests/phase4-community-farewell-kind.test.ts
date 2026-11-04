@@ -297,7 +297,7 @@ for(const engine of ['json','sqlite'] as const){
    assert.equal(jobs.length,1);
    assert.equal(jobs[0]?.kind,'LEAVE');
    assert.equal(jobs[0]?.messageId,822);
-   const member=await f.app.handle(f.membershipLeave(823,'member','left',Number(MEMBER),405));
+   const member=await f.app.handle(f.membershipLeave(823,'member','left',405,405));
    assert.ok(member.plan);
    assert.equal((await f.store.snapshot()).phase4Community?.cleanupJobs?.length,1,
     'chat_member has no message_id and must never be eligible for deleteMessage');
