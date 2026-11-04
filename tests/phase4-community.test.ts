@@ -371,7 +371,8 @@ for(const engine of ['json','sqlite'] as const){
    assert.equal((await sender.dispatch(before.deliveryKey!)).status,'FAILED_CONFIRMED');
    assert.equal(sent,0);
    f.setNow(f.now()+9000);
-   const after=await f.app().handle(joinMessage(791,'JOIN'));
+   // A second unique member joins; original member remains under its anti-spam cooldown.
+   const after=await f.app().handle(joinMessage(791,'JOIN','301'));
    assert.match(after.plan?.text??'',/https:\/\/t.me\/manaratak_rules\/3/);
    const remove=await f.community.pending(OWNER,{kind:'RULES_LINK_CLEAR'},GROUP);
    await f.community.approve(OWNER,remove.id);
