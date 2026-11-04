@@ -74,6 +74,7 @@ import type {ModerationService} from './moderation.js';
 import {Phase4CommunityService} from './phase4-community.js';
 import {phase4CommunityScreen,parsePhase4CommunityCommand} from './phase4-community-ui.js';
 import type {CommunityInput} from './phase4-community-model.js';
+import {validCommunityPhotoId} from './phase4-community-rich.js';
 import type {ModerationPurgeService} from './moderation-purge.js';
 import {isReplyDeleteCommand,previewReplyDelete,handleReplyDeleteCallback} from './telegram-reply-delete.js';
 import {parseReplyModerationCommand,executeReplyModerationCommand} from './telegram-moderation-commands.js';
@@ -238,6 +239,29 @@ function eventFrom(value:unknown):{event?:Event;reason:string} {
      ...(msg.date!==undefined?{serviceSentAtMs:(msg.date as number)*1000}:{}),
      groupName:typeof msg.chat.title==='string'?msg.chat.title:'المجموعة',
      ...(msg.message_thread_id!==undefined?{topicId:msg.message_thread_id as number}:{})},reason:'VALID'};
+  }
+  if(kind==='private'&&msg.photo!==undefined){
+   // An owner can attach an actual photo to a private command caption.
+   // Telegram has already authenticated the inbound update, but owner
+   // authorization and group approval are rechecked by the community editor.
+   if(msg.text!==undefined||msg.document!==undefined||
+     typeof msg.caption!=='string'||!/^\/(?:welcomephoto|farewellphoto) -[1-9]\d{0,15}$/u.test(msg.caption)||
+     !Array.isArray(msg.photo)||msg.photo.length<1||msg.photo.length>10||
+     msg.photo.some(p=>!isObject(p)||!validCommunityPhotoId(p.file_id)||
+       typeof p.file_unique_id!=='string'||!/^[A-Za-z0-9_-]{8,512}$/u.test(p.file_unique_id)||
+       !Number.isSafeInteger(p.width)||p.width<1||p.width>20000||
+       !Number.isSafeInteger(p.height)||p.height<1||p.height>20000||
+       (p.file_size!==undefined&&(!Number.isSafeInteger(p.file_size)||
+         p.file_size<1||p.file_size>10_000_000))))
+     return {reason:'INVALID_OWNER_PHOTO'};
+   const photos=msg.photo as Record<string,unknown>[];
+   // Telegram sends increasing sizes, but select on actual bounded area so
+   // malformed order cannot replace a higher-resolution file without review.
+   const largest=photos.reduce((best,item)=>
+    (item.width as number)*(item.height as number)>
+     (best.width as number)*(best.height as number)?item:best);
+   return {event:{updateId:value.update_id as number,actorId:String(msg.from.id),
+     chatId:String(msg.chat.id),kind,text:msg.caption+' '+largest.file_id},reason:'VALID'};
   }
   if(kind==='group'){
    const decoded=protectionMediaFromMessage(msg);
