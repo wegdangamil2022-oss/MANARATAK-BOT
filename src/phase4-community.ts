@@ -6,7 +6,7 @@ import {Policy} from './policy.js';
 import {validCommunityPhotoId,validCommunityLinkButtons,communityLinkKeyboard,
  type CommunityLinkKeyboard} from './phase4-community-rich.js';
 import {defaultCommunityConfig,emptyCommunityState,validCommunityConfig,
- matchCommunityRule,renderCommunityTemplate,selectCommunityRule,selectCommunityGreeting,normalizeCommunityMatch,validCommunityRulesUrl,inCommunityQuietHours,validCommunityTimeZone,validCommunityJoinKind,validCommunityLeaveKind,validCommunityFAQId,
+ matchCommunityRule,renderCommunityTemplate,selectCommunityRule,selectCommunityGreeting,normalizeCommunityMatch,validCommunityRulesUrl,inCommunityQuietHours,validCommunityTimeZone,validCommunityJoinKind,validCommunityLeaveKind,validCommunityFAQId,validCommunityProfileTitle,
  type CommunityConfig,type CommunityInput,type CommunityDraft,type CommunityDraftKind,
  type ReplyMatch,type CommunityReplySource,type CommunityAutomationState,type CommunityEventKind,type CommunityServiceKind,
  type CommunityServiceChange,type CommunityLanguage,type CommunityCalendar,type CommunityClockFormat,type CommunityJoinKind,type CommunityLeaveKind,
@@ -78,6 +78,16 @@ export class Phase4CommunityService{
    const chatVersion=groupAvailable(s,this.policy,actorId,chatId);
    const current=configured(s,chatId);
    const kind=request.kind;
+   if(kind==='GROUP_TITLE_SET'||kind==='GROUP_PHOTO_REMOVE'){
+    if(current.profileEditingEnabled!==true)throw Error('COMMUNITY_PROFILE_DISABLED');
+    if(kind==='GROUP_TITLE_SET'&&!validCommunityProfileTitle(request.text))
+     throw Error('COMMUNITY_PROFILE_TITLE_INVALID');
+    if(kind==='GROUP_PHOTO_REMOVE'&&request.text!==undefined)
+     throw Error('COMMUNITY_PROFILE_PAYLOAD_INVALID');
+    if((s.phase4Community?.profileJobs??[]).some(job=>job.chatId===chatId&&
+       (job.status==='SENDING'||job.status==='QUEUED'&&now-job.createdAt<600000)))
+     throw Error('COMMUNITY_PROFILE_OPERATION_PENDING');
+   }
    if((kind==='WELCOME_TEXT'||kind==='FAREWELL_TEXT'||kind==='REPLY_ADD'&&
      (request.source===undefined||request.source==='NOTE'))&&
       (typeof request.text!=='string'||request.text.trim().length===0))
@@ -282,6 +292,17 @@ export class Phase4CommunityService{
     case 'FAREWELL_OFF':config.farewell.enabled=false;break;
     case 'REPLIES_ON':config.repliesEnabled=true;break;
     case 'REPLIES_OFF':config.repliesEnabled=false;break;
+    case 'GROUP_PROFILE_ON':config.profileEditingEnabled=true;break;
+    case 'GROUP_PROFILE_OFF':config.profileEditingEnabled=false;break;
+    case 'GROUP_TITLE_SET':case 'GROUP_PHOTO_REMOVE':{
+     if(config.profileEditingEnabled!==true)throw Error('COMMUNITY_PROFILE_DISABLED');
+     if(draft.kind==='GROUP_TITLE_SET'&&!validCommunityProfileTitle(draft.text))
+      throw Error('COMMUNITY_PROFILE_TITLE_INVALID');
+     if((st?.profileJobs??[]).some(j=>j.chatId===draft.chatId&&
+       (j.status==='SENDING'||j.status==='QUEUED'&&now-j.createdAt<600000)))
+      throw Error('COMMUNITY_PROFILE_OPERATION_PENDING');
+     break;
+    }
     case 'CHANGE_LOG_ON':config.changeLogEnabled=true;break;
     case 'CHANGE_LOG_OFF':config.changeLogEnabled=false;break;
     case 'DECISION_LOG_ON':config.decisionLogEnabled=true;break;
@@ -338,6 +359,16 @@ export class Phase4CommunityService{
    }
    config.version++;
    if(!validCommunityConfig(config))throw Error('COMMUNITY_CONFIG_INVALID');
+   if(draft.kind==='GROUP_TITLE_SET'||draft.kind==='GROUP_PHOTO_REMOVE'){
+    st!.profileJobs=(st!.profileJobs??[]).filter(j=>
+      j.status==='QUEUED'||j.status==='SENDING'||now-j.createdAt<7*86400000).slice(-499);
+    st!.profileJobs.push({key:randomBytes(12).toString('hex'),chatId:draft.chatId,
+     chatVersion:draft.chatVersion,policyVersion:config.version,
+     profileEpoch:(st!.profileObservations??[]).filter(x=>x.chatId===draft.chatId).length,
+     kind:draft.kind==='GROUP_TITLE_SET'?'TITLE_SET':'PHOTO_REMOVE',
+     status:'QUEUED',createdAt:now,
+     ...(draft.kind==='GROUP_TITLE_SET'?{title:draft.text!}:{})});
+   }
    st!.configs=st!.configs.filter(c=>c.chatId!==config.chatId);
    st!.configs.push(config);
    st!.drafts=st!.drafts.filter(d=>d.actorId!==actorId);
@@ -372,15 +403,25 @@ export class Phase4CommunityService{
    if(!config||!validCommunityConfig(config))return false;
    const isChange=input.kind!=='JOIN'&&input.kind!=='LEAVE';
    const shouldLog=isChange&&config.changeLogEnabled===true;
+   const shouldObserve=isChange&&config.profileEditingEnabled===true;
    const shouldClean=config.serviceCleanup?.enabled===true&&
     (input.kind==='JOIN'?config.serviceCleanup.joinEnabled!==false:
      input.kind==='LEAVE'?config.serviceCleanup.leaveEnabled!==false:true);
-   if(!shouldLog&&!shouldClean)return false;
+   if(!shouldLog&&!shouldClean&&!shouldObserve)return false;
    const chat=s.chats.find(x=>x.id===input.chatId)!;
    const key=hex('P4:SERVICE:'+input.updateKey),actorDigest=hex('P4:SERVICE:ACTOR:'+input.chatId+':'+input.actorId);
    s.phase4Community??=emptyCommunityState();
    const state=s.phase4Community;
    let recorded=false;
+   if(shouldObserve){
+    state.profileObservations=(state.profileObservations??[]).filter(x=>
+      x.at<=now&&now-x.at<7*86400000);
+    if(!state.profileObservations.some(x=>x.key===key)){
+     state.profileObservations=[...state.profileObservations.slice(-999),
+      {key,chatId:input.chatId,at:now}];
+     recorded=true;
+    }
+   }
    if(shouldLog){
     state.serviceChanges=(state.serviceChanges??[]).filter(x=>now-x.at<7*86400000);
     if(!state.serviceChanges.some(x=>x.key===key)){
@@ -450,6 +491,15 @@ export class Phase4CommunityService{
   if(!validCommunityConfig(config)||config.decisionLogEnabled!==true)return [];
   return structuredClone((s.phase4Community?.decisionLog??[]).filter(x=>x.chatId===chatId&&
    x.at<=now&&now-x.at<7*86400000).slice(-20).reverse());
+ }
+ /** Never show a title payload in operation history, even to the owner. */
+ async recentProfileOperations(actorId:string,chatId:string):Promise<
+  {kind:'TITLE_SET'|'PHOTO_REMOVE';status:string;createdAt:number}[]>{
+  const s=await this.store.snapshot();groupAvailable(s,this.policy,actorId,chatId);
+  const now=this.clock();
+  return (s.phase4Community?.profileJobs??[]).filter(x=>x.chatId===chatId&&
+    x.createdAt<=now&&now-x.createdAt<7*86400000).slice(-10).reverse()
+   .map(x=>({kind:x.kind,status:x.status,createdAt:x.createdAt}));
  }
  async recentChanges(actorId:string,chatId:string):Promise<CommunityServiceChange[]>{
   const state=await this.store.snapshot();
@@ -649,6 +699,14 @@ export class Phase4CommunityService{
    return '<b>معاينة التوقيت والتقويم</b>\nUTC'+
     (draft.utcOffsetMinutes!>=0?'+':'')+draft.utcOffsetMinutes!+' دقيقة'+
     '\nالساعة: '+draft.clockFormat+'\nالتقويم: '+draft.calendar;
+  if(draft.kind==='GROUP_PROFILE_ON')return '<b>تفعيل صلاحية اقتراح تعديل اسم/صورة المجموعة</b>\n'+
+   'لا تغيير فور التفعيل؛ كل عملية تحتاج اعتمادًا مستقلاً وحقوق Telegram صريحة. مفتاح التشغيل الخارجي منفصل.';
+  if(draft.kind==='GROUP_PROFILE_OFF')return '<b>إيقاف تعديل اسم/صورة المجموعة</b>\n'+
+   'طلبات التعديل التي لم تُرسل ستُلغى عند محاولة التنفيذ.';
+  if(draft.kind==='GROUP_TITLE_SET')return '<b>اعتماد تغيير اسم المجموعة</b>\n'+safe(draft.text??'')+
+   '\nعند الاعتماد يُنشأ طلب واحد، ولا يُرسل حتى فحص حقوق can_change_info ومفتاح التشغيل.';
+  if(draft.kind==='GROUP_PHOTO_REMOVE')return '<b>تأكيد حذف الصورة الحالية للمجموعة</b>\n'+
+   'سيُطلب deleteChatPhoto مرة واحدة فقط، بعد فحص حقوق Telegram. لا يتضمن هذا الأمر رفع صورة جديدة.';
   if(draft.kind==='RULES_LINK_SET')return '<b>اعتماد رابط القوانين</b>\n'+clean(draft.text??'')+
     '\nهذا الرابط سيظهر في القوالب التي تستخدم متغير {رابط_القوانين}.';
   if(draft.kind==='RULES_LINK_CLEAR')return 'اعتماد مسح رابط القوانين: سيختفي من الرسائل التالية.';
