@@ -202,7 +202,9 @@ export class Phase4CommunityService{
      ...(request.timeZone!==undefined?{timeZone:request.timeZone}:{}),
     ...(request.photoFileId!==undefined?{photoFileId:request.photoFileId}:{}),
     ...(request.buttonText!==undefined?{buttonText:request.buttonText}:{}),
-    ...(request.buttonUrl!==undefined?{buttonUrl:request.buttonUrl}:{})};
+    ...(request.buttonUrl!==undefined?{buttonUrl:request.buttonUrl}:{}),
+    ...(['GROUP_TITLE_SET','GROUP_PHOTO_REMOVE'].includes(kind)?
+     {profileEpoch:s.phase4Community?.profileRevisions?.find(x=>x.chatId===chatId)?.revision??0}:{})};
    s.phase4Community??=emptyCommunityState();
    const st=s.phase4Community;
    st.drafts=st.drafts.filter(d=>d.actorId!==actorId&&d.expiresAt>now).slice(-90);
@@ -233,6 +235,10 @@ export class Phase4CommunityService{
     throw Error('COMMUNITY_DRAFT_EXPIRED');
    const config=configured(s,draft.chatId);
    if(config.version!==draft.configVersion)throw Error('COMMUNITY_DRAFT_STALE');
+   if((draft.kind==='GROUP_TITLE_SET'||draft.kind==='GROUP_PHOTO_REMOVE')&&
+     draft.profileEpoch!==(st?.profileRevisions??[]).find(x=>x.chatId===draft.chatId)?.revision&&
+     !(draft.profileEpoch===0&&!(st?.profileRevisions??[]).some(x=>x.chatId===draft.chatId)))
+    throw Error('COMMUNITY_PROFILE_DRAFT_STALE');
    switch(draft.kind){
     case 'WELCOME_PHOTO_SET':config.welcome.photoFileId=draft.photoFileId!;break;
     case 'WELCOME_PHOTO_CLEAR':delete config.welcome.photoFileId;break;
@@ -364,7 +370,7 @@ export class Phase4CommunityService{
       j.status==='QUEUED'||j.status==='SENDING'||now-j.createdAt<7*86400000).slice(-499);
     st!.profileJobs.push({key:randomBytes(12).toString('hex'),chatId:draft.chatId,
      chatVersion:draft.chatVersion,policyVersion:config.version,
-     profileEpoch:(st!.profileObservations??[]).filter(x=>x.chatId===draft.chatId).length,
+     profileEpoch:st!.profileRevisions?.find(x=>x.chatId===draft.chatId)?.revision??0,
      kind:draft.kind==='GROUP_TITLE_SET'?'TITLE_SET':'PHOTO_REMOVE',
      status:'QUEUED',createdAt:now,
      ...(draft.kind==='GROUP_TITLE_SET'?{title:draft.text!}:{})});
@@ -419,6 +425,13 @@ export class Phase4CommunityService{
     if(!state.profileObservations.some(x=>x.key===key)){
      state.profileObservations=[...state.profileObservations.slice(-999),
       {key,chatId:input.chatId,at:now}];
+     state.profileRevisions??=[];
+     const rev=state.profileRevisions.find(x=>x.chatId===input.chatId);
+     if(rev){
+      if(rev.revision<2_000_000_000)rev.revision++;
+      else throw Error('COMMUNITY_PROFILE_REVISION_EXHAUSTED');
+      rev.lastKey=key;
+     }else state.profileRevisions.push({chatId:input.chatId,revision:1,lastKey:key});
      recorded=true;
     }
    }
