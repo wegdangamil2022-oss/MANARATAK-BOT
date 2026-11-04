@@ -304,3 +304,23 @@ for(const engine of ['json','sqlite'] as const){
   }finally{await f.close();}
  });
 }
+
+
+for(const engine of ['json','sqlite'] as const){
+ test('P4 WELCOME-003 '+engine+': stale or future-dated Telegram service departures cannot post farewell or delete',async()=>{
+  const f=await setup(engine);
+  try{
+   await f.approve({kind:'FAREWELL_ON'});
+   await f.approve({kind:'SERVICE_CLEANUP_ON'});
+   const old=f.serviceLeave(888),future=f.serviceLeave(889);
+   (old.message as typeof old.message & {date:number}).date=Math.floor((f.clock()-901000)/1000);
+   (future.message as typeof future.message & {date:number}).date=Math.floor((f.clock()+120000)/1000);
+   const previous=await f.app.handle(old);
+   const upcoming=await f.app.handle(future);
+   assert.equal(previous.plan,undefined);
+   assert.equal(upcoming.plan,undefined);
+   assert.equal((await f.store.snapshot()).phase4Community?.receipts.length??0,0);
+   assert.equal((await f.store.snapshot()).phase4Community?.cleanupJobs?.length??0,0);
+  }finally{await f.close();}
+ });
+}
