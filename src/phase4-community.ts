@@ -395,49 +395,78 @@ export class Phase4CommunityService{
    if(!config||!validCommunityConfig(config)||
       !this.policy.canUseChat(s,input.chatId,'navigation')||
       s.chats.filter(c=>c.id===input.chatId&&c.approved).length!==1)return null;
+   const record=(reason:CommunityDecisionReason,ruleId?:string):void=>{
+    if(config.decisionLogEnabled!==true)return;
+    s.phase4Community??=emptyCommunityState();
+    const previous=(s.phase4Community.decisionLog??[]).filter(x=>
+     x.at<=now&&now-x.at<7*86400000);
+    if(previous.some(x=>x.key===key))return;
+    // The decision code and revision are enough to explain a decision;
+    // never persist the student's ID, name, message or group title.
+    s.phase4Community.decisionLog=[...previous.slice(-999),
+     {key,chatId:input.chatId,at:now,kind:input.kind,configVersion:config.version,
+      reason,...(ruleId?{ruleId}:{})}];
+   };
+   // A denied update must not generate repeat log entries on webhook replay.
+   if(config.decisionLogEnabled&&stateOf(s).decisionLog?.some(x=>x.key===key))return null;
    let template:string,ruleId:string|undefined;
    let photoFileId:string|undefined,communityLinks:CommunityLinkKeyboard|undefined;
    if(input.kind==='JOIN'||input.kind==='LEAVE'){
     const target=input.kind==='JOIN'?config.welcome:config.farewell;
-    if(!target.enabled)return null;
+    if(!target.enabled){
+     record(input.kind==='JOIN'?'WELCOME_DISABLED':'FAREWELL_DISABLED');return null;
+    }
     template=selectCommunityGreeting(config,input.kind==='JOIN'?'welcome':'farewell');
     photoFileId=target.photoFileId;
     communityLinks=communityLinkKeyboard(target.buttons);
-   }
-   else{
-    if(config.quietHours&&inCommunityQuietHours(config.quietHours,now,config.utcOffsetMinutes,config.timeZone))return null;
+   }else{
+    if(!config.repliesEnabled){record('REPLIES_DISABLED');return null;}
+    if(config.quietHours&&inCommunityQuietHours(config.quietHours,now,config.utcOffsetMinutes,config.timeZone)){
+     record('QUIET_HOURS');return null;
+    }
     const rule=selectCommunityRule(config,input.messageText!,input.topicId);
-    if(!rule)return null;
+    if(!rule){record('NO_MATCH');return null;}
     template=rule.response;ruleId=rule.id;
    }
    const actorDigest=hex('P4:ACTOR:'+input.chatId+':'+input.actorId);
    const existing=stateOf(s).receipts;
-   if(existing.some(x=>x.key===key)||existing.some(x=>x.chatId===input.chatId&&x.at>now))return null;
+   if(existing.some(x=>x.key===key))return null;
+   if(existing.some(x=>x.chatId===input.chatId&&x.at>now)){
+    record('CLOCK_SKEW');return null;
+   }
    const active=existing.filter(x=>x.at>now-86400000);
    const inGroup=active.filter(x=>x.chatId===input.chatId);
-   if(inGroup.filter(x=>x.at>now-60000).length>=8)return null;
+   if(inGroup.filter(x=>x.at>now-60000).length>=8){
+    record('GROUP_LIMIT',ruleId);return null;
+   }
    const topicRate=input.kind==='TEXT'&&input.topicId!==undefined?
     config.topicCooldowns?.find(x=>x.topicId===input.topicId)?.cooldownMs:undefined;
-   // Per-topic overrides are isolated; the group-wide eight/minute guard remains.
+   // Per-topic overrides do not bypass the global 8/minute cap.
    if(topicRate!==undefined?
      inGroup.some(x=>x.kind==='TEXT'&&x.topicId===input.topicId&&now-x.at<topicRate):
-     inGroup.some(x=>now-x.at<config.groupCooldownMs))return null;
+     inGroup.some(x=>now-x.at<config.groupCooldownMs)){
+    record(topicRate===undefined?'GROUP_COOLDOWN':'TOPIC_COOLDOWN',ruleId);return null;
+   }
    const actorPeriod=ruleId?config.rules.find(x=>x.id===ruleId)!.cooldownMs:600000;
    if(inGroup.some(x=>x.actorDigest===actorDigest&&x.kind===input.kind&&
-       x.ruleId===ruleId&&now-x.at<actorPeriod))return null;
+       x.ruleId===ruleId&&now-x.at<actorPeriod)){
+    record('ACTOR_COOLDOWN',ruleId);return null;
+   }
    let text:string;
    try{text=renderCommunityTemplate(template,input,
      now+(config.timeZone?0:config.utcOffsetMinutes*60000),config.rulesUrl??'',
      {language:config.language??'ar',clockFormat:config.clockFormat??'24',
       calendar:config.calendar??'gregorian',...(config.timeZone?{timeZone:config.timeZone}:{})});}
-   catch{return null;}
-   // A Telegram photo caption has a 1024-byte post-escaping budget; do not
-   // enqueue a job which the Bot API would reject after quota reservation.
-   if(photoFileId&&Buffer.byteLength(text,'utf8')>1024)return null;
+   catch{record('TEMPLATE_INVALID',ruleId);return null;}
+   if(photoFileId&&Buffer.byteLength(text,'utf8')>1024){
+    record('CAPTION_LIMIT',ruleId);return null;
+   }
    const receipt={key,chatId:input.chatId,at:now,kind:input.kind,actorDigest,
     ...(ruleId?{ruleId}:{}),...(input.topicId!==undefined?{topicId:input.topicId}:{})};
    s.phase4Community??=emptyCommunityState();
    s.phase4Community.receipts=[...active.slice(-2499),receipt];
+   // Reserved means local intent only; the Telegram send may subsequently fail.
+   record('RESERVED',ruleId);
    return {text,chatId:input.chatId,actorId:input.actorId,kind:input.kind,
     policyVersion:config.version,...(input.topicId!==undefined?{topicId:input.topicId}:{}),
     ...(photoFileId?{photoFileId}:{}),
