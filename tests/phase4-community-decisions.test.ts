@@ -1,4 +1,5 @@
 import {test} from 'node:test';
+import {createHash} from 'node:crypto';
 import assert from 'node:assert/strict';
 import {mkdtemp,rm} from 'node:fs/promises';
 import {join} from 'node:path';
@@ -134,10 +135,17 @@ for(const engine of ['json','sqlite'] as const){
   const f=await fixture(engine);
   try{
    await f.apply({kind:'DECISION_LOG_ON'});
-   for(let i=0;i<1200;i++){
-    f.set(Date.parse('2026-11-04T12:00:00Z')+i*1000);
-    await f.service.propose(input('unmatched private '+i),'b3-webhook:bot-main:'+(10_000+i));
-   }
+   const initial=f.clock();
+   const epoch=(await f.service.view(OWNER,CHAT)).version;
+   // A single isolated seed avoids 1200 SQLite writes while still exercising
+   // the live append-and-cap path and strict persistent schema validation.
+   await f.store.transaction(s=>{
+    s.phase4Community!.decisionLog=Array.from({length:1000},(_,i)=>({
+     key:createHash('sha256').update('test:'+i).digest('hex'),chatId:CHAT,
+     at:initial-1000+i,kind:'TEXT' as const,configVersion:epoch,reason:'NO_MATCH' as const
+    }));
+   });
+   await f.service.propose(input('a new private question'),'b3-webhook:bot-main:22000');
    const state=await f.store.snapshot();
    assert.equal(state.phase4Community?.decisionLog?.length,1000);
    assert.equal(validCommunityState(state.phase4Community),true);
