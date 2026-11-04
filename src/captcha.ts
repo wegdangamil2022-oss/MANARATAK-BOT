@@ -1,4 +1,5 @@
 import {createHash,randomBytes,randomInt} from 'node:crypto';
+import {CaptchaEscalationPolicy} from './captcha-escalation-policy.js';
 import type {BotState,BotStore,Wizard} from './store.js';
 import type {Policy} from './policy.js';
 import type {OwnerInlineScreen} from './telegram-inline-owner.js';
@@ -34,10 +35,33 @@ export class CaptchaService{
  #read(s:BotState,w:Wizard,actor:string,allowStale=false):Session|null{
   if(!user(actor)||w.userId!==actor||w.chatId!==actor||w.topicId!==''||w.step!==0||w.version!==1||typeof w.flow!=='string'||!w.flow.startsWith(MEMBER))return null;
   try{const d=JSON.parse(w.flow.slice(MEMBER.length)) as Session;if(!d||typeof d!=='object'||Array.isArray(d)||Object.keys(d).sort().join(',')!=='deadline,group,issued,lastAttempt,nonce,phase,problem,retryAt,revision,round,tries'||typeof d.nonce!=='string'||/^[A-Za-z0-9_-]{24}$/u.exec(d.nonce)?.[0]!==d.nonce||!group(d.group)||w.key!==key(d.group,actor)||s.wizards.filter(x=>x.key===w.key).length!==1||!time(d.issued)||!time(this.clock())||this.clock()<d.issued||!Number.isSafeInteger(d.deadline)||!Number.isSafeInteger(d.retryAt)||!Number.isSafeInteger(d.round)||d.round<1||d.round>3||!Number.isSafeInteger(d.tries)||d.tries<0||!Number.isSafeInteger(d.lastAttempt)||d.lastAttempt< -1||d.lastAttempt>this.clock()||d.lastAttempt>=0&&d.lastAttempt<d.issued||!['WAITING','FAILED','PASSED'].includes(d.phase)||!Array.isArray(d.problem)||d.problem.length!==3||!d.problem.every(n=>Number.isSafeInteger(n))||d.problem[0]<1||d.problem[0]>9||d.problem[1]<1||d.problem[1]>9||d.problem[2]<0||d.problem[2]>2)return null;
-   const settings=this.settings(s,d.group);if(!settings?.enabled||!Number.isSafeInteger(d.revision)||d.revision<1||d.revision>settings.revision||!allowStale&&settings.revision!==d.revision||!this.policy.canUseChat(s,d.group,'moderation')||!Number.isSafeInteger(w.policyVersion)||w.policyVersion<1||w.policyVersion>this.policy.chatRevision(s,d.group)||!allowStale&&w.policyVersion!==this.policy.chatRevision(s,d.group)||w.expiresAt!==d.deadline||![60000,120000,300000].includes(d.deadline-d.issued)||!allowStale&&d.deadline!==d.issued+settings.timeout*1000||d.tries>5||!allowStale&&d.tries>settings.attempts||d.retryAt!==d.deadline+d.round*60000||d.tries===0&&d.lastAttempt!==-1||d.tries>0&&d.lastAttempt<d.issued||d.phase==='PASSED'&&(d.tries<1||w.status!=='CANCELLED')||d.phase!=='PASSED'&&w.status!=='ACTIVE'||this.policy.has(s,actor,'chat.manage',d.group,this.clock()))return null;return d;
+   const settings=this.settings(s,d.group);if(!settings?.enabled||!Number.isSafeInteger(d.revision)||d.revision<1||d.revision>settings.revision||!allowStale&&settings.revision!==d.revision||!this.policy.canUseChat(s,d.group,'moderation')||!Number.isSafeInteger(w.policyVersion)||w.policyVersion<1||w.policyVersion>this.policy.chatRevision(s,d.group)||!allowStale&&w.policyVersion!==this.policy.chatRevision(s,d.group)||w.expiresAt!==d.deadline||![60000,120000,300000].includes(d.deadline-d.issued)||!allowStale&&d.deadline!==d.issued+settings.timeout*1000||d.tries>5||!allowStale&&d.tries>settings.attempts||CaptchaEscalationPolicy.knownCooldown(d.round,d.retryAt-d.deadline)===null||d.tries===0&&d.lastAttempt!==-1||d.tries>0&&d.lastAttempt<d.issued||d.phase==='PASSED'&&(d.tries<1||w.status!=='CANCELLED')||d.phase!=='PASSED'&&w.status!=='ACTIVE'||this.policy.has(s,actor,'chat.manage',d.group,this.clock()))return null;
+   if(CaptchaEscalationPolicy.knownCooldown(d.round,d.retryAt-d.deadline)==='EXTENDED'){
+    const proofs=s.audit.filter(a=>a.updateKey==='captcha:escalation-used:'+d.nonce),proof=proofs[0];
+    if(proofs.length!==1||!proof||proof.actorId!==actor||proof.decision!=='ALLOW'||
+       proof.policyVersion!==w.policyVersion||proof.at!==d.issued||
+       proof.reason!==CaptchaEscalationPolicy.receipt(d.group,actor,d.nonce,d.round,d.issued,
+        d.deadline,d.retryAt,d.revision,w.policyVersion))return null;
+   }
+   return d;
   }catch{return null;}
  }
- #fresh(chat:string,settings:Settings,round:number):Session{const now=this.clock();return {nonce:randomBytes(18).toString('base64url'),group:chat,revision:settings.revision,issued:now,deadline:now+settings.timeout*1000,retryAt:now+settings.timeout*1000+round*60000,round,tries:0,lastAttempt:-1,phase:'WAITING',problem:[randomInt(1,10),randomInt(1,10),randomInt(0,3)]};}
+ #fresh(s:BotState,actor:string,chat:string,settings:Settings,round:1|2|3):Session|null{
+  const now=this.clock(),duration=new CaptchaEscalationPolicy(this.store,this.policy,this.captchaReference(),this.clock).cooldown(s,chat,round);
+  if(duration===null||!time(now)||now+settings.timeout*1000+duration>8640000000000000-120000)return null;
+  const result:Session={nonce:randomBytes(18).toString('base64url'),group:chat,
+   revision:settings.revision,issued:now,deadline:now+settings.timeout*1000,
+   retryAt:now+settings.timeout*1000+duration,round,tries:0,lastAttempt:-1,
+   phase:'WAITING',problem:[randomInt(1,10),randomInt(1,10),randomInt(0,3)]};
+  if(duration!==round*60000){
+   s.audit.push({actorId:actor,updateKey:'captcha:escalation-used:'+result.nonce,decision:'ALLOW',
+    reason:CaptchaEscalationPolicy.receipt(chat,actor,result.nonce,round,now,result.deadline,
+     result.retryAt,settings.revision,this.policy.chatRevision(s,chat)),
+    policyVersion:this.policy.chatRevision(s,chat),at:now});
+  }
+  return result;
+ }
+ private captchaReference():CaptchaService{return this;}
  /** Retire completed challenge payloads only; audit and moderation evidence remain intact. */
  #cleanup(s:BotState):number{
   const now=this.clock();if(!time(now))return 0;
@@ -105,7 +129,7 @@ export class CaptchaService{
   if(!group(chat)||!Array.isArray(members)||members.length>100||new Set(members).size!==members.length||!members.every(user)||!/^b3-webhook:[A-Za-z0-9_-]{1,80}:[0-9]{1,16}$/u.test(updateKey)||!time(sentAt))return 0;
   return this.store.transaction(s=>{const now=this.clock(),settings=this.settings(s,chat);if(!time(now)||now<sentAt||now-sentAt>30000||!settings?.enabled||!this.policy.canUseChat(s,chat,'moderation'))return 0;this.#cleanup(s);let issued=0;
    for(const actor of members){if(this.policy.has(s,actor,'chat.manage',chat,now)||this.status(s,chat,actor)==='PASSED')continue;const rows=s.wizards.filter(w=>w.key===key(chat,actor)),w=rows[0];if(rows.length>1)continue;if(w){const d=this.#read(s,w,actor,true);if(!d||d.revision===settings.revision&&w.policyVersion===this.policy.chatRevision(s,chat)&&(now<d.issued+86400000||d.round===3||s.audit.some(a=>a.updateKey==='captcha:review:'+d.nonce)||s.moderationReasons.some(r=>r.chatId===chat&&r.memberId===actor)||s.moderationOperations.some(o=>o.chatId===chat&&o.memberId===actor)))continue;}
-    if(s.wizards.filter(w=>typeof w.flow==='string'&&w.flow.startsWith(MEMBER)&&w.key!==key(chat,actor)).length>=1000)continue;const d=this.#fresh(chat,settings,1);s.audit.push({actorId:actor,updateKey:'captcha:join-issued:'+d.nonce,decision:'ALLOW',reason:'CAPTCHA_JOIN_OBSERVED:'+hash([chat,actor,d.nonce,updateKey,sentAt,s.audit.filter(a=>a.updateKey==='captcha:enforcement:'+chat)]),policyVersion:this.policy.chatRevision(s,chat),at:now});s.wizards=s.wizards.filter(w=>w.key!==key(chat,actor));s.wizards.push({key:key(chat,actor),userId:actor,chatId:actor,topicId:'',flow:MEMBER+JSON.stringify(d),step:0,version:1,policyVersion:this.policy.chatRevision(s,chat),expiresAt:d.deadline,status:'ACTIVE'});issued++;
+    if(s.wizards.filter(w=>typeof w.flow==='string'&&w.flow.startsWith(MEMBER)&&w.key!==key(chat,actor)).length>=1000)continue;const d=this.#fresh(s,actor,chat,settings,1);if(!d)continue;s.audit.push({actorId:actor,updateKey:'captcha:join-issued:'+d.nonce,decision:'ALLOW',reason:'CAPTCHA_JOIN_OBSERVED:'+hash([chat,actor,d.nonce,updateKey,sentAt,s.audit.filter(a=>a.updateKey==='captcha:enforcement:'+chat)]),policyVersion:this.policy.chatRevision(s,chat),at:now});s.wizards=s.wizards.filter(w=>w.key!==key(chat,actor));s.wizards.push({key:key(chat,actor),userId:actor,chatId:actor,topicId:'',flow:MEMBER+JSON.stringify(d),step:0,version:1,policyVersion:this.policy.chatRevision(s,chat),expiresAt:d.deadline,status:'ACTIVE'});issued++;
    }return issued;});
  }
  async view(actor:string,data?:string):Promise<OwnerInlineScreen|null>{
@@ -117,11 +141,11 @@ export class CaptchaService{
   if((action==='a'||action==='b')&&(prior.phase!=='WAITING'||now>=prior.deadline||prior.lastAttempt>=0&&now-prior.lastAttempt<2000))return null;
   if(action==='r'&&(prior.phase==='PASSED'||prior.round>=3))return null;
   let member=false;try{member=await this.membership(selected.d.group,actor)==='VERIFIED';}catch{/* unknown is not membership */}if(!member)return null;
-  return this.store.transaction(s=>{const at=this.clock(),w=s.wizards.find(w=>w.key===selected.w.key);if(!w||w.status!=='ACTIVE'||at<now||at>=now+120000||captchaSource(s)!==captchaSource(before)||w.flow!==selected.w.flow)return null;let d=this.#read(s,w,actor);if(!d&&selected.refresh&&data===undefined){const previous=this.#read(s,w,actor,true),current=previous?this.settings(s,previous.group):null;if(!previous||!current)return null;d=this.#fresh(previous.group,current,1);w.policyVersion=this.policy.chatRevision(s,previous.group);w.flow=MEMBER+JSON.stringify(d);w.expiresAt=d.deadline;}const settings=d?this.settings(s,d.group):null;if(!d||!settings)return null;
+  return this.store.transaction(s=>{const at=this.clock(),w=s.wizards.find(w=>w.key===selected.w.key);if(!w||w.status!=='ACTIVE'||at<now||at>=now+120000||captchaSource(s)!==captchaSource(before)||w.flow!==selected.w.flow)return null;let d=this.#read(s,w,actor);if(!d&&selected.refresh&&data===undefined){const previous=this.#read(s,w,actor,true),current=previous?this.settings(s,previous.group):null;if(!previous||!current)return null;const refreshed=this.#fresh(s,actor,previous.group,current,1);if(!refreshed)return null;d=refreshed;w.policyVersion=this.policy.chatRevision(s,previous.group);w.flow=MEMBER+JSON.stringify(d);w.expiresAt=d.deadline;}const settings=d?this.settings(s,d.group):null;if(!d||!settings)return null;
    const human=this.#humanDecision(s,w,d);
    if(human)return {text:(human==='APPROVED'?'✅ قُبل التحقق بمراجعة بشرية.':'رُفض التحقق بعد مراجعة بشرية.')+'\nهذا القرار يخص CAPTCHA فقط، ولا يرفع عقوبة أو قيد اشتراك مستقلًا.',keyboard:{inline_keyboard:[[{text:'🏠 الرئيسية',callback_data:'pn:1:h'}]]}};
    if(s.audit.some(a=>a.updateKey==='captcha:review:'+d.nonce))return null;
-   if(data){const action=data.split(':')[2];if(action==='r'){if(d.phase==='PASSED'||d.round>=3)return null;if(at>=d.retryAt)Object.assign(d,this.#fresh(d.group,settings,d.round+1));}
+   if(data){const action=data.split(':')[2];if(action==='r'){if(d.phase==='PASSED'||d.round>=3)return null;if(at>=d.retryAt){const fresh=this.#fresh(s,actor,d.group,settings,(d.round+1) as 2|3);if(!fresh)return null;Object.assign(d,fresh);}}
     else if(action!=='o'){if(at>=d.deadline||d.phase!=='WAITING'||d.lastAttempt>=0&&at-d.lastAttempt<2000)return null;d.lastAttempt=at;d.tries++;if(action==='b'||Number(data.split(':')[4])===d.problem[2]){if(s.audit.some(a=>a.updateKey==='captcha:passed:'+d.nonce))return null;d.phase='PASSED';w.status='CANCELLED';s.audit.push({actorId:actor,updateKey:'captcha:passed:'+d.nonce,decision:'ALLOW',reason:'CAPTCHA_CHALLENGE_PASSED:'+hash([d.group,actor,d.revision]),policyVersion:w.policyVersion,at});}else if(d.tries>=settings.attempts)d.phase='FAILED';}
    }
    w.flow=MEMBER+JSON.stringify(d);w.expiresAt=d.deadline;
