@@ -22,6 +22,7 @@ const help='للتعديل أرسل في خاص البوت أحد الأوامر
  +'<code>/groupeditoff -100123</code>\n'
  +'<code>/groupname -100123 اسم المجموعة الجديد</code>\n'
  +'<code>/groupclearphoto -100123</code>\n'
+ +'<code>/groupphoto -100123 TELEGRAM_PHOTO_FILE_ID</code>\n'
  +'<code>/farewellvariant -100123 SELF مع السلامة {العضو}</code>\n'
  +'<code>/clearfarewellvariant -100123 SELF</code>\n'
  +'<code>/farewellremovedon -100123</code>\n'
@@ -73,6 +74,9 @@ export function parsePhase4CommunityCommand(text:string):
   return validCommunityProfileTitle(title)?
    {kind:'EDIT',chatId:profileName[1]!,request:{kind:'GROUP_TITLE_SET',text:title}}:null;
  }
+ const profileUpload=/^\/groupphoto (-[1-9]\d{0,15}) ([A-Za-z0-9_-]{25,200})$/u.exec(text);
+ if(profileUpload)return validCommunityPhotoId(profileUpload[2])?
+  {kind:'EDIT',chatId:profileUpload[1]!,request:{kind:'GROUP_PHOTO_SET',photoFileId:profileUpload[2]!}}:null;
  const profilePhoto=/^\/groupclearphoto (-[1-9]\d{0,15})$/u.exec(text);
  if(profilePhoto)return {kind:'EDIT',chatId:profilePhoto[1]!,request:{kind:'GROUP_PHOTO_REMOVE'}};
 
@@ -597,17 +601,18 @@ export async function phase4CommunityScreen(service:Phase4CommunityService,actor
   const id=groupProfile[1]!,config=await service.view(actorId,id);
   const jobs=await service.recentProfileOperations(actorId,id);
   const enabled=config.profileEditingEnabled===true;
-  return {text:'<b>🛠️ تغيير اسم المجموعة أو حذف صورتها</b>\nالمجموعة: <code>'+id+'</code>'+
+  return {text:'<b>🛠️ تغيير اسم أو صورة المجموعة</b>\nالمجموعة: <code>'+id+'</code>'+
    '\nالتفعيل: '+(enabled?'مسموح بعد مراجعة كل طلب':'متوقف افتراضيًا')+
    '\n\nكل عملية تحتاج: صلاحية المالك، موافقة جديدة، اعتماد المجموعة،'+
    ' مفتاح تشغيل منفصل في الخادم، وصلاحية can_change_info في Telegram.'+
    '\n\nالأوامر في خاص المالك:'+
    '\n<code>/groupname '+id+' اسم المجموعة الجديد</code>'+
-   '\n<code>/groupclearphoto '+id+'</code>'+
+   '\n<code>/groupclearphoto '+id+'</code>'+ 
+   '\n<code>/groupphoto '+id+' PHOTO_FILE_ID</code>'+
    '\n<code>/groupediton '+id+'</code> أو <code>/groupeditoff '+id+'</code>'+
-   '\n\nحذف الصورة لا يدعم رفع صورة جديدة؛ Telegram يشترط رفع InputFile منفصلًا.'+
+   '\n\nرفع الصورة يتم من معرّف ملف موثوق يصلح للبوت عبر getFile ثم multipart؛ لا يقبل Telegram تمرير file_id مباشرةً كصورة المجموعة.'+
    '\n\nآخر طلبات التعديل:\n'+(jobs.length?jobs.map(job=>
-    '• '+(job.kind==='TITLE_SET'?'تعديل الاسم':'حذف الصورة')+
+    '• '+(job.kind==='TITLE_SET'?'تعديل الاسم':job.kind==='PHOTO_SET'?'رفع صورة جديدة':'حذف الصورة')+
     ' — '+esc(job.status)+' — '+new Date(job.createdAt).toISOString().slice(0,16).replace('T',' ')+' UTC'
    ).join('\n'):'لا توجد طلبات تعديل محفوظة.')+
    '\nلا يعرض السجل عنوان المجموعة المطلوب بعد محاولة الإرسال، ولا يكرر الطلب عند نتيجة مجهولة.',
