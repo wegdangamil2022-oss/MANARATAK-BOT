@@ -78,6 +78,10 @@ export class Phase4CommunityService{
    const chatVersion=groupAvailable(s,this.policy,actorId,chatId);
    const current=configured(s,chatId);
    const kind=request.kind;
+   // High-impact group profile changes are owner-only, even if a delegated
+   // moderator has general chat.manage permission for templates and replies.
+   if(['GROUP_PROFILE_ON','GROUP_PROFILE_OFF','GROUP_TITLE_SET','GROUP_PHOTO_REMOVE'].includes(kind)&&
+      !this.policy.isOwner(actorId))throw Error('COMMUNITY_OWNER_DENIED');
    if(kind==='GROUP_TITLE_SET'||kind==='GROUP_PHOTO_REMOVE'){
     if(current.profileEditingEnabled!==true)throw Error('COMMUNITY_PROFILE_DISABLED');
     if(kind==='GROUP_TITLE_SET'&&!validCommunityProfileTitle(request.text))
@@ -229,6 +233,8 @@ export class Phase4CommunityService{
    if(drafts.length!==1||drafts[0]!.actorId!==actorId)
     throw Error('COMMUNITY_DRAFT_NOT_FOUND');
    const draft=drafts[0]!;
+   if(['GROUP_PROFILE_ON','GROUP_PROFILE_OFF','GROUP_TITLE_SET','GROUP_PHOTO_REMOVE'].includes(draft.kind)&&
+      !this.policy.isOwner(actorId))throw Error('COMMUNITY_OWNER_DENIED');
    // A stale/expired/unauthorized draft never changes a running policy.
    if(now<draft.createdAt||now>=draft.expiresAt||
       groupAvailable(s,this.policy,actorId,draft.chatId)!==draft.chatVersion)
