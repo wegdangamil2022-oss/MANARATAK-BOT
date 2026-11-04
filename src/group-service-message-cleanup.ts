@@ -12,7 +12,6 @@ const update=(v:unknown):v is string=>typeof v==='string'&&/^b3-webhook:[A-Za-z0
 type Consent={enabled:boolean;revision:number;stamp:string};
 type Job={key:string;chat:string;kind:'JOIN'|'LEAVE';messageId:number;issued:number;sentAt:number;updateKey:string;version:number;revision:number;stamp:string};
 type DeleteGateway=Pick<TelegramTemporaryGroupSender,'delete'>;
-type Rights=()=>Promise<'GRANTED'|'DENIED'|'UNKNOWN'>;
 const suffix=(s:BotState,k:string,name:string)=>s.audit.filter(a=>a.updateKey===k+name);
 
 /** Original Telegram service messages, not the bot's own notices.
@@ -63,10 +62,10 @@ export class GroupServiceMessageCleanup{
    const version=this.policyAccess.chatRevision(s,chat),revision=old.revision+1,
     record={actorId:actor,updateKey:P+chat,decision:'ALLOW' as const,
      reason:JSON.stringify({enabled,revision,stamp:old.stamp}),policyVersion:version,at:now};
-   const existing=s.audit.find(a=>a.updateKey===P+chat);
-   if(existing)Object.assign(existing,record);else s.audit.push(record);
    const updateKey='group:service-cleanup-change:'+digest([chat,now,revision,old.stamp]);
    if(s.audit.some(a=>a.updateKey===updateKey))return false;
+   const existing=s.audit.find(a=>a.updateKey===P+chat);
+   if(existing)Object.assign(existing,record);else s.audit.push(record);
    s.audit.push({actorId:actor,updateKey,decision:'ALLOW',reason:'SERVICE_CLEANUP_POLICY_UPDATE:'+digest(record),policyVersion:version,at:now});
    return true;
   });
@@ -92,11 +91,15 @@ export class GroupServiceMessageCleanup{
  }
  private jobs(s:BotState,now:number):Job[]{
   if(!time(now))return [];
-  const result:Job[]=[];
+  const result:Job[]=[],counts=new Map<string,number>();
+  // A single pass detects duplicate restored audit keys. Scanning all historical
+  // records for each job was quadratic and could delay the live safety loop.
+  for(const a of s.audit)if(/^group:service-message-job:[a-f0-9]{64}$/u.test(a.updateKey))
+   counts.set(a.updateKey,(counts.get(a.updateKey)??0)+1);
   for(const a of s.audit){
    if(!/^group:service-message-job:[a-f0-9]{64}$/u.test(a.updateKey)||
       !a.reason.startsWith(PREFIX)||a.actorId!==this.policyAccess.ownerId||a.decision!=='ALLOW'||
-      !time(a.at)||a.at>now||s.audit.filter(x=>x.updateKey===a.updateKey).length!==1)continue;
+      !time(a.at)||a.at>now||now-a.at>86400000||counts.get(a.updateKey)!==1)continue;
    try{
     const raw:unknown=JSON.parse(a.reason.slice(PREFIX.length));
     if(!raw||typeof raw!=='object'||Array.isArray(raw))continue;
