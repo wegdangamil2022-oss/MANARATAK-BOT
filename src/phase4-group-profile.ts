@@ -111,8 +111,8 @@ export class Phase4GroupProfileDispatcher{
    const t=this.clock(),group=state.chats.filter(x=>x.id===current.chatId);
    const configs=state.phase4Community?.configs.filter(x=>x.chatId===current.chatId)??[];
    const config=configs[0];
-   const observed=(state.phase4Community?.profileObservations??[]).filter(x=>
-     x.chatId===current.chatId).length;
+   const observed=state.phase4Community?.profileRevisions?.find(x=>
+     x.chatId===current.chatId)?.revision??0;
    const permitted=Number.isSafeInteger(t)&&t>=current.createdAt&&
     t-current.createdAt<600000&&group.length===1&&group[0]!.approved&&
     group[0]!.present&&group[0]!.version===current.chatVersion&&
