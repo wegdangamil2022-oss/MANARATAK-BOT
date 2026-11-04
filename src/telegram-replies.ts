@@ -6,6 +6,7 @@ import type {TelegramReplyPlan} from './telegram-transport.js';
 import {isValidTelegramReplyKeyboard} from './telegram-menu.js';
 import {isValidTelegramInlineKeyboard} from './telegram-inline-owner.js';
 import {validCommunityPhotoId,validCommunityLinkKeyboard} from './phase4-community-rich.js';
+import {inCommunityQuietHours,validCommunityConfig} from './phase4-community-model.js';
 import {validStudioNativeKeyboard} from './telegram-studio-rich.js';
 import {groupQuestionEpochDigest,groupMenuEpochDigest,privateGroupEpochDigest} from './telegram-group-access.js';
 import {privateLibraryEpoch} from './private-library-access.js';
@@ -162,6 +163,15 @@ export function validTelegramReplyJob(v:unknown):v is TelegramReplyJob{
  return typeof j.updateKey==='string'&&/^b3-webhook:[a-zA-Z0-9_-]{1,80}:\d+$/.test(j.updateKey)&&
   knownStatus(j.status)&&
   validCommunityMessageMetadata(v as TelegramReplyJob)&&
+  (j.communityAutomation===undefined||(
+   j.status==='QUEUED'&&j.groupReplyKind==='GENERAL'&&validGroupReplyAccess(j.groupMenuAccess)&&
+   typeof j.communityAutomation==='object'&&j.communityAutomation!==null&&
+   !Array.isArray(j.communityAutomation)&&
+   Object.keys(j.communityAutomation as object).length===2&&
+   ['JOIN','LEAVE','TEXT'].includes(String((j.communityAutomation as {kind?:unknown}).kind))&&
+   Number.isSafeInteger((j.communityAutomation as {configVersion?:unknown}).configVersion)&&
+   Number((j.communityAutomation as {configVersion?:unknown}).configVersion)>=1
+  ))&&
   ((j.plan as TelegramReplyPlan|undefined)?.messageThreadId===undefined||j.groupReplyKind==='GENERAL'&&validGroupReplyAccess(j.groupMenuAccess))&&
   (j.status==='QUEUED'?validPlan(j.plan):(j.plan===undefined||validPlan(j.plan)))&&
   ((j.plan as TelegramReplyPlan|undefined)?.photoFileId===undefined&&
@@ -345,7 +355,27 @@ export class TelegramReplyDispatcher {
    const community=job.communityAccess;
    const communityDenied=Boolean(community&&(community.actorId!==plan.chatId||!Number.isSafeInteger(job.queuedAt)||now<job.queuedAt!||now>=community.expiresAt||community.expiresAt>job.queuedAt!+ADMIN_UI_TTL_MS||communityFolderEpoch(s,this.policy,community.actorId)!==community.epoch));
    const closeDenied=Boolean(job.communityClose&&!matchesCommunityClose(s,this.policy,job.communityClose,now));
-   const forbidden=closeDenied||noGroupProof||noPrivateProvenance||adminDenied||libraryDenied||communityDenied||(!!access&&(
+   // Quiet hours are time-dependent. A reply queued just before the boundary
+   // must not be sent when the provider gate opens during the quiet window.
+   // Only Phase 4 replies carry this trusted server-generated marker; ordinary
+   // navigation/FAQ replies are not affected by the community schedule.
+   const automation=job.communityAutomation;
+   let automationDenied=false;
+   if(automation){
+    const configs=s.phase4Community?.configs.filter(c=>c.chatId===plan.chatId)??[];
+    const config=configs.length===1?configs[0]:undefined;
+    if(!config||!validCommunityConfig(config)||
+       config.version!==automation.configVersion||
+       (automation.kind==='TEXT'&&!config.repliesEnabled)||
+       (automation.kind==='JOIN'&&!config.welcome.enabled)||
+       (automation.kind==='LEAVE'&&!config.farewell.enabled)){
+     automationDenied=true;
+    }else if(automation.kind==='TEXT'&&config.quietHours){
+     try{automationDenied=inCommunityQuietHours(config.quietHours,now,config.utcOffsetMinutes);}
+     catch{automationDenied=true;}
+    }
+   }
+   const forbidden=closeDenied||noGroupProof||noPrivateProvenance||adminDenied||libraryDenied||communityDenied||automationDenied||(!!access&&(
     !groupPrecheck?.allowed||
     groupPrecheck.kind!==accessKind||
     groupPrecheck.access.actorId!==access.actorId||
@@ -366,7 +396,7 @@ export class TelegramReplyDispatcher {
     job.accessDenialCode=noGroupProof||noPrivateProvenance?
      'LEGACY_UNVERIFIABLE':groupUnavailable?'GROUP_UNAVAILABLE':'ACCESS_RECHECK_FAILED';
     job.status='FAILED_CONFIRMED';delete job.communityClose;
-    delete job.plan;delete job.adminUIAccess;delete job.privateLibraryAccess;delete job.communityAccess;delete job.groupQuestionAccess;delete job.groupMenuAccess;delete job.privateGroupAccess;delete job.privateReplyKind;delete job.groupReplyKind;job.redactedAt=this.clock();
+    delete job.plan;delete job.adminUIAccess;delete job.privateLibraryAccess;delete job.communityAccess;delete job.groupQuestionAccess;delete job.groupMenuAccess;delete job.privateGroupAccess;delete job.privateReplyKind;delete job.groupReplyKind;delete job.communityAutomation;job.redactedAt=this.clock();
     return {status:'FAILED_CONFIRMED' as const};
    }
    const attemptId=randomUUID();
@@ -379,7 +409,7 @@ export class TelegramReplyDispatcher {
    job.status='SENDING';job.attemptId=attemptId;job.startedAt=at;
    // Remove the durable body *before* the external call. The immediate local
    // copy goes to the sender, but a crash leaves no replayable payload.
-   delete job.plan;delete job.adminUIAccess;delete job.privateLibraryAccess;delete job.communityAccess;delete job.groupQuestionAccess;delete job.groupMenuAccess;delete job.privateGroupAccess;delete job.privateReplyKind;delete job.groupReplyKind;job.redactedAt=at;
+   delete job.plan;delete job.adminUIAccess;delete job.privateLibraryAccess;delete job.communityAccess;delete job.groupQuestionAccess;delete job.groupMenuAccess;delete job.privateGroupAccess;delete job.privateReplyKind;delete job.groupReplyKind;delete job.communityAutomation;job.redactedAt=at;
    delete job.communityClose;
    return {status:'SEND' as const,attemptId,plan,communityReceipt};
   });
