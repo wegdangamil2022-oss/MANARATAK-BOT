@@ -73,7 +73,7 @@ import {parseB6ExplicitMention} from './b6-telegram-mention.js';
 import type {ModerationService} from './moderation.js';
 import {Phase4CommunityService} from './phase4-community.js';
 import {phase4CommunityScreen,parsePhase4CommunityCommand} from './phase4-community-ui.js';
-import type {CommunityInput,CommunityJoinKind} from './phase4-community-model.js';
+import type {CommunityInput,CommunityJoinKind,CommunityLeaveKind} from './phase4-community-model.js';
 import {validCommunityPhotoId} from './phase4-community-rich.js';
 import type {ModerationPurgeService} from './moderation-purge.js';
 import {isReplyDeleteCommand,previewReplyDelete,handleReplyDeleteCallback} from './telegram-reply-delete.js';
@@ -135,7 +135,7 @@ export interface TelegramApplicationOptions {
   community?:Phase4CommunityService;
 }
 
-type Event = {updateId: number; actorId: string; chatId: string; kind: 'private' | 'group'; text: string; communityKind?:'JOIN'|'LEAVE'; communityJoinKind?:CommunityJoinKind; communityChange?:'TITLE_CHANGED'|'PHOTO_CHANGED'|'PHOTO_REMOVED'; serviceSentAtMs?:number; communityMemberId?:string; memberName?:string; groupName?:string; topicId?:number; entities?:unknown; messageId?:number; replyTo?:unknown; document?: IncomingDocument; protectionMedia?:ProtectionMedia; edited?:true; forwarded?:true; callbackData?:string; callbackQueryId?:string; callbackMessageId?:number};
+type Event = {updateId: number; actorId: string; chatId: string; kind: 'private' | 'group'; text: string; communityKind?:'JOIN'|'LEAVE'; communityJoinKind?:CommunityJoinKind; communityLeaveKind?:CommunityLeaveKind; communityChange?:'TITLE_CHANGED'|'PHOTO_CHANGED'|'PHOTO_REMOVED'; serviceSentAtMs?:number; communityMemberId?:string; memberName?:string; groupName?:string; topicId?:number; entities?:unknown; messageId?:number; replyTo?:unknown; document?: IncomingDocument; protectionMedia?:ProtectionMedia; edited?:true; forwarded?:true; callbackData?:string; callbackQueryId?:string; callbackMessageId?:number};
 const isObject=(x:unknown):x is Record<string,unknown>=>Boolean(x)&&typeof x==='object'&&!Array.isArray(x);
 const positiveId=(x:unknown): x is number=>typeof x==='number'&&Number.isSafeInteger(x)&&x>0;
 const chatId=(x:unknown): x is number=>typeof x==='number'&&Number.isSafeInteger(x)&&x!==0;
@@ -200,13 +200,19 @@ function eventFrom(value:unknown):{event?:Event;reason:string} {
       before.status==='restricted'&&before.is_member===false;
    const newPresent=after.status==='member'||after.status==='administrator'||
       after.status==='creator'||after.status==='restricted'&&after.is_member===true;
-   if(!oldAbsent||!newPresent)return {reason:'UNSUPPORTED_EVENT'};
+   const oldPresent=before.status==='member'||before.status==='administrator'||
+      before.status==='creator'||before.status==='restricted'&&before.is_member===true;
+   const newAbsent=after.status==='left'||after.status==='kicked'||
+      after.status==='restricted'&&after.is_member===false;
+   const joining=oldAbsent&&newPresent,leaving=oldPresent&&newAbsent;
+   if(!joining&&!leaving)return {reason:'UNSUPPORTED_EVENT'};
    const user=after.user;
    const memberName=typeof user.first_name==='string'&&user.first_name.trim()?
       user.first_name.trim().slice(0,75):'عضو';
    return {reason:'VALID',event:{updateId:value.update_id as number,actorId:String(cm.from.id),
-     chatId:String(cm.chat.id),kind:'group',text:'',communityKind:'JOIN',
-     communityJoinKind:cm.from.id===user.id?'SELF':'ADDED',
+     chatId:String(cm.chat.id),kind:'group',text:'',communityKind:joining?'JOIN':'LEAVE',
+     ...(joining?{communityJoinKind:cm.from.id===user.id?'SELF' as const:'ADDED' as const}:
+      {communityLeaveKind:after.status==='kicked'||cm.from.id!==user.id?'REMOVED' as const:'SELF' as const}),
      communityMemberId:String(user.id),memberName,
      groupName:typeof cm.chat.title==='string'?cm.chat.title:'المجموعة',
      serviceSentAtMs:(cm.date as number)*1000}};
@@ -274,10 +280,13 @@ function eventFrom(value:unknown):{event?:Event;reason:string} {
    // Only Telegram's service fields establish the join category.
    const communityJoinKind:CommunityJoinKind|undefined=members===undefined?undefined:
       human.length>1?'BATCH':msg.from.id===first.id?'SELF':'ADDED';
+   const communityLeaveKind:CommunityLeaveKind|undefined=left===undefined?undefined:
+      msg.from.id===first.id?'SELF':'REMOVED';
    return {event:{updateId:value.update_id as number,actorId:String(msg.from.id),
      chatId:String(msg.chat.id),kind,text:'',communityKind:members!==undefined?'JOIN':'LEAVE',
      communityMemberId:String(first.id),memberName,
-     ...(communityJoinKind?{communityJoinKind}:{}),messageId:msg.message_id as number,
+     ...(communityJoinKind?{communityJoinKind}:{}),
+     ...(communityLeaveKind?{communityLeaveKind}:{}),messageId:msg.message_id as number,
      ...(msg.date!==undefined?{serviceSentAtMs:(msg.date as number)*1000}:{}),
      groupName:typeof msg.chat.title==='string'?msg.chat.title:'المجموعة',
      ...(msg.message_thread_id!==undefined?{topicId:msg.message_thread_id as number}:{})},reason:'VALID'};
@@ -504,6 +513,7 @@ export class TelegramUpdateApplication {
       memberName:event.memberName??'عضو',groupName:event.groupName??'المجموعة',
       ...(event.text?{messageText:event.text}:{}),
       ...(event.communityJoinKind?{joinKind:event.communityJoinKind}:{}),
+      ...(event.communityLeaveKind?{leaveKind:event.communityLeaveKind}:{}),
       ...(event.topicId!==undefined?{topicId:event.topicId}:{})};
     const proposal=await this.opts.community.propose(input,
       'b3-webhook:'+this.opts.botId+':'+event.updateId);
