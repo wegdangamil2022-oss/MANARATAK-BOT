@@ -46,6 +46,8 @@ export interface CommunityConfig{
  rulesUrl?:string;
  /** Missing in old snapshots means disabled. */
  changeLogEnabled?:boolean;
+ /** Opt-in, privacy-limited decisions ledger; disabled by default. */
+ decisionLogEnabled?:boolean;
  serviceCleanup?:{enabled:boolean;delayMs:number};
  /** Optional expiry of confirmed bot-authored community responses. Disabled by default. */
  replyCleanup?:{enabled:boolean;delayMs:number};
@@ -54,7 +56,7 @@ export type CommunityDraftKind='WELCOME_TEXT'|'FAREWELL_TEXT'|'REPLY_ADD'|'REPLY
  'WELCOME_ON'|'WELCOME_OFF'|'FAREWELL_ON'|'FAREWELL_OFF'|'REPLIES_ON'|'REPLIES_OFF'|
  'REPLY_ENABLE'|'REPLY_DISABLE'|'REPLY_COOLDOWN'|
  'QUIET_HOURS_SET'|'QUIET_HOURS_CLEAR'|'TOPIC_COOLDOWN_SET'|'TOPIC_COOLDOWN_CLEAR'|
- 'CHANGE_LOG_ON'|'CHANGE_LOG_OFF'|'SERVICE_CLEANUP_ON'|'SERVICE_CLEANUP_OFF'|'SERVICE_CLEANUP_DELAY'|
+ 'CHANGE_LOG_ON'|'CHANGE_LOG_OFF'|'DECISION_LOG_ON'|'DECISION_LOG_OFF'|'SERVICE_CLEANUP_ON'|'SERVICE_CLEANUP_OFF'|'SERVICE_CLEANUP_DELAY'|
  'REPLY_CLEANUP_ON'|'REPLY_CLEANUP_OFF'|'REPLY_CLEANUP_DELAY'|
  'RULES_LINK_SET'|'RULES_LINK_CLEAR'|
  'WELCOME_LOCALIZED'|'FAREWELL_LOCALIZED'|'GROUP_LANGUAGE'|'GROUP_CLOCK'|'GROUP_TIMEZONE'|'GROUP_TIMEZONE_CLEAR'|
@@ -74,6 +76,15 @@ export interface CommunityReceipt{
  /** A short-lived digest, not a raw student message or display name. */
  actorDigest:string;ruleId?:string;topicId?:number;
 }
+/** A bounded, opt-in decision record. No message, display name or actor identifier. */
+export type CommunityDecisionReason=
+ 'RESERVED'|'WELCOME_DISABLED'|'FAREWELL_DISABLED'|'REPLIES_DISABLED'|'QUIET_HOURS'|
+ 'NO_MATCH'|'CLOCK_SKEW'|'GROUP_LIMIT'|'TOPIC_COOLDOWN'|'GROUP_COOLDOWN'|
+ 'ACTOR_COOLDOWN'|'TEMPLATE_INVALID'|'CAPTION_LIMIT';
+export interface CommunityDecision {
+ key:string;chatId:string;at:number;kind:CommunityEventKind;configVersion:number;
+ reason:CommunityDecisionReason;ruleId?:string;
+}
 export interface CommunityServiceChange{
  key:string;chatId:string;kind:'TITLE_CHANGED'|'PHOTO_CHANGED'|'PHOTO_REMOVED';
  actorDigest:string;at:number;
@@ -89,6 +100,7 @@ export interface CommunityAutomationState{
  /** Event audit contains kind and opaque digests only, never titles or images. */
  serviceChanges?:CommunityServiceChange[];
  cleanupJobs?:CommunityCleanupJob[];
+ decisionLog?:CommunityDecision[];
 }
 export interface CommunityInput{
  kind:CommunityEventKind;chatId:string;actorId:string;
@@ -148,7 +160,7 @@ const kinds=new Set<CommunityDraftKind>(['WELCOME_TEXT','FAREWELL_TEXT','REPLY_A
  'WELCOME_ON','WELCOME_OFF','FAREWELL_ON','FAREWELL_OFF','REPLIES_ON','REPLIES_OFF',
  'REPLY_ENABLE','REPLY_DISABLE','REPLY_COOLDOWN',
  'QUIET_HOURS_SET','QUIET_HOURS_CLEAR','TOPIC_COOLDOWN_SET','TOPIC_COOLDOWN_CLEAR',
- 'CHANGE_LOG_ON','CHANGE_LOG_OFF','SERVICE_CLEANUP_ON','SERVICE_CLEANUP_OFF','SERVICE_CLEANUP_DELAY',
+ 'CHANGE_LOG_ON','CHANGE_LOG_OFF','DECISION_LOG_ON','DECISION_LOG_OFF','SERVICE_CLEANUP_ON','SERVICE_CLEANUP_OFF','SERVICE_CLEANUP_DELAY',
  'REPLY_CLEANUP_ON','REPLY_CLEANUP_OFF','REPLY_CLEANUP_DELAY',
  'RULES_LINK_SET','RULES_LINK_CLEAR',
  'WELCOME_LOCALIZED','FAREWELL_LOCALIZED','GROUP_LANGUAGE','GROUP_CLOCK','GROUP_TIMEZONE','GROUP_TIMEZONE_CLEAR',
@@ -183,6 +195,7 @@ export function validCommunityConfig(value:unknown):value is CommunityConfig{
   (x.clockFormat!==undefined&&x.clockFormat!=='12'&&x.clockFormat!=='24')||
   (x.calendar!==undefined&&x.calendar!=='gregorian'&&x.calendar!=='hijri')||
   (x.changeLogEnabled!==undefined&&typeof x.changeLogEnabled!=='boolean')||
+  (x.decisionLogEnabled!==undefined&&typeof x.decisionLogEnabled!=='boolean')||
   (x.serviceCleanup!==undefined&&(!x.serviceCleanup||typeof x.serviceCleanup!=='object'||
     typeof x.serviceCleanup.enabled!=='boolean'||!Number.isInteger(x.serviceCleanup.delayMs)||
     x.serviceCleanup.delayMs<30000||x.serviceCleanup.delayMs>3600000))||
@@ -221,7 +234,25 @@ export function validCommunityState(value:unknown):value is CommunityAutomationS
   !Array.isArray(v.drafts)||v.drafts.length>100||
   !Array.isArray(v.receipts)||v.receipts.length>2500||
   (v.serviceChanges!==undefined&&(!Array.isArray(v.serviceChanges)||v.serviceChanges.length>1000))||
-  (v.cleanupJobs!==undefined&&(!Array.isArray(v.cleanupJobs)||v.cleanupJobs.length>1000)))return false;
+  (v.cleanupJobs!==undefined&&(!Array.isArray(v.cleanupJobs)||v.cleanupJobs.length>1000))||
+  (v.decisionLog!==undefined&&(!Array.isArray(v.decisionLog)||v.decisionLog.length>1000)))return false;
+ const validReasons=new Set<CommunityDecisionReason>(['RESERVED','WELCOME_DISABLED','FAREWELL_DISABLED',
+  'REPLIES_DISABLED','QUIET_HOURS','NO_MATCH','CLOCK_SKEW','GROUP_LIMIT','TOPIC_COOLDOWN',
+  'GROUP_COOLDOWN','ACTOR_COOLDOWN','TEMPLATE_INVALID','CAPTION_LIMIT']);
+ if(v.decisionLog){
+  const keys=new Set<string>();
+  for(const entry of v.decisionLog){
+   if(!entry||typeof entry!=='object'||Array.isArray(entry)||
+      Object.keys(entry).some(k=>!['key','chatId','at','kind','configVersion','reason','ruleId'].includes(k))||
+      typeof entry.key!=='string'||!/^[a-f0-9]{64}$/u.test(entry.key)||keys.has(entry.key)||
+      !validGroup(entry.chatId)||!validClock(entry.at)||
+      !['JOIN','LEAVE','TEXT'].includes(entry.kind)||!validReasons.has(entry.reason)||
+      !Number.isSafeInteger(entry.configVersion)||entry.configVersion<1||entry.configVersion>2_000_000_000||
+      (entry.ruleId!==undefined&&(!/^[a-f0-9]{12}$/u.test(entry.ruleId)||
+        !['RESERVED','GROUP_LIMIT','TOPIC_COOLDOWN','GROUP_COOLDOWN','ACTOR_COOLDOWN','TEMPLATE_INVALID','CAPTION_LIMIT'].includes(entry.reason))))return false;
+   keys.add(entry.key);
+  }
+ }
  const serviceKinds=new Set<CommunityServiceKind>(['JOIN','LEAVE','TITLE_CHANGED','PHOTO_CHANGED','PHOTO_REMOVED']);
  if(v.serviceChanges){
   const keys=new Set<string>();
