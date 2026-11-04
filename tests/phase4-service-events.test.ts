@@ -42,7 +42,7 @@ function serviceUpdate(updateId:number,changes:Record<string,unknown>,date?:numb
   from:{id:Number(MEMBER),is_bot:false,first_name:'مُشرف'},
   ...(date===undefined?{}:{date}),...changes}};
 }
-const join=()=>({new_chat_members:[{id:301,is_bot:false,first_name:'طالب جديد'}]});
+const memberJoined=()=>({new_chat_members:[{id:301,is_bot:false,first_name:'طالب جديد'}]});
 const title=()=>({new_chat_title:'الاسم الجديد <script> &'});
 const photo=()=>({new_chat_photo:[{file_id:'AgACAgQAAxkBAAABC12',
  file_unique_id:'QWERTY123456',width:90,height:90}]});
@@ -74,11 +74,11 @@ for(const engine of ['json','sqlite'] as const){
  });
  test('P4 '+engine+': opt-in cleanups are delayed, bounded, idempotent and unchanged if disabled',async()=>{
   const f=await fixture(engine);try{
-   await f.app().handle(serviceUpdate(910,join()));
+   await f.app().handle(serviceUpdate(910,memberJoined()));
    assert.equal((await f.store.snapshot()).phase4Community?.cleanupJobs?.length??0,0);
    await f.approve('SERVICE_CLEANUP_ON');
    await f.approve('SERVICE_CLEANUP_DELAY',90000);
-   const sent=await f.app().handle(serviceUpdate(911,join()));
+   const sent=await f.app().handle(serviceUpdate(911,memberJoined()));
    assert.equal(sent.plan,undefined);
    const queued=(await f.store.snapshot()).phase4Community?.cleanupJobs??[];
    assert.equal(queued.length,1);
@@ -97,7 +97,7 @@ for(const engine of ['json','sqlite'] as const){
    },message:undefined})).status,'IGNORED');
    const malformed=await f.app().handle(serviceUpdate(921,{new_chat_title:'',new_chat_photo:[{}]}));
    assert.equal(malformed.status,'DENIED');
-   const old=await f.app().handle(serviceUpdate(922,join(),50));
+   const old=await f.app().handle(serviceUpdate(922,memberJoined(),50));
    assert.equal(old.status,'IGNORED');
    assert.equal((await f.store.snapshot()).phase4Community?.cleanupJobs?.length??0,0);
    await f.app().handle(serviceUpdate(923,photo()));
@@ -107,7 +107,7 @@ for(const engine of ['json','sqlite'] as const){
  test('P4 '+engine+': cleanup must check rights and emergency gate, and never replay ambiguous deletes',async()=>{
   const f=await fixture(engine);try{
    await f.approve('SERVICE_CLEANUP_ON');
-   await f.app().handle(serviceUpdate(930,join()));
+   await f.app().handle(serviceUpdate(930,memberJoined()));
    const key=(await f.store.snapshot()).phase4Community!.cleanupJobs![0]!.key;
    const calls:{delete:number;rights:number}={delete:0,rights:0};
    const gateway={canDelete:async()=>{calls.rights++;return true;},
@@ -128,7 +128,7 @@ for(const engine of ['json','sqlite'] as const){
  test('P4 '+engine+': revoked group or modified configuration makes cleanup impossible',async()=>{
   const f=await fixture(engine);try{
    await f.approve('SERVICE_CLEANUP_ON');
-   await f.app().handle(serviceUpdate(940,join()));
+   await f.app().handle(serviceUpdate(940,memberJoined()));
    const key=(await f.store.snapshot()).phase4Community!.cleanupJobs![0]!.key;
    const gateway={canDelete:async()=>true,deleteMessage:async()=>{throw Error('MUST_NOT_DELETE');}};
    const dispatcher=new Phase4ServiceCleanupDispatcher(f.store,f.policy,gateway,f.clock);
