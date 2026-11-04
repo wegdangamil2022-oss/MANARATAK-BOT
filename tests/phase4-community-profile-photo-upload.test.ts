@@ -186,7 +186,7 @@ test('WELCOME-005 photo-upload: file download rejects traversal, unexpected exte
  assert.equal(huge.urls.length,1);
 });
 test('WELCOME-005 photo-upload: wrong type, truncated content, 5xx and network errors fail safely',async()=>{
- for(const bytes of [new Uint8Array([0x89,0x50,0x4e,0x47]),new Uint8Array([0xff,0xd8,0xff,0xe0])]){
+ for(const bytes of [new Uint8Array([0x89,0x50,0x4e,0x47,0x0d,0x0a]),new Uint8Array([0xff,0xd8,0xff,0xe0,0xaa,0xaa])]){
   const fake=mockRequest({body:bytes,fileSize:bytes.length});
   assert.equal(await new TelegramBotApiGroupProfileGateway(TOKEN,fake.request).setPhoto(GROUP,PHOTO),
    'FAILED_CONFIRMED');
