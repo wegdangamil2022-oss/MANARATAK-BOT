@@ -4,7 +4,7 @@ import type {CommunityDraftKind,ReplyMatch,CommunityLanguage,CommunityCalendar,C
 import {validCommunityRulesUrl} from './phase4-community-model.js';
 import {validCommunityLinkButton,validCommunityPhotoId} from './phase4-community-rich.js';
 const group=/^-[1-9]\d{0,15}$/u,hex=/^[a-f0-9]{24}$/u;
-const route=/^p4c:1:(?:l:(?:0|[1-9]\d{0,2})|g:-[1-9]\d{0,15}|h:-[1-9]\d{0,15}|v:-[1-9]\d{0,15}:[wf]|j:-[1-9]\d{0,15}:[wf]:[pb]|r:-[1-9]\d{0,15}:(?:0|[1-9]\d{0,2})|t:-[1-9]\d{0,15}:[wfrsg]:[01]|d:-[1-9]\d{0,15}:[a-f0-9]{12}|e:-[1-9]\d{0,15}:[a-f0-9]{12}:[01]|u:-[1-9]\d{0,15}:(?:ar|en)|o:-[1-9]\d{0,15}:(?:12|24):[gh]|[cx]:[a-f0-9]{24})$/u;
+const route=/^p4c:1:(?:q:-[1-9]\d{0,15}|z:-[1-9]\d{0,15}|y:-[1-9]\d{0,15}(?::[1-9]\d{0,9})?|l:(?:0|[1-9]\d{0,2})|g:-[1-9]\d{0,15}|h:-[1-9]\d{0,15}|v:-[1-9]\d{0,15}:[wf]|j:-[1-9]\d{0,15}:[wf]:[pb]|r:-[1-9]\d{0,15}:(?:0|[1-9]\d{0,2})|t:-[1-9]\d{0,15}:[wfrsg]:[01]|d:-[1-9]\d{0,15}:[a-f0-9]{12}|e:-[1-9]\d{0,15}:[a-f0-9]{12}:[01]|u:-[1-9]\d{0,15}:(?:ar|en)|o:-[1-9]\d{0,15}:(?:12|24):[gh]|[cx]:[a-f0-9]{24})$/u;
 export const validPhase4CommunityRoute=(s:unknown):s is string=>typeof s==='string'&&
  Buffer.byteLength(s,'utf8')<=64&&route.test(s);
 const esc=(s:string):string=>s.replace(/&/gu,'&amp;').replace(/</gu,'&lt;')
@@ -21,6 +21,10 @@ const help='للتعديل أرسل في خاص البوت أحد الأوامر
  +'<code>/setruleslink -100123 https://t.me/manaratak_rules</code>\n'
  +'<code>/clearruleslink -100123</code>\n'
  +'<code>/replyrate -100123 معرف_القاعدة 90</code>\n'
+ +'<code>/replyquiet -100123 22:00 07:00</code>\n'
+ +'<code>/replyquietoff -100123</code>\n'
+ +'<code>/replytopicrate -100123 777 10</code>\n'
+ +'<code>/replytopicclear -100123 777</code>\n'
  +'<code>/servicedelay -100123 120</code>\n'
  +'<code>/greetinglang -100123 en</code>\n'
  +'<code>/greetingtext -100123 welcome en Welcome {العضو}</code>\n'
@@ -34,6 +38,28 @@ export function parsePhase4CommunityCommand(text:string):
  {kind:'HOME'}|{kind:'VIEW';chatId:string}|{kind:'EDIT';chatId:string;request:DraftRequest}|
  {kind:'DIAGNOSE';chatId:string;sample:string;topicId?:number}|null{
  if(text==='/community')return {kind:'HOME'};
+ const quiet=/^\/replyquiet (-[1-9]\d{0,15}) ([01]\d|2[0-3]):([0-5]\d) ([01]\d|2[0-3]):([0-5]\d)$/u.exec(text);
+ if(quiet){
+  const startMinute=Number(quiet[2])*60+Number(quiet[3]);
+  const endMinute=Number(quiet[4])*60+Number(quiet[5]);
+  return startMinute!==endMinute?{kind:'EDIT',chatId:quiet[1]!,
+   request:{kind:'QUIET_HOURS_SET',startMinute,endMinute}}:null;
+ }
+ const quietOff=/^\/replyquietoff (-[1-9]\d{0,15})$/u.exec(text);
+ if(quietOff)return {kind:'EDIT',chatId:quietOff[1]!,request:{kind:'QUIET_HOURS_CLEAR'}};
+ const topicRate=/^\/replytopicrate (-[1-9]\d{0,15}) ([1-9]\d{0,9}) ([1-9]\d{0,3})$/u.exec(text);
+ if(topicRate){
+  const topicId=Number(topicRate[2]),seconds=Number(topicRate[3]);
+  if(!Number.isSafeInteger(topicId)||topicId>2147483647||seconds>600)return null;
+  return {kind:'EDIT',chatId:topicRate[1]!,request:{kind:'TOPIC_COOLDOWN_SET',
+   topicId,cooldownMs:seconds*1000}};
+ }
+ const topicClear=/^\/replytopicclear (-[1-9]\d{0,15}) ([1-9]\d{0,9})$/u.exec(text);
+ if(topicClear){
+  const topicId=Number(topicClear[2]);
+  return Number.isSafeInteger(topicId)&&topicId<=2147483647?
+   {kind:'EDIT',chatId:topicClear[1]!,request:{kind:'TOPIC_COOLDOWN_CLEAR',topicId}}:null;
+ }
  const photo=/^\/(welcomephoto|farewellphoto) (-[1-9]\d{0,15}) ([A-Za-z0-9_-]{25,200})$/u.exec(text);
  if(photo)return validCommunityPhotoId(photo[3])?
   {kind:'EDIT',chatId:photo[2]!,request:{
@@ -125,6 +151,7 @@ export async function phase4CommunityScreen(service:Phase4CommunityService,actor
   const text=diagnostic.status==='MATCH'?
    '✅ توجد قاعدة مطابقة: <code>'+diagnostic.ruleId+'</code>\nنص تجريبي: '+diagnostic.preview:
    diagnostic.status==='REPLIES_DISABLED'?'الردود التلقائية متوقفة في هذه المجموعة.':
+   diagnostic.status==='QUIET_HOURS'?'الردود متوقفة حاليًا بسبب ساعات الهدوء المعتمدة للمجموعة.':
    'لا توجد قاعدة ترد على هذه الرسالة في هذا الموضوع.';
   return {text:'<b>🧪 تشخيص الردود دون إرسال</b>\n'+text+
    '\nلا تحسب هذه المعاينة حدود المعدّل أو عضوية الطلاب.',
@@ -165,6 +192,8 @@ export async function phase4CommunityScreen(service:Phase4CommunityService,actor
    '\nالرسائل الخدمية: '+label(c.serviceCleanup?.enabled??false)+
    '\nمدة حذف رسائل الخدمة: '+((c.serviceCleanup?.delayMs??120000)/1000)+' ثانية'+
    '\nفاصل ردود المجموعة: '+Math.floor(c.groupCooldownMs/1000)+' ثوانٍ'+
+   '\nساعات الهدوء: '+(c.quietHours?'محددة':'غير مفعّلة')+
+   '\nحدود الموضوعات: '+(c.topicCooldowns?.length??0)+
    '\nاللغة: '+(c.language??'ar')+'\nنظام الوقت: '+(c.clockFormat??'24')+
    '\nالتقويم: '+(c.calendar??'gregorian')+'\nإزاحة UTC: '+c.utcOffsetMinutes+' دقيقة'+
    '\nقالب الترحيب المترجم: '+(c.welcome.localized?.[c.language??'ar']?'متاح':'غير محدد')+
@@ -179,6 +208,7 @@ export async function phase4CommunityScreen(service:Phase4CommunityService,actor
     [btn('👋 '+(c.farewell.enabled?'إيقاف':'تفعيل')+' الوداع','p4c:1:t:'+id+':f:'+(c.farewell.enabled?'0':'1'))],
     [btn('🤖 '+(c.repliesEnabled?'إيقاف':'تفعيل')+' الردود','p4c:1:t:'+id+':r:'+(c.repliesEnabled?'0':'1'))],
     [btn('📋 قائمة الردود','p4c:1:r:'+id+':0')],
+    [btn('🌙 ساعات الهدوء','p4c:1:q:'+id),btn('🧵 حدود الموضوعات','p4c:1:y:'+id)],
     [btn('🖼️ وسائط الترحيب','p4c:1:v:'+id+':w'),
      btn('🖼️ وسائط الوداع','p4c:1:v:'+id+':f')],
     [btn('🌐 اللغة: '+(c.language??'ar'),'p4c:1:u:'+id+':'+((c.language??'ar')==='ar'?'en':'ar'))],
@@ -190,7 +220,58 @@ export async function phase4CommunityScreen(service:Phase4CommunityService,actor
     [btn('↩️ المجموعات','p4c:1:l:0'),btn('🏠 لوحة المالك','mi:1:h')]
    ])};
  }
- const mediaView=/^p4c:1:v:(-[1-9]\d{0,15}):([wf])$/u.exec(data);
+ const showQuiet=/^p4c:1:q:(-[1-9]\d{0,15})$/u.exec(data);
+  if(showQuiet){
+   const id=showQuiet[1]!,conf=await service.view(actorId,id);
+   const hhmm=(n:number)=>String(Math.floor(n/60)).padStart(2,'0')+
+    ':'+String(n%60).padStart(2,'0');
+   const rows=[[btn('↩️ المجموعة','p4c:1:g:'+id)]];
+   if(conf.quietHours)rows.unshift([btn('⛔ إلغاء ساعات الهدوء','p4c:1:z:'+id)]);
+   return {text:'<b>🌙 ساعات هدوء الردود التلقائية</b>\n'+
+    'المجموعة: <code>'+id+'</code>\nالوقت المحلي مضبوط بإزاحة UTC '+conf.utcOffsetMinutes+' دقيقة.'+
+    '\nالفترة: '+(conf.quietHours?hhmm(conf.quietHours.startMinute)+' — '+hhmm(conf.quietHours.endMinute):'غير محددة')+
+    '\n\nتخص الردود النصية فقط، ولا توقف الترحيب والوداع أو الحماية.'+
+    '\nللتعديل اكتب في الخاص:\n<code>/replyquiet '+id+' 22:00 07:00</code>'+
+    '\nويمكن حذفها بعد معاينة واعتماد.',
+    keyboard:k(rows)};
+  }
+  const clearQuiet=/^p4c:1:z:(-[1-9]\d{0,15})$/u.exec(data);
+  if(clearQuiet){
+   const conf=await service.view(actorId,clearQuiet[1]!);
+   if(!conf.quietHours)return null;
+   const draft=await service.pending(actorId,{kind:'QUIET_HOURS_CLEAR'},clearQuiet[1]!);
+   return {text:service.preview(draft)+'\nلن يُطبّق إلا بعد التأكيد.',
+    keyboard:k([[btn('✅ اعتماد الإلغاء','p4c:1:c:'+draft.id)],
+     [btn('❌ إلغاء','p4c:1:x:'+draft.id)],
+     [btn('↩️ ساعات الهدوء','p4c:1:q:'+draft.chatId)]])};
+  }
+  const showTopics=/^p4c:1:y:(-[1-9]\d{0,15})$/u.exec(data);
+  if(showTopics){
+   const id=showTopics[1]!,conf=await service.view(actorId,id);
+   const limits=conf.topicCooldowns??[];
+   const rows=limits.slice(0,8).map(x=>[btn('🗑️ مسح حد الموضوع '+x.topicId,
+    'p4c:1:y:'+id+':'+x.topicId)]);
+   rows.push([btn('↩️ المجموعة','p4c:1:g:'+id)]);
+   return {text:'<b>🧵 فواصل الردود حسب موضوع Forum</b>\n'+
+    (limits.length?limits.map(x=>'• الموضوع '+x.topicId+': '+x.cooldownMs/1000+' ثانية').join('\n'):
+    'لا توجد حدود مخصصة. يُستخدم فاصل المجموعة الافتراضي.')+
+    '\nالحد العام البالغ 8 ردود في الدقيقة يبقى مطبقًا.'+
+    '\n\nأوامر الخاص بعد المعاينة والتأكيد:\n<code>/replytopicrate '+id+' 777 10</code>'+
+    '\n<code>/replytopicclear '+id+' 777</code>'+
+    (limits.length>8?'\nحذف بقية الحدود من خلال أمر الخاص.':''),
+    keyboard:k(rows)};
+  }
+  const clearTopic=/^p4c:1:y:(-[1-9]\d{0,15}):([1-9]\d{0,9})$/u.exec(data);
+  if(clearTopic){
+   const id=clearTopic[1]!,topicId=Number(clearTopic[2]);
+   if(topicId>2147483647)return null;
+   const draft=await service.pending(actorId,{kind:'TOPIC_COOLDOWN_CLEAR',topicId},id);
+   return {text:service.preview(draft)+'\nلن يُطبّق إلا بعد التأكيد.',
+    keyboard:k([[btn('✅ اعتماد الإلغاء','p4c:1:c:'+draft.id)],
+     [btn('❌ إلغاء','p4c:1:x:'+draft.id)],
+     [btn('↩️ حدود الموضوعات','p4c:1:y:'+draft.chatId)]])};
+  }
+  const mediaView=/^p4c:1:v:(-[1-9]\d{0,15}):([wf])$/u.exec(data);
  if(mediaView){
   const id=mediaView[1]!,kind=mediaView[2]!,config=await service.view(actorId,id);
   const media=kind==='w'?config.welcome:config.farewell;
