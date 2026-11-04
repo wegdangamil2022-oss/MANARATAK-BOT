@@ -10,12 +10,19 @@ export type CommunityJoinKind='SELF'|'ADDED'|'BATCH';
 export type CommunityLeaveKind='SELF'|'REMOVED';
 export type CommunityServiceKind='JOIN'|'LEAVE'|'TITLE_CHANGED'|'PHOTO_CHANGED'|'PHOTO_REMOVED';
 export type ReplyMatch='EXACT'|'WORD'|'CONTAINS'|'COMMAND';
+/** A rule may reference only an owner-approved fixed note, a reviewed group
+ * rules URL, or an already published FAQ with an approved source. Missing
+ * source is a legacy, owner-reviewed fixed reply. */
+export type CommunityReplySource='NOTE'|'RULES'|'FAQ';
+export const validCommunityFAQId=(value:unknown):value is string=>
+ typeof value==='string'&&/^[a-f0-9]{8}-(?:[a-f0-9]{4}-){3}[a-f0-9]{12}$/u.test(value);
 export type CommunityLanguage='ar'|'en';
 export type CommunityClockFormat='12'|'24';
 export type CommunityCalendar='gregorian'|'hijri';
 export interface CommunityReplyRule{
  id:string;trigger:string;response:string;match:ReplyMatch;
  enabled:boolean;cooldownMs:number;topicId?:number;
+ source?:CommunityReplySource;sourceFaqId?:string;
 }
 export interface CommunityGreeting{
  enabled:boolean;text:string;
@@ -82,7 +89,7 @@ export type CommunityDraftKind='WELCOME_TEXT'|'FAREWELL_TEXT'|'REPLY_ADD'|'REPLY
 export interface CommunityDraft{
  id:string;actorId:string;chatId:string;chatVersion:number;configVersion:number;
  kind:CommunityDraftKind;createdAt:number;expiresAt:number;
- text?:string;trigger?:string;match?:ReplyMatch;ruleId?:string;topicId?:number;cooldownMs?:number;delayMs?:number;
+ text?:string;trigger?:string;match?:ReplyMatch;source?:CommunityReplySource;sourceFaqId?:string;ruleId?:string;topicId?:number;cooldownMs?:number;delayMs?:number;
  language?:CommunityLanguage;clockFormat?:CommunityClockFormat;calendar?:CommunityCalendar;utcOffsetMinutes?:number;timeZone?:string;
  joinKind?:CommunityJoinKind;leaveKind?:CommunityLeaveKind;
  photoFileId?:string;buttonText?:string;buttonUrl?:string;
@@ -261,7 +268,9 @@ export function validCommunityConfig(value:unknown):value is CommunityConfig{
    (rule.match==='COMMAND'&&!/^m_[a-z][a-z0-9_]{0,23}$/u.test(rule.trigger))||
    typeof rule.enabled!=='boolean'||!Number.isInteger(rule.cooldownMs)||
    rule.cooldownMs<1000||rule.cooldownMs>86400000||
-   (rule.topicId!==undefined&&!validTopic(rule.topicId)))return false;
+   (rule.topicId!==undefined&&!validTopic(rule.topicId))||
+   (rule.source!==undefined&&!['NOTE','RULES','FAQ'].includes(rule.source))||
+   (rule.source==='FAQ'?!validCommunityFAQId(rule.sourceFaqId):rule.sourceFaqId!==undefined))return false;
   const triggerKey=JSON.stringify([rule.topicId??0,normalizeCommunityMatch(rule.trigger),rule.match]);
   if(ids.has(rule.id)||triggers.has(triggerKey))return false;
   ids.add(rule.id);triggers.add(triggerKey);
@@ -350,6 +359,8 @@ export function validCommunityState(value:unknown):value is CommunityAutomationS
    (d.text!==undefined&&!validTemplate(d.text))||
    (d.trigger!==undefined&&!validText(d.trigger,80))||
    (d.match!==undefined&&!matches.has(d.match))||
+   (d.source!==undefined&&!['NOTE','RULES','FAQ'].includes(d.source))||
+   (d.source==='FAQ'?!validCommunityFAQId(d.sourceFaqId):d.sourceFaqId!==undefined)||
    (d.ruleId!==undefined&&!/^[a-f0-9]{12}$/u.test(d.ruleId))||
    (d.topicId!==undefined&&!validTopic(d.topicId))||
    (d.cooldownMs!==undefined&&(!Number.isInteger(d.cooldownMs)||d.cooldownMs<1000||d.cooldownMs>86400000))||
@@ -372,7 +383,8 @@ export function validCommunityState(value:unknown):value is CommunityAutomationS
       (typeof d.buttonUrl!=='string'||!validCommunityLinkButtons([{text:d.buttonText??'',
         url:d.buttonUrl}]))) )return false;
   if((d.kind==='WELCOME_TEXT'||d.kind==='FAREWELL_TEXT')&&!d.text||
-   d.kind==='REPLY_ADD'&&(!d.text||!d.trigger||!d.match)||
+   d.kind==='REPLY_ADD'&&(!d.trigger||!d.match||
+      (d.source===undefined||d.source==='NOTE')&&!validTemplate(d.text))||
    (['REPLY_REMOVE','REPLY_ENABLE','REPLY_DISABLE','REPLY_COOLDOWN'] as string[]).includes(d.kind)&&!d.ruleId||
    d.kind==='REPLY_COOLDOWN'&&d.cooldownMs===undefined||
    d.kind==='QUIET_HOURS_SET'&&(!validMinute(d.startMinute)||!validMinute(d.endMinute)||d.startMinute===d.endMinute)||
