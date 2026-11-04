@@ -162,3 +162,62 @@ for(const engine of ['json','sqlite'] as const){
   }finally{await f.close();}
  });
 }
+
+
+for(const engine of ['json','sqlite'] as const){
+ test('P4 WELCOME-001 '+engine+': chat_member transitions greet only actual new members, not promotions',async()=>{
+  const f=await setup(engine);
+  try{
+   await f.approve({kind:'WELCOME_VARIANT_SET',joinKind:'SELF',text:'دخول: {العضو}'});
+   await f.approve({kind:'WELCOME_VARIANT_SET',joinKind:'ADDED',text:'إضافة: {العضو}'});
+   await f.approve({kind:'WELCOME_ON'});
+   const member=(id:number,adder:number,target:number,oldStatus:string,newStatus:string,
+    override:Record<string,unknown>={})=>({update_id:id,chat_member:{
+    chat:{id:Number(CHAT),type:'supergroup',title:'منارتك'},
+    from:{id:adder,is_bot:false,first_name:'مشرف'},
+    date:Math.floor(f.clock()/1000),
+    old_chat_member:{status:oldStatus,user:{id:target,is_bot:false,first_name:'مشارك'}},
+    new_chat_member:{status:newStatus,user:{id:target,is_bot:false,first_name:'مشارك <&>'}},
+    ...override
+   }});
+   const a=await f.app.handle(member(3000,501,501,'left','member'));
+   assert.equal(a.status,'APPLIED');assert.equal(a.plan?.text,'دخول: مشارك &lt;&amp;&gt;');
+   f.setNow(f.clock()+9000);
+   const b=await f.app.handle(member(3001,900,502,'kicked','member',{via_join_request:true}));
+   assert.equal(b.status,'APPLIED');assert.equal(b.plan?.text,'إضافة: مشارك &lt;&amp;&gt;');
+   f.setNow(f.clock()+9000);
+   const promotion=await f.app.handle(member(3002,900,503,'member','administrator'));
+   assert.equal(promotion.plan,undefined);
+   const kick=await f.app.handle(member(3003,900,504,'member','kicked'));
+   assert.equal(kick.plan,undefined);
+   const malformed=member(3004,900,505,'left','member');
+   malformed.chat_member.new_chat_member.user.id=506;
+   assert.equal((await f.app.handle(malformed)).plan,undefined);
+   const state=await f.store.snapshot();
+   assert.equal(state.phase4Community?.receipts.length,2);
+  }finally{await f.close();}
+ });
+ test('P4 WELCOME-001 '+engine+': Telegram chat_member and service message cannot double-welcome',async()=>{
+  const f=await setup(engine);
+  try{
+   await f.approve({kind:'WELCOME_ON'});
+   const chatMember={update_id:3080,chat_member:{
+    chat:{id:Number(CHAT),type:'supergroup',title:'منارتك'},
+    from:{id:601,is_bot:false},date:Math.floor(f.clock()/1000),
+    old_chat_member:{status:'left',user:{id:601,is_bot:false}},
+    new_chat_member:{status:'member',user:{id:601,is_bot:false,first_name:'طالب'}}
+   }};
+   assert.ok((await f.app.handle(chatMember)).deliveryKey);
+   f.setNow(f.clock()+9000);
+   assert.equal((await f.app.handle(f.incoming(3081,601,[601]))).plan,undefined);
+   const stale={...chatMember,update_id:3082,chat_member:{
+    ...chatMember.chat_member,from:{id:602,is_bot:false},
+    date:Math.floor(f.clock()/1000)-901,
+    old_chat_member:{status:'left',user:{id:602,is_bot:false}},
+    new_chat_member:{status:'member',user:{id:602,is_bot:false,first_name:'طالب'}}
+   }};
+   assert.equal((await f.app.handle(stale)).plan,undefined);
+   assert.equal((await f.store.snapshot()).phase4Community?.receipts.length,1);
+  }finally{await f.close();}
+ });
+}
