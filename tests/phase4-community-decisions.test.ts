@@ -186,7 +186,8 @@ for(const engine of ['json','sqlite'] as const){
    const report=await phase4CommunityScreen(f.service,OWNER,'p4c:1:k:'+CHAT);
    assert.match(report?.text??'',/متوقف|غير مفعّل/u);
    const preview=await phase4CommunityScreen(f.service,OWNER,'p4c:1:t:'+CHAT+':d:1');
-   assert.match(preview?.text??'',/اعتماد/u);
+   assert.match(preview?.text??'',/تأكيد/u);
+   assert.ok(preview?.keyboard.inline_keyboard.flat().some(x=>x.text.includes('اعتماد')));
    assert.equal((await f.service.view(OWNER,CHAT)).decisionLogEnabled,undefined);
    const approve=preview?.keyboard.inline_keyboard.flat().find(x=>x.callback_data.startsWith('p4c:1:c:'));
    assert.ok(approve);
