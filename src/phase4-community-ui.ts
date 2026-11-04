@@ -4,7 +4,7 @@ import type {CommunityDraftKind,ReplyMatch,CommunityLanguage,CommunityCalendar,C
 import {validCommunityRulesUrl} from './phase4-community-model.js';
 import {validCommunityLinkButton,validCommunityPhotoId} from './phase4-community-rich.js';
 const group=/^-[1-9]\d{0,15}$/u,hex=/^[a-f0-9]{24}$/u;
-const route=/^p4c:1:(?:q:-[1-9]\d{0,15}|z:-[1-9]\d{0,15}|y:-[1-9]\d{0,15}(?::[1-9]\d{0,9})?|l:(?:0|[1-9]\d{0,2})|g:-[1-9]\d{0,15}|h:-[1-9]\d{0,15}|v:-[1-9]\d{0,15}:[wf]|j:-[1-9]\d{0,15}:[wf]:[pb]|r:-[1-9]\d{0,15}:(?:0|[1-9]\d{0,2})|t:-[1-9]\d{0,15}:[wfrsg]:[01]|d:-[1-9]\d{0,15}:[a-f0-9]{12}|e:-[1-9]\d{0,15}:[a-f0-9]{12}:[01]|u:-[1-9]\d{0,15}:(?:ar|en)|o:-[1-9]\d{0,15}:(?:12|24):[gh]|[cx]:[a-f0-9]{24})$/u;
+const route=/^p4c:1:(?:q:-[1-9]\d{0,15}|z:-[1-9]\d{0,15}|y:-[1-9]\d{0,15}(?::[1-9]\d{0,9})?|l:(?:0|[1-9]\d{0,2})|g:-[1-9]\d{0,15}|h:-[1-9]\d{0,15}|v:-[1-9]\d{0,15}:[wf]|j:-[1-9]\d{0,15}:[wf]:[pb]|r:-[1-9]\d{0,15}:(?:0|[1-9]\d{0,2})|t:-[1-9]\d{0,15}:[wfrsgb]:[01]|d:-[1-9]\d{0,15}:[a-f0-9]{12}|e:-[1-9]\d{0,15}:[a-f0-9]{12}:[01]|u:-[1-9]\d{0,15}:(?:ar|en)|o:-[1-9]\d{0,15}:(?:12|24):[gh]|[cx]:[a-f0-9]{24})$/u;
 export const validPhase4CommunityRoute=(s:unknown):s is string=>typeof s==='string'&&
  Buffer.byteLength(s,'utf8')<=64&&route.test(s);
 const esc=(s:string):string=>s.replace(/&/gu,'&amp;').replace(/</gu,'&lt;')
@@ -26,6 +26,9 @@ const help='للتعديل أرسل في خاص البوت أحد الأوامر
  +'<code>/replytopicrate -100123 777 10</code>\n'
  +'<code>/replytopicclear -100123 777</code>\n'
  +'<code>/servicedelay -100123 120</code>\n'
+ +'<code>/replycleanup -100123 45</code>\n'
+ +'<code>/replycleanupon -100123</code>\n'
+ +'<code>/replycleanupoff -100123</code>\n'
  +'<code>/greetinglang -100123 en</code>\n'
  +'<code>/greetingtext -100123 welcome en Welcome {العضو}</code>\n'
  +'<code>/greetingclock -100123 +03:00 12 hijri</code>\n'
@@ -38,6 +41,16 @@ export function parsePhase4CommunityCommand(text:string):
  {kind:'HOME'}|{kind:'VIEW';chatId:string}|{kind:'EDIT';chatId:string;request:DraftRequest}|
  {kind:'DIAGNOSE';chatId:string;sample:string;topicId?:number}|null{
  if(text==='/community')return {kind:'HOME'};
+ const replyCleanup=/^\/replycleanup (-[1-9]\d{0,15}) ([1-9]\d{0,3})$/u.exec(text);
+ if(replyCleanup){
+  const seconds=Number(replyCleanup[2]);
+  if(seconds<30||seconds>3600)return null;
+  return {kind:'EDIT',chatId:replyCleanup[1]!,request:{
+   kind:'REPLY_CLEANUP_DELAY',delayMs:seconds*1000}};
+ }
+ const replyCleanupSwitch=/^\/reply(cleanup(on|off)) (-[1-9]\d{0,15})$/u.exec(text);
+ if(replyCleanupSwitch)return {kind:'EDIT',chatId:replyCleanupSwitch[3]!,
+  request:{kind:replyCleanupSwitch[2]==='on'?'REPLY_CLEANUP_ON':'REPLY_CLEANUP_OFF'}};
  const quiet=/^\/replyquiet (-[1-9]\d{0,15}) ([01]\d|2[0-3]):([0-5]\d) ([01]\d|2[0-3]):([0-5]\d)$/u.exec(text);
  if(quiet){
   const startMinute=Number(quiet[2])*60+Number(quiet[3]);
@@ -190,6 +203,8 @@ export async function phase4CommunityScreen(service:Phase4CommunityService,actor
    '\nالردود: '+label(c.repliesEnabled)+'\nالقواعد: '+c.rules.length+
    '\nتسجيل تغييرات المجموعة: '+label(c.changeLogEnabled??false)+
    '\nالرسائل الخدمية: '+label(c.serviceCleanup?.enabled??false)+
+   '\nحذف ردود البوت المؤقتة: '+label(c.replyCleanup?.enabled??false)+
+   '\nمهلة حذف الردود: '+((c.replyCleanup?.delayMs??120000)/1000)+' ثانية'+
    '\nمدة حذف رسائل الخدمة: '+((c.serviceCleanup?.delayMs??120000)/1000)+' ثانية'+
    '\nفاصل ردود المجموعة: '+Math.floor(c.groupCooldownMs/1000)+' ثوانٍ'+
    '\nساعات الهدوء: '+(c.quietHours?'محددة':'غير مفعّلة')+
@@ -215,6 +230,7 @@ export async function phase4CommunityScreen(service:Phase4CommunityService,actor
     [btn('🕒 الساعة: '+(c.clockFormat??'24'),'p4c:1:o:'+id+':'+((c.clockFormat??'24')==='24'?'12':'24')+':'+((c.calendar??'gregorian')==='hijri'?'h':'g'))],
     [btn('📅 التقويم: '+(c.calendar??'gregorian'),'p4c:1:o:'+id+':'+(c.clockFormat??'24')+':'+((c.calendar??'gregorian')==='hijri'?'g':'h'))],
     [btn('🧹 '+(c.serviceCleanup?.enabled?'إيقاف':'تفعيل')+' تنظيف رسائل الخدمة','p4c:1:t:'+id+':s:'+(c.serviceCleanup?.enabled?'0':'1'))],
+    [btn('🧼 '+(c.replyCleanup?.enabled?'إيقاف':'تفعيل')+' حذف ردود البوت','p4c:1:t:'+id+':b:'+(c.replyCleanup?.enabled?'0':'1'))],
     [btn('📝 '+(c.changeLogEnabled?'إيقاف':'تفعيل')+' سجل تغييرات المجموعة','p4c:1:t:'+id+':g:'+(c.changeLogEnabled?'0':'1'))],
     [btn('🕘 تغييرات اسم/صورة المجموعة','p4c:1:h:'+id)],
     [btn('↩️ المجموعات','p4c:1:l:0'),btn('🏠 لوحة المالك','mi:1:h')]
@@ -338,11 +354,11 @@ export async function phase4CommunityScreen(service:Phase4CommunityService,actor
    '\n\nلا يُخزّن هذا السجل الأسماء والصور نفسها.',
    keyboard:k([[btn('↩️ إعدادات المجموعة','p4c:1:g:'+history[1])]])};
  }
- const toggle=/^p4c:1:t:(-[1-9]\d{0,15}):([wfrsg]):([01])$/u.exec(data);
+ const toggle=/^p4c:1:t:(-[1-9]\d{0,15}):([wfrsgb]):([01])$/u.exec(data);
  if(toggle){
   const field=toggle[2]!,value=toggle[3]!;
   const kind:CommunityDraftKind=(field==='w'?'WELCOME_':field==='f'?'FAREWELL_':
-    field==='r'?'REPLIES_':field==='s'?'SERVICE_CLEANUP_':'CHANGE_LOG_')+
+    field==='r'?'REPLIES_':field==='s'?'SERVICE_CLEANUP_':field==='b'?'REPLY_CLEANUP_':'CHANGE_LOG_')+
    (value==='1'?'ON':'OFF') as CommunityDraftKind;
   const draft=await service.pending(actorId,{kind},toggle[1]!);
   return {text:'<b>تأكيد تغيير تفاعل المجموعة</b>\n'+service.preview(draft)+
