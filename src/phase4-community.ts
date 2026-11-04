@@ -1,16 +1,17 @@
 import {createHash,randomBytes} from 'node:crypto';
 import {BotStore,type BotState} from './store.js';
+import {reviewedGroupFAQAnswer,resolvedCommunityReply} from './phase4-community-sources.js';
 import {Policy} from './policy.js';
 import {validCommunityPhotoId,validCommunityLinkButtons,communityLinkKeyboard,
  type CommunityLinkKeyboard} from './phase4-community-rich.js';
 import {defaultCommunityConfig,emptyCommunityState,validCommunityConfig,
- matchCommunityRule,renderCommunityTemplate,selectCommunityRule,selectCommunityGreeting,normalizeCommunityMatch,validCommunityRulesUrl,inCommunityQuietHours,validCommunityTimeZone,validCommunityJoinKind,validCommunityLeaveKind,
+ matchCommunityRule,renderCommunityTemplate,selectCommunityRule,selectCommunityGreeting,normalizeCommunityMatch,validCommunityRulesUrl,inCommunityQuietHours,validCommunityTimeZone,validCommunityJoinKind,validCommunityLeaveKind,validCommunityFAQId,
  type CommunityConfig,type CommunityInput,type CommunityDraft,type CommunityDraftKind,
- type ReplyMatch,type CommunityAutomationState,type CommunityEventKind,type CommunityServiceKind,
+ type ReplyMatch,type CommunityReplySource,type CommunityAutomationState,type CommunityEventKind,type CommunityServiceKind,
  type CommunityServiceChange,type CommunityLanguage,type CommunityCalendar,type CommunityClockFormat,type CommunityJoinKind,type CommunityLeaveKind,
  type CommunityDecision,type CommunityDecisionReason} from './phase4-community-model.js';
 
-export type DraftRequest={kind:CommunityDraftKind;text?:string;trigger?:string;match?:ReplyMatch;ruleId?:string;topicId?:number;cooldownMs?:number;delayMs?:number;startMinute?:number;endMinute?:number;
+export type DraftRequest={kind:CommunityDraftKind;text?:string;trigger?:string;match?:ReplyMatch;source?:CommunityReplySource;sourceFaqId?:string;ruleId?:string;topicId?:number;cooldownMs?:number;delayMs?:number;startMinute?:number;endMinute?:number;
  language?:CommunityLanguage;calendar?:CommunityCalendar;clockFormat?:CommunityClockFormat;utcOffsetMinutes?:number;timeZone?:string;
  photoFileId?:string;buttonText?:string;buttonUrl?:string;joinKind?:CommunityJoinKind;leaveKind?:CommunityLeaveKind;};
 export interface CommunitySendProposal{
@@ -19,7 +20,7 @@ export interface CommunitySendProposal{
  readonly photoFileId?:string;readonly communityLinks?:CommunityLinkKeyboard;
 }
 /** Read-only administrative explanation, never stored with student text. */
-export type CommunityDiagnostic={status:'REPLIES_DISABLED'|'NO_MATCH'|'QUIET_HOURS'}|
+export type CommunityDiagnostic={status:'REPLIES_DISABLED'|'NO_MATCH'|'QUIET_HOURS'|'SOURCE_UNAVAILABLE'}|
  {status:'RULE_DISABLED'|'TOPIC_MISMATCH';ruleId:string}|
  {status:'MATCH';ruleId:string;preview:string};
 const isGroup=(s:string):boolean=>/^-[1-9]\d{0,15}$/u.test(s)&&Number.isSafeInteger(Number(s));
@@ -65,9 +66,23 @@ export class Phase4CommunityService{
    const chatVersion=groupAvailable(s,this.policy,actorId,chatId);
    const current=configured(s,chatId);
    const kind=request.kind;
-   if((kind==='WELCOME_TEXT'||kind==='FAREWELL_TEXT'||kind==='REPLY_ADD')&&
+   if((kind==='WELCOME_TEXT'||kind==='FAREWELL_TEXT'||kind==='REPLY_ADD'&&
+     (request.source===undefined||request.source==='NOTE'))&&
       (typeof request.text!=='string'||request.text.trim().length===0))
     throw Error('COMMUNITY_TEMPLATE_REQUIRED');
+   if(request.source!==undefined&&kind!=='REPLY_ADD')
+    throw Error('COMMUNITY_REPLY_SOURCE_INVALID');
+   if(kind==='REPLY_ADD'){
+    if(request.source!==undefined&&!['NOTE','RULES','FAQ'].includes(request.source))
+     throw Error('COMMUNITY_REPLY_SOURCE_INVALID');
+    if(request.source==='FAQ'){
+     if(!validCommunityFAQId(request.sourceFaqId)||request.text!==undefined||
+      reviewedGroupFAQAnswer(s,chatId,request.sourceFaqId,request.topicId)===null)
+      throw Error('COMMUNITY_FAQ_SOURCE_UNAVAILABLE');
+    }else if(request.sourceFaqId!==undefined)throw Error('COMMUNITY_REPLY_SOURCE_INVALID');
+    if(request.source==='RULES'&&(!validCommunityRulesUrl(current.rulesUrl)||request.text!==undefined))
+     throw Error('COMMUNITY_RULES_SOURCE_UNAVAILABLE');
+   }
    if(kind==='REPLY_ADD'&&(typeof request.trigger!=='string'||!request.trigger.trim()||
        !['EXACT','WORD','CONTAINS','COMMAND'].includes(request.match??'')))throw Error('COMMUNITY_TRIGGER_REQUIRED');
    if(kind==='WELCOME_VARIANT_SET'||kind==='WELCOME_VARIANT_CLEAR'){
@@ -150,6 +165,8 @@ export class Phase4CommunityService{
     ...(request.leaveKind!==undefined?{leaveKind:request.leaveKind}:{}),
     ...(request.trigger!==undefined?{trigger:request.trigger}:{}),
     ...(request.match!==undefined?{match:request.match}:{}),
+    ...(request.source!==undefined?{source:request.source}:{}),
+    ...(request.sourceFaqId!==undefined?{sourceFaqId:request.sourceFaqId}:{}),
     ...(request.ruleId!==undefined?{ruleId:request.ruleId}:{}),
     ...(request.topicId!==undefined?{topicId:request.topicId}:{}),
     ...(request.cooldownMs!==undefined?{cooldownMs:request.cooldownMs}:{}),
@@ -290,11 +307,19 @@ export class Phase4CommunityService{
      break;
     }
     case 'REPLY_ADD':{
+     if(draft.source==='FAQ'&&reviewedGroupFAQAnswer(s,draft.chatId,draft.sourceFaqId!,draft.topicId)===null)
+      throw Error('COMMUNITY_FAQ_SOURCE_UNAVAILABLE');
+     if(draft.source==='RULES'&&!validCommunityRulesUrl(config.rulesUrl))
+      throw Error('COMMUNITY_RULES_SOURCE_UNAVAILABLE');
      const same=config.rules.some(r=>r.match===draft.match&&r.topicId===draft.topicId&&
        normalizeCommunityMatch(r.trigger)===normalizeCommunityMatch(draft.trigger!));
      if(same)throw Error('COMMUNITY_RULE_DUPLICATE');
      config.rules.push({id:randomBytes(6).toString('hex'),trigger:draft.trigger!,
-      response:draft.text!,match:draft.match!,enabled:true,cooldownMs:60000,
+      response:draft.source==='FAQ'?'إجابة معتمدة من الأسئلة الشائعة':
+       draft.source==='RULES'?'قوانين المجموعة: {رابط_القوانين}':draft.text!,
+      match:draft.match!,enabled:true,cooldownMs:60000,
+      ...(draft.source?{source:draft.source}:{}),
+      ...(draft.sourceFaqId?{sourceFaqId:draft.sourceFaqId}:{}),
       ...(draft.topicId!==undefined?{topicId:draft.topicId}:{})});
      break;
     }
@@ -454,10 +479,14 @@ export class Phase4CommunityService{
   const input:CommunityInput={kind:'TEXT',chatId,actorId:'1',
    memberName:'الطالب التجريبي',groupName:'مجموعة منارتك التجريبية',
    messageText:sample,...(topicId!==undefined?{topicId}:{})};
+  const resolved=resolvedCommunityReply(state,config,rule,topicId);
+  if(!resolved)return {status:'SOURCE_UNAVAILABLE'};
   return {status:'MATCH',ruleId:rule.id,
-   preview:renderCommunityTemplate(rule.response,input,now+(config.timeZone?0:config.utcOffsetMinutes*60000),
-    config.rulesUrl??'',{language:config.language??'ar',clockFormat:config.clockFormat??'24',
-     calendar:config.calendar??'gregorian',...(config.timeZone?{timeZone:config.timeZone}:{})})};
+   preview:resolved.escaped?resolved.template:
+    renderCommunityTemplate(resolved.template,input,
+     now+(config.timeZone?0:config.utcOffsetMinutes*60000),config.rulesUrl??'',
+     {language:config.language??'ar',clockFormat:config.clockFormat??'24',
+      calendar:config.calendar??'gregorian',...(config.timeZone?{timeZone:config.timeZone}:{})})};
  }
  /** Atomically applies quotas and reserves an outbound event exactly once.
   * A reservation is at-most-once: its provider outcome is managed separately
@@ -492,7 +521,7 @@ export class Phase4CommunityService{
    };
    // A denied update must not generate repeat log entries on webhook replay.
    if(config.decisionLogEnabled&&stateOf(s).decisionLog?.some(x=>x.key===key))return null;
-   let template:string,ruleId:string|undefined;
+   let template:string,ruleId:string|undefined,preEscaped=false;
    let photoFileId:string|undefined,communityLinks:CommunityLinkKeyboard|undefined;
    if(input.kind==='JOIN'||input.kind==='LEAVE'){
     const target=input.kind==='JOIN'?config.welcome:config.farewell;
@@ -514,7 +543,9 @@ export class Phase4CommunityService{
     }
     const rule=selectCommunityRule(config,input.messageText!,input.topicId);
     if(!rule){record('NO_MATCH');return null;}
-    template=rule.response;ruleId=rule.id;
+    const resolved=resolvedCommunityReply(s,config,rule,input.topicId);
+    if(!resolved){record('SOURCE_UNAVAILABLE',rule.id);return null;}
+    template=resolved.template;preEscaped=resolved.escaped===true;ruleId=rule.id;
    }
    const actorDigest=hex('P4:ACTOR:'+input.chatId+':'+input.actorId);
    const existing=stateOf(s).receipts;
@@ -541,7 +572,7 @@ export class Phase4CommunityService{
     record('ACTOR_COOLDOWN',ruleId);return null;
    }
    let text:string;
-   try{text=renderCommunityTemplate(template,input,
+   try{text=preEscaped?template:renderCommunityTemplate(template,input,
      now+(config.timeZone?0:config.utcOffsetMinutes*60000),config.rulesUrl??'',
      {language:config.language??'ar',clockFormat:config.clockFormat??'24',
       calendar:config.calendar??'gregorian',...(config.timeZone?{timeZone:config.timeZone}:{})});}
@@ -611,7 +642,11 @@ export class Phase4CommunityService{
   if(draft.kind==='RULES_LINK_CLEAR')return 'اعتماد مسح رابط القوانين: سيختفي من الرسائل التالية.';
   if(draft.kind==='REPLY_ADD')
    return '<b>معاينة رد تلقائي</b>\nالكلمة: '+clean(draft.trigger??'')+
-    '\nالمطابقة: '+draft.match+'\nالرد: '+clean(draft.text??'');
+    '\nالمطابقة: '+draft.match+'\nالمصدر: '+(draft.source??'نص ثابت معتمد')+
+    (draft.source==='FAQ'?'\nمعرف FAQ: <code>'+clean(draft.sourceFaqId??'')+'</code>'+
+     '\nلا يتم نسخ نص الإجابة إلى القاعدة؛ يُجلب من النسخة المعتمدة وقت التشغيل.':
+     draft.source==='RULES'?'\nسيُستخدم رابط القوانين المعتمد للمجموعة وقت التشغيل.':
+     '\nالرد: '+clean(draft.text??''));
   if(draft.kind==='WELCOME_TEXT'||draft.kind==='FAREWELL_TEXT')
    return '<b>معاينة قالب '+(draft.kind==='WELCOME_TEXT'?'الترحيب':'الوداع')+
     '</b>\n'+clean(draft.text??'');
