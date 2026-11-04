@@ -8,10 +8,11 @@ import {Policy} from '../src/policy.js';
 import {CaptchaService,captchaSource} from '../src/captcha.js';
 import {CaptchaJoinNotices} from '../src/captcha-join-notices.js';
 import {TelegramCaptchaOwner} from '../src/telegram-captcha-owner.js';
+import type {OwnerInlineScreen} from '../src/telegram-inline-owner.js';
 import type {TemporaryGroupSendResult,TemporaryGroupDeleteResult,TemporaryGroupNotice} from '../src/telegram-temporary-group-sender.js';
 
 const NOW=1700000000000,G='-100123',OWNER='100';
-const pick=(view:{keyboard:{inline_keyboard:{text:string;callback_data:string}[][]}}|null,label:string)=>{
+const pick=(view:OwnerInlineScreen|null,label:string)=>{
  assert.ok(view);const b=view.keyboard.inline_keyboard.flat().find(b=>b.text.includes(label));assert.ok(b,label);return b.callback_data;
 };
 for(const engine of ['json','sqlite'] as const){
