@@ -102,7 +102,8 @@ for(const engine of ['json','sqlite'] as const){
    assert.equal((await sender.dispatch(key)).status,'CONFIRMED');
    assert.equal((await f.store.snapshot()).phase4Community?.cleanupJobs?.length??0,0);
    await f.apply({kind:'REPLY_CLEANUP_ON'});
-   f.advance(9000);
+   // The rule itself has a 60-second per-actor cooldown; use a genuinely new eligible update.
+   f.advance(65000);
    const unknownKey=await f.plan(2002);
    const unknown=new TelegramReplyDispatcher(f.store,f.policy,{send:async()=>({
     status:'UNKNOWN_OUTCOME'
