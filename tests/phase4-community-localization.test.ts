@@ -138,3 +138,34 @@ for(const engine of ['json','sqlite'] as const){
   }finally{await f.close();}
  });
 }
+
+for(const engine of ['json','sqlite'] as const){
+ test('P4 '+engine+': inline language/calendar controls require preview and cannot replay approval',async()=>{
+  const f=await setup(engine);
+  try{
+   const original=await phase4CommunityScreen(f.community,OWNER,'p4c:1:g:'+CHAT);
+   assert.ok(original);
+   const languageButton=original.keyboard.inline_keyboard.flat()
+    .find(x=>x.callback_data==='p4c:1:u:'+CHAT+':en');
+   assert.ok(languageButton);
+   const preview=await phase4CommunityScreen(f.community,OWNER,languageButton!.callback_data);
+   assert.match(preview?.text??'',/en/u);
+   assert.equal((await f.community.view(OWNER,CHAT)).language,undefined);
+   const confirm=preview?.keyboard.inline_keyboard.flat()
+    .find(x=>x.callback_data.startsWith('p4c:1:c:'));
+   assert.ok(confirm);
+   assert.ok(await phase4CommunityScreen(f.community,OWNER,confirm!.callback_data));
+   assert.equal((await f.community.view(OWNER,CHAT)).language,'en');
+   await assert.rejects(phase4CommunityScreen(f.community,OWNER,confirm!.callback_data),
+    /COMMUNITY_DRAFT_NOT_FOUND/);
+   const calendar=await phase4CommunityScreen(f.community,OWNER,'p4c:1:o:'+CHAT+':12:h');
+   assert.ok(calendar);
+   const action=calendar.keyboard.inline_keyboard.flat().find(x=>
+    x.callback_data.startsWith('p4c:1:c:'));
+   assert.ok(action);
+   await phase4CommunityScreen(f.community,OWNER,action!.callback_data);
+   assert.equal((await f.community.view(OWNER,CHAT)).calendar,'hijri');
+   assert.equal((await f.community.view(OWNER,CHAT)).clockFormat,'12');
+  }finally{await f.close();}
+ });
+}
