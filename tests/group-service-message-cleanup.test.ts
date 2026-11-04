@@ -56,6 +56,7 @@ for(const engine of ['json','sqlite'] as const){
   await f.enable();assert.equal(await f.observe('JOIN',44,21),1);
   assert.equal(await f.observe('JOIN',44,21),0);
   assert.equal(await f.observe('LEAVE',44,22),0);
+  assert.equal(await f.observe('LEAVE',45,21),0); // Same authenticated update cannot represent two different service messages
   assert.equal(await f.service.observeService(G,'JOIN',44,'fake',f.now()),0);
   assert.equal(await f.service.observeService(G,'JOIN',0,'b3-webhook:service-cleanup:23',f.now()),0);
   assert.equal((await f.store.snapshot()).audit.filter(a=>/^group:service-message-job:[a-f0-9]{64}$/u.test(a.updateKey)).length,1);
