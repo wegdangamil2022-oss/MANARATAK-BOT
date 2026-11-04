@@ -122,6 +122,8 @@ export interface CommunityPrivateWelcome{
 export interface CommunityServiceChange{
  key:string;chatId:string;kind:'TITLE_CHANGED'|'PHOTO_CHANGED'|'PHOTO_REMOVED';
  actorDigest:string;at:number;
+ /** Hash of chat and Telegram service message id, prevents duplicate updates. */
+ messageDigest?:string;
 }
 export type CommunityCleanupStatus='QUEUED'|'SENDING'|'CONFIRMED'|'FAILED_CONFIRMED'|'UNKNOWN_OUTCOME'|'SKIPPED';
 export interface CommunityCleanupJob{
@@ -137,7 +139,7 @@ export interface CommunityProfileJob{
  kind:'TITLE_SET'|'PHOTO_REMOVE';status:CommunityProfileStatus;
  createdAt:number;profileEpoch:number;title?:string;attemptId?:string;
 }
-export interface CommunityProfileObservation{key:string;chatId:string;at:number;}
+export interface CommunityProfileObservation{key:string;chatId:string;at:number;messageDigest?:string;}
 export interface CommunityProfileRevision{chatId:string;revision:number;lastKey:string;}
 export function validCommunityProfileTitle(value:unknown):value is string{
  return typeof value==='string'&&value.trim()===value&&
@@ -334,9 +336,10 @@ export function validCommunityState(value:unknown):value is CommunityAutomationS
  if(v.profileObservations){
   const seen=new Set<string>();
   for(const o of v.profileObservations){
-   if(!o||typeof o!=='object'||Array.isArray(o)||Object.keys(o).some(k=>!['key','chatId','at'].includes(k))||
+   if(!o||typeof o!=='object'||Array.isArray(o)||Object.keys(o).some(k=>!['key','chatId','at','messageDigest'].includes(k))||
      typeof o.key!=='string'||!/^[a-f0-9]{64}$/u.test(o.key)||seen.has(o.key)||
-     !validGroup(o.chatId)||!validClock(o.at))return false;
+     !validGroup(o.chatId)||!validClock(o.at)||
+     (o.messageDigest!==undefined&&(typeof o.messageDigest!=='string'||!/^[a-f0-9]{64}$/u.test(o.messageDigest))))return false;
    seen.add(o.key);
   }
  }
@@ -398,7 +401,8 @@ export function validCommunityState(value:unknown):value is CommunityAutomationS
     !/^[a-f0-9]{64}$/u.test(row.key)||keys.has(row.key)||!validGroup(row.chatId)||
     !['TITLE_CHANGED','PHOTO_CHANGED','PHOTO_REMOVED'].includes(row.kind)||
     typeof row.actorDigest!=='string'||!/^[a-f0-9]{64}$/u.test(row.actorDigest)||
-    !validClock(row.at))return false;
+    !validClock(row.at)||
+    (row.messageDigest!==undefined&&(typeof row.messageDigest!=='string'||!/^[a-f0-9]{64}$/u.test(row.messageDigest))))return false;
    keys.add(row.key);
   }
  }
