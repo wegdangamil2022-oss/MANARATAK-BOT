@@ -263,6 +263,12 @@ export class Phase4CommunityService{
     case 'SERVICE_CLEANUP_ON':config.serviceCleanup={...config.serviceCleanup??{delayMs:120000},enabled:true};break;
     case 'SERVICE_CLEANUP_OFF':config.serviceCleanup={...config.serviceCleanup??{delayMs:120000},enabled:false};break;
     case 'SERVICE_CLEANUP_DELAY':config.serviceCleanup={...config.serviceCleanup??{enabled:false},delayMs:draft.delayMs!};break;
+    case 'SERVICE_JOIN_ON':case 'SERVICE_JOIN_OFF':
+     config.serviceCleanup={...config.serviceCleanup??{enabled:false,delayMs:120000},
+      joinEnabled:draft.kind==='SERVICE_JOIN_ON'};break;
+    case 'SERVICE_LEAVE_ON':case 'SERVICE_LEAVE_OFF':
+     config.serviceCleanup={...config.serviceCleanup??{enabled:false,delayMs:120000},
+      leaveEnabled:draft.kind==='SERVICE_LEAVE_ON'};break;
     case 'REPLY_CLEANUP_ON':config.replyCleanup={...config.replyCleanup??{delayMs:120000},enabled:true};break;
     case 'REPLY_CLEANUP_OFF':config.replyCleanup={...config.replyCleanup??{delayMs:120000},enabled:false};break;
     case 'REPLY_CLEANUP_DELAY':config.replyCleanup={...config.replyCleanup??{enabled:false},delayMs:draft.delayMs!};break;
@@ -329,7 +335,9 @@ export class Phase4CommunityService{
    if(!config||!validCommunityConfig(config))return false;
    const isChange=input.kind!=='JOIN'&&input.kind!=='LEAVE';
    const shouldLog=isChange&&config.changeLogEnabled===true;
-   const shouldClean=config.serviceCleanup?.enabled===true;
+   const shouldClean=config.serviceCleanup?.enabled===true&&
+    (input.kind==='JOIN'?config.serviceCleanup.joinEnabled!==false:
+     input.kind==='LEAVE'?config.serviceCleanup.leaveEnabled!==false:true);
    if(!shouldLog&&!shouldClean)return false;
    const chat=s.chats.find(x=>x.id===input.chatId)!;
    const key=hex('P4:SERVICE:'+input.updateKey),actorDigest=hex('P4:SERVICE:ACTOR:'+input.chatId+':'+input.actorId);
@@ -627,6 +635,12 @@ export class Phase4CommunityService{
    (draft.delayMs!/1000)+' ثانية. الحذف يتطلب صلاحية حديثة.';
   if(draft.kind==='REPLY_CLEANUP_ON')return 'تفعيل تنظيف ردود منارتك المؤكدة فقط بعد المهلة. لا يُحذف محتوى الأعضاء.';
   if(draft.kind==='REPLY_CLEANUP_OFF')return 'إيقاف حذف ردود منارتك المؤقتة؛ المهام القديمة تُلغى عند الإرسال.';
+  if(draft.kind==='SERVICE_JOIN_ON'||draft.kind==='SERVICE_JOIN_OFF')return
+   'تنظيف رسالة خدمة الدخول: '+(draft.kind==='SERVICE_JOIN_ON'?'مسموح':'متوقف')+
+   '. تنظيف رسائل المغادرة مستقل ولا يتأثر بهذا الخيار.';
+  if(draft.kind==='SERVICE_LEAVE_ON'||draft.kind==='SERVICE_LEAVE_OFF')return
+   'تنظيف رسالة خدمة المغادرة: '+(draft.kind==='SERVICE_LEAVE_ON'?'مسموح':'متوقف')+
+   '. تنظيف رسائل الدخول مستقل ولا يتأثر بهذا الخيار.';
   if(draft.kind==='SERVICE_CLEANUP_DELAY')return 'تحديد تأخير تنظيف الرسائل الخدمية: '+
    (draft.delayMs!/1000)+' ثانية';
   return 'معاينة التغيير: '+draft.kind;
