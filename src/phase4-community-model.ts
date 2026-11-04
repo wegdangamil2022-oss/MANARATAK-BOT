@@ -5,12 +5,18 @@
 export type CommunityEventKind='JOIN'|'LEAVE'|'TEXT';
 export type CommunityServiceKind='JOIN'|'LEAVE'|'TITLE_CHANGED'|'PHOTO_CHANGED'|'PHOTO_REMOVED';
 export type ReplyMatch='EXACT'|'WORD'|'CONTAINS'|'COMMAND';
+export type CommunityLanguage='ar'|'en';
+export type CommunityClockFormat='12'|'24';
+export type CommunityCalendar='gregorian'|'hijri';
 export interface CommunityReplyRule{
  id:string;trigger:string;response:string;match:ReplyMatch;
  enabled:boolean;cooldownMs:number;topicId?:number;
 }
 export interface CommunityGreeting{
  enabled:boolean;text:string;
+ /** Group language is owner-selected. Telegram service join updates do not
+  * reliably contain the joining user's language. */
+ localized?:Partial<Record<CommunityLanguage,string>>;
 }
 export interface CommunityConfig{
  chatId:string;version:number;welcome:CommunityGreeting;farewell:CommunityGreeting;
@@ -19,6 +25,10 @@ export interface CommunityConfig{
  utcOffsetMinutes:number;
  /** A group-wide minimum gap between any two automatic group replies. */
  groupCooldownMs:number;
+ /** Optional for backward compatibility with pre-localization snapshots. */
+ language?:CommunityLanguage;
+ clockFormat?:CommunityClockFormat;
+ calendar?:CommunityCalendar;
  /** Explicitly owner-approved Telegram rules page, never inferred from names. */
  rulesUrl?:string;
  /** Missing in old snapshots means disabled. */
@@ -29,11 +39,13 @@ export type CommunityDraftKind='WELCOME_TEXT'|'FAREWELL_TEXT'|'REPLY_ADD'|'REPLY
  'WELCOME_ON'|'WELCOME_OFF'|'FAREWELL_ON'|'FAREWELL_OFF'|'REPLIES_ON'|'REPLIES_OFF'|
  'REPLY_ENABLE'|'REPLY_DISABLE'|'REPLY_COOLDOWN'|
  'CHANGE_LOG_ON'|'CHANGE_LOG_OFF'|'SERVICE_CLEANUP_ON'|'SERVICE_CLEANUP_OFF'|'SERVICE_CLEANUP_DELAY'|
- 'RULES_LINK_SET'|'RULES_LINK_CLEAR';
+ 'RULES_LINK_SET'|'RULES_LINK_CLEAR'|
+ 'WELCOME_LOCALIZED'|'FAREWELL_LOCALIZED'|'GROUP_LANGUAGE'|'GROUP_CLOCK';
 export interface CommunityDraft{
  id:string;actorId:string;chatId:string;chatVersion:number;configVersion:number;
  kind:CommunityDraftKind;createdAt:number;expiresAt:number;
  text?:string;trigger?:string;match?:ReplyMatch;ruleId?:string;topicId?:number;cooldownMs?:number;delayMs?:number;
+ language?:CommunityLanguage;clockFormat?:CommunityClockFormat;calendar?:CommunityCalendar;utcOffsetMinutes?:number;
 }
 export interface CommunityReceipt{
  /** An opaque hash of the inbound Telegram update and bot identifier. */
@@ -87,7 +99,8 @@ const kinds=new Set<CommunityDraftKind>(['WELCOME_TEXT','FAREWELL_TEXT','REPLY_A
  'WELCOME_ON','WELCOME_OFF','FAREWELL_ON','FAREWELL_OFF','REPLIES_ON','REPLIES_OFF',
  'REPLY_ENABLE','REPLY_DISABLE','REPLY_COOLDOWN',
  'CHANGE_LOG_ON','CHANGE_LOG_OFF','SERVICE_CLEANUP_ON','SERVICE_CLEANUP_OFF','SERVICE_CLEANUP_DELAY',
- 'RULES_LINK_SET','RULES_LINK_CLEAR']);
+ 'RULES_LINK_SET','RULES_LINK_CLEAR',
+ 'WELCOME_LOCALIZED','FAREWELL_LOCALIZED','GROUP_LANGUAGE','GROUP_CLOCK']);
 const matches=new Set<ReplyMatch>(['EXACT','WORD','CONTAINS','COMMAND']);
 export function defaultCommunityConfig(chatId:string):CommunityConfig{
  if(!validGroup(chatId))throw Error('COMMUNITY_CHAT_INVALID');
@@ -104,12 +117,20 @@ export function validCommunityConfig(value:unknown):value is CommunityConfig{
   !Number.isInteger(x.groupCooldownMs)||x.groupCooldownMs<1000||x.groupCooldownMs>600000||
   !Array.isArray(x.rules)||x.rules.length>30||
   (x.rulesUrl!==undefined&&!validCommunityRulesUrl(x.rulesUrl))||
+  (x.language!==undefined&&x.language!=='ar'&&x.language!=='en')||
+  (x.clockFormat!==undefined&&x.clockFormat!=='12'&&x.clockFormat!=='24')||
+  (x.calendar!==undefined&&x.calendar!=='gregorian'&&x.calendar!=='hijri')||
   (x.changeLogEnabled!==undefined&&typeof x.changeLogEnabled!=='boolean')||
   (x.serviceCleanup!==undefined&&(!x.serviceCleanup||typeof x.serviceCleanup!=='object'||
     typeof x.serviceCleanup.enabled!=='boolean'||!Number.isInteger(x.serviceCleanup.delayMs)||
     x.serviceCleanup.delayMs<30000||x.serviceCleanup.delayMs>3600000)))return false;
  for(const item of [x.welcome,x.farewell]){
   if(!item||typeof item!=='object'||typeof item.enabled!=='boolean'||!validTemplate(item.text))return false;
+  if(item.localized!==undefined){
+   if(!item.localized||typeof item.localized!=='object'||Array.isArray(item.localized)||
+      Object.keys(item.localized).some(k=>k!=='ar'&&k!=='en')||
+      Object.values(item.localized).some(v=>!validTemplate(v)))return false;
+  }
  }
  const ids=new Set<string>(),triggers=new Set<string>();
  for(const rule of x.rules){
@@ -178,13 +199,23 @@ export function validCommunityState(value:unknown):value is CommunityAutomationS
    (d.ruleId!==undefined&&!/^[a-f0-9]{12}$/u.test(d.ruleId))||
    (d.topicId!==undefined&&!validTopic(d.topicId))||
    (d.cooldownMs!==undefined&&(!Number.isInteger(d.cooldownMs)||d.cooldownMs<1000||d.cooldownMs>86400000))||
-   (d.delayMs!==undefined&&(!Number.isInteger(d.delayMs)||d.delayMs<30000||d.delayMs>3600000)))return false;
+   (d.delayMs!==undefined&&(!Number.isInteger(d.delayMs)||d.delayMs<30000||d.delayMs>3600000))||
+   (d.language!==undefined&&d.language!=='ar'&&d.language!=='en')||
+   (d.clockFormat!==undefined&&d.clockFormat!=='12'&&d.clockFormat!=='24')||
+   (d.calendar!==undefined&&d.calendar!=='gregorian'&&d.calendar!=='hijri')||
+   (d.utcOffsetMinutes!==undefined&&(!Number.isInteger(d.utcOffsetMinutes)||
+       d.utcOffsetMinutes< -720||d.utcOffsetMinutes>840)))return false;
   if((d.kind==='WELCOME_TEXT'||d.kind==='FAREWELL_TEXT')&&!d.text||
    d.kind==='REPLY_ADD'&&(!d.text||!d.trigger||!d.match)||
    (['REPLY_REMOVE','REPLY_ENABLE','REPLY_DISABLE','REPLY_COOLDOWN'] as string[]).includes(d.kind)&&!d.ruleId||
    d.kind==='REPLY_COOLDOWN'&&d.cooldownMs===undefined||
    d.kind==='SERVICE_CLEANUP_DELAY'&&d.delayMs===undefined||
-   d.kind==='RULES_LINK_SET'&&!validCommunityRulesUrl(d.text))return false;
+   d.kind==='RULES_LINK_SET'&&!validCommunityRulesUrl(d.text)||
+   (d.kind==='WELCOME_LOCALIZED'||d.kind==='FAREWELL_LOCALIZED')&&
+      (!d.language||!validTemplate(d.text))||
+   d.kind==='GROUP_LANGUAGE'&&!d.language||
+   d.kind==='GROUP_CLOCK'&&(d.utcOffsetMinutes===undefined||
+      !d.clockFormat||!d.calendar))return false;
   draftIds.add(d.id);
  }
  const receiptIds=new Set<string>();
@@ -224,14 +255,50 @@ export function matchCommunityRule(rule:CommunityReplyRule,text:string):boolean{
  }
  return false;
 }
+/** A localized greeting overrides the legacy template only for the language
+ * expressly chosen for this group; otherwise use the existing safe fallback. */
+export function selectCommunityGreeting(config:CommunityConfig,kind:'welcome'|'farewell'):string{
+ const entry=config[kind],language=config.language??'ar';
+ return entry.localized?.[language]??entry.text;
+}
+export interface CommunityDateTimeOptions{
+ language?:CommunityLanguage;clockFormat?:CommunityClockFormat;calendar?:CommunityCalendar;
+}
+export function formatCommunityDateTime(now:number,options:CommunityDateTimeOptions={}):
+ {date:string;time:string}{
+ if(!validClock(now)||options.language!==undefined&&!['ar','en'].includes(options.language)||
+   options.clockFormat!==undefined&&!['12','24'].includes(options.clockFormat)||
+   options.calendar!==undefined&&!['gregorian','hijri'].includes(options.calendar))
+  throw Error('COMMUNITY_DATE_FORMAT_INVALID');
+ const dateObject=new Date(now);
+ if(Number.isNaN(dateObject.getTime()))throw Error('COMMUNITY_DATE_FORMAT_INVALID');
+ let day:string;
+ if(options.calendar==='hijri'){
+  const parts=new Intl.DateTimeFormat('en-US-u-ca-islamic-umalqura',{
+   year:'numeric',month:'2-digit',day:'2-digit',timeZone:'UTC',numberingSystem:'latn'
+  }).formatToParts(dateObject);
+  const part=(key:string):string=>parts.find(p=>p.type===key)?.value??'';
+  if(!/^\d{3,4}$/u.test(part('year'))||!/^\d{1,2}$/u.test(part('month'))||
+     !/^\d{1,2}$/u.test(part('day')))throw Error('COMMUNITY_HIJRI_CONVERSION_UNAVAILABLE');
+  day=part('year')+'-'+part('month').padStart(2,'0')+'-'+part('day').padStart(2,'0')+' هـ';
+ }else day=dateObject.toISOString().slice(0,10);
+ const hrs=dateObject.getUTCHours();
+ const minutes=String(dateObject.getUTCMinutes()).padStart(2,'0');
+ const time=options.clockFormat==='12'?
+  String((hrs%12)||12).padStart(2,'0')+':'+minutes+' '+
+  (options.language==='en'?(hrs<12?'AM':'PM'):(hrs<12?'ص':'م')):
+  String(hrs).padStart(2,'0')+':'+minutes;
+ return {date:day,time};
+}
 const escapeHtml=(s:string):string=>s.replace(/&/gu,'&amp;').replace(/</gu,'&lt;')
  .replace(/>/gu,'&gt;').replace(/"/gu,'&quot;').replace(/'/gu,'&#39;');
 const safeName=(name:string,max:number):string=>name.replace(/[\u0000-\u001f\u007f\u202a-\u202e\u2066-\u2069]/gu,' ').trim().slice(0,max)||'عضو';
-export function renderCommunityTemplate(template:string,input:CommunityInput,now:number,rulesUrl=''):string{
+export function renderCommunityTemplate(template:string,input:CommunityInput,now:number,rulesUrl='',
+ options:CommunityDateTimeOptions={}):string{
  if(!validTemplate(template)||!validClock(now))throw Error('COMMUNITY_TEMPLATE_INVALID');
- const shifted=new Date(now);
- // Shift explicitly, then use UTC formatters so server locale never changes output.
- const date=shifted.toISOString().slice(0,10),time=shifted.toISOString().slice(11,16);
+ // 'now' is an offset-adjusted absolute instant supplied by the caller.
+ // UTC formatters prevent server timezone and locale from changing the result.
+ const {date,time}=formatCommunityDateTime(now,options);
  const vars:Record<string,string>={
   'العضو':safeName(input.memberName,80),'اسم_المجموعة':safeName(input.groupName,120),
   'التاريخ':date,'الوقت':time,'رابط_القوانين':rulesUrl
