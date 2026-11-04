@@ -31,3 +31,16 @@ test('group cleanup checks authorization and classifies uncertain outcomes witho
  const sender=new TelegramTemporaryGroupSender(token,request);assert.equal(await sender.delete(plan.chatId,80,async()=>false),'NOT_SENT');assert.equal(calls,0);assert.equal(await sender.delete(plan.chatId,80,async()=>true),'ACKNOWLEDGED');assert.equal(calls,1);
  const lost=new TelegramTemporaryGroupSender(token,(async()=>{throw Error('lost');}) as typeof fetch);assert.equal(await lost.delete(plan.chatId,80,async()=>true),'UNKNOWN_OUTCOME');
 });
+
+test('CAPTCHA public link uses neutral wording and does not expose member, challenge or subscription details',async()=>{
+ const sent:Record<string,unknown>[]=[];
+ const request=(async(_url:unknown,init:RequestInit)=>{sent.push(JSON.parse(String(init.body)));return Response.json(receipt());}) as typeof fetch;
+ const sender=new TelegramTemporaryGroupSender(token,request);
+ assert.deepEqual(await sender.send({...plan,kind:'CAPTCHA'},async()=>true),{status:'CONFIRMED',messageId:80});
+ assert.match(String(sent[0]!.text),/إكمال اختبار الانضمام/u);
+ assert.doesNotMatch(String(sent[0]!.text),/300|عضو|NOT_MEMBER|@/u);
+ assert.deepEqual(sent[0]!.reply_markup,{inline_keyboard:[[{text:'فتح البوت',url:'https://t.me/ManaratakBot'}]]});
+ const invalid={...plan,kind:'UNKNOWN' as 'CAPTCHA'};
+ assert.equal((await sender.send(invalid,async()=>true)).status,'NOT_SENT');
+ assert.equal(sent.length,1);
+});
