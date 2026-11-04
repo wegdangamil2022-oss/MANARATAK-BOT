@@ -188,6 +188,46 @@ for(const engine of ['json','sqlite'] as const){
    assert.equal(f.sent.length,1);
   }finally{await f.close();}
  });
+ test(engine+' STOP pauses greeting send before any Telegram call and resumes only while event is current',async()=>{
+  const f=await fixture();try{
+   const t=await f.create('Welcome','Welcome');
+   await f.enable('WELCOME',t.id,t.revision);await f.observe();
+   f.stop();assert.deepEqual(await f.greetings.drain(),{sent:0,unresolved:0});assert.equal(f.sent.length,0);
+   f.start();assert.equal((await f.greetings.drain()).sent,1);
+   assert.equal(f.sent.length,1);
+  }finally{await f.close();}
+ });
+ test(engine+' a corrupted own-message receipt cannot authorize any deletion',async()=>{
+  const f=await fixture();try{
+   const t=await f.create('Welcome','Welcome');
+   await f.enable('WELCOME',t.id,t.revision);await f.observe();assert.equal((await f.greetings.drain()).sent,1);
+   await f.store.transaction(s=>{const proof=s.audit.find(a=>a.updateKey.endsWith(':receipt')&&a.updateKey.startsWith('greeting:job:'))!;
+    proof.reason='FORGED:'+proof.reason;});
+   f.advance(300000);
+   assert.equal((await f.greetings.cleanup()).deleted,0);
+   assert.equal(f.deleted.length,0);
+  }finally{await f.close();}
+ });
+ test(engine+' stopping a greeting type does not block cleanup of its previously verified own message',async()=>{
+  const f=await fixture();try{
+   const t=await f.create('Welcome','Welcome');
+   await f.enable('WELCOME',t.id,t.revision);await f.observe();
+   assert.equal((await f.greetings.drain()).sent,1);
+   assert.equal(await f.greetings.configure(OWNER,G,'WELCOME',false,'',0,
+    f.greetings.epoch(await f.store.snapshot(),G,'WELCOME')),true);
+   f.advance(300000);assert.equal((await f.greetings.cleanup()).deleted,1);
+   assert.deepEqual(f.deleted,[{chatId:G,messageId:601}]);
+  }finally{await f.close();}
+ });
+ test(engine+' a greeting message older than one day is never deleted automatically',async()=>{
+  const f=await fixture();try{
+   const t=await f.create('Welcome','Welcome');
+   await f.enable('WELCOME',t.id,t.revision);await f.observe();
+   await f.greetings.drain();f.advance(86400001);
+   assert.equal((await f.greetings.cleanup()).deleted,0);
+   assert.equal(f.deleted.length,0);
+  }finally{await f.close();}
+ });
  test(engine+' owner menu previews and confirms saved studio version separately for welcome and farewell',async()=>{
   const f=await fixture();try{
    const t=await f.create('ترحيب منارتك','أهلاً بك في منارتك!');
