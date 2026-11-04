@@ -95,7 +95,7 @@ export class Phase4CommunityService{
       !current.topicCooldowns?.some(x=>x.topicId===request.topicId))
      throw Error('COMMUNITY_TOPIC_NOT_CONFIGURED');
    }
-   if(kind==='SERVICE_CLEANUP_DELAY'&&(!Number.isInteger(request.delayMs)||
+   if((kind==='SERVICE_CLEANUP_DELAY'||kind==='REPLY_CLEANUP_DELAY')&&(!Number.isInteger(request.delayMs)||
       request.delayMs===undefined||request.delayMs<30000||request.delayMs>3600000))
     throw Error('COMMUNITY_SERVICE_DELAY_INVALID');
    if(kind==='RULES_LINK_SET'&&!validCommunityRulesUrl(request.text))
@@ -215,6 +215,9 @@ export class Phase4CommunityService{
     case 'SERVICE_CLEANUP_ON':config.serviceCleanup={...config.serviceCleanup??{delayMs:120000},enabled:true};break;
     case 'SERVICE_CLEANUP_OFF':config.serviceCleanup={...config.serviceCleanup??{delayMs:120000},enabled:false};break;
     case 'SERVICE_CLEANUP_DELAY':config.serviceCleanup={...config.serviceCleanup??{enabled:false},delayMs:draft.delayMs!};break;
+    case 'REPLY_CLEANUP_ON':config.replyCleanup={...config.replyCleanup??{delayMs:120000},enabled:true};break;
+    case 'REPLY_CLEANUP_OFF':config.replyCleanup={...config.replyCleanup??{delayMs:120000},enabled:false};break;
+    case 'REPLY_CLEANUP_DELAY':config.replyCleanup={...config.replyCleanup??{enabled:false},delayMs:draft.delayMs!};break;
     case 'REPLY_REMOVE':config.rules=config.rules.filter(r=>r.id!==draft.ruleId);break;
     case 'REPLY_ENABLE':config.rules.find(r=>r.id===draft.ruleId)!.enabled=true;break;
     case 'REPLY_DISABLE':config.rules.find(r=>r.id===draft.ruleId)!.enabled=false;break;
@@ -457,6 +460,10 @@ export class Phase4CommunityService{
    ': '+(draft.cooldownMs!/1000)+' ثانية. الحد العام 8 رسائل في الدقيقة يبقى.';
   if(draft.kind==='TOPIC_COOLDOWN_CLEAR')return 'مراجعة إزالة تخصيص حد موضوع '+draft.topicId+
    ' والعودة إلى فاصل المجموعة الافتراضي.';
+  if(draft.kind==='REPLY_CLEANUP_DELAY')return 'تحديد مدة حذف ردود البوت المؤقتة بعد إثبات الإرسال: '+
+   (draft.delayMs!/1000)+' ثانية. الحذف يتطلب صلاحية حديثة.';
+  if(draft.kind==='REPLY_CLEANUP_ON')return 'تفعيل تنظيف ردود منارتك المؤكدة فقط بعد المهلة. لا يُحذف محتوى الأعضاء.';
+  if(draft.kind==='REPLY_CLEANUP_OFF')return 'إيقاف حذف ردود منارتك المؤقتة؛ المهام القديمة تُلغى عند الإرسال.';
   if(draft.kind==='SERVICE_CLEANUP_DELAY')return 'تحديد تأخير تنظيف الرسائل الخدمية: '+
    (draft.delayMs!/1000)+' ثانية';
   return 'معاينة التغيير: '+draft.kind;
