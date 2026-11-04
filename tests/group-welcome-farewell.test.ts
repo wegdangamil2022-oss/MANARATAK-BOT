@@ -12,13 +12,16 @@ import {TelegramUpdateApplication} from '../src/telegram-transport.js';
 import {EducationService} from '../src/education.js';
 import {EducationAdminFacade} from '../src/education-admin.js';
 import {ApprovedAnswerService,ResourceLinkService} from '../src/education-interactions.js';
-import type {OwnerInlineScreen} from '../src/telegram-inline-owner.js';
+import {ownerInlineConnection,type OwnerInlineScreen} from '../src/telegram-inline-owner.js';
 
 const NOW=1700000000000,G='-100123',OWNER='100';
 const btn=(v:OwnerInlineScreen|null,name:string)=>{
  assert.ok(v);const found=v.keyboard.inline_keyboard.flat().find(b=>b.text.includes(name));
  assert.ok(found,'missing '+name+' in '+v.text);return found.callback_data;
 };
+test('welcome and farewell is linked to an actual owner editor, not a catalogue-only placeholder',()=>{
+ assert.equal(ownerInlineConnection('mi:1:i:09:01'),'EDITOR');
+});
 for(const engine of ['json','sqlite'] as const){
  async function fixture(){
   const dir=await mkdtemp(join(tmpdir(),'group-welcome-farewell-')),store=new BotStore(join(dir,'state.'+engine),{engine});
