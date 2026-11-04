@@ -198,3 +198,21 @@ for(const engine of ['json','sqlite'] as const){
   }finally{await f.close();}
  });
 }
+
+
+for(const engine of ['json','sqlite'] as const){
+ test('WELCOME-006 '+engine+': owner group settings stay below Telegram 4096-byte limit despite expanded controls',async()=>{
+  const f=await fixture(engine);
+  try{
+   const group=await phase4CommunityScreen(f.community,OWNER,'p4c:1:g:'+GROUP);
+   assert.ok(group);
+   assert.ok(Buffer.byteLength(group!.text,'utf8')<=4096,
+    'expanded owner controls must not replicate long command help inside every group view');
+   assert.ok(group!.keyboard.inline_keyboard.length<=30,
+    'Telegram rejects inline keyboards exceeding thirty rows');
+   const commands=await phase4CommunityScreen(f.community,OWNER,'p4c:1:l:0');
+   assert.match(commands!.text,/autocap/u);
+   assert.match(commands!.text,/serviceprofileoff/u);
+  }finally{await f.close();}
+ });
+}
