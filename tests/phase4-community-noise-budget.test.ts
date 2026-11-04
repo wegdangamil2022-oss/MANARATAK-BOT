@@ -158,3 +158,42 @@ for(const engine of ['json','sqlite'] as const){
   }finally{await f.close();}
  });
 }
+
+
+for(const engine of ['json','sqlite'] as const){
+ test('WELCOME-006 '+engine+': budget inline buttons create a draft before changing group rate',async()=>{
+  const f=await fixture(engine);
+  try{
+   const screen=await phase4CommunityScreen(f.community,OWNER,'p4c:1:i:'+GROUP);
+   assert.match(screen?.text??'',/8 رسالة خلال أي 60 ثانية/u);
+   assert.ok(screen?.keyboard.inline_keyboard.flat().some(b=>
+    b.callback_data==='p4c:1:ac:'+GROUP+':2'));
+   const proposal=await phase4CommunityScreen(f.community,OWNER,'p4c:1:ac:'+GROUP+':2');
+   assert.match(proposal?.text??'',/2 رسائل/u);
+   assert.equal((await f.community.view(OWNER,GROUP)).autoMessagesPerMinute,undefined);
+   const confirm=proposal!.keyboard.inline_keyboard.flat().find(b=>
+    b.callback_data.startsWith('p4c:1:c:'))!;
+   await phase4CommunityScreen(f.community,OWNER,confirm.callback_data);
+   assert.equal((await f.community.view(OWNER,GROUP)).autoMessagesPerMinute,2);
+   const again=await phase4CommunityScreen(f.community,OWNER,'p4c:1:i:'+GROUP);
+   assert.match(again?.text??'',/2 رسالة خلال أي 60 ثانية/u);
+   await assert.rejects(phase4CommunityScreen(f.community,NONOWNER,
+    'p4c:1:i:'+GROUP),/COMMUNITY_OWNER_DENIED/);
+  }finally{await f.close();}
+ });
+ test('WELCOME-006 '+engine+': profile-service cleanup opt-out does not hide approved change audit',async()=>{
+  const f=await fixture(engine);
+  try{
+   await f.approve({kind:'CHANGE_LOG_ON'});
+   await f.approve({kind:'SERVICE_CLEANUP_ON'});
+   await f.approve({kind:'SERVICE_PROFILE_OFF'});
+   assert.equal(await f.event(400,'TITLE_CHANGED'),true);
+   assert.equal(await f.event(401,'PHOTO_REMOVED'),true);
+   assert.deepEqual((await f.community.recentChanges(OWNER,GROUP)).map(x=>x.kind),
+    ['PHOTO_REMOVED','TITLE_CHANGED']);
+   assert.equal((await f.store.snapshot()).phase4Community?.cleanupJobs?.length??0,0);
+   await f.approve({kind:'CHANGE_LOG_OFF'});
+   assert.deepEqual(await f.community.recentChanges(OWNER,GROUP),[]);
+  }finally{await f.close();}
+ });
+}
