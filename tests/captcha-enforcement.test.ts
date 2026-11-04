@@ -188,4 +188,21 @@ for(const engine of ['json','sqlite'] as const){
   assert.equal(f.target().status,'restricted');assert.equal(f.writes.length,1);
   assert.ok((await f.store.snapshot()).moderationReasons.some(r=>r.source==='MANUAL'&&r.active));
  }finally{await f.close();}});
+
+ test(engine+' private start resumes an unfinished joined channel gate without repeating passed CAPTCHA',async()=>{const f=await fixture(true);try{
+  await f.policy.approveChat('100','-200',['verification']);
+  await f.store.transaction(s=>{s.subscriptionRequirements.push({chatId:G,channelIds:['-200'],mode:'ALL',version:1});assert.equal(recordSubscriptionEnforcementConsent(s,f.policy,'100',G,true,f.now()),true);});
+  await f.enable();f.channelMembership.set('-200','300','NOT_MEMBER');f.advance();const at=f.now();
+  await f.app.handle({update_id:199,message:{message_id:199,date:at/1000,from:{id:100,is_bot:false},chat:{id:Number(G),type:'supergroup'},new_chat_members:[{id:300,is_bot:false}]}});
+  f.advance();const start=await f.app.handle({update_id:200,message:{message_id:200,from:{id:300,is_bot:false},chat:{id:300,type:'private'},text:'/start'}}),answer=pick({text:start.plan!.text,keyboard:start.plan!.inlineMarkup!},'تحقق بديل');
+  const passed=await f.app.handle({update_id:201,callback_query:{id:'resume-first-pass',from:{id:300,is_bot:false},data:answer,message:{message_id:201,from:{id:999,is_bot:true},chat:{id:300,type:'private'}}}});
+  assert.equal(passed.reason,'SUBSCRIPTION_VERIFICATION_VIEW');assert.equal(f.target().status,'restricted');
+  const resumed=await f.app.handle({update_id:202,message:{message_id:202,from:{id:300,is_bot:false},chat:{id:300,type:'private'},text:'/start'}});
+  assert.equal(resumed.reason,'SUBSCRIPTION_VERIFICATION_VIEW');
+  assert.match(resumed.plan!.text,/لم يكتمل شرط الاشتراك/u);
+  assert.equal(f.captcha.status(await f.store.snapshot(),G,'300'),'PASSED');assert.equal(f.writes.length,1);
+  f.channelMembership.set('-200','300','MEMBER');const button=resumed.plan!.studioMarkup!.inline_keyboard.flat().find(b=>'callback_data' in b&&b.callback_data.startsWith('sv:1:'));assert.ok(button&&'callback_data' in button);
+  const done=await f.app.handle({update_id:203,callback_query:{id:'resume-channel',from:{id:300,is_bot:false},data:button.callback_data,message:{message_id:203,from:{id:999,is_bot:true},chat:{id:300,type:'private'}}}});
+  assert.equal(done.reason,'SUBSCRIPTION_VERIFICATION_VIEW');assert.equal(f.target().status,'member');assert.equal(f.writes.length,2);
+ }finally{await f.close();}});
 }
