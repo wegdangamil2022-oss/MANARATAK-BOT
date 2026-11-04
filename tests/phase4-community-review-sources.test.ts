@@ -182,3 +182,37 @@ for(const engine of ['json','sqlite'] as const){
   }finally{await f.close();}
  });
 }
+
+
+for(const engine of ['json','sqlite'] as const){
+ test('WELCOME-004 '+engine+': owner-only FAQ source catalogue excludes stale, hidden and other-group records',async()=>{
+  const f=await fixture(engine);
+  try{
+   await f.addFAQ();
+   assert.equal((await f.community.listReviewedFAQs(OWNER,GROUP)).length,1);
+   assert.equal((await f.community.listReviewedFAQs(OWNER,GROUP))[0]?.id,FAQ);
+   assert.equal((await f.community.listReviewedFAQs(OWNER,GROUP))[0]?.question,'كيف أقدم؟');
+   const screen=await phase4CommunityScreen(f.community,OWNER,'p4c:1:f:'+GROUP+':0');
+   assert.match(screen?.text??'',/كيف أقدم/u);
+   assert.match(screen?.text??'',new RegExp(FAQ));
+   assert.ok(screen?.keyboard.inline_keyboard.flat().some(b=>b.callback_data==='p4c:1:g:'+GROUP));
+   await assert.rejects(f.community.listReviewedFAQs(MEMBER,GROUP),/COMMUNITY_OWNER_DENIED/);
+   await assert.rejects(phase4CommunityScreen(f.community,MEMBER,'p4c:1:f:'+GROUP+':0'),/COMMUNITY_OWNER_DENIED/);
+   await f.store.transaction(s=>{s.educationCategories.find(c=>c.id===CATEGORY)!.groupVisible=false;});
+   assert.equal((await f.community.listReviewedFAQs(OWNER,GROUP)).length,0);
+   const blank=await phase4CommunityScreen(f.community,OWNER,'p4c:1:f:'+GROUP+':0');
+   assert.doesNotMatch(blank?.text??'',new RegExp(FAQ));
+  }finally{await f.close();}
+ });
+ test('WELCOME-004 '+engine+': FAQ draft cannot be approved if original published source becomes unavailable',async()=>{
+  const f=await fixture(engine);
+  try{
+   await f.addFAQ();
+   const draft=await f.community.pending(OWNER,{kind:'REPLY_ADD',source:'FAQ',sourceFaqId:FAQ,
+    trigger:'قبول',match:'WORD'},GROUP);
+   await f.store.transaction(s=>{s.educationCategories.find(c=>c.id===CATEGORY)!.enabled=false;});
+   await assert.rejects(f.community.approve(OWNER,draft.id),/COMMUNITY_FAQ_SOURCE_UNAVAILABLE/);
+   assert.equal((await f.community.view(OWNER,GROUP)).rules.length,0);
+  }finally{await f.close();}
+ });
+}
