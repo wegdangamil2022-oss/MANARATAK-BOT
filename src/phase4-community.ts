@@ -80,13 +80,15 @@ export class Phase4CommunityService{
    const kind=request.kind;
    // High-impact group profile changes are owner-only, even if a delegated
    // moderator has general chat.manage permission for templates and replies.
-   if(['GROUP_PROFILE_ON','GROUP_PROFILE_OFF','GROUP_TITLE_SET','GROUP_PHOTO_REMOVE'].includes(kind)&&
+   if(['GROUP_PROFILE_ON','GROUP_PROFILE_OFF','GROUP_TITLE_SET','GROUP_PHOTO_SET','GROUP_PHOTO_REMOVE'].includes(kind)&&
       !this.policy.isOwner(actorId))throw Error('COMMUNITY_OWNER_DENIED');
-   if(kind==='GROUP_TITLE_SET'||kind==='GROUP_PHOTO_REMOVE'){
+   if(kind==='GROUP_TITLE_SET'||kind==='GROUP_PHOTO_SET'||kind==='GROUP_PHOTO_REMOVE'){
     if(current.profileEditingEnabled!==true)throw Error('COMMUNITY_PROFILE_DISABLED');
     if(kind==='GROUP_TITLE_SET'&&!validCommunityProfileTitle(request.text))
      throw Error('COMMUNITY_PROFILE_TITLE_INVALID');
-    if(kind==='GROUP_PHOTO_REMOVE'&&request.text!==undefined)
+    if(kind==='GROUP_PHOTO_SET'&&(!validCommunityPhotoId(request.photoFileId)||request.text!==undefined))
+     throw Error('COMMUNITY_PROFILE_PHOTO_INVALID');
+    if(kind==='GROUP_PHOTO_REMOVE'&&(request.text!==undefined||request.photoFileId!==undefined))
      throw Error('COMMUNITY_PROFILE_PAYLOAD_INVALID');
     if((s.phase4Community?.profileJobs??[]).some(job=>job.chatId===chatId&&
        (job.status==='SENDING'||job.status==='QUEUED'&&now-job.createdAt<600000)))
@@ -207,7 +209,7 @@ export class Phase4CommunityService{
     ...(request.photoFileId!==undefined?{photoFileId:request.photoFileId}:{}),
     ...(request.buttonText!==undefined?{buttonText:request.buttonText}:{}),
     ...(request.buttonUrl!==undefined?{buttonUrl:request.buttonUrl}:{}),
-    ...(['GROUP_TITLE_SET','GROUP_PHOTO_REMOVE'].includes(kind)?
+    ...(['GROUP_TITLE_SET','GROUP_PHOTO_SET','GROUP_PHOTO_REMOVE'].includes(kind)?
      {profileEpoch:s.phase4Community?.profileRevisions?.find(x=>x.chatId===chatId)?.revision??0}:{})};
    s.phase4Community??=emptyCommunityState();
    const st=s.phase4Community;
@@ -233,7 +235,7 @@ export class Phase4CommunityService{
    if(drafts.length!==1||drafts[0]!.actorId!==actorId)
     throw Error('COMMUNITY_DRAFT_NOT_FOUND');
    const draft=drafts[0]!;
-   if(['GROUP_PROFILE_ON','GROUP_PROFILE_OFF','GROUP_TITLE_SET','GROUP_PHOTO_REMOVE'].includes(draft.kind)&&
+   if(['GROUP_PROFILE_ON','GROUP_PROFILE_OFF','GROUP_TITLE_SET','GROUP_PHOTO_SET','GROUP_PHOTO_REMOVE'].includes(draft.kind)&&
       !this.policy.isOwner(actorId))throw Error('COMMUNITY_OWNER_DENIED');
    // A stale/expired/unauthorized draft never changes a running policy.
    if(now<draft.createdAt||now>=draft.expiresAt||
@@ -241,7 +243,7 @@ export class Phase4CommunityService{
     throw Error('COMMUNITY_DRAFT_EXPIRED');
    const config=configured(s,draft.chatId);
    if(config.version!==draft.configVersion)throw Error('COMMUNITY_DRAFT_STALE');
-   if((draft.kind==='GROUP_TITLE_SET'||draft.kind==='GROUP_PHOTO_REMOVE')&&
+   if((draft.kind==='GROUP_TITLE_SET'||draft.kind==='GROUP_PHOTO_SET'||draft.kind==='GROUP_PHOTO_REMOVE')&&
      draft.profileEpoch!==(st?.profileRevisions??[]).find(x=>x.chatId===draft.chatId)?.revision&&
      !(draft.profileEpoch===0&&!(st?.profileRevisions??[]).some(x=>x.chatId===draft.chatId)))
     throw Error('COMMUNITY_PROFILE_DRAFT_STALE');
@@ -306,10 +308,12 @@ export class Phase4CommunityService{
     case 'REPLIES_OFF':config.repliesEnabled=false;break;
     case 'GROUP_PROFILE_ON':config.profileEditingEnabled=true;break;
     case 'GROUP_PROFILE_OFF':config.profileEditingEnabled=false;break;
-    case 'GROUP_TITLE_SET':case 'GROUP_PHOTO_REMOVE':{
+    case 'GROUP_TITLE_SET':case 'GROUP_PHOTO_SET':case 'GROUP_PHOTO_REMOVE':{
      if(config.profileEditingEnabled!==true)throw Error('COMMUNITY_PROFILE_DISABLED');
      if(draft.kind==='GROUP_TITLE_SET'&&!validCommunityProfileTitle(draft.text))
       throw Error('COMMUNITY_PROFILE_TITLE_INVALID');
+     if(draft.kind==='GROUP_PHOTO_SET'&&!validCommunityPhotoId(draft.photoFileId))
+      throw Error('COMMUNITY_PROFILE_PHOTO_INVALID');
      if((st?.profileJobs??[]).some(j=>j.chatId===draft.chatId&&
        (j.status==='SENDING'||j.status==='QUEUED'&&now-j.createdAt<600000)))
       throw Error('COMMUNITY_PROFILE_OPERATION_PENDING');
@@ -376,15 +380,16 @@ export class Phase4CommunityService{
    }
    config.version++;
    if(!validCommunityConfig(config))throw Error('COMMUNITY_CONFIG_INVALID');
-   if(draft.kind==='GROUP_TITLE_SET'||draft.kind==='GROUP_PHOTO_REMOVE'){
+   if(draft.kind==='GROUP_TITLE_SET'||draft.kind==='GROUP_PHOTO_SET'||draft.kind==='GROUP_PHOTO_REMOVE'){
     st!.profileJobs=(st!.profileJobs??[]).filter(j=>
       j.status==='QUEUED'||j.status==='SENDING'||now-j.createdAt<7*86400000).slice(-499);
     st!.profileJobs.push({key:randomBytes(12).toString('hex'),chatId:draft.chatId,
      chatVersion:draft.chatVersion,policyVersion:config.version,
      profileEpoch:st!.profileRevisions?.find(x=>x.chatId===draft.chatId)?.revision??0,
-     kind:draft.kind==='GROUP_TITLE_SET'?'TITLE_SET':'PHOTO_REMOVE',
+     kind:draft.kind==='GROUP_TITLE_SET'?'TITLE_SET':draft.kind==='GROUP_PHOTO_SET'?'PHOTO_SET':'PHOTO_REMOVE',
      status:'QUEUED',createdAt:now,
-     ...(draft.kind==='GROUP_TITLE_SET'?{title:draft.text!}:{})});
+     ...(draft.kind==='GROUP_TITLE_SET'?{title:draft.text!}:{}),
+     ...(draft.kind==='GROUP_PHOTO_SET'?{photoFileId:draft.photoFileId!}:{})});
    }
    st!.configs=st!.configs.filter(c=>c.chatId!==config.chatId);
    st!.configs.push(config);
@@ -519,7 +524,7 @@ export class Phase4CommunityService{
  }
  /** Never show a title payload in operation history, even to the owner. */
  async recentProfileOperations(actorId:string,chatId:string):Promise<
-  {kind:'TITLE_SET'|'PHOTO_REMOVE';status:string;createdAt:number}[]>{
+  {kind:'TITLE_SET'|'PHOTO_SET'|'PHOTO_REMOVE';status:string;createdAt:number}[]>{
   const s=await this.store.snapshot();groupAvailable(s,this.policy,actorId,chatId);
   const now=this.clock();
   return (s.phase4Community?.profileJobs??[]).filter(x=>x.chatId===chatId&&
@@ -730,6 +735,9 @@ export class Phase4CommunityService{
    'طلبات التعديل التي لم تُرسل ستُلغى عند محاولة التنفيذ.';
   if(draft.kind==='GROUP_TITLE_SET')return '<b>اعتماد تغيير اسم المجموعة</b>\n'+safe(draft.text??'')+
    '\nعند الاعتماد يُنشأ طلب واحد، ولا يُرسل حتى فحص حقوق can_change_info ومفتاح التشغيل.';
+  if(draft.kind==='GROUP_PHOTO_SET')return '<b>اعتماد رفع صورة جديدة للمجموعة</b>\n'+
+   'الملف مستمد من معرّف صورة Telegram الذي قدمه المالك؛ لن يُعرض رقم الملف أو رابط التنزيل. '+
+   'بعد اعتماد الطلب يفحص البوت حق can_change_info والملف وحجمه ونوعه، ثم يعيد رفعه بـ multipart مرة واحدة فقط.';
   if(draft.kind==='GROUP_PHOTO_REMOVE')return '<b>تأكيد حذف الصورة الحالية للمجموعة</b>\n'+
    'سيُطلب deleteChatPhoto مرة واحدة فقط، بعد فحص حقوق Telegram. لا يتضمن هذا الأمر رفع صورة جديدة.';
   if(draft.kind==='RULES_LINK_SET')return '<b>اعتماد رابط القوانين</b>\n'+clean(draft.text??'')+
