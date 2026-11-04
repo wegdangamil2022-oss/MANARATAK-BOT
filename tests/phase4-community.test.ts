@@ -392,3 +392,29 @@ for(const engine of ['json','sqlite'] as const){
   }finally{await f.close();}
  });
 }
+
+for(const engine of ['json','sqlite'] as const){
+ test('P4 '+engine+': rules-link owner conversation previews, confirms and clears without premature saves',async()=>{
+  const f=await fixture(engine);try{
+   const url='https://t.me/manaratak_rules/4';
+   const first=await f.app().handle(ownerMessage(810,'/setruleslink '+GROUP+' '+url));
+   assert.equal(first.status,'APPLIED');
+   assert.match(first.plan?.text??'',/manaratak_rules/);
+   assert.equal((await f.community.view(OWNER,GROUP)).rulesUrl,undefined);
+   const button=first.plan?.inlineMarkup?.inline_keyboard.flat()
+    .find(b=>b.callback_data.startsWith('p4c:1:c:'));
+   assert.ok(button);
+   const confirm=await f.app().handle(ownerCallback(811,button!.callback_data));
+   assert.equal(confirm.status,'APPLIED');
+   assert.equal((await f.community.view(OWNER,GROUP)).rulesUrl,url);
+   const cleared=await f.app().handle(ownerMessage(812,'/clearruleslink '+GROUP));
+   assert.equal(cleared.status,'APPLIED');
+   assert.equal((await f.community.view(OWNER,GROUP)).rulesUrl,url);
+   const remove=cleared.plan?.inlineMarkup?.inline_keyboard.flat()
+    .find(b=>b.callback_data.startsWith('p4c:1:c:'));
+   assert.ok(remove);
+   assert.equal((await f.app().handle(ownerCallback(813,remove!.callback_data))).status,'APPLIED');
+   assert.equal((await f.community.view(OWNER,GROUP)).rulesUrl,undefined);
+  }finally{await f.close();}
+ });
+}
