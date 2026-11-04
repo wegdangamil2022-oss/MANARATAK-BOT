@@ -35,6 +35,7 @@ import {validAdminRoleRoute} from './telegram-admin-roles.js';
 import {validCaptchaRoute} from './captcha.js';
 import {validCaptchaRulesRoute} from './captcha-rules.js';
 import {validCaptchaOwnerRoute} from './telegram-captcha-owner.js';
+import {validWelcomeOwnerRoute} from './telegram-welcome-owner.js';
 import {validRuleExemptionRoute} from './telegram-rule-exemptions.js';
 import {validCommunityFolderRoute} from './telegram-community-folders.js';
 /** The approved 2026-10-23 owner catalogue from docs/أزرار_منارتك.md.
@@ -720,7 +721,7 @@ export function isValidTelegramInlineKeyboard(input:unknown):input is TelegramIn
      !validModerationAppealRoute(button.callback_data)&&
      !validModerationReportRoute(button.callback_data)&&
      !validGroupRulesRoute(button.callback_data)&&
-     !validCaptchaRoute(button.callback_data)&&!validCaptchaRulesRoute(button.callback_data)&&!validCaptchaOwnerRoute(button.callback_data)&&
+     !validCaptchaRoute(button.callback_data)&&!validCaptchaRulesRoute(button.callback_data)&&!validCaptchaOwnerRoute(button.callback_data)&&!validWelcomeOwnerRoute(button.callback_data)&&
      !validAdminRoleRoute(button.callback_data)&&
      !validOwnerRightsRoute(button.callback_data)&&
      !validRuleExemptionRoute(button.callback_data)&&!validRuleWarningPolicyRoute(button.callback_data)&&!validRuleActionRoute(button.callback_data)&&
