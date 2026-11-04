@@ -522,7 +522,11 @@ export class TelegramUpdateApplication {
       'b3-webhook:'+this.opts.botId+':'+event.updateId);
     if(!proposal)return null;
     const snapshot=await this.opts.store.snapshot(),now=this.clock();
+    // A published FAQ/category can be archived between the atomic reply
+    // reservation and this later read. Refuse the now-stale text instead of
+    // attaching a new authorization witness to an old source's answer.
     if(!this.opts.policy.canUseChat(snapshot,event.chatId,'navigation')||
+       proposal.sourceEpoch!==groupMenuEpochDigest(snapshot,event.chatId,event.topicId)||
        !Number.isSafeInteger(now)||now<0||now>8640000000000000-120000)
       return null;
     // Telegram has no generic private-to-one group message. A public link
