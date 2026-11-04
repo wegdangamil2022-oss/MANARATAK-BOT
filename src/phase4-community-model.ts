@@ -1,3 +1,4 @@
+import {validCommunityPhotoId,validCommunityLinkButtons,type CommunityLinkButton} from './phase4-community-rich.js';
 /** Phase 4 community interaction model.
  * Telegram identity and group approval must come from the authenticated transport,
  * never from a student-supplied message or a callback parameter.
@@ -17,6 +18,10 @@ export interface CommunityGreeting{
  /** Group language is owner-selected. Telegram service join updates do not
   * reliably contain the joining user's language. */
  localized?:Partial<Record<CommunityLanguage,string>>;
+ /** Telegram file_id saved by owner approval; never an image URL. */
+ photoFileId?:string;
+ /** External HTTPS links only, no callback handlers or hidden actor IDs. */
+ buttons?:CommunityLinkButton[];
 }
 export interface CommunityConfig{
  chatId:string;version:number;welcome:CommunityGreeting;farewell:CommunityGreeting;
@@ -40,12 +45,15 @@ export type CommunityDraftKind='WELCOME_TEXT'|'FAREWELL_TEXT'|'REPLY_ADD'|'REPLY
  'REPLY_ENABLE'|'REPLY_DISABLE'|'REPLY_COOLDOWN'|
  'CHANGE_LOG_ON'|'CHANGE_LOG_OFF'|'SERVICE_CLEANUP_ON'|'SERVICE_CLEANUP_OFF'|'SERVICE_CLEANUP_DELAY'|
  'RULES_LINK_SET'|'RULES_LINK_CLEAR'|
- 'WELCOME_LOCALIZED'|'FAREWELL_LOCALIZED'|'GROUP_LANGUAGE'|'GROUP_CLOCK';
+ 'WELCOME_LOCALIZED'|'FAREWELL_LOCALIZED'|'GROUP_LANGUAGE'|'GROUP_CLOCK'|
+ 'WELCOME_PHOTO_SET'|'WELCOME_PHOTO_CLEAR'|'FAREWELL_PHOTO_SET'|'FAREWELL_PHOTO_CLEAR'|
+ 'WELCOME_BUTTON_ADD'|'WELCOME_BUTTONS_CLEAR'|'FAREWELL_BUTTON_ADD'|'FAREWELL_BUTTONS_CLEAR';
 export interface CommunityDraft{
  id:string;actorId:string;chatId:string;chatVersion:number;configVersion:number;
  kind:CommunityDraftKind;createdAt:number;expiresAt:number;
  text?:string;trigger?:string;match?:ReplyMatch;ruleId?:string;topicId?:number;cooldownMs?:number;delayMs?:number;
  language?:CommunityLanguage;clockFormat?:CommunityClockFormat;calendar?:CommunityCalendar;utcOffsetMinutes?:number;
+ photoFileId?:string;buttonText?:string;buttonUrl?:string;
 }
 export interface CommunityReceipt{
  /** An opaque hash of the inbound Telegram update and bot identifier. */
@@ -100,7 +108,9 @@ const kinds=new Set<CommunityDraftKind>(['WELCOME_TEXT','FAREWELL_TEXT','REPLY_A
  'REPLY_ENABLE','REPLY_DISABLE','REPLY_COOLDOWN',
  'CHANGE_LOG_ON','CHANGE_LOG_OFF','SERVICE_CLEANUP_ON','SERVICE_CLEANUP_OFF','SERVICE_CLEANUP_DELAY',
  'RULES_LINK_SET','RULES_LINK_CLEAR',
- 'WELCOME_LOCALIZED','FAREWELL_LOCALIZED','GROUP_LANGUAGE','GROUP_CLOCK']);
+ 'WELCOME_LOCALIZED','FAREWELL_LOCALIZED','GROUP_LANGUAGE','GROUP_CLOCK',
+ 'WELCOME_PHOTO_SET','WELCOME_PHOTO_CLEAR','FAREWELL_PHOTO_SET','FAREWELL_PHOTO_CLEAR',
+ 'WELCOME_BUTTON_ADD','WELCOME_BUTTONS_CLEAR','FAREWELL_BUTTON_ADD','FAREWELL_BUTTONS_CLEAR']);
 const matches=new Set<ReplyMatch>(['EXACT','WORD','CONTAINS','COMMAND']);
 export function defaultCommunityConfig(chatId:string):CommunityConfig{
  if(!validGroup(chatId))throw Error('COMMUNITY_CHAT_INVALID');
@@ -126,6 +136,8 @@ export function validCommunityConfig(value:unknown):value is CommunityConfig{
     x.serviceCleanup.delayMs<30000||x.serviceCleanup.delayMs>3600000)))return false;
  for(const item of [x.welcome,x.farewell]){
   if(!item||typeof item!=='object'||typeof item.enabled!=='boolean'||!validTemplate(item.text))return false;
+  if(item.photoFileId!==undefined&&!validCommunityPhotoId(item.photoFileId)||
+     item.buttons!==undefined&&!validCommunityLinkButtons(item.buttons))return false;
   if(item.localized!==undefined){
    if(!item.localized||typeof item.localized!=='object'||Array.isArray(item.localized)||
       Object.keys(item.localized).some(k=>k!=='ar'&&k!=='en')||
@@ -204,7 +216,14 @@ export function validCommunityState(value:unknown):value is CommunityAutomationS
    (d.clockFormat!==undefined&&d.clockFormat!=='12'&&d.clockFormat!=='24')||
    (d.calendar!==undefined&&d.calendar!=='gregorian'&&d.calendar!=='hijri')||
    (d.utcOffsetMinutes!==undefined&&(!Number.isInteger(d.utcOffsetMinutes)||
-       d.utcOffsetMinutes< -720||d.utcOffsetMinutes>840)))return false;
+       d.utcOffsetMinutes< -720||d.utcOffsetMinutes>840))||
+   (d.photoFileId!==undefined&&!validCommunityPhotoId(d.photoFileId))||
+   (d.buttonText!==undefined&&
+      (typeof d.buttonText!=='string'||!validCommunityLinkButtons([{text:d.buttonText,
+        url:d.buttonUrl??''}])))||
+   (d.buttonUrl!==undefined&&
+      (typeof d.buttonUrl!=='string'||!validCommunityLinkButtons([{text:d.buttonText??'',
+        url:d.buttonUrl}]))) )return false;
   if((d.kind==='WELCOME_TEXT'||d.kind==='FAREWELL_TEXT')&&!d.text||
    d.kind==='REPLY_ADD'&&(!d.text||!d.trigger||!d.match)||
    (['REPLY_REMOVE','REPLY_ENABLE','REPLY_DISABLE','REPLY_COOLDOWN'] as string[]).includes(d.kind)&&!d.ruleId||
@@ -215,7 +234,11 @@ export function validCommunityState(value:unknown):value is CommunityAutomationS
       (!d.language||!validTemplate(d.text))||
    d.kind==='GROUP_LANGUAGE'&&!d.language||
    d.kind==='GROUP_CLOCK'&&(d.utcOffsetMinutes===undefined||
-      !d.clockFormat||!d.calendar))return false;
+      !d.clockFormat||!d.calendar)||
+   (d.kind==='WELCOME_PHOTO_SET'||d.kind==='FAREWELL_PHOTO_SET')&&
+      !validCommunityPhotoId(d.photoFileId)||
+   (d.kind==='WELCOME_BUTTON_ADD'||d.kind==='FAREWELL_BUTTON_ADD')&&
+      !validCommunityLinkButtons([{text:d.buttonText??'',url:d.buttonUrl??''}]))return false;
   draftIds.add(d.id);
  }
  const receiptIds=new Set<string>();
