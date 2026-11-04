@@ -965,7 +965,7 @@ export class TelegramUpdateApplication {
        if(denied)return {status:'DENIED',reason:'PRIVATE_WELCOME_ACCESS_DENIED'};
        await markPrivateGroupSource(scope);
        const welcome=await this.opts.community.claimPrivateWelcome(actorId,scope,event.memberName??'عضو');
-       if(!welcome)return result('لا يوجد ترحيب خاص متاح لهذه العضوية الآن. يمكنك متابعة التصفح من القائمة الرئيسية.');
+       if(!welcome)return {status:'DENIED',reason:'PRIVATE_WELCOME_UNAVAILABLE'};
        return result('<b>🔒 ترحيب خاص بطلبك</b>\n'+welcome);
       }
       if(cmd==='/start'||cmd==='/help'||text===m.home||text===m.back)return main();
