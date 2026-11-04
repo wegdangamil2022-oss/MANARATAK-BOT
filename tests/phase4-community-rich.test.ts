@@ -122,7 +122,7 @@ for(const engine of ['json','sqlite'] as const){
    await f.approve({kind:'WELCOME_ON'});
    const outcome=await f.app.handle(f.joinUpdate(722));
    assert.equal(outcome.plan,undefined);
-   assert.equal((await f.store.snapshot()).telegramReplyJobs?.some(j=>j.updateKey==='b3-webhook:bot-main:722'),false);
+   assert.equal((await f.store.snapshot()).telegramReplyJobs?.some(j=>j.updateKey==='b3-webhook:bot-main:722')??false,false);
   }finally{await f.close();}
  });
  test('P4 rich '+engine+': owner private preview is not approval and removed buttons do not leak',async()=>{
