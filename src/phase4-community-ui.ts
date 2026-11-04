@@ -1,6 +1,7 @@
 import {Phase4CommunityService,type DraftRequest} from './phase4-community.js';
 import type {OwnerInlineScreen,TelegramInlineKeyboard} from './telegram-inline-owner.js';
 import type {CommunityDraftKind,ReplyMatch} from './phase4-community-model.js';
+import {validCommunityRulesUrl} from './phase4-community-model.js';
 const group=/^-[1-9]\d{0,15}$/u,hex=/^[a-f0-9]{24}$/u;
 const route=/^p4c:1:(?:l:(?:0|[1-9]\d{0,2})|g:-[1-9]\d{0,15}|h:-[1-9]\d{0,15}|r:-[1-9]\d{0,15}:(?:0|[1-9]\d{0,2})|t:-[1-9]\d{0,15}:[wfrsg]:[01]|d:-[1-9]\d{0,15}:[a-f0-9]{12}|e:-[1-9]\d{0,15}:[a-f0-9]{12}:[01]|[cx]:[a-f0-9]{24})$/u;
 export const validPhase4CommunityRoute=(s:unknown):s is string=>typeof s==='string'&&
@@ -16,6 +17,8 @@ const help='للتعديل أرسل في خاص البوت أحد الأوامر
  +'<code>/replyadd -100123 topic:777 COMMAND m_grants | رابط المنح</code>\n'
  +'<code>/replycheck -100123 منحة دراسية</code>\n'
  +'<code>/replydel -100123 معرف_القاعدة</code>\n'
+ +'<code>/setruleslink -100123 https://t.me/manaratak_rules</code>\n'
+ +'<code>/clearruleslink -100123</code>\n'
  +'<code>/replyrate -100123 معرف_القاعدة 90</code>\n'
  +'<code>/servicedelay -100123 120</code>\n'
  +'يظهر تأكيد مستقل لكل تعديل، وتظل الميزات مغلقة حتى تفعّلها.';
@@ -23,6 +26,12 @@ export function parsePhase4CommunityCommand(text:string):
  {kind:'HOME'}|{kind:'VIEW';chatId:string}|{kind:'EDIT';chatId:string;request:DraftRequest}|
  {kind:'DIAGNOSE';chatId:string;sample:string;topicId?:number}|null{
  if(text==='/community')return {kind:'HOME'};
+ const link=/^\/setruleslink (-[1-9]\d{0,15}) (\S{1,256})$/u.exec(text);
+ if(link)return validCommunityRulesUrl(link[2])?
+  {kind:'EDIT',chatId:link[1]!,request:{kind:'RULES_LINK_SET',text:link[2]!}}:null;
+ const clear=/^\/clearruleslink (-[1-9]\d{0,15})$/u.exec(text);
+ if(clear)return {kind:'EDIT',chatId:clear[1]!,request:{kind:'RULES_LINK_CLEAR'}};
+
  const serviceDelay=/^\/servicedelay (-[1-9]\d{0,15}) ([1-9]\d{0,3})$/u.exec(text);
  if(serviceDelay){
   const seconds=Number(serviceDelay[2]);
@@ -105,7 +114,7 @@ export async function phase4CommunityScreen(service:Phase4CommunityService,actor
   const id=view[1]!,c=await service.view(actorId,id);
   const label=(on:boolean)=>on?'✅ مفعّل':'⛔ متوقف';
   return {text:'<b>👋 تفاعل المجموعة</b>\nالمجموعة: <code>'+id+'</code>'+
-   '\nالإصدار: '+c.version+'\nالترحيب: '+label(c.welcome.enabled)+
+   '\nالإصدار: '+c.version+'\nرابط القوانين: '+(c.rulesUrl?esc(c.rulesUrl):'غير محدد')+'\nالترحيب: '+label(c.welcome.enabled)+
    '\nالوداع: '+label(c.farewell.enabled)+
    '\nالردود: '+label(c.repliesEnabled)+'\nالقواعد: '+c.rules.length+
    '\nتسجيل تغييرات المجموعة: '+label(c.changeLogEnabled??false)+
