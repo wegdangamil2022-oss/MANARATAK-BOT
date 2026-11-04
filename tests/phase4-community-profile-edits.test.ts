@@ -6,6 +6,7 @@ import {tmpdir} from 'node:os';
 import {BotStore} from '../src/store.js';
 import {Policy} from '../src/policy.js';
 import {Phase4CommunityService} from '../src/phase4-community.js';
+import {loadLiveTelegramConfig} from '../src/telegram-live-server.js';
 import {Phase4GroupProfileDispatcher,TelegramBotApiGroupProfileGateway}
  from '../src/phase4-group-profile.js';
 import {validCommunityConfig,validCommunityState,defaultCommunityConfig}
@@ -195,7 +196,8 @@ test('WELCOME-005: Telegram group-profile gateway requires fresh can_change_info
  const request=async(url:string|URL|Request,init?:RequestInit)=>{
   const method=String(url).split('/').at(-1)!;calls.push(method);
   const body=JSON.parse(String(init?.body));
-  const result=method==='getChatMember'?{ok:true,result:{status:'administrator',can_change_info:true}}:
+  const result=method==='getChatMember'?{ok:true,result:{status:'administrator',can_change_info:true,
+    user:{id:123456789,is_bot:true}}}:
    method==='setChatTitle'?{ok:true,result:true}:{ok:true,result:true};
   assert.equal(body.chat_id,GROUP);
   return new Response(JSON.stringify(result),{status:200});
@@ -263,3 +265,35 @@ for(const engine of ['json','sqlite'] as const){
   }finally{await f.close();}
  });
 }
+
+
+test('WELCOME-005: remote can_change_info belongs to the configured bot, not a different user',async()=>{
+ const token='123456789:'+('A'.repeat(36));
+ const gateway=new TelegramBotApiGroupProfileGateway(token,async()=>new Response(JSON.stringify({
+  ok:true,result:{status:'administrator',can_change_info:true,
+   user:{id:123456780,is_bot:true}}
+ }),{status:200}));
+ assert.equal(await gateway.canChangeInfo(GROUP),false);
+ const malformed=new TelegramBotApiGroupProfileGateway(token,async()=>new Response(JSON.stringify({
+  ok:true,result:{status:'administrator',can_change_info:true,
+   user:{id:123456789,is_bot:false}}
+ }),{status:200}));
+ assert.equal(await malformed.canChangeInfo(GROUP),false);
+});
+test('WELCOME-005: group-profile editing has a second explicit live-server environment gate',()=>{
+ const env={
+  BOT_ENV:'production',TELEGRAM_ENABLED:'true',TELEGRAM_REPLY_DELIVERY_ENABLED:'true',
+  BOT_OWNER_ID:OWNER,BOT_ID:'bot-main',BOT_USERNAME:'ManaratakBot',
+  BOT_STATE_FILE:'/tmp/manaratak-profile-state.sqlite',
+  TELEGRAM_BOT_TOKEN:'123456789:'+('A'.repeat(36)),
+  TELEGRAM_WEBHOOK_SECRET:'a'.repeat(40),
+  TELEGRAM_LISTEN_PORT:'8445',
+  TELEGRAM_WEBHOOK_PUBLIC_URL:'https://manaratak.scholarships.org/telegram/webhook',
+  TELEGRAM_SAFETY_FILE:'/tmp/manaratak-profile-safety.flag'
+ };
+ assert.equal(loadLiveTelegramConfig(env).profileEditsEnabled,undefined);
+ assert.equal(loadLiveTelegramConfig({...env,TELEGRAM_GROUP_PROFILE_EDITS_ENABLED:'false'}).profileEditsEnabled,undefined);
+ assert.equal(loadLiveTelegramConfig({...env,TELEGRAM_GROUP_PROFILE_EDITS_ENABLED:'true'}).profileEditsEnabled,true);
+ assert.throws(()=>loadLiveTelegramConfig({...env,TELEGRAM_GROUP_PROFILE_EDITS_ENABLED:'yes'}),
+  /LIVE_TELEGRAM_CONFIG_INVALID/);
+});
