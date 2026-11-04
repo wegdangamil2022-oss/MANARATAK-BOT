@@ -76,9 +76,12 @@ export class GroupServiceMessageCleanup{
   return this.store.transaction(s=>{
    const now=this.clock(),consent=this.policy(s,chat);
    if(!time(now)||sentAt>now||now-sentAt>30000||!consent?.enabled)return 0;
-   if(this.jobs(s,now).some(j=>j.chat===chat&&j.messageId===messageId))return 0;
+   const existing=this.jobs(s,now);
+   // One Telegram update identifies one service message. A replay with a
+   // different kind or message ID cannot enqueue a second deletion.
+   if(existing.some(j=>j.chat===chat&&(j.messageId===messageId||j.updateKey===updateKey)))return 0;
    // Bound storage and deletion pressure even when many service events arrive.
-   if(this.jobs(s,now).filter(j=>j.chat===chat&&now>=j.issued&&now-j.issued<60000).length>=40)return 0;
+   if(existing.filter(j=>j.chat===chat&&now>=j.issued&&now-j.issued<60000).length>=40)return 0;
    const version=this.policyAccess.chatRevision(s,chat),data={
     chat,kind,messageId,updateKey,sentAt,issued:now,revision:consent.revision,stamp:consent.stamp,version
    };
