@@ -204,6 +204,21 @@ for(const engine of ['json','sqlite'] as const){
    assert.equal(f.greetings.policy(await f.store.snapshot(),G,'WELCOME')?.enabled,false);
   }finally{await f.close();}
  });
+ test(engine+' bot-only join or bot departure cannot trigger a human welcome or farewell',async()=>{
+  const f=await fixture();try{
+   const hi=await f.create('Welcome','Welcome');const bye=await f.create('Bye','Goodbye');
+   await f.enable('WELCOME',hi.id,hi.revision);await f.enable('FAREWELL',bye.id,bye.revision);
+   const incoming=await f.app.handle({update_id:131,message:{message_id:131,date:f.now()/1000,
+    from:{id:100,is_bot:false},chat:{id:Number(G),type:'supergroup'},
+    new_chat_members:[{id:301,is_bot:true}]}});
+   const outgoing=await f.app.handle({update_id:132,message:{message_id:132,date:f.now()/1000,
+    from:{id:100,is_bot:false},chat:{id:Number(G),type:'supergroup'},
+    left_chat_member:{id:301,is_bot:true}}});
+   assert.equal(incoming.status,'IGNORED');assert.equal(outgoing.status,'IGNORED');
+   assert.deepEqual(await f.greetings.drain(),{sent:0,unresolved:0});
+   assert.equal(f.sent.length,0);
+  }finally{await f.close();}
+ });
  test(engine+' Telegram join and leave webhook routes enqueue only trusted local greeting events',async()=>{
   const f=await fixture();try{
    const t=await f.create('Welcome','Welcome');
