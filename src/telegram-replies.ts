@@ -371,7 +371,7 @@ export class TelegramReplyDispatcher {
        (automation.kind==='LEAVE'&&!config.farewell.enabled)){
      automationDenied=true;
     }else if(automation.kind==='TEXT'&&config.quietHours){
-     try{automationDenied=inCommunityQuietHours(config.quietHours,now,config.utcOffsetMinutes);}
+     try{automationDenied=inCommunityQuietHours(config.quietHours,now,config.utcOffsetMinutes,config.timeZone);}
      catch{automationDenied=true;}
     }
    }
