@@ -1,9 +1,9 @@
 import {Phase4CommunityService,type DraftRequest} from './phase4-community.js';
 import type {OwnerInlineScreen,TelegramInlineKeyboard} from './telegram-inline-owner.js';
-import type {CommunityDraftKind,ReplyMatch} from './phase4-community-model.js';
+import type {CommunityDraftKind,ReplyMatch,CommunityLanguage,CommunityCalendar,CommunityClockFormat} from './phase4-community-model.js';
 import {validCommunityRulesUrl} from './phase4-community-model.js';
 const group=/^-[1-9]\d{0,15}$/u,hex=/^[a-f0-9]{24}$/u;
-const route=/^p4c:1:(?:l:(?:0|[1-9]\d{0,2})|g:-[1-9]\d{0,15}|h:-[1-9]\d{0,15}|r:-[1-9]\d{0,15}:(?:0|[1-9]\d{0,2})|t:-[1-9]\d{0,15}:[wfrsg]:[01]|d:-[1-9]\d{0,15}:[a-f0-9]{12}|e:-[1-9]\d{0,15}:[a-f0-9]{12}:[01]|[cx]:[a-f0-9]{24})$/u;
+const route=/^p4c:1:(?:l:(?:0|[1-9]\d{0,2})|g:-[1-9]\d{0,15}|h:-[1-9]\d{0,15}|r:-[1-9]\d{0,15}:(?:0|[1-9]\d{0,2})|t:-[1-9]\d{0,15}:[wfrsg]:[01]|d:-[1-9]\d{0,15}:[a-f0-9]{12}|e:-[1-9]\d{0,15}:[a-f0-9]{12}:[01]|u:-[1-9]\d{0,15}:(?:ar|en)|o:-[1-9]\d{0,15}:(?:12|24):[gh]|[cx]:[a-f0-9]{24})$/u;
 export const validPhase4CommunityRoute=(s:unknown):s is string=>typeof s==='string'&&
  Buffer.byteLength(s,'utf8')<=64&&route.test(s);
 const esc=(s:string):string=>s.replace(/&/gu,'&amp;').replace(/</gu,'&lt;')
@@ -21,11 +21,30 @@ const help='للتعديل أرسل في خاص البوت أحد الأوامر
  +'<code>/clearruleslink -100123</code>\n'
  +'<code>/replyrate -100123 معرف_القاعدة 90</code>\n'
  +'<code>/servicedelay -100123 120</code>\n'
+ +'<code>/greetinglang -100123 en</code>\n'
+ +'<code>/greetingtext -100123 welcome en Welcome {العضو}</code>\n'
+ +'<code>/greetingclock -100123 +03:00 12 hijri</code>\n'
  +'يظهر تأكيد مستقل لكل تعديل، وتظل الميزات مغلقة حتى تفعّلها.';
 export function parsePhase4CommunityCommand(text:string):
  {kind:'HOME'}|{kind:'VIEW';chatId:string}|{kind:'EDIT';chatId:string;request:DraftRequest}|
  {kind:'DIAGNOSE';chatId:string;sample:string;topicId?:number}|null{
  if(text==='/community')return {kind:'HOME'};
+ const language=/^\/greetinglang (-[1-9]\d{0,15}) (ar|en)$/u.exec(text);
+ if(language)return {kind:'EDIT',chatId:language[1]!,
+  request:{kind:'GROUP_LANGUAGE',language:language[2]! as CommunityLanguage}};
+ const translated=/^\/greetingtext (-[1-9]\d{0,15}) (welcome|farewell) (ar|en) ([^\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]{1,800})$/u.exec(text);
+ if(translated)return {kind:'EDIT',chatId:translated[1]!,request:{
+  kind:translated[2]==='welcome'?'WELCOME_LOCALIZED':'FAREWELL_LOCALIZED',
+  language:translated[3]! as CommunityLanguage,text:translated[4]!.trim()}};
+ const clock=/^\/greetingclock (-[1-9]\d{0,15}) ([+-])([01]\d):([0-5]\d) (12|24) (gregorian|hijri)$/u.exec(text);
+ if(clock){
+  const offset=(clock[2]==='-'?-1:1)*(Number(clock[3])*60+Number(clock[4]));
+  if(offset< -720||offset>840)return null;
+  return {kind:'EDIT',chatId:clock[1]!,request:{kind:'GROUP_CLOCK',
+   utcOffsetMinutes:offset,clockFormat:clock[5]! as CommunityClockFormat,
+   calendar:clock[6]! as CommunityCalendar}};
+ }
+
  const link=/^\/setruleslink (-[1-9]\d{0,15}) (\S{1,256})$/u.exec(text);
  if(link)return validCommunityRulesUrl(link[2])?
   {kind:'EDIT',chatId:link[1]!,request:{kind:'RULES_LINK_SET',text:link[2]!}}:null;
@@ -120,17 +139,46 @@ export async function phase4CommunityScreen(service:Phase4CommunityService,actor
    '\nتسجيل تغييرات المجموعة: '+label(c.changeLogEnabled??false)+
    '\nالرسائل الخدمية: '+label(c.serviceCleanup?.enabled??false)+
    '\nمدة حذف رسائل الخدمة: '+((c.serviceCleanup?.delayMs??120000)/1000)+' ثانية'+
-   '\nفاصل ردود المجموعة: '+Math.floor(c.groupCooldownMs/1000)+' ثوانٍ\n\n'+help,
+   '\nفاصل ردود المجموعة: '+Math.floor(c.groupCooldownMs/1000)+' ثوانٍ'+
+   '\nاللغة: '+(c.language??'ar')+'\nنظام الوقت: '+(c.clockFormat??'24')+
+   '\nالتقويم: '+(c.calendar??'gregorian')+'\nإزاحة UTC: '+c.utcOffsetMinutes+' دقيقة'+
+   '\nقالب الترحيب المترجم: '+(c.welcome.localized?.[c.language??'ar']?'متاح':'غير محدد')+
+   '\nقالب الوداع المترجم: '+(c.farewell.localized?.[c.language??'ar']?'متاح':'غير محدد')+
+   '\n\n'+help,
    keyboard:k([
     [btn('👋 '+(c.welcome.enabled?'إيقاف':'تفعيل')+' الترحيب','p4c:1:t:'+id+':w:'+(c.welcome.enabled?'0':'1'))],
     [btn('👋 '+(c.farewell.enabled?'إيقاف':'تفعيل')+' الوداع','p4c:1:t:'+id+':f:'+(c.farewell.enabled?'0':'1'))],
     [btn('🤖 '+(c.repliesEnabled?'إيقاف':'تفعيل')+' الردود','p4c:1:t:'+id+':r:'+(c.repliesEnabled?'0':'1'))],
     [btn('📋 قائمة الردود','p4c:1:r:'+id+':0')],
+    [btn('🌐 اللغة: '+(c.language??'ar'),'p4c:1:u:'+id+':'+((c.language??'ar')==='ar'?'en':'ar'))],
+    [btn('🕒 الساعة: '+(c.clockFormat??'24'),'p4c:1:o:'+id+':'+((c.clockFormat??'24')==='24'?'12':'24')+':'+((c.calendar??'gregorian')==='hijri'?'h':'g'))],
+    [btn('📅 التقويم: '+(c.calendar??'gregorian'),'p4c:1:o:'+id+':'+(c.clockFormat??'24')+':'+((c.calendar??'gregorian')==='hijri'?'g':'h'))],
     [btn('🧹 '+(c.serviceCleanup?.enabled?'إيقاف':'تفعيل')+' تنظيف رسائل الخدمة','p4c:1:t:'+id+':s:'+(c.serviceCleanup?.enabled?'0':'1'))],
     [btn('📝 '+(c.changeLogEnabled?'إيقاف':'تفعيل')+' سجل تغييرات المجموعة','p4c:1:t:'+id+':g:'+(c.changeLogEnabled?'0':'1'))],
     [btn('🕘 تغييرات اسم/صورة المجموعة','p4c:1:h:'+id)],
     [btn('↩️ المجموعات','p4c:1:l:0'),btn('🏠 لوحة المالك','mi:1:h')]
    ])};
+ }
+ const localeClick=/^p4c:1:u:(-[1-9]\d{0,15}):(ar|en)$/u.exec(data);
+ if(localeClick){
+  const draft=await service.pending(actorId,{kind:'GROUP_LANGUAGE',
+   language:localeClick[2]! as CommunityLanguage},localeClick[1]!);
+  return {text:service.preview(draft)+'\nلا يطبّق الإعداد قبل الاعتماد.',
+   keyboard:k([[btn('✅ اعتماد','p4c:1:c:'+draft.id)],
+    [btn('❌ إلغاء','p4c:1:x:'+draft.id)],
+    [btn('↩️ المجموعة','p4c:1:g:'+draft.chatId)]])};
+ }
+ const timeClick=/^p4c:1:o:(-[1-9]\d{0,15}):(12|24):([gh])$/u.exec(data);
+ if(timeClick){
+  const config=await service.view(actorId,timeClick[1]!);
+  const draft=await service.pending(actorId,{kind:'GROUP_CLOCK',
+   clockFormat:timeClick[2]! as CommunityClockFormat,
+   calendar:timeClick[3]==='h'?'hijri':'gregorian',
+   utcOffsetMinutes:config.utcOffsetMinutes},timeClick[1]!);
+  return {text:service.preview(draft)+'\nلا يطبّق الإعداد قبل الاعتماد.',
+   keyboard:k([[btn('✅ اعتماد','p4c:1:c:'+draft.id)],
+    [btn('❌ إلغاء','p4c:1:x:'+draft.id)],
+    [btn('↩️ المجموعة','p4c:1:g:'+draft.chatId)]])};
  }
  const history=/^p4c:1:h:(-[1-9]\d{0,15})$/u.exec(data);
  if(history){
