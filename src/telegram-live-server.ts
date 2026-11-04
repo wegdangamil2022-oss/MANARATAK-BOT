@@ -1,5 +1,6 @@
 import {GroupProtectionPolicyService} from './group-protection-policy.js';
 import {Phase4CommunityService} from './phase4-community.js';
+import {Phase4ServiceCleanupDispatcher,TelegramBotApiServiceCleanupGateway} from './phase4-service-cleanup.js';
 import {startProtectionMaintenance} from './protection-maintenance.js';
 import {createServer,type Server} from 'node:http';
 import {lstat,realpath} from 'node:fs/promises';
@@ -187,10 +188,14 @@ export async function createLiveTelegramServer(config:LiveTelegramConfig,
   new TelegramBotApiCallbackAcker(check.token,request)));
  server.once('listening',()=>{
   const protection=new GroupProtectionPolicyService(store,policy);
+  const serviceCleaner=new Phase4ServiceCleanupDispatcher(store,policy,
+   new TelegramBotApiServiceCleanupGateway(check.token,request),Date.now,safetyGate);
   const cleanup=startProtectionMaintenance(async()=>{
    const result=await protection.cleanupFloodWindows();
    if(result.status==='CLOCK_UNTRUSTED')throw Error('PROTECTION_CLOCK_UNTRUSTED');
-  },undefined,()=>process.stderr.write('PROTECTION_MAINTENANCE_FAILED\n'));
+   // Explicitly enabled group service deletions only; no retries of unknown API outcomes.
+   await serviceCleaner.runDue(4);
+  },undefined,()=>process.stderr.write('PROTECTION_OR_SERVICE_MAINTENANCE_FAILED\n'));
   protectionMaintenanceStops.set(server,cleanup.stop);
   server.once('close',()=>{void cleanup.stop();});
  });
