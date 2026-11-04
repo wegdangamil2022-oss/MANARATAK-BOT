@@ -481,7 +481,7 @@ export class TelegramUpdateApplication {
     const {actorId,chatId,kind,text}=event;
     const communityCommand=kind==='private'?parsePhase4CommunityCommand(text):null;
     if(kind==='private'&&(communityCommand||event.callbackData?.startsWith('p4c:1:')||
-      (this.opts.community&&['mi:1:i:09:01','mi:1:i:09:05','mi:1:i:07:10'].includes(event.callbackData??'')))){
+      (this.opts.community&&['mi:1:i:09:01','mi:1:i:09:04','mi:1:i:09:05','mi:1:i:09:15','mi:1:i:09:16','mi:1:i:07:10'].includes(event.callbackData??'')))){
      if(!this.opts.policy.isOwner(actorId)||!this.opts.community)
       return {status:'DENIED',reason:'COMMUNITY_EDITOR_DISABLED'};
      const screen=await phase4CommunityScreen(this.opts.community,actorId,
