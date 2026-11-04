@@ -4,9 +4,10 @@ import {Policy} from './policy.js';
 import {defaultCommunityConfig,emptyCommunityState,validCommunityConfig,
  matchCommunityRule,renderCommunityTemplate,selectCommunityRule,normalizeCommunityMatch,
  type CommunityConfig,type CommunityInput,type CommunityDraft,type CommunityDraftKind,
- type ReplyMatch,type CommunityAutomationState,type CommunityEventKind} from './phase4-community-model.js';
+ type ReplyMatch,type CommunityAutomationState,type CommunityEventKind,type CommunityServiceKind,
+ type CommunityServiceChange} from './phase4-community-model.js';
 
-export type DraftRequest={kind:CommunityDraftKind;text?:string;trigger?:string;match?:ReplyMatch;ruleId?:string;topicId?:number;cooldownMs?:number};
+export type DraftRequest={kind:CommunityDraftKind;text?:string;trigger?:string;match?:ReplyMatch;ruleId?:string;topicId?:number;cooldownMs?:number;delayMs?:number};
 export interface CommunitySendProposal{
  readonly text:string;readonly chatId:string;readonly actorId:string;
  readonly kind:CommunityEventKind;readonly policyVersion:number;readonly topicId?:number;
@@ -69,6 +70,9 @@ export class Phase4CommunityService{
    if(kind==='REPLY_COOLDOWN'&&(!Number.isInteger(request.cooldownMs)||
       request.cooldownMs===undefined||request.cooldownMs<1000||request.cooldownMs>86400000))
     throw Error('COMMUNITY_COOLDOWN_INVALID');
+   if(kind==='SERVICE_CLEANUP_DELAY'&&(!Number.isInteger(request.delayMs)||
+      request.delayMs===undefined||request.delayMs<30000||request.delayMs>3600000))
+    throw Error('COMMUNITY_SERVICE_DELAY_INVALID');
    if(kind==='REPLY_ADD'&&request.match==='COMMAND'&&!/^m_[a-z][a-z0-9_]{0,23}$/u.test(request.trigger??''))
     throw Error('COMMUNITY_COMMAND_INVALID');
    const id=randomBytes(12).toString('hex');
@@ -79,7 +83,8 @@ export class Phase4CommunityService{
     ...(request.match!==undefined?{match:request.match}:{}),
     ...(request.ruleId!==undefined?{ruleId:request.ruleId}:{}),
     ...(request.topicId!==undefined?{topicId:request.topicId}:{}),
-    ...(request.cooldownMs!==undefined?{cooldownMs:request.cooldownMs}:{})};
+    ...(request.cooldownMs!==undefined?{cooldownMs:request.cooldownMs}:{}),
+    ...(request.delayMs!==undefined?{delayMs:request.delayMs}:{})};
    s.phase4Community??=emptyCommunityState();
    const st=s.phase4Community;
    st.drafts=st.drafts.filter(d=>d.actorId!==actorId&&d.expiresAt>now).slice(-90);
@@ -119,6 +124,11 @@ export class Phase4CommunityService{
     case 'FAREWELL_OFF':config.farewell.enabled=false;break;
     case 'REPLIES_ON':config.repliesEnabled=true;break;
     case 'REPLIES_OFF':config.repliesEnabled=false;break;
+    case 'CHANGE_LOG_ON':config.changeLogEnabled=true;break;
+    case 'CHANGE_LOG_OFF':config.changeLogEnabled=false;break;
+    case 'SERVICE_CLEANUP_ON':config.serviceCleanup={...config.serviceCleanup??{delayMs:120000},enabled:true};break;
+    case 'SERVICE_CLEANUP_OFF':config.serviceCleanup={...config.serviceCleanup??{delayMs:120000},enabled:false};break;
+    case 'SERVICE_CLEANUP_DELAY':config.serviceCleanup={...config.serviceCleanup??{enabled:false},delayMs:draft.delayMs!};break;
     case 'REPLY_REMOVE':config.rules=config.rules.filter(r=>r.id!==draft.ruleId);break;
     case 'REPLY_ENABLE':config.rules.find(r=>r.id===draft.ruleId)!.enabled=true;break;
     case 'REPLY_DISABLE':config.rules.find(r=>r.id===draft.ruleId)!.enabled=false;break;
@@ -142,6 +152,70 @@ export class Phase4CommunityService{
     reason:'COMMUNITY_'+draft.kind,policyVersion:config.version,at:now});
    return structuredClone(config);
   });
+ }
+ /** A trusted Telegram service event, never an input command.
+  * Keep only event kind, irreversible hash of opaque update/actor keys and a
+  * bounded one-shot deletion intent, never names, titles or photo file ids.
+  */
+ async recordServiceEvent(input:{
+   chatId:string;actorId:string;messageId:number;kind:CommunityServiceKind;
+   updateKey:string;sentAtMs?:number;
+ }):Promise<boolean>{
+  const now=this.clock();
+  if(!validNow(now)||!isGroup(input.chatId)||
+     !/^[1-9]\d{0,15}$/u.test(input.actorId)||
+     !Number.isSafeInteger(input.messageId)||input.messageId<1||input.messageId>2147483647||
+     !/^b3-webhook:[A-Za-z0-9_-]{1,80}:\d+$/u.test(input.updateKey)||
+     !['JOIN','LEAVE','TITLE_CHANGED','PHOTO_CHANGED','PHOTO_REMOVED'].includes(input.kind))
+   return false;
+  // Never delete old messages from replayed or delayed updates. Legitimate
+  // Telegram date is validated by the event parser, but may be absent in tests.
+  if(input.sentAtMs!==undefined&&(!Number.isSafeInteger(input.sentAtMs)||
+    input.sentAtMs>now+60000||now-input.sentAtMs>900000))return false;
+  return this.store.transaction(s=>{
+   if(!this.policy.canUseChat(s,input.chatId,'navigation')||
+      s.chats.filter(x=>x.id===input.chatId&&x.approved).length!==1)return false;
+   const config=activeConfig(s,input.chatId);
+   if(!config||!validCommunityConfig(config))return false;
+   const isChange=input.kind!=='JOIN'&&input.kind!=='LEAVE';
+   const shouldLog=isChange&&config.changeLogEnabled===true;
+   const shouldClean=config.serviceCleanup?.enabled===true;
+   if(!shouldLog&&!shouldClean)return false;
+   const chat=s.chats.find(x=>x.id===input.chatId)!;
+   const key=hex('P4:SERVICE:'+input.updateKey),actorDigest=hex('P4:SERVICE:ACTOR:'+input.chatId+':'+input.actorId);
+   s.phase4Community??=emptyCommunityState();
+   const state=s.phase4Community;
+   let recorded=false;
+   if(shouldLog){
+    state.serviceChanges=(state.serviceChanges??[]).filter(x=>now-x.at<7*86400000);
+    if(!state.serviceChanges.some(x=>x.key===key)){
+     const kind=input.kind as CommunityServiceChange['kind'];
+     state.serviceChanges=[...state.serviceChanges.slice(-999),
+      {key,chatId:input.chatId,kind,actorDigest,at:now}];
+     recorded=true;
+    }
+   }
+   if(shouldClean){
+    state.cleanupJobs=(state.cleanupJobs??[]).filter(x=>
+      x.status==='QUEUED'||x.status==='SENDING'||now-x.observedAt<7*86400000);
+    if(state.cleanupJobs.length>=1000)return recorded;
+    if(!state.cleanupJobs.some(x=>x.key===key||
+      x.chatId===input.chatId&&x.messageId===input.messageId)){
+     state.cleanupJobs.push({key,chatId:input.chatId,messageId:input.messageId,kind:input.kind,
+       chatVersion:chat.version,policyVersion:config.version,observedAt:now,
+       dueAt:now+config.serviceCleanup!.delayMs,status:'QUEUED'});
+     recorded=true;
+    }
+   }
+   return recorded;
+  });
+ }
+ async recentChanges(actorId:string,chatId:string):Promise<CommunityServiceChange[]>{
+  const state=await this.store.snapshot();
+  groupAvailable(state,this.policy,actorId,chatId);
+  const now=this.clock();
+  return structuredClone((state.phase4Community?.serviceChanges??[]).filter(x=>x.chatId===chatId&&
+    x.at<=now&&now-x.at<7*86400000).slice(-20).reverse());
  }
  /** Owner-only, side-effect-free dry run for a supplied sample message.
   * Never persists the query, consumes quotas or asks Telegram for a member.
@@ -226,6 +300,8 @@ export class Phase4CommunityService{
    return 'مراجعة '+(draft.kind==='REPLY_ENABLE'?'تفعيل':'إيقاف')+' القاعدة: '+clean(draft.ruleId??'');
   if(draft.kind==='REPLY_COOLDOWN')return 'مراجعة فاصل الرد للقاعدة '+clean(draft.ruleId??'')+
     ': '+(draft.cooldownMs!/1000)+' ثانية';
+  if(draft.kind==='SERVICE_CLEANUP_DELAY')return 'تحديد تأخير تنظيف الرسائل الخدمية: '+
+   (draft.delayMs!/1000)+' ثانية';
   return 'معاينة التغيير: '+draft.kind;
  }
 }
