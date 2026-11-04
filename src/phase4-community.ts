@@ -1,6 +1,8 @@
 import {createHash,randomBytes} from 'node:crypto';
 import {BotStore,type BotState} from './store.js';
 import {Policy} from './policy.js';
+import {validCommunityPhotoId,validCommunityLinkButtons,communityLinkKeyboard,
+ type CommunityLinkKeyboard} from './phase4-community-rich.js';
 import {defaultCommunityConfig,emptyCommunityState,validCommunityConfig,
  matchCommunityRule,renderCommunityTemplate,selectCommunityRule,selectCommunityGreeting,normalizeCommunityMatch,validCommunityRulesUrl,
  type CommunityConfig,type CommunityInput,type CommunityDraft,type CommunityDraftKind,
@@ -8,10 +10,12 @@ import {defaultCommunityConfig,emptyCommunityState,validCommunityConfig,
  type CommunityServiceChange,type CommunityLanguage,type CommunityCalendar,type CommunityClockFormat} from './phase4-community-model.js';
 
 export type DraftRequest={kind:CommunityDraftKind;text?:string;trigger?:string;match?:ReplyMatch;ruleId?:string;topicId?:number;cooldownMs?:number;delayMs?:number;
- language?:CommunityLanguage;calendar?:CommunityCalendar;clockFormat?:CommunityClockFormat;utcOffsetMinutes?:number};
+ language?:CommunityLanguage;calendar?:CommunityCalendar;clockFormat?:CommunityClockFormat;utcOffsetMinutes?:number;
+ photoFileId?:string;buttonText?:string;buttonUrl?:string};
 export interface CommunitySendProposal{
  readonly text:string;readonly chatId:string;readonly actorId:string;
  readonly kind:CommunityEventKind;readonly policyVersion:number;readonly topicId?:number;
+ readonly photoFileId?:string;readonly communityLinks?:CommunityLinkKeyboard;
 }
 /** Read-only administrative explanation, never stored with student text. */
 export type CommunityDiagnostic={status:'REPLIES_DISABLED'|'NO_MATCH'}|
@@ -89,6 +93,17 @@ export class Phase4CommunityService{
     throw Error('COMMUNITY_CLOCK_SETTINGS_INVALID');
    if(kind==='REPLY_ADD'&&request.match==='COMMAND'&&!/^m_[a-z][a-z0-9_]{0,23}$/u.test(request.trigger??''))
     throw Error('COMMUNITY_COMMAND_INVALID');
+   if((kind==='WELCOME_PHOTO_SET'||kind==='FAREWELL_PHOTO_SET')&&
+     !validCommunityPhotoId(request.photoFileId))throw Error('COMMUNITY_PHOTO_ID_INVALID');
+   if(kind==='WELCOME_BUTTON_ADD'||kind==='FAREWELL_BUTTON_ADD'){
+    const target=kind==='WELCOME_BUTTON_ADD'?current.welcome:current.farewell;
+    if(!validCommunityLinkButtons([{text:request.buttonText??'',url:request.buttonUrl??''}]))
+     throw Error('COMMUNITY_BUTTON_INVALID');
+    if((target.buttons?.length??0)>=3)throw Error('COMMUNITY_BUTTON_CAPACITY');
+    if(target.buttons?.some(b=>b.url===request.buttonUrl||
+      b.text.normalize('NFKC').trim()===request.buttonText?.normalize('NFKC').trim()))
+     throw Error('COMMUNITY_BUTTON_DUPLICATE');
+   }
    const id=randomBytes(12).toString('hex');
    const draft:CommunityDraft={id,actorId,chatId,chatVersion,configVersion:current.version,kind,
     createdAt:now,expiresAt:now+120000,
@@ -102,7 +117,10 @@ export class Phase4CommunityService{
     ...(request.language!==undefined?{language:request.language}:{}),
     ...(request.clockFormat!==undefined?{clockFormat:request.clockFormat}:{}),
     ...(request.calendar!==undefined?{calendar:request.calendar}:{}),
-    ...(request.utcOffsetMinutes!==undefined?{utcOffsetMinutes:request.utcOffsetMinutes}:{})};
+    ...(request.utcOffsetMinutes!==undefined?{utcOffsetMinutes:request.utcOffsetMinutes}:{}),
+    ...(request.photoFileId!==undefined?{photoFileId:request.photoFileId}:{}),
+    ...(request.buttonText!==undefined?{buttonText:request.buttonText}:{}),
+    ...(request.buttonUrl!==undefined?{buttonUrl:request.buttonUrl}:{})};
    s.phase4Community??=emptyCommunityState();
    const st=s.phase4Community;
    st.drafts=st.drafts.filter(d=>d.actorId!==actorId&&d.expiresAt>now).slice(-90);
@@ -134,6 +152,23 @@ export class Phase4CommunityService{
    const config=configured(s,draft.chatId);
    if(config.version!==draft.configVersion)throw Error('COMMUNITY_DRAFT_STALE');
    switch(draft.kind){
+    case 'WELCOME_PHOTO_SET':config.welcome.photoFileId=draft.photoFileId!;break;
+    case 'WELCOME_PHOTO_CLEAR':delete config.welcome.photoFileId;break;
+    case 'FAREWELL_PHOTO_SET':config.farewell.photoFileId=draft.photoFileId!;break;
+    case 'FAREWELL_PHOTO_CLEAR':delete config.farewell.photoFileId;break;
+    case 'WELCOME_BUTTON_ADD':
+    case 'FAREWELL_BUTTON_ADD':{
+     const target=draft.kind==='WELCOME_BUTTON_ADD'?config.welcome:config.farewell;
+     const newButton={text:draft.buttonText!,url:draft.buttonUrl!};
+     if((target.buttons?.length??0)>=3||
+       target.buttons?.some(b=>b.url===newButton.url||
+         b.text.normalize('NFKC').trim()===newButton.text.normalize('NFKC').trim()))
+      throw Error('COMMUNITY_BUTTON_DUPLICATE');
+     target.buttons=[...target.buttons??[],newButton];
+     break;
+    }
+    case 'WELCOME_BUTTONS_CLEAR':delete config.welcome.buttons;break;
+    case 'FAREWELL_BUTTONS_CLEAR':delete config.farewell.buttons;break;
     case 'WELCOME_LOCALIZED':
      config.welcome.localized={...config.welcome.localized,[draft.language!]:draft.text!};break;
     case 'FAREWELL_LOCALIZED':
@@ -288,8 +323,14 @@ export class Phase4CommunityService{
       !this.policy.canUseChat(s,input.chatId,'navigation')||
       s.chats.filter(c=>c.id===input.chatId&&c.approved).length!==1)return null;
    let template:string,ruleId:string|undefined;
-   if(input.kind==='JOIN'){if(!config.welcome.enabled)return null;template=selectCommunityGreeting(config,'welcome');}
-   else if(input.kind==='LEAVE'){if(!config.farewell.enabled)return null;template=selectCommunityGreeting(config,'farewell');}
+   let photoFileId:string|undefined,communityLinks:CommunityLinkKeyboard|undefined;
+   if(input.kind==='JOIN'||input.kind==='LEAVE'){
+    const target=input.kind==='JOIN'?config.welcome:config.farewell;
+    if(!target.enabled)return null;
+    template=selectCommunityGreeting(config,input.kind==='JOIN'?'welcome':'farewell');
+    photoFileId=target.photoFileId;
+    communityLinks=communityLinkKeyboard(target.buttons);
+   }
    else{
     const rule=selectCommunityRule(config,input.messageText!,input.topicId);
     if(!rule)return null;
@@ -311,17 +352,35 @@ export class Phase4CommunityService{
      {language:config.language??'ar',clockFormat:config.clockFormat??'24',
       calendar:config.calendar??'gregorian'});}
    catch{return null;}
+   // A Telegram photo caption has a 1024-byte post-escaping budget; do not
+   // enqueue a job which the Bot API would reject after quota reservation.
+   if(photoFileId&&Buffer.byteLength(text,'utf8')>1024)return null;
    const receipt={key,chatId:input.chatId,at:now,kind:input.kind,actorDigest,
     ...(ruleId?{ruleId}:{})};
    s.phase4Community??=emptyCommunityState();
    s.phase4Community.receipts=[...active.slice(-2499),receipt];
    return {text,chatId:input.chatId,actorId:input.actorId,kind:input.kind,
-    policyVersion:config.version,...(input.topicId!==undefined?{topicId:input.topicId}:{})};
+    policyVersion:config.version,...(input.topicId!==undefined?{topicId:input.topicId}:{}),
+    ...(photoFileId?{photoFileId}:{}),
+    ...(communityLinks?{communityLinks}:{})};
   });
  }
  /** Preview never calls the Telegram gateway, writes a send or records a vote. */
  preview(draft:CommunityDraft):string{
   const clean=(x:string)=>safe(x.slice(0,250));
+  if(draft.kind==='WELCOME_PHOTO_SET'||draft.kind==='FAREWELL_PHOTO_SET')
+   return '<b>معاينة صورة '+(draft.kind==='WELCOME_PHOTO_SET'?'الترحيب':'الوداع')+
+    '</b>\nمعرّف صورة تيليجرام محفوظ بصورة خاصة بالمالك؛ لن تُرسل قبل التفعيل.'+
+    '\nالتحقق من وجود الملف يتم بواسطة Telegram عند إرسال الرسالة.';
+  if(draft.kind==='WELCOME_PHOTO_CLEAR'||draft.kind==='FAREWELL_PHOTO_CLEAR')
+   return '<b>حذف صورة '+(draft.kind==='WELCOME_PHOTO_CLEAR'?'الترحيب':'الوداع')+
+    '</b>\nسيعود البوت لإرسال قالب نصي.';
+  if(draft.kind==='WELCOME_BUTTON_ADD'||draft.kind==='FAREWELL_BUTTON_ADD')
+   return '<b>معاينة زر رابط '+(draft.kind==='WELCOME_BUTTON_ADD'?'الترحيب':'الوداع')+
+    '</b>\nالاسم: '+clean(draft.buttonText??'')+
+    '\nالوجهة: '+clean(draft.buttonUrl??'')+'\nزر رابط فقط؛ لا يستدعي أمرًا داخل البوت.';
+  if(draft.kind==='WELCOME_BUTTONS_CLEAR'||draft.kind==='FAREWELL_BUTTONS_CLEAR')
+   return '<b>حذف جميع أزرار الرابط</b> من '+(draft.kind==='WELCOME_BUTTONS_CLEAR'?'الترحيب':'الوداع');
   if(draft.kind==='WELCOME_LOCALIZED'||draft.kind==='FAREWELL_LOCALIZED')
    return '<b>معاينة قالب '+(draft.kind==='WELCOME_LOCALIZED'?'الترحيب':'الوداع')+
     ' بلغة '+draft.language+'</b>\n'+clean(draft.text??'');
