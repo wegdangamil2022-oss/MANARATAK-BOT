@@ -34,10 +34,15 @@ export class VerifiedOnboardingWelcome{
       ['INTENT','STARTED','UNKNOWN_OUTCOME'].includes(o.status)))return null;
   const policyEpoch=subscriptionVerificationEpoch(s,this.policy,member,chat,now);
   if(!policyEpoch)return null;
-  const challenge=this.captcha.challenge(s,chat,member);
-  return sha([chat,member,this.policy.chatRevision(s,chat),
-   challenge?.reference??'NO_CAPTCHA_REQUIRED',this.rules.epoch(s,chat),
-   s.subscriptionRequirements.filter(r=>r.chatId===chat),policyEpoch]);
+  // Identity is the joining member's own CAPTCHA setting/revision, NOT
+  // the mutable moderation state. An independent sanction or a later channel
+  // re-check must never send a second "first-time" welcome.
+  const challenge=this.captcha.challenge(s,chat,member),settings=this.captcha.settings(s,chat),
+   revision=this.policy.chatRevision(s,chat);
+  const session=challenge?.reference??(captcha==='PASSED'&&settings?.enabled
+   ?'captcha_'+sha([chat,member,settings.revision,revision]).slice(0,24)
+   :'CAPTCHA_NOT_REQUIRED');
+  return sha(['PRIVATE_WELCOME_V1',chat,member,revision,session]);
  }
  /** Call only after SubscriptionGate has verified MEMBER through Telegram.
   * If any gate changes while the reply is being built, the claim is denied.
