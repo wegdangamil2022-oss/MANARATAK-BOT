@@ -495,8 +495,10 @@ export class TelegramUpdateApplication {
        challenge=captcha.challenge(current,group,event.actorId),mode=subscriptionRequirementMode(current,group);
       if(challenge&&captcha.status(current,group,event.actorId)==='PASSED'&&
          ['ACCEPTED','NOT_REQUIRED'].includes(captchaRules.status(current,group,event.actorId))&&
-         (mode==='NONE'||mode==='PAUSED'))
-       standaloneWelcome=await new VerifiedOnboardingWelcome(this.opts.store,this.opts.policy,captcha,this.clock).claimStandalone(group,event.actorId,challenge.epoch);
+         (mode==='NONE'||mode==='PAUSED')){
+       let currentMember=false;try{currentMember=await this.opts.membership(group,event.actorId)==='VERIFIED';}catch{/* unknown is not verified */}
+       if(currentMember)standaloneWelcome=await new VerifiedOnboardingWelcome(this.opts.store,this.opts.policy,captcha,this.clock).claimStandalone(group,event.actorId,challenge.epoch);
+      }
      }
      const pending='تعذر إكمال رفع قيد التحقق آليًا؛ راجع المشرف. لم يُغيَّر أي قيد مستقل.';
      if(view||accepted||settled.attempted>0||settled.pending>0||settled.remaining>0){const screen=view??{text:accepted?'✅ حُفظت موافقتك على القوانين. تبقى القيود والمتطلبات المستقلة حسب شروطها.':'✅ اكتملت خطوة CAPTCHA. تبقى القيود والمتطلبات المستقلة حسب شروطها.',keyboard:{inline_keyboard:[[{text:'🏠 الرئيسية',callback_data:'pn:1:h'}]]}};return {status:'APPLIED',reason:'CAPTCHA_CHALLENGE_VIEW',plan:this.plan(event.actorId,screen.text+(standaloneWelcome?'\n\n<b>مرحبًا بك بعد إكمال التحقق</b> 🎉\nيمكنك المشاركة في المجموعة وفق قوانينها.':'')+(unavailableSubscription?'\nفحص الاشتراك المطلوب غير متاح حاليًا؛ راجع المشرف.':'')+(settled.pending>0?'\n'+pending:'')+(settled.remaining>0?'\nتوجد مجموعات أخرى لم تُراجع بعد؛ افتح البوت مجددًا.':''),undefined,screen.keyboard,event.callbackMessageId)};}
