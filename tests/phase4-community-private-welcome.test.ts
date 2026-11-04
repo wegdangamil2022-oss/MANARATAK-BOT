@@ -98,7 +98,9 @@ for(const engine of ['json','sqlite'] as const){
    assert.ok((await f.store.snapshot()).telegramReplyJobs?.some(j=>
     j.updateKey===personalized.deliveryKey&&j.privateReplyKind==='GROUP_SCOPED'));
    const saved=JSON.stringify((await f.store.snapshot()).phase4Community?.privateWelcomes);
-   assert.equal(saved.includes('301'),false);assert.equal(saved.includes('طالب'),false);
+   assert.equal(saved.includes('"actorId"'),false);
+   assert.equal(saved.includes('"memberId"'),false);
+   assert.equal(saved.includes('طالب'),false);
    assert.equal((await f.app().handle(f.privateMessage(14,deeplink))).plan,undefined);
    let attempts=0;
    const dispatcher=new TelegramReplyDispatcher(f.store,f.policy,
