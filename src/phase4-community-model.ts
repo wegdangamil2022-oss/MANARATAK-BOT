@@ -60,7 +60,8 @@ export interface CommunityConfig{
  changeLogEnabled?:boolean;
  /** Opt-in, privacy-limited decisions ledger; disabled by default. */
  decisionLogEnabled?:boolean;
- serviceCleanup?:{enabled:boolean;delayMs:number};
+ /** Missing per-kind flags preserve legacy behavior (both true). */
+ serviceCleanup?:{enabled:boolean;delayMs:number;joinEnabled?:boolean;leaveEnabled?:boolean};
  /** Optional expiry of confirmed bot-authored community responses. Disabled by default. */
  replyCleanup?:{enabled:boolean;delayMs:number};
 }
@@ -70,6 +71,7 @@ export type CommunityDraftKind='WELCOME_TEXT'|'FAREWELL_TEXT'|'REPLY_ADD'|'REPLY
  'REPLY_ENABLE'|'REPLY_DISABLE'|'REPLY_COOLDOWN'|
  'QUIET_HOURS_SET'|'QUIET_HOURS_CLEAR'|'TOPIC_COOLDOWN_SET'|'TOPIC_COOLDOWN_CLEAR'|
  'CHANGE_LOG_ON'|'CHANGE_LOG_OFF'|'DECISION_LOG_ON'|'DECISION_LOG_OFF'|'SERVICE_CLEANUP_ON'|'SERVICE_CLEANUP_OFF'|'SERVICE_CLEANUP_DELAY'|
+ 'SERVICE_JOIN_ON'|'SERVICE_JOIN_OFF'|'SERVICE_LEAVE_ON'|'SERVICE_LEAVE_OFF'|
  'REPLY_CLEANUP_ON'|'REPLY_CLEANUP_OFF'|'REPLY_CLEANUP_DELAY'|
  'RULES_LINK_SET'|'RULES_LINK_CLEAR'|
  'WELCOME_VARIANT_SET'|'WELCOME_VARIANT_CLEAR'|
@@ -186,6 +188,7 @@ const kinds=new Set<CommunityDraftKind>(['WELCOME_TEXT','FAREWELL_TEXT','REPLY_A
  'REPLY_ENABLE','REPLY_DISABLE','REPLY_COOLDOWN',
  'QUIET_HOURS_SET','QUIET_HOURS_CLEAR','TOPIC_COOLDOWN_SET','TOPIC_COOLDOWN_CLEAR',
  'CHANGE_LOG_ON','CHANGE_LOG_OFF','DECISION_LOG_ON','DECISION_LOG_OFF','SERVICE_CLEANUP_ON','SERVICE_CLEANUP_OFF','SERVICE_CLEANUP_DELAY',
+ 'SERVICE_JOIN_ON','SERVICE_JOIN_OFF','SERVICE_LEAVE_ON','SERVICE_LEAVE_OFF',
  'REPLY_CLEANUP_ON','REPLY_CLEANUP_OFF','REPLY_CLEANUP_DELAY',
  'RULES_LINK_SET','RULES_LINK_CLEAR',
  'WELCOME_VARIANT_SET','WELCOME_VARIANT_CLEAR',
@@ -235,7 +238,9 @@ export function validCommunityConfig(value:unknown):value is CommunityConfig{
   (x.decisionLogEnabled!==undefined&&typeof x.decisionLogEnabled!=='boolean')||
   (x.serviceCleanup!==undefined&&(!x.serviceCleanup||typeof x.serviceCleanup!=='object'||
     typeof x.serviceCleanup.enabled!=='boolean'||!Number.isInteger(x.serviceCleanup.delayMs)||
-    x.serviceCleanup.delayMs<30000||x.serviceCleanup.delayMs>3600000))||
+    x.serviceCleanup.delayMs<30000||x.serviceCleanup.delayMs>3600000||
+    (x.serviceCleanup.joinEnabled!==undefined&&typeof x.serviceCleanup.joinEnabled!=='boolean')||
+    (x.serviceCleanup.leaveEnabled!==undefined&&typeof x.serviceCleanup.leaveEnabled!=='boolean')))||
   (x.replyCleanup!==undefined&&(!x.replyCleanup||typeof x.replyCleanup!=='object'||
     typeof x.replyCleanup.enabled!=='boolean'||!Number.isInteger(x.replyCleanup.delayMs)||
     x.replyCleanup.delayMs<30000||x.replyCleanup.delayMs>3600000)))return false;
