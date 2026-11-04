@@ -1,4 +1,5 @@
 import {CaptchaEnforcement} from './captcha-enforcement.js';
+import type {CaptchaJoinNotices} from './captcha-join-notices.js';
 import {VerifiedOnboardingWelcome} from './onboarding-welcome.js';
 import {CaptchaRuleGate} from './captcha-rules.js';
 import {TelegramRuleActions} from './telegram-rule-actions.js';
@@ -162,6 +163,8 @@ export interface TelegramApplicationOptions {
   adminRoles?:TelegramAdminRoleGateway;
   moderationRights?:{gateway:TelegramBotApiModerationGateway;safety:()=>Promise<boolean>};
   ephemeralVerification?:boolean;
+  /** Optional opt-in CAPTCHA join notice queue; absent in mock-only and unarmed live runtimes. */
+  joinNotices?:CaptchaJoinNotices;
 }
 
 type Event = {updateId: number; actorId: string; chatId: string; kind: 'private' | 'group'; text: string; displayName?:string; username?:string; topicId?:number; entities?:unknown; messageId?:number; sentAt?:number; replyTo?:unknown; joins?:string[]; pinnedMessageId?:number; document?: IncomingDocument; protectionMedia?:ProtectionMedia; edited?:true; forwarded?:true; callbackData?:string; callbackQueryId?:string; callbackMessageId?:number};
@@ -234,7 +237,7 @@ function eventFrom(value:unknown):{event?:Event;reason:string} {
   }
   if(msg.new_chat_members!==undefined){
    if(kind!=='group'||forwarded||!positiveId(msg.message_id)||!positiveId(msg.date)||!Array.isArray(msg.new_chat_members)||msg.new_chat_members.length<1||msg.new_chat_members.length>100||['text','caption','document','photo','video','animation','audio','voice','video_note','sticker','poll','contact','location','left_chat_member','reply_to_message'].some(k=>msg[k]!==undefined)||!msg.new_chat_members.every(m=>isObject(m)&&positiveId(m.id)&&typeof m.is_bot==='boolean')||new Set(msg.new_chat_members.map(m=>(m as Record<string,unknown>).id)).size!==msg.new_chat_members.length)return {reason:'INVALID_GROUP_JOINS'};
-   return {event:{updateId:value.update_id as number,actorId:String(msg.from.id),chatId:String(msg.chat.id),kind,text:'',messageId:msg.message_id,sentAt:msg.date*1000,joins:msg.new_chat_members.filter(m=>isObject(m)&&m.is_bot===false).map(m=>String((m as Record<string,unknown>).id))},reason:'VALID'};
+   return {event:{updateId:value.update_id as number,actorId:String(msg.from.id),chatId:String(msg.chat.id),kind,text:'',messageId:msg.message_id,sentAt:msg.date*1000,joins:msg.new_chat_members.filter(m=>isObject(m)&&m.is_bot===false).map(m=>String((m as Record<string,unknown>).id)),...(msg.message_thread_id!==undefined?{topicId:msg.message_thread_id as number}:{})},reason:'VALID'};
   }
   if(kind==='group'){
    const decoded=protectionMediaFromMessage(msg);
@@ -463,7 +466,7 @@ export class TelegramUpdateApplication {
     const captcha=new CaptchaService(this.opts.store,this.opts.policy,this.opts.membership,this.clock),captchaEnforcement=new CaptchaEnforcement(this.opts.store,this.opts.policy,captcha,this.opts.moderation,this.opts.moderationRights,this.clock,this.opts.subscription),captchaRules=new CaptchaRuleGate(this.opts.store,this.opts.policy,captcha,this.opts.membership,this.clock);
     if(event.kind==='private'&&!event.callbackData?.startsWith('cr:1:')&&!event.callbackData?.startsWith('cp:1:')&&(event.callbackData!==undefined||!['/start','/captcha'].includes(event.text)))await captchaRules.cancel(event.actorId);
     if(event.kind==='private'&&this.opts.policy.isOwner(event.actorId)){
-     const owner=new TelegramCaptchaOwner(this.opts.store,this.opts.policy,captcha,this.clock,captchaEnforcement);
+     const owner=new TelegramCaptchaOwner(this.opts.store,this.opts.policy,captcha,this.clock,captchaEnforcement,this.opts.joinNotices);
      if(event.callbackData==='mi:1:i:04:07'||event.callbackData==='mi:1:i:04:10'||event.callbackData?.startsWith('ca:1:')){const view=await owner.handle(event.actorId,event.callbackData);return view?{status:'APPLIED',reason:'CAPTCHA_OWNER_VIEW',adminUIAccess:view.access,plan:this.plan(event.actorId,view.text,undefined,view.keyboard,event.callbackMessageId)}:{status:'DENIED',reason:'CAPTCHA_OWNER_UNAVAILABLE'};}
      await owner.cancel(event.actorId);
     }
@@ -525,7 +528,9 @@ export class TelegramUpdateApplication {
     if(this.opts.moderation&&event.kind==='private'&&(event.callbackData!==undefined?!event.callbackData.startsWith('mc:1:'):event.text.startsWith('/')||(Object.values(menuLabels) as string[]).includes(event.text)))await cancelModerationCommandReview(this.opts.store,event.actorId);
     if(event.joins){
      if(event.kind!=='group'||event.edited||event.forwarded||event.sentAt===undefined)return {status:'DENIED',reason:'INVALID_GROUP_JOINS'};
+     const trustedJoinKey='b3-webhook:'+this.opts.botId+':'+event.updateId;
      await captcha.observe(event.chatId,event.joins,'b3-webhook:'+this.opts.botId+':'+event.updateId,event.sentAt);
+     if(this.opts.joinNotices)await this.opts.joinNotices.observe(event.chatId,event.joins,trustedJoinKey,event.sentAt,event.topicId);
      if(this.opts.subscription)for(const member of event.joins)await this.opts.subscription.observeMember(event.chatId,member,event.sentAt);
      const status=await observeProtectionJoins(this.opts.store,this.opts.policy,this.clock,this.opts.protectionEnforcer,event.chatId,event.joins,event.sentAt,'b3-webhook:'+this.opts.botId+':'+event.updateId);
      if(captchaEnforcement.available()&&captchaEnforcement.consent(await this.opts.store.snapshot(),event.chatId)?.enabled)for(const member of event.joins)await captchaEnforcement.admit(event.chatId,member,'b3-webhook:'+this.opts.botId+':'+event.updateId,event.sentAt);
