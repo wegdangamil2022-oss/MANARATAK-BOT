@@ -12,7 +12,7 @@ import {defaultCommunityConfig,emptyCommunityState,validCommunityConfig,
  type CommunityServiceChange,type CommunityLanguage,type CommunityCalendar,type CommunityClockFormat,type CommunityJoinKind,type CommunityLeaveKind,
  type CommunityDecision,type CommunityDecisionReason} from './phase4-community-model.js';
 
-export type DraftRequest={kind:CommunityDraftKind;text?:string;trigger?:string;match?:ReplyMatch;source?:CommunityReplySource;sourceFaqId?:string;ruleId?:string;topicId?:number;cooldownMs?:number;delayMs?:number;startMinute?:number;endMinute?:number;
+export type DraftRequest={kind:CommunityDraftKind;text?:string;trigger?:string;match?:ReplyMatch;source?:CommunityReplySource;sourceFaqId?:string;ruleId?:string;topicId?:number;cooldownMs?:number;delayMs?:number;autoMessagesPerMinute?:number;startMinute?:number;endMinute?:number;
  language?:CommunityLanguage;calendar?:CommunityCalendar;clockFormat?:CommunityClockFormat;utcOffsetMinutes?:number;timeZone?:string;
  photoFileId?:string;buttonText?:string;buttonUrl?:string;joinKind?:CommunityJoinKind;leaveKind?:CommunityLeaveKind;};
 export interface CommunitySendProposal{
@@ -131,6 +131,9 @@ export class Phase4CommunityService{
    if(['REPLY_REMOVE','REPLY_ENABLE','REPLY_DISABLE','REPLY_COOLDOWN'].includes(kind)&&
       (!request.ruleId||!current.rules.some(r=>r.id===request.ruleId)))
     throw Error('COMMUNITY_RULE_MISSING');
+   if(kind==='AUTO_LIMIT_SET'&&(!Number.isInteger(request.autoMessagesPerMinute)||
+      request.autoMessagesPerMinute===undefined||request.autoMessagesPerMinute<1||
+      request.autoMessagesPerMinute>8))throw Error('COMMUNITY_AUTO_LIMIT_INVALID');
    if(kind==='REPLY_COOLDOWN'&&(!Number.isInteger(request.cooldownMs)||
       request.cooldownMs===undefined||request.cooldownMs<1000||request.cooldownMs>86400000))
     throw Error('COMMUNITY_COOLDOWN_INVALID');
@@ -198,6 +201,7 @@ export class Phase4CommunityService{
     ...(request.ruleId!==undefined?{ruleId:request.ruleId}:{}),
     ...(request.topicId!==undefined?{topicId:request.topicId}:{}),
     ...(request.cooldownMs!==undefined?{cooldownMs:request.cooldownMs}:{}),
+    ...(request.autoMessagesPerMinute!==undefined?{autoMessagesPerMinute:request.autoMessagesPerMinute}:{}),
     ...(request.delayMs!==undefined?{delayMs:request.delayMs}:{}),
     ...(request.startMinute!==undefined?{startMinute:request.startMinute}:{}),
     ...(request.endMinute!==undefined?{endMinute:request.endMinute}:{}),
@@ -340,6 +344,10 @@ export class Phase4CommunityService{
     case 'SERVICE_LEAVE_ON':case 'SERVICE_LEAVE_OFF':
      config.serviceCleanup={...config.serviceCleanup??{enabled:false,delayMs:120000},
       leaveEnabled:draft.kind==='SERVICE_LEAVE_ON'};break;
+    case 'SERVICE_PROFILE_ON':case 'SERVICE_PROFILE_OFF':
+     config.serviceCleanup={...config.serviceCleanup??{enabled:false,delayMs:120000},
+      profileEnabled:draft.kind==='SERVICE_PROFILE_ON'};break;
+    case 'AUTO_LIMIT_SET':config.autoMessagesPerMinute=draft.autoMessagesPerMinute!;break;
     case 'REPLY_CLEANUP_ON':config.replyCleanup={...config.replyCleanup??{delayMs:120000},enabled:true};break;
     case 'REPLY_CLEANUP_OFF':config.replyCleanup={...config.replyCleanup??{delayMs:120000},enabled:false};break;
     case 'REPLY_CLEANUP_DELAY':config.replyCleanup={...config.replyCleanup??{enabled:false},delayMs:draft.delayMs!};break;
@@ -428,7 +436,8 @@ export class Phase4CommunityService{
    const shouldObserve=isChange&&config.profileEditingEnabled===true;
    const shouldClean=config.serviceCleanup?.enabled===true&&
     (input.kind==='JOIN'?config.serviceCleanup.joinEnabled!==false:
-     input.kind==='LEAVE'?config.serviceCleanup.leaveEnabled!==false:true);
+     input.kind==='LEAVE'?config.serviceCleanup.leaveEnabled!==false:
+      config.serviceCleanup.profileEnabled!==false);
    if(!shouldLog&&!shouldClean&&!shouldObserve)return false;
    const chat=s.chats.find(x=>x.id===input.chatId)!;
    const key=hex('P4:SERVICE:'+input.updateKey),actorDigest=hex('P4:SERVICE:ACTOR:'+input.chatId+':'+input.actorId);
@@ -647,7 +656,7 @@ export class Phase4CommunityService{
    }
    const active=existing.filter(x=>x.at>now-86400000);
    const inGroup=active.filter(x=>x.chatId===input.chatId);
-   if(inGroup.filter(x=>x.at>now-60000).length>=8){
+   if(inGroup.filter(x=>x.at>now-60000).length>=(config.autoMessagesPerMinute??8)){
     record('GROUP_LIMIT',ruleId);return null;
    }
    const topicRate=input.kind==='TEXT'&&input.topicId!==undefined?
@@ -773,6 +782,14 @@ export class Phase4CommunityService{
    (draft.delayMs!/1000)+' ثانية. الحذف يتطلب صلاحية حديثة.';
   if(draft.kind==='REPLY_CLEANUP_ON')return 'تفعيل تنظيف ردود منارتك المؤكدة فقط بعد المهلة. لا يُحذف محتوى الأعضاء.';
   if(draft.kind==='REPLY_CLEANUP_OFF')return 'إيقاف حذف ردود منارتك المؤقتة؛ المهام القديمة تُلغى عند الإرسال.';
+  if(draft.kind==='AUTO_LIMIT_SET')return '<b>اعتماد ميزانية الإعلانات الآلية</b>\n'+
+   'السقف: '+draft.autoMessagesPerMinute+' رسائل خلال أي 60 ثانية في المجموعة، بما فيها الترحيب والوداع والردود الآلية. '+
+   'فترات الحماية الحالية للمجموعة والعضو والموضوع لا تتغير، والسقف الأقصى 8.';
+  if(draft.kind==='SERVICE_PROFILE_ON'||draft.kind==='SERVICE_PROFILE_OFF')return
+   '<b>تغيير تنظيف رسائل تغيير اسم/صورة المجموعة</b>\n'+
+   (draft.kind==='SERVICE_PROFILE_ON'?'السماح بحذفها بعد المهلة':'استبعادها من التنظيف')+
+   '. الرسائل المسجلة سابقًا لا تُحذف عند الإيقاف بسبب تغير إصدار السياسة. '+
+   'يتطلب التنظيف العام وصلاحيات Telegram السارية.';
   if(draft.kind==='SERVICE_JOIN_ON'||draft.kind==='SERVICE_JOIN_OFF')return 'تنظيف رسالة خدمة الدخول: '+(draft.kind==='SERVICE_JOIN_ON'?'مسموح':'متوقف')+
    '. تنظيف رسائل المغادرة مستقل ولا يتأثر بهذا الخيار.';
   if(draft.kind==='SERVICE_LEAVE_ON'||draft.kind==='SERVICE_LEAVE_OFF')return 'تنظيف رسالة خدمة المغادرة: '+(draft.kind==='SERVICE_LEAVE_ON'?'مسموح':'متوقف')+
