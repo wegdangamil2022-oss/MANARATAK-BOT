@@ -53,6 +53,10 @@ export class TelegramBotApiGroupProfileGateway implements Phase4GroupProfileGate
   if(!data?.ok||!data.result||typeof data.result!=='object'||Array.isArray(data.result))
    return false;
   const member=data.result as Record<string,unknown>;
+  const user=member.user;
+  if(!user||typeof user!=='object'||Array.isArray(user)||
+    (user as Record<string,unknown>).id!==this.botUserId||
+    (user as Record<string,unknown>).is_bot!==true)return false;
   return member.status==='creator'||member.status==='administrator'&&
    member.can_change_info===true;
  }
