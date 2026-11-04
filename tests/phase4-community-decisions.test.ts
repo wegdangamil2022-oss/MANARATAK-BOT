@@ -125,7 +125,7 @@ for(const engine of ['json','sqlite'] as const){
    await f.apply({kind:'QUIET_HOURS_SET',startMinute:0,endMinute:1439});
    assert.equal(await f.service.propose(input('hello','900',777),'b3-webhook:bot-main:100'),null);
    assert.equal((await f.service.recentDecisions(OWNER,CHAT))[0]?.reason,'QUIET_HOURS');
-   const reasons=(await f.service.recentDecisions(OWNER,CHAT)).map(x=>x.reason);
+   const reasons:string[]=(await f.service.recentDecisions(OWNER,CHAT)).map(x=>x.reason);
    for(const reason of ['TOPIC_COOLDOWN','GROUP_COOLDOWN','GROUP_LIMIT','QUIET_HOURS','RESERVED'])
     assert.ok(reasons.includes(reason),reason);
   }finally{await f.close();}
