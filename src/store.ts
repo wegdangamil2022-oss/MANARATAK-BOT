@@ -2,6 +2,7 @@ import {isValidFloodWindow,type FloodWindow} from './protection-flood.js';
 import {validGroupNetworks,type GroupNetwork} from './group-network-model.js';
 import {validCommunityFolders,type CommunityFolder} from './community-folder-model.js';
 import {validCommunityState,type CommunityAutomationState} from './phase4-community-model.js';
+import {validCommunityPhotoId,validCommunityLinkKeyboard} from './phase4-community-rich.js';
 import {validCommunityMessageMetadata,type CommunityMessageReceipt} from './community-message-receipt.js';
 import {validAdminUIAccess,type AdminUIAccess} from './protection-ui-access.js';
 import {validStudioState,type StudioState} from './button-studio-model.js';
@@ -98,6 +99,8 @@ export interface TelegramReplyJob {
   replyMarkup?:import('./telegram-menu.js').TelegramReplyKeyboard;
   inlineMarkup?:import('./telegram-inline-owner.js').TelegramInlineKeyboard;
   studioMarkup?:import('./telegram-studio-rich.js').StudioNativeKeyboard;
+  photoFileId?:string;
+  communityLinks?:import('./phase4-community-rich.js').CommunityLinkKeyboard;
   editMessageId?:number;messageThreadId?:number};
  status:'QUEUED'|'SENDING'|'SENT'|'FAILED_CONFIRMED'|'UNKNOWN_OUTCOME';
  attemptId?:string;startedAt?:number;messageId?:number;
@@ -365,6 +368,16 @@ export class BotStore {
         if(!validCommunityMessageMetadata(raw as TelegramReplyJob))return true;
         const plan=job.plan as Record<string,unknown>|undefined;
         if(plan?.messageThreadId!==undefined&&(!Number.isSafeInteger(plan.messageThreadId)||Number(plan.messageThreadId)<1||Number(plan.messageThreadId)>2147483647||typeof plan.chatId!=='string'||!plan.chatId.startsWith('-')||job.groupMenuAccess===undefined))return true;
+        if(plan?.photoFileId!==undefined||plan?.communityLinks!==undefined){
+         if(typeof plan.chatId!=='string'||!plan.chatId.startsWith('-')||
+            job.groupReplyKind!=='GENERAL'||job.groupMenuAccess===undefined||
+            plan.editMessageId!==undefined||
+            (plan.photoFileId!==undefined&&!validCommunityPhotoId(plan.photoFileId))||
+            (plan.communityLinks!==undefined&&!validCommunityLinkKeyboard(plan.communityLinks))||
+            (plan.photoFileId!==undefined&&
+             (typeof plan.text!=='string'||Buffer.byteLength(plan.text,'utf8')>1024)))
+          return true;
+        }
         if(job.accessDenialCode!==undefined&&(
            job.status!=='FAILED_CONFIRMED'||typeof job.accessDenialCode!=='string'||
            !['LEGACY_UNVERIFIABLE','ACCESS_RECHECK_FAILED','GROUP_UNAVAILABLE']
