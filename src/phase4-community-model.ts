@@ -53,6 +53,8 @@ export interface CommunityConfig{
  timeZone?:string;
  /** A group-wide minimum gap between any two automatic group replies. */
  groupCooldownMs:number;
+ /** Group-wide rolling 60-second cap, 1 to 8. Missing on old snapshots means 8. */
+ autoMessagesPerMinute?:number;
  /** Absent means no scheduled quiet period; configured local clock offset applies. */
  quietHours?:CommunityQuietHours;
  /** Topic-local reply gaps override the group gap only for those topics. */
@@ -70,7 +72,9 @@ export interface CommunityConfig{
  /** Opt-in, privacy-limited decisions ledger; disabled by default. */
  decisionLogEnabled?:boolean;
  /** Missing per-kind flags preserve legacy behavior (both true). */
- serviceCleanup?:{enabled:boolean;delayMs:number;joinEnabled?:boolean;leaveEnabled?:boolean};
+ serviceCleanup?:{enabled:boolean;delayMs:number;joinEnabled?:boolean;leaveEnabled?:boolean;
+  /** Absent preserves legacy cleanup of title/photo change service messages. */
+  profileEnabled?:boolean;};
  /** Optional expiry of confirmed bot-authored community responses. Disabled by default. */
  replyCleanup?:{enabled:boolean;delayMs:number};
 }
@@ -78,10 +82,11 @@ export type CommunityDraftKind='WELCOME_TEXT'|'FAREWELL_TEXT'|'REPLY_ADD'|'REPLY
  'WELCOME_ON'|'WELCOME_OFF'|'FAREWELL_ON'|'FAREWELL_OFF'|'REPLIES_ON'|'REPLIES_OFF'|
  'PRIVATE_WELCOME_ON'|'PRIVATE_WELCOME_OFF'|
  'GROUP_PROFILE_ON'|'GROUP_PROFILE_OFF'|'GROUP_TITLE_SET'|'GROUP_PHOTO_SET'|'GROUP_PHOTO_REMOVE'|
- 'REPLY_ENABLE'|'REPLY_DISABLE'|'REPLY_COOLDOWN'|
+ 'REPLY_ENABLE'|'REPLY_DISABLE'|'REPLY_COOLDOWN'|'AUTO_LIMIT_SET'|
  'QUIET_HOURS_SET'|'QUIET_HOURS_CLEAR'|'TOPIC_COOLDOWN_SET'|'TOPIC_COOLDOWN_CLEAR'|
  'CHANGE_LOG_ON'|'CHANGE_LOG_OFF'|'DECISION_LOG_ON'|'DECISION_LOG_OFF'|'SERVICE_CLEANUP_ON'|'SERVICE_CLEANUP_OFF'|'SERVICE_CLEANUP_DELAY'|
  'SERVICE_JOIN_ON'|'SERVICE_JOIN_OFF'|'SERVICE_LEAVE_ON'|'SERVICE_LEAVE_OFF'|
+ 'SERVICE_PROFILE_ON'|'SERVICE_PROFILE_OFF'|
  'REPLY_CLEANUP_ON'|'REPLY_CLEANUP_OFF'|'REPLY_CLEANUP_DELAY'|
  'RULES_LINK_SET'|'RULES_LINK_CLEAR'|
  'WELCOME_VARIANT_SET'|'WELCOME_VARIANT_CLEAR'|
@@ -92,7 +97,7 @@ export type CommunityDraftKind='WELCOME_TEXT'|'FAREWELL_TEXT'|'REPLY_ADD'|'REPLY
 export interface CommunityDraft{
  id:string;actorId:string;chatId:string;chatVersion:number;configVersion:number;
  kind:CommunityDraftKind;createdAt:number;expiresAt:number;
- text?:string;trigger?:string;match?:ReplyMatch;source?:CommunityReplySource;sourceFaqId?:string;ruleId?:string;topicId?:number;cooldownMs?:number;delayMs?:number;
+ text?:string;trigger?:string;match?:ReplyMatch;source?:CommunityReplySource;sourceFaqId?:string;ruleId?:string;topicId?:number;cooldownMs?:number;delayMs?:number;autoMessagesPerMinute?:number;
  language?:CommunityLanguage;clockFormat?:CommunityClockFormat;calendar?:CommunityCalendar;utcOffsetMinutes?:number;timeZone?:string;
  joinKind?:CommunityJoinKind;leaveKind?:CommunityLeaveKind;
  photoFileId?:string;buttonText?:string;buttonUrl?:string;
@@ -221,10 +226,11 @@ export function inCommunityQuietHours(hours:CommunityQuietHours,now:number,utcOf
 const kinds=new Set<CommunityDraftKind>(['WELCOME_TEXT','FAREWELL_TEXT','REPLY_ADD','REPLY_REMOVE',
  'WELCOME_ON','WELCOME_OFF','PRIVATE_WELCOME_ON','PRIVATE_WELCOME_OFF',
  'GROUP_PROFILE_ON','GROUP_PROFILE_OFF','GROUP_TITLE_SET','GROUP_PHOTO_SET','GROUP_PHOTO_REMOVE','FAREWELL_ON','FAREWELL_OFF','REPLIES_ON','REPLIES_OFF',
- 'REPLY_ENABLE','REPLY_DISABLE','REPLY_COOLDOWN',
+ 'REPLY_ENABLE','REPLY_DISABLE','REPLY_COOLDOWN','AUTO_LIMIT_SET',
  'QUIET_HOURS_SET','QUIET_HOURS_CLEAR','TOPIC_COOLDOWN_SET','TOPIC_COOLDOWN_CLEAR',
  'CHANGE_LOG_ON','CHANGE_LOG_OFF','DECISION_LOG_ON','DECISION_LOG_OFF','SERVICE_CLEANUP_ON','SERVICE_CLEANUP_OFF','SERVICE_CLEANUP_DELAY',
  'SERVICE_JOIN_ON','SERVICE_JOIN_OFF','SERVICE_LEAVE_ON','SERVICE_LEAVE_OFF',
+ 'SERVICE_PROFILE_ON','SERVICE_PROFILE_OFF',
  'REPLY_CLEANUP_ON','REPLY_CLEANUP_OFF','REPLY_CLEANUP_DELAY',
  'RULES_LINK_SET','RULES_LINK_CLEAR',
  'WELCOME_VARIANT_SET','WELCOME_VARIANT_CLEAR',
@@ -246,6 +252,8 @@ export function validCommunityConfig(value:unknown):value is CommunityConfig{
  if(!validGroup(x.chatId)||!Number.isSafeInteger(x.version)||x.version<0||x.version>2_000_000_000||
   !Number.isInteger(x.utcOffsetMinutes)||x.utcOffsetMinutes< -720||x.utcOffsetMinutes>840||
   !Number.isInteger(x.groupCooldownMs)||x.groupCooldownMs<1000||x.groupCooldownMs>600000||
+  (x.autoMessagesPerMinute!==undefined&&(!Number.isInteger(x.autoMessagesPerMinute)||
+    x.autoMessagesPerMinute<1||x.autoMessagesPerMinute>8))||
   !Array.isArray(x.rules)||x.rules.length>30||
   (x.quietHours!==undefined&&
     (!x.quietHours||!validMinute(x.quietHours.startMinute)||
@@ -277,7 +285,8 @@ export function validCommunityConfig(value:unknown):value is CommunityConfig{
     typeof x.serviceCleanup.enabled!=='boolean'||!Number.isInteger(x.serviceCleanup.delayMs)||
     x.serviceCleanup.delayMs<30000||x.serviceCleanup.delayMs>3600000||
     (x.serviceCleanup.joinEnabled!==undefined&&typeof x.serviceCleanup.joinEnabled!=='boolean')||
-    (x.serviceCleanup.leaveEnabled!==undefined&&typeof x.serviceCleanup.leaveEnabled!=='boolean')))||
+    (x.serviceCleanup.leaveEnabled!==undefined&&typeof x.serviceCleanup.leaveEnabled!=='boolean')||
+    (x.serviceCleanup.profileEnabled!==undefined&&typeof x.serviceCleanup.profileEnabled!=='boolean')))||
   (x.replyCleanup!==undefined&&(!x.replyCleanup||typeof x.replyCleanup!=='object'||
     typeof x.replyCleanup.enabled!=='boolean'||!Number.isInteger(x.replyCleanup.delayMs)||
     x.replyCleanup.delayMs<30000||x.replyCleanup.delayMs>3600000)))return false;
@@ -443,6 +452,8 @@ export function validCommunityState(value:unknown):value is CommunityAutomationS
    (d.ruleId!==undefined&&!/^[a-f0-9]{12}$/u.test(d.ruleId))||
    (d.topicId!==undefined&&!validTopic(d.topicId))||
    (d.cooldownMs!==undefined&&(!Number.isInteger(d.cooldownMs)||d.cooldownMs<1000||d.cooldownMs>86400000))||
+   (d.autoMessagesPerMinute!==undefined&&(!Number.isInteger(d.autoMessagesPerMinute)||
+     d.autoMessagesPerMinute<1||d.autoMessagesPerMinute>8))||
    (d.startMinute!==undefined&&!validMinute(d.startMinute))||
    (d.endMinute!==undefined&&!validMinute(d.endMinute))||
    (d.delayMs!==undefined&&(!Number.isInteger(d.delayMs)||d.delayMs<30000||d.delayMs>3600000))||
@@ -469,6 +480,7 @@ export function validCommunityState(value:unknown):value is CommunityAutomationS
       (d.source===undefined||d.source==='NOTE')&&!validTemplate(d.text))||
    (['REPLY_REMOVE','REPLY_ENABLE','REPLY_DISABLE','REPLY_COOLDOWN'] as string[]).includes(d.kind)&&!d.ruleId||
    d.kind==='REPLY_COOLDOWN'&&d.cooldownMs===undefined||
+   d.kind==='AUTO_LIMIT_SET'&&d.autoMessagesPerMinute===undefined||
    d.kind==='QUIET_HOURS_SET'&&(!validMinute(d.startMinute)||!validMinute(d.endMinute)||d.startMinute===d.endMinute)||
    (d.kind==='TOPIC_COOLDOWN_SET'||d.kind==='TOPIC_COOLDOWN_CLEAR')&&!validTopic(d.topicId)||
    d.kind==='TOPIC_COOLDOWN_SET'&&(!Number.isInteger(d.cooldownMs)||d.cooldownMs===undefined||d.cooldownMs<1000||d.cooldownMs>600000)||
