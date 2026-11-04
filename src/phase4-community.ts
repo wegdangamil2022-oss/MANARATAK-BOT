@@ -1,6 +1,7 @@
 import {createHash,randomBytes} from 'node:crypto';
 import {BotStore,type BotState} from './store.js';
 import {reviewedGroupFAQAnswer,resolvedCommunityReply} from './phase4-community-sources.js';
+import {groupMenuEpochDigest} from './telegram-group-access.js';
 import {Policy} from './policy.js';
 import {validCommunityPhotoId,validCommunityLinkButtons,communityLinkKeyboard,
  type CommunityLinkKeyboard} from './phase4-community-rich.js';
@@ -17,6 +18,8 @@ export type DraftRequest={kind:CommunityDraftKind;text?:string;trigger?:string;m
 export interface CommunitySendProposal{
  readonly text:string;readonly chatId:string;readonly actorId:string;
  readonly kind:CommunityEventKind;readonly policyVersion:number;readonly topicId?:number;
+ /** Exactly the content/authorization epoch under which the source was read. */
+ readonly sourceEpoch:string;
  readonly photoFileId?:string;readonly communityLinks?:CommunityLinkKeyboard;
 }
 /** Read-only administrative explanation, never stored with student text. */
@@ -598,7 +601,7 @@ export class Phase4CommunityService{
    // Reserved means local intent only; the Telegram send may subsequently fail.
    record('RESERVED',ruleId);
    return {text,chatId:input.chatId,actorId:input.actorId,kind:input.kind,
-    policyVersion:config.version,...(input.topicId!==undefined?{topicId:input.topicId}:{}),
+    policyVersion:config.version,sourceEpoch:groupMenuEpochDigest(s,input.chatId,input.topicId),...(input.topicId!==undefined?{topicId:input.topicId}:{}),
     ...(photoFileId?{photoFileId}:{}),
     ...(communityLinks?{communityLinks}:{})};
   });
