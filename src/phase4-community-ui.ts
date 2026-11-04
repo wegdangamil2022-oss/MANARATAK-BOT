@@ -1,10 +1,10 @@
 import {Phase4CommunityService,type DraftRequest} from './phase4-community.js';
 import type {OwnerInlineScreen,TelegramInlineKeyboard} from './telegram-inline-owner.js';
-import type {CommunityDraftKind,ReplyMatch,CommunityLanguage,CommunityCalendar,CommunityClockFormat} from './phase4-community-model.js';
+import type {CommunityDraftKind,ReplyMatch,CommunityLanguage,CommunityCalendar,CommunityClockFormat,CommunityJoinKind} from './phase4-community-model.js';
 import {validCommunityRulesUrl,validCommunityTimeZone} from './phase4-community-model.js';
 import {validCommunityLinkButton,validCommunityPhotoId} from './phase4-community-rich.js';
 const group=/^-[1-9]\d{0,15}$/u,hex=/^[a-f0-9]{24}$/u;
-const route=/^p4c:1:(?:q:-[1-9]\d{0,15}|k:-[1-9]\d{0,15}|z:-[1-9]\d{0,15}|n:-[1-9]\d{0,15}|a:-[1-9]\d{0,15}|y:-[1-9]\d{0,15}(?::[1-9]\d{0,9})?|l:(?:0|[1-9]\d{0,2})|g:-[1-9]\d{0,15}|h:-[1-9]\d{0,15}|v:-[1-9]\d{0,15}:[wf]|j:-[1-9]\d{0,15}:[wf]:[pb]|r:-[1-9]\d{0,15}:(?:0|[1-9]\d{0,2})|t:-[1-9]\d{0,15}:[wfrsgbd]:[01]|d:-[1-9]\d{0,15}:[a-f0-9]{12}|e:-[1-9]\d{0,15}:[a-f0-9]{12}:[01]|u:-[1-9]\d{0,15}:(?:ar|en)|o:-[1-9]\d{0,15}:(?:12|24):[gh]|[cx]:[a-f0-9]{24})$/u;
+const route=/^p4c:1:(?:q:-[1-9]\d{0,15}|b:-[1-9]\d{0,15}(?::[sam])?|k:-[1-9]\d{0,15}|z:-[1-9]\d{0,15}|n:-[1-9]\d{0,15}|a:-[1-9]\d{0,15}|y:-[1-9]\d{0,15}(?::[1-9]\d{0,9})?|l:(?:0|[1-9]\d{0,2})|g:-[1-9]\d{0,15}|h:-[1-9]\d{0,15}|v:-[1-9]\d{0,15}:[wf]|j:-[1-9]\d{0,15}:[wf]:[pb]|r:-[1-9]\d{0,15}:(?:0|[1-9]\d{0,2})|t:-[1-9]\d{0,15}:[wfrsgbd]:[01]|d:-[1-9]\d{0,15}:[a-f0-9]{12}|e:-[1-9]\d{0,15}:[a-f0-9]{12}:[01]|u:-[1-9]\d{0,15}:(?:ar|en)|o:-[1-9]\d{0,15}:(?:12|24):[gh]|[cx]:[a-f0-9]{24})$/u;
 export const validPhase4CommunityRoute=(s:unknown):s is string=>typeof s==='string'&&
  Buffer.byteLength(s,'utf8')<=64&&route.test(s);
 const esc=(s:string):string=>s.replace(/&/gu,'&amp;').replace(/</gu,'&lt;')
@@ -13,6 +13,8 @@ const k=(rows:{text:string;callback_data:string}[][]):TelegramInlineKeyboard=>({
 const btn=(text:string,data:string)=>({text,callback_data:data});
 const help='للتعديل أرسل في خاص البوت أحد الأوامر:\n'
  +'<code>/setwelcome -100123 نص الترحيب {العضو}</code>\n'
+ +'<code>/welcomevariant -100123 SELF أهلًا {العضو}</code>\n'
+ +'<code>/clearwelcomevariant -100123 SELF</code>\n'
  +'<code>/setfarewell -100123 نص الوداع</code>\n'
  +'<code>/replyadd -100123 WORD منحة | راجع قسم المنح الدراسية</code>\n'
  +'<code>/replyadd -100123 topic:777 COMMAND m_grants | رابط المنح</code>\n'
@@ -47,6 +49,12 @@ export function parsePhase4CommunityCommand(text:string):
  {kind:'DIAGNOSE';chatId:string;sample:string;topicId?:number}|
  {kind:'DECISIONS';chatId:string}|null{
  if(text==='/community')return {kind:'HOME'};
+ const variant=/^\/welcomevariant (-[1-9]\d{0,15}) (SELF|ADDED|BATCH) ([^\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]{1,800})$/u.exec(text);
+ if(variant)return {kind:'EDIT',chatId:variant[1]!,request:{
+  kind:'WELCOME_VARIANT_SET',joinKind:variant[2]! as CommunityJoinKind,text:variant[3]!.trim()}};
+ const variantClear=/^\/clearwelcomevariant (-[1-9]\d{0,15}) (SELF|ADDED|BATCH)$/u.exec(text);
+ if(variantClear)return {kind:'EDIT',chatId:variantClear[1]!,request:{
+  kind:'WELCOME_VARIANT_CLEAR',joinKind:variantClear[2]! as CommunityJoinKind}};
  const decisionSwitch=/^\/replylog(on|off) (-[1-9]\d{0,15})$/u.exec(text);
  if(decisionSwitch)return {kind:'EDIT',chatId:decisionSwitch[2]!,
   request:{kind:decisionSwitch[1]==='on'?'DECISION_LOG_ON':'DECISION_LOG_OFF'}};
@@ -234,6 +242,7 @@ export async function phase4CommunityScreen(service:Phase4CommunityService,actor
    '\nالمنطقة الزمنية: '+(c.timeZone??'غير محددة — إزاحة ثابتة')+
    '\nقالب الترحيب المترجم: '+(c.welcome.localized?.[c.language??'ar']?'متاح':'غير محدد')+
    '\nقالب الوداع المترجم: '+(c.farewell.localized?.[c.language??'ar']?'متاح':'غير محدد')+
+   '\nأنواع الترحيب المخصصة: '+Object.keys(c.welcomeByJoin??{}).length+' من 3'+
    '\nصورة الترحيب: '+(c.welcome.photoFileId?'معتمدة':'غير مضافة')+
    '\nصورة الوداع: '+(c.farewell.photoFileId?'معتمدة':'غير مضافة')+
    '\nأزرار الترحيب الخارجية: '+(c.welcome.buttons?.length??0)+
@@ -248,6 +257,7 @@ export async function phase4CommunityScreen(service:Phase4CommunityService,actor
     [btn('🧾 '+(c.decisionLogEnabled?'إيقاف':'تفعيل')+' السجل المنقح',
      'p4c:1:t:'+id+':d:'+(c.decisionLogEnabled?'0':'1'))],
     [btn('🌙 ساعات الهدوء','p4c:1:q:'+id),btn('🧵 حدود الموضوعات','p4c:1:y:'+id)],
+    [btn('🚪 أنواع الانضمام','p4c:1:b:'+id)],
     [btn('🖼️ وسائط الترحيب','p4c:1:v:'+id+':w'),
      btn('🖼️ وسائط الوداع','p4c:1:v:'+id+':f')],
     [btn('🌐 اللغة: '+(c.language??'ar'),'p4c:1:u:'+id+':'+((c.language??'ar')==='ar'?'en':'ar'))],
@@ -334,7 +344,41 @@ export async function phase4CommunityScreen(service:Phase4CommunityService,actor
      [btn('❌ إلغاء','p4c:1:x:'+draft.id)],
      [btn('↩️ حدود الموضوعات','p4c:1:y:'+draft.chatId)]])};
   }
-  const mediaView=/^p4c:1:v:(-[1-9]\d{0,15}):([wf])$/u.exec(data);
+  const joinTypes=/^p4c:1:b:(-[1-9]\d{0,15})$/u.exec(data);
+ if(joinTypes){
+  const id=joinTypes[1]!,config=await service.view(actorId,id);
+  const kinds=[['SELF','انضم بنفسه','s'],['ADDED','أضافه عضو آخر','a'],
+   ['BATCH','انضم عدة أعضاء','m']] as const;
+  const rows:{text:string;callback_data:string}[][]=[];
+  for(const [kind,label,code] of kinds){
+   if(config.welcomeByJoin?.[kind])rows.push([btn('🗑️ إزالة قالب '+label,'p4c:1:b:'+id+':'+code)]);
+  }
+  rows.push([btn('↩️ إعدادات المجموعة','p4c:1:g:'+id)]);
+  return {text:'<b>🚪 قوالب الترحيب حسب نوع الانضمام</b>\nالمجموعة: <code>'+id+'</code>+
+   '\n\n'+kinds.map(([kind,label])=>
+    '• '+label+' ('+kind+'): '+
+    (config.welcomeByJoin?.[kind]?esc(config.welcomeByJoin[kind]!.slice(0,100)):'القالب العام أو المترجم')).join('\n')+
+   '\n\nتُحدد الأنواع من أحداث الخدمة التي يرسلها Telegram فقط؛ لا يحددها الطالب برسالة.'+
+   '\nلتعديل أحد الأنواع، أرسل في خاص المالك:\n'+
+   '<code>/welcomevariant '+id+' SELF مرحبًا {العضو}</code>'+
+   '\n<code>/welcomevariant '+id+' ADDED أهلًا {العضو}</code>'+
+   '\n<code>/welcomevariant '+id+' BATCH مرحبًا بكم {العضو}</code>'+
+   '\nلن تُعتمد التعديلات قبل معاينتها وتأكيدها؛ الترحيب العام يظل متوقفًا حتى تفعيله.',
+   keyboard:k(rows)};
+ }
+ const clearJoinType=/^p4c:1:b:(-[1-9]\d{0,15}):([sam])$/u.exec(data);
+ if(clearJoinType){
+  const id=clearJoinType[1]!,kind:CommunityJoinKind=
+   clearJoinType[2]==='s'?'SELF':clearJoinType[2]==='a'?'ADDED':'BATCH';
+  const config=await service.view(actorId,id);
+  if(!config.welcomeByJoin?.[kind])return null;
+  const draft=await service.pending(actorId,{kind:'WELCOME_VARIANT_CLEAR',joinKind:kind},id);
+  return {text:service.preview(draft)+'\nلا يُطبّق الحذف دون اعتماد.',
+   keyboard:k([[btn('✅ اعتماد الحذف','p4c:1:c:'+draft.id)],
+    [btn('❌ إلغاء','p4c:1:x:'+draft.id)],
+    [btn('↩️ أنواع الانضمام','p4c:1:b:'+id)]])};
+ }
+ const mediaView=/^p4c:1:v:(-[1-9]\d{0,15}):([wf])$/u.exec(data);
  if(mediaView){
   const id=mediaView[1]!,kind=mediaView[2]!,config=await service.view(actorId,id);
   const media=kind==='w'?config.welcome:config.farewell;
