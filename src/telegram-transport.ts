@@ -518,7 +518,7 @@ export class TelegramUpdateApplication {
       c.version===proposal.policyVersion);
     const optIn=event.communityKind==='JOIN'&&config?.privateWelcomeEnabled===true&&
       /^[A-Za-z][A-Za-z0-9_]{4,31}$/u.test(this.opts.botUsername)?
-      '\n🔒 <a href="https://t.me/+this.opts.botUsername+'?start=welcome_'+event.chatId.slice(1)+
+      '\n🔒 <a href="https://t.me/'+this.opts.botUsername+'?start=welcome_'+event.chatId.slice(1)+
        '">افتح ترحيبك الخاص في البوت (اختياري)</a>':'';
     const welcomeText=optIn&&Buffer.byteLength(proposal.text+optIn,'utf8')<=
       (proposal.photoFileId?1024:4096)?proposal.text+optIn:proposal.text;
