@@ -206,3 +206,59 @@ for(const engine of ['json','sqlite'] as const){
   }finally{await f.close();}
  });
 }
+
+
+test('P4 WELCOME-003: per-event service cleanup switches remain backward-compatible and strictly typed',()=>{
+ assert.deepEqual(parsePhase4CommunityCommand('/servicejoinoff '+CHAT),{
+  kind:'EDIT',chatId:CHAT,request:{kind:'SERVICE_JOIN_OFF'}});
+ assert.deepEqual(parsePhase4CommunityCommand('/servicejoinon '+CHAT),{
+  kind:'EDIT',chatId:CHAT,request:{kind:'SERVICE_JOIN_ON'}});
+ assert.deepEqual(parsePhase4CommunityCommand('/serviceleaveoff '+CHAT),{
+  kind:'EDIT',chatId:CHAT,request:{kind:'SERVICE_LEAVE_OFF'}});
+ assert.deepEqual(parsePhase4CommunityCommand('/serviceleaveon '+CHAT),{
+  kind:'EDIT',chatId:CHAT,request:{kind:'SERVICE_LEAVE_ON'}});
+ assert.equal(parsePhase4CommunityCommand('/serviceleaveoff 301'),null);
+ assert.equal(validPhase4CommunityRoute('p4c:1:s:'+CHAT),true);
+ const base=defaultCommunityConfig(CHAT);
+ assert.equal(validCommunityConfig(base),true);
+ assert.equal(validCommunityConfig({...base,serviceCleanup:{enabled:true,delayMs:120000}}),true);
+ assert.equal(validCommunityConfig({...base,serviceCleanup:{
+  enabled:true,delayMs:120000,joinEnabled:false,leaveEnabled:true}}),true);
+ assert.equal(validCommunityConfig({...base,serviceCleanup:{
+  enabled:true,delayMs:120000,leaveEnabled:'false'}}),false);
+});
+for(const engine of ['json','sqlite'] as const){
+ test('P4 WELCOME-003 '+engine+': service-join and service-leave cleanup can be disabled independently',async()=>{
+  const f=await setup(engine);
+  try{
+   await f.approve({kind:'SERVICE_CLEANUP_ON'});
+   const base=await f.community.view(OWNER,CHAT);
+   assert.equal(base.serviceCleanup?.enabled,true);
+   assert.equal(await f.community.recordServiceEvent({chatId:CHAT,actorId:MEMBER,
+    kind:'JOIN',messageId:600,updateKey:'b3-webhook:bot-main:600',sentAtMs:f.clock()}),true);
+   assert.equal(await f.community.recordServiceEvent({chatId:CHAT,actorId:MEMBER,
+    kind:'LEAVE',messageId:601,updateKey:'b3-webhook:bot-main:601',sentAtMs:f.clock()}),true);
+   assert.equal((await f.store.snapshot()).phase4Community?.cleanupJobs?.length,2);
+   const draft=await f.community.pending(OWNER,{kind:'SERVICE_JOIN_OFF'},CHAT);
+   assert.equal((await f.community.view(OWNER,CHAT)).serviceCleanup?.joinEnabled,undefined);
+   await f.community.approve(OWNER,draft.id);
+   assert.equal((await new BotStore(f.file,{engine}).snapshot()).phase4Community?.configs[0]?.serviceCleanup?.joinEnabled,false);
+   assert.equal(await f.community.recordServiceEvent({chatId:CHAT,actorId:MEMBER,
+    kind:'JOIN',messageId:602,updateKey:'b3-webhook:bot-main:602',sentAtMs:f.clock()}),false);
+   assert.equal(await f.community.recordServiceEvent({chatId:CHAT,actorId:MEMBER,
+    kind:'LEAVE',messageId:603,updateKey:'b3-webhook:bot-main:603',sentAtMs:f.clock()}),true);
+   assert.equal((await f.store.snapshot()).phase4Community?.cleanupJobs?.length,3);
+   await f.approve({kind:'SERVICE_LEAVE_OFF'});
+   assert.equal(await f.community.recordServiceEvent({chatId:CHAT,actorId:MEMBER,
+    kind:'LEAVE',messageId:604,updateKey:'b3-webhook:bot-main:604',sentAtMs:f.clock()}),false);
+   await f.approve({kind:'SERVICE_JOIN_ON'});
+   assert.equal(await f.community.recordServiceEvent({chatId:CHAT,actorId:MEMBER,
+    kind:'JOIN',messageId:605,updateKey:'b3-webhook:bot-main:605',sentAtMs:f.clock()}),true);
+   const screen=await phase4CommunityScreen(f.community,OWNER,'p4c:1:s:'+CHAT);
+   assert.match(screen?.text??'',/الدخول|المغادرة/);
+   assert.ok(screen?.keyboard.inline_keyboard.flat().some(b=>b.callback_data==='p4c:1:t:'+CHAT+':s:0'));
+   await assert.rejects(f.community.pending(MEMBER,{kind:'SERVICE_LEAVE_ON'},CHAT),
+    /COMMUNITY_OWNER_DENIED/);
+  }finally{await f.close();}
+ });
+}
