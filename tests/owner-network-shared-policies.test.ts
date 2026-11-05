@@ -156,4 +156,30 @@ for(const engine of ['json','sqlite'] as const){
    assert.equal((await f.app().handle(cb(43,'nw:1:z:'+NETWORK+':'+SOURCE+':0'))).status,'APPLIED');
   }finally{await f.close();}
  });
+  test('NETWORK-002 policy preview supports explicit group exclusions with latest-choice-only confirmation ('+engine+')',async()=>{
+   const f=await fixture(engine);try{
+    await f.save(SOURCE);
+    const first=await f.app().handle(cb(60,'nw:1:z:'+NETWORK+':'+SOURCE+':0'));
+    const obsolete=click(first,'تأكيد');
+    const excluded=await f.app().handle(cb(61,click(first,'استبعاد '+TARGET)));
+    assert.match(excluded.plan?.text??'',/1 مجموعات/);
+    assert.match(excluded.plan?.text??'',/مستبعدة/);
+    assert.equal((await f.app().handle(cb(62,obsolete))).status,'DENIED');
+    const empty=await f.app().handle(cb(63,click(excluded,'استبعاد '+OVERRIDE)));
+    assert.match(empty.plan?.text??'',/0 مجموعات/);
+    assert.ok(!empty.plan?.inlineMarkup?.inline_keyboard.flat().some(x=>x.text.includes('تأكيد')));
+    assert.equal((await f.app().handle(cb(64,click(excluded,'تأكيد')))).status,'DENIED');
+    const selected=await f.app().handle(cb(65,click(empty,'تضمين '+TARGET)));
+    assert.match(selected.plan?.text??'',/1 مجموعات/);
+    const token=click(selected,'تأكيد');
+    assert.equal((await f.app().handle(cb(66,token))).status,'APPLIED');
+    assert.equal((await f.app().handle(cb(67,token))).status,'DENIED');
+    const state=await f.store.snapshot();
+    assert.equal(state.protectionPolicies?.length,2);
+    assert.ok(state.protectionPolicies?.some(x=>x.policy.chatId===TARGET));
+    assert.ok(!state.protectionPolicies?.some(x=>x.policy.chatId===OVERRIDE));
+    assert.equal(state.audit.filter(x=>x.reason==='OWNER_NETWORK_MONITOR_POLICIES_COPIED').length,1);
+   }finally{await f.close();}
+  });
+
 }
