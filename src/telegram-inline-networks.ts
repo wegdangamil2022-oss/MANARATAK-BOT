@@ -424,6 +424,65 @@ export class OwnerNetworkEditor{
   });
  }
 
+
+ /** Read-only scoped status; network membership never grants chat permissions. */
+ private inheritedTargetsScreen(s:BotState,actor:string,now:number,id:string,p:number):
+  OwnerInlineScreen|null{
+  const n=this.find(s,id);
+  if(!n||!this.auth(s,actor,now))return null;
+  const links=(s.networkInheritance??[]).filter(x=>x.networkId===id)
+   .sort((a,b)=>a.targetChatId.localeCompare(b.targetChatId)||a.kind.localeCompare(b.kind));
+  const pages=Math.max(1,Math.ceil(links.length/SIZE));
+  if(p<0||p>=pages)return null;
+  const rows=links.slice(p*SIZE,(p+1)*SIZE).map(link=>[
+   btn((link.status==='ACTIVE'?'🟢 ':'⏸ ')+link.targetChatId+
+    ' · '+(link.kind==='POLICY'?'حماية':'ترحيب'),'nw:1:j:'+link.id)]);
+  const nav:{text:string;callback_data:string}[]=[];
+  if(p)nav.push(btn('⬅️ السابق','nw:1:f:'+id+':'+(p-1)));
+  if((p+1)*SIZE<links.length)nav.push(btn('➡️ التالي','nw:1:f:'+id+':'+(p+1)));
+  if(nav.length)rows.push(nav);
+  rows.push([btn('↩️ بطاقة الشبكة','nw:1:d:'+id)]);
+  return ui('<b>🔁 المتابعة التلقائية لشبكة '+escape(n.name)+'</b>\n'+
+   'روابط المتابعة المحلية: '+links.length+' · نشطة: '+
+   links.filter(x=>x.status==='ACTIVE').length+' · متوقفة: '+
+   links.filter(x=>x.status==='PAUSED').length+'\n'+
+   'لا تنقل المتابعة صلاحيات Telegram أو العقوبات. كل تعديل محلي يوقفها.\n'+
+   'المتابعات المتوقفة لا تعود للعمل تلقائيًا.',
+   rows);
+ }
+ private linkProof(s:BotState,link:NetworkInheritanceLink):string{
+  return createHash('sha256').update(JSON.stringify([link,
+   s.privateSettingsRevision??0,s.privateFeatures['owner.dashboard']])).digest('hex');
+ }
+ private async previewStopInheritance(actor:string,linkId:string):
+  Promise<OwnerInlineScreen|null>{
+  return this.store.transaction(s=>{
+   const now=this.clock();
+   if(!this.auth(s,actor,now))return null;
+   const links=(s.networkInheritance??[]).filter(x=>x.id===linkId);
+   if(links.length!==1)return null;
+   const link=links[0]!;
+   if(link.status==='PAUSED')return ui(
+    '<b>⏸ المتابعة متوقفة بالفعل</b>\n'+
+    'المجموعة: <code>'+link.targetChatId+'</code>\n'+
+    'السبب: '+escape(link.pausedReason??'مجهول')+
+    '\nلن تعود المتابعة تلقائيًا.',
+    [[btn('↩️ المتابعات','nw:1:f:'+link.networkId+':0')]]);
+   const ref='c_'+randomBytes(18).toString('base64url');
+   if(s.callbacks.some(x=>x.ref===ref))return null;
+   s.callbacks.push({ref,action:PREFIX+'stop-follow:'+JSON.stringify([
+    link.id,link.networkId,this.linkProof(s,link)]),
+    actorId:actor,chatId:'private',policyVersion:0,oneShot:true,
+    used:false,revoked:false,expiresAt:now+TTL});
+   return ui('<b>🔎 معاينة إيقاف متابعة المجموعة</b>\n'+
+    'الهدف: <code>'+link.targetChatId+'</code> · المصدر: <code>'+link.sourceChatId+'</code>\n'+
+    'القسم: '+(link.kind==='POLICY'?'سياسة الحماية':'قوالب الترحيب')+'\n'+
+    'الإيقاف محلي دائم حتى مراجعة جديدة، ولا يمحو الإعداد أو ينفذ Telegram.',
+    [[btn('✅ تأكيد إيقاف المتابعة','nw:1:c:'+ref.slice(2))],
+     [btn('✖ إلغاء المعاينة','nw:1:k:'+ref.slice(2))]]);
+  });
+ }
+
  private async previewStale(actor:string,id:string,revision:number,groupId:string,
   memberVersion:number,p:number):Promise<OwnerInlineScreen|null>{
   return this.store.transaction(s=>{
