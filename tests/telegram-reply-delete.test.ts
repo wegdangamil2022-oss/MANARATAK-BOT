@@ -11,6 +11,7 @@ import {EducationAdminFacade} from '../src/education-admin.js';
 import {ApprovedAnswerService,ResourceLinkService} from '../src/education-interactions.js';
 import {ModerationPurgeService,FakePurgeGateway} from '../src/moderation-purge.js';
 import {TelegramUpdateApplication} from '../src/telegram-transport.js';
+import {GroupAdminCommandCleanup,reviewedAdminCommandKind} from '../src/group-admin-command-cleanup.js';
 import {TelegramBotApiPurgeGateway} from '../src/telegram-purge-gateway.js';
 import {isValidTelegramInlineKeyboard} from '../src/telegram-inline-owner.js';
 const OWNER='100',CHAT='-100123',NOW=30*86400000;
@@ -26,9 +27,10 @@ for(const engine of ['json','sqlite'] as const){
   let time=NOW;
   const gateway=new FakePurgeGateway(),purge=new ModerationPurgeService(store,policy,gateway,()=>time);
   await purge.observe({chatId:CHAT,messageId:10,senderKind:'USER',senderId:'300',sentAt:NOW-1000,observedAt:NOW,contentType:'TEXT',hasLinks:false,pinned:false,linkedChannel:false,adminLog:false,approvedAnnouncement:false});
-  const app=(service=purge)=>new TelegramUpdateApplication({store,policy,education,purge:service,admin:new EducationAdminFacade(store,policy,education),faq:new ApprovedAnswerService(store,policy),links:new ResourceLinkService(store,policy),
-   botId:'delete-test',botUsername:'ManaratakBot',clock:()=>time,membership:async()=>{throw Error('unexpected membership');}});
-  return {store,policy,purge,gateway,app,setTime:(n:number)=>{time=n;},close:()=>rm(dir,{recursive:true,force:true})};
+  const app=(service=purge,cleanup?:GroupAdminCommandCleanup)=>new TelegramUpdateApplication({store,policy,education,purge:service,admin:new EducationAdminFacade(store,policy,education),faq:new ApprovedAnswerService(store,policy),links:new ResourceLinkService(store,policy),
+   botId:'delete-test',botUsername:'ManaratakBot',clock:()=>time,membership:async()=>{throw Error('unexpected membership');},
+   ...(cleanup?{adminCommandCleanup:cleanup}:{})});
+  return {store,policy,purge,gateway,app,clock:()=>time,setTime:(n:number)=>{time=n;},close:()=>rm(dir,{recursive:true,force:true})};
  }
  test('delete reply previews privately, confirms once and never exposes message text ('+engine+')',async()=>{
   const f=await fixture();try{
@@ -41,6 +43,37 @@ for(const engine of ['json','sqlite'] as const){
    assert.equal((await f.app().handle(confirmation)).status,'DUPLICATE');
    assert.equal((await f.app().handle(tap(3,button.callback_data))).status,'DENIED');
    assert.equal(f.gateway.calls.length,1);assert.equal(f.gateway.calls[0]?.messageId,10);
+   assert.equal(JSON.stringify(await f.store.snapshot()).includes('PRIVATE_MESSAGE_NOT_TO_STORE'),false);
+  }finally{await f.close();}
+ });
+ test('opted-in admin cleanup deletes only the reviewed original /delete command after private delivery ('+engine+')',async()=>{
+  const f=await fixture();try{
+   const deleted:{chat:string;messageId:number}[]=[];
+   const cleanup=new GroupAdminCommandCleanup(f.store,f.policy,{delete:async(chat,messageId,guard)=>{
+    if(!await guard())return 'NOT_SENT' as const;
+    deleted.push({chat,messageId});return 'ACKNOWLEDGED' as const;
+   }},f.clock,async()=>true,async()=> 'GRANTED');
+   assert.equal(await cleanup.configure(OWNER,CHAT,true,cleanup.epoch(await f.store.snapshot(),CHAT)),true);
+   assert.equal(reviewedAdminCommandKind('/delete@ManaratakBot','ManaratakBot','DELETE_PREVIEW_ONLY'),'DELETE');
+   assert.equal(reviewedAdminCommandKind('/delete@AnotherBot','ManaratakBot','DELETE_PREVIEW_ONLY'),null);
+   const base=command(55),original={...base,message:{...base.message,date:NOW/1000}};
+   const response=await f.app(f.purge,cleanup).handle(original);
+   assert.equal(response.reason,'DELETE_PREVIEW_ONLY');
+   const s=await f.store.snapshot(),key='b3-webhook:delete-test:55';
+   const receipt=s.telegramReplyJobs?.find(j=>j.updateKey===key);
+   assert.equal(receipt?.privateReplyKind,'ADMIN_SCOPED');
+   assert.equal(s.audit.filter(a=>a.updateKey.startsWith('group:admin-command-job:')).length,1);
+   assert.equal((await cleanup.cleanup()).deleted,0);
+   await f.store.transaction(state=>{
+    const j=state.telegramReplyJobs!.find(x=>x.updateKey===key)!;
+    j.status='SENT';j.messageId=777;j.startedAt=NOW;j.redactedAt=NOW;
+    j.attemptId='11111111-2222-4333-8444-555555555555';
+    delete j.plan;delete j.privateReplyKind;delete j.adminUIAccess;
+   });
+   f.setTime(NOW+120000);
+   assert.deepEqual(await cleanup.cleanup(),{deleted:1,unresolved:0});
+   assert.deepEqual(deleted,[{chat:CHAT,messageId:100}]);
+   assert.equal((await cleanup.cleanup()).deleted,0);
    assert.equal(JSON.stringify(await f.store.snapshot()).includes('PRIVATE_MESSAGE_NOT_TO_STORE'),false);
   }finally{await f.close();}
  });
