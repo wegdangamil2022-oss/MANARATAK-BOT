@@ -733,9 +733,10 @@ export class OwnerNetworkEditor{
      typeof data[0]!=='string'||!/^[a-f0-9]{12}$/u.test(data[0])||
      typeof data[1]!=='string'||!/^[a-f0-9]{12}$/u.test(data[1])||
      typeof data[2]!=='string'||!/^[a-f0-9]{64}$/u.test(data[2]))return null;
-    const links=(s.networkInheritance??[]).filter(x=>x.id===data[0]),link=links[0];
-    if(links.length!==1||!link||link.networkId!==data[1]||
-      link.status!=='ACTIVE'||this.linkProof(s,link)!==data[2]||
+    const [linkId,networkId,digest]=data as [string,string,string];
+    const links=(s.networkInheritance??[]).filter(x=>x.id===linkId),link=links[0];
+    if(links.length!==1||!link||link.networkId!==networkId||
+      link.status!=='ACTIVE'||this.linkProof(s,link)!==digest||
       !pauseNetworkInheritanceByOwner(s,link.id))return null;
     receipt.used=true;
     s.audit.push({actorId:actor,updateKey:'owner-network:'+nonce,
