@@ -664,10 +664,11 @@ export class OwnerNetworkEditor{
     const [id,revision,sourceId,p,ids,digest]=data as [
      string,number,string,number,string[],string];
     const ctx=this.networkPolicySelection(s,actor,now,id,sourceId);
-    if(!ctx||ctx.network.revision!==revision||ctx.digest!==digest||
-     JSON.stringify(ctx.targets.slice(p*SIZE,(p+1)*SIZE).map(c=>c.id))!==
-      JSON.stringify(ids))return null;
-    const drafts=ctx.targets.slice(p*SIZE,(p+1)*SIZE).map(chat=>{
+    if(!ctx||ctx.network.revision!==revision||ctx.digest!==digest)return null;
+    const selected=ctx.targets.slice(p*SIZE,(p+1)*SIZE).filter(c=>ids.includes(c.id));
+    if(selected.length!==ids.length||JSON.stringify(selected.map(c=>c.id))!==
+     JSON.stringify(ids))return null;
+    const drafts=selected.map(chat=>{
      const source=ctx.source.policy;
      // Never move group-specific allowlists, member exemptions, or any
      // approval/authority. Even a reviewed ENFORCE source is forbidden.
@@ -710,10 +711,10 @@ export class OwnerNetworkEditor{
     const [id,revision,sourceId,p,ids,digest]=data as
      [string,number,string,number,string[],string];
     const ctx=this.greetingSelection(s,actor,now,id,sourceId);
-    if(!ctx||ctx.network.revision!==revision||ctx.digest!==digest||
-     JSON.stringify(ctx.targets.slice(p*SIZE,(p+1)*SIZE).map(c=>c.id))!==
-      JSON.stringify(ids))return null;
-    const selected=ctx.targets.slice(p*SIZE,(p+1)*SIZE);
+    if(!ctx||ctx.network.revision!==revision||ctx.digest!==digest)return null;
+    const selected=ctx.targets.slice(p*SIZE,(p+1)*SIZE).filter(c=>ids.includes(c.id));
+    if(selected.length!==ids.length||JSON.stringify(selected.map(c=>c.id))!==
+     JSON.stringify(ids))return null;
     if((s.phase4Community?.configs.length??0)+selected.length>500)return null;
     const drafts=selected.map(chat=>{
      const result=defaultCommunityConfig(chat.id);
@@ -1052,11 +1053,11 @@ export class OwnerNetworkEditor{
   const py=policySources.exec(data);
   if(py)return this.policySourceList(state,actor,now,py[1]!,Number(py[2]));
   const pz=policyPreview.exec(data);
-  if(pz)return this.previewNetworkPolicy(actor,pz[1]!,pz[2]!,Number(pz[3]));
+  if(pz)return this.previewNetworkPolicy(actor,pz[1]!,pz[2]!,Number(pz[3]),Number(pz[4]??0));
   const gw=greetingSources.exec(data);
   if(gw)return this.greetingSourcesScreen(state,actor,now,gw[1]!,Number(gw[2]));
   const gv=greetingPreview.exec(data);
-  if(gv)return this.previewGreeting(actor,gv[1]!,gv[2]!,Number(gv[3]));
+  if(gv)return this.previewGreeting(actor,gv[1]!,gv[2]!,Number(gv[3]),Number(gv[4]??0));
   const sp=stalePage.exec(data);
   if(sp)return this.staleMembersPage(state,actor,now,sp[1]!,Number(sp[2]));
   const sq=stalePick.exec(data);
