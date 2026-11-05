@@ -240,7 +240,7 @@ export class OwnerNetworkEditor{
    'التصنيف ادعاء إداري قابل للرفض، وليس دليلًا على مخالفة.\n'+
    'لا تُنقل عقوبة بين المجموعات.',
    [['S','F','I','O'].map(code=>btn(watchLabel[watchKind[code]!],
-    'nw:1:ca:'+id+':'+sourceId+':'+code))],
+    'nw:1:ca:'+id+':'+sourceId+':'+code)),
     [btn('↩️ تغيير المصدر','nw:1:o:'+id+':0')]]);
  }
  private async startWatchInput(actor:string,id:string,sourceId:string,code:string):
