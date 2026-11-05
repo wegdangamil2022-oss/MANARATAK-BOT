@@ -115,6 +115,7 @@ export class TelegramCaptchaOwner{
     if(service)rows.push([b(enabled?'إيقاف حذف رسائل الدخول والخروج':'تفعيل حذف رسائل الدخول والخروج',
      {...step,kind:enabled?'service-off':'service-on'})]);
    }
+   if(step.kind==='edit'&&this.serviceCleanup)rows.push([{text:'🧹 تنظيف أوامر المشرفين (موافقة مستقلة)',callback_data:'ac:1:h'}]);
    if(step.kind==='edit'&&this.escalation&&this.captcha.settings(s,step.group)?.enabled){
     const mode=this.escalation.mode(s,step.group);
     text+='\nتدرج انتظار CAPTCHA: '+(mode==='EXTENDED'?'مفعل (3 ثم 10 دقائق، ثم مراجعة بشرية)':'اعتيادي (1، 2، 3 دقائق)');
