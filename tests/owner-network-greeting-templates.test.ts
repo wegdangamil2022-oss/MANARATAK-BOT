@@ -169,4 +169,26 @@ for(const engine of ['json','sqlite'] as const){
    assert.ok(state.phase4Community!.configs.every(c=>validCommunityConfig(c)));
   }finally{await f.close();}
  });
+  test('NETWORK-002 greeting preview excludes selected groups and revokes older approvals ('+engine+')',async()=>{
+   const f=await fixture(engine);try{
+    const first=await f.app().handle(cb(60,'nw:1:v:'+NETWORK+':'+SOURCE+':0'));
+    const old=click(first,'تأكيد');
+    const limited=await f.app().handle(cb(61,click(first,'استبعاد '+TARGET)));
+    assert.match(limited.plan?.text??'',/1 مجموعات/);
+    assert.equal((await f.app().handle(cb(62,old))).status,'DENIED');
+    const ticket=click(limited,'تأكيد');
+    assert.equal((await f.app().handle(cb(63,ticket))).status,'APPLIED');
+    assert.equal((await f.app().handle(cb(64,ticket))).status,'DENIED');
+    const state=await f.store.snapshot();
+    assert.equal(state.phase4Community!.configs.length,2);
+    assert.equal(state.phase4Community!.configs.some(c=>c.chatId===TARGET),false);
+    const selected=state.phase4Community!.configs.find(c=>c.chatId===OVERRIDE)!;
+    assert.equal(selected.welcome.enabled,false);
+    assert.equal(selected.farewell.enabled,false);
+    assert.equal(selected.welcome.photoFileId,undefined);
+    assert.equal(selected.welcome.text,state.phase4Community!.configs[0]!.welcome.text);
+    assert.equal(state.audit.filter(x=>x.reason==='OWNER_NETWORK_GREETING_TEMPLATES_COPIED').length,1);
+   }finally{await f.close();}
+  });
+
 }
