@@ -63,10 +63,13 @@ async function fixture(engine:'json'|'sqlite',targets=[TARGET,OVERRIDE]){
   close:()=>rm(dir,{recursive:true,force:true})};
 }
 test('NETWORK-002 callbacks are canonical and bounded',()=>{
- for(const key of ['nw:1:y:'+NETWORK+':0','nw:1:y:'+NETWORK+':999',
+ for(const key of ['nw:1:z:'+NETWORK+':'+SOURCE+':0:1','nw:1:z:'+NETWORK+':'+SOURCE+':0:255',
+  'nw:1:y:'+NETWORK+':0','nw:1:y:'+NETWORK+':999',
   'nw:1:z:'+NETWORK+':'+SOURCE+':0'])assert.equal(validOwnerNetworkRoute(key),true,key);
  for(const key of ['nw:1:y:'+NETWORK+':00','nw:1:y:'+NETWORK+':1000',
   'nw:1:z:'+NETWORK+':'+SOURCE+':-1','nw:1:z:'+NETWORK+':123:0',
+   'nw:1:z:'+NETWORK+':'+SOURCE+':0:0','nw:1:z:'+NETWORK+':'+SOURCE+':0:01',
+   'nw:1:z:'+NETWORK+':'+SOURCE+':0:256',
   'nw:1:y:ABCDEF123456:0','nw:1:z:'+NETWORK+':'+SOURCE+':0\n',
   'nw:1:z:'+NETWORK+':'+SOURCE+':0'+('X'.repeat(70))])
   assert.equal(validOwnerNetworkRoute(key),false,key);
