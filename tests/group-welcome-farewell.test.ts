@@ -51,7 +51,7 @@ for(const engine of ['json','sqlite'] as const){
    }
   };
   const greetings=new GroupWelcomeFarewell(store,policy,sender,()=>now,async()=>safe,async()=>right);
-  const enable=async(kind:'WELCOME'|'FAREWELL',id:string,revision:number)=>
+  const enable=async(kind:'WELCOME'|'FAREWELL'|'GUIDE',id:string,revision:number)=>
    assert.equal(await greetings.configure(OWNER,G,kind,true,id,revision,greetings.epoch(await store.snapshot(),G,kind)),true);
   const observe=async(kind:'WELCOME'|'FAREWELL'='WELCOME',msg=71,upd=71,topicId?:number)=>
    greetings.observe(G,kind,msg,'b3-webhook:greetings:'+upd,now,topicId);
@@ -260,6 +260,78 @@ for(const engine of ['json','sqlite'] as const){
    assert.equal(incoming.status,'IGNORED');assert.equal(outgoing.status,'IGNORED');
    assert.deepEqual(await f.greetings.drain(),{sent:0,unresolved:0});
    assert.equal(f.sent.length,0);
+  }finally{await f.close();}
+ });
+ test(engine+' group guide is initially off and no unsolicited Telegram guide is queued',async()=>{
+  const f=await fixture();try{
+   const t=await f.create('دليل المجموعة','🎓 مجتمع منارتك: دليل المنح والدورات');
+   assert.equal(f.greetings.policy(await f.store.snapshot(),G,'GUIDE')?.enabled,false);
+   const guide=await f.app.handle({update_id:101,message:{message_id:81,date:f.now()/1000,
+    from:{id:300,is_bot:false},chat:{id:Number(G),type:'supergroup'},text:'/guide'}});
+   assert.equal(guide.status,'IGNORED');
+   assert.equal((await f.greetings.drain()).sent,0);
+   assert.equal(f.sent.length,0);
+   assert.ok(t.id);
+  }finally{await f.close();}
+ });
+ test(engine+' member guide command emits exactly one saved Studio URL message and preserves topic',async()=>{
+  const f=await fixture();try{
+   const t=await f.create('دليل الطلاب','🎓 دليل منارتك للمنح والدورات مع {التاريخ}','https://study.example.org/guide');
+   await f.enable('GUIDE',t.id,t.revision);
+   const command=(update_id:number,content:string,topicId?:number)=>({update_id,message:{
+    message_id:update_id,date:f.now()/1000,from:{id:300,is_bot:false},
+    chat:{id:Number(G),type:'supergroup'},text:content,
+    ...(topicId?{message_thread_id:topicId}:{})}});
+   const queued=await f.app.handle(command(101,'/guide@ManaratakBot',42));
+   assert.equal(queued.status,'IGNORED');assert.equal(queued.reason,'GROUP_GUIDE_QUEUED');
+   assert.equal((await f.greetings.drain()).sent,1);
+   assert.match(f.sent[0]!.text,/دليل منارتك للمنح والدورات/u);
+   assert.deepEqual(f.sent[0]!.buttons,[[{text:'📚 دليل الطلاب',url:'https://study.example.org/guide'}]]);
+   assert.equal(f.sent[0]!.topicId,42);
+   assert.equal((await f.app.handle(command(102,'/guide'))).reason,'GROUP_GUIDE_RATE_LIMITED_OR_DISABLED');
+   assert.equal((await f.greetings.drain()).sent,0);assert.equal(f.sent.length,1);
+   f.advance(61000);
+   assert.equal((await f.app.handle(command(103,'/guide'))).reason,'GROUP_GUIDE_QUEUED');
+   assert.equal((await f.greetings.drain()).sent,1);
+   assert.equal(f.sent.length,2);
+  }finally{await f.close();}
+ });
+ test(engine+' guide cannot be triggered through wrong bot mention, forwarded or edited service',async()=>{
+  const f=await fixture();try{
+   const t=await f.create('دليل الطلاب','مرحبا بطلاب منارتك');
+   await f.enable('GUIDE',t.id,t.revision);
+   const base={message_id:51,date:f.now()/1000,from:{id:300,is_bot:false},chat:{id:Number(G),type:'supergroup'},text:'/guide'};
+   const unrelated=await f.app.handle({update_id:51,message:{...base,text:'/guide@AnotherBot'}});
+   assert.notEqual(unrelated.reason,'GROUP_GUIDE_QUEUED');
+   const forwarded=await f.app.handle({update_id:52,message:{...base,message_id:52,forward_date:Math.floor(f.now()/1000)}});
+   assert.notEqual(forwarded.reason,'GROUP_GUIDE_QUEUED');
+   const edited=await f.app.handle({update_id:53,edited_message:{...base,message_id:53}});
+   assert.notEqual(edited.reason,'GROUP_GUIDE_QUEUED');
+   assert.equal((await f.greetings.drain()).sent,0);assert.equal(f.sent.length,0);
+  }finally{await f.close();}
+ });
+ test(engine+' owner guide menu previews saved version and confirms independently from welcome/farewell',async()=>{
+  const f=await fixture();try{
+   const t=await f.create('دليل الطلاب','دليل منارتك للطلاب');
+   const owner=new TelegramWelcomeOwner(f.store,f.policy,f.greetings,f.now);
+   const root=await owner.handle(OWNER,'mi:1:i:09:02');
+   assert.match(root!.text,/دليل العضو الجديد/u);
+   const group=await owner.handle(OWNER,btn(root,G));
+   const editor=await owner.handle(OWNER,btn(group,'دليل العضو'));
+   const templates=await owner.handle(OWNER,btn(editor,'اختيار قالب'));
+   const preview=await owner.handle(OWNER,btn(templates,'دليل الطلاب'));
+   assert.match(preview!.text,/معاينة/u);
+   const accept=btn(preview,'تأكيد');
+   assert.ok(await owner.handle(OWNER,accept));
+   assert.equal(f.greetings.policy(await f.store.snapshot(),G,'GUIDE')?.templateId,t.id);
+   assert.equal(f.greetings.policy(await f.store.snapshot(),G,'WELCOME')?.enabled,false);
+   assert.equal(await owner.handle(OWNER,accept),null);
+   const reopened=await owner.handle(OWNER,'mi:1:i:09:02');
+   const groupAgain=await owner.handle(OWNER,btn(reopened,G));
+   const editAgain=await owner.handle(OWNER,btn(groupAgain,'دليل العضو'));
+   const off=await owner.handle(OWNER,btn(editAgain,'إيقاف دليل'));
+   assert.ok(await owner.handle(OWNER,btn(off,'تأكيد')));
+   assert.equal(f.greetings.policy(await f.store.snapshot(),G,'GUIDE')?.enabled,false);
   }finally{await f.close();}
  });
  test(engine+' Telegram join and leave webhook routes enqueue only trusted local greeting events',async()=>{
