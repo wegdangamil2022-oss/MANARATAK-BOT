@@ -28,13 +28,15 @@ test('reviewed admin cleanup recognizes only supported approved command families
  }
  assert.equal(reviewedAdminCommandKind('/actrule 2',bot,'RULE_ACTION_CHOICE'),'RULE');
  assert.equal(reviewedAdminCommandKind('/actrule@ManaratakBot 2',bot,'RULE_ACTION_CHOICE'),'RULE');
+ assert.equal(reviewedAdminCommandKind('/delete',bot,'DELETE_PREVIEW_ONLY'),'DELETE');
+ assert.equal(reviewedAdminCommandKind('/delete@ManaratakBot',bot,'DELETE_PREVIEW_ONLY'),'DELETE');
  for(const [cmd,reason] of [
   ['/actrule 2','MODERATION_PREVIEW_ONLY'],['/warnrule 2','RULE_ACTION_CHOICE'],
   ['/noticerule 0','MODERATION_PREVIEW_ONLY'],['/muterule 2','MODERATION_PREVIEW_ONLY'],
   ['/warnrule 2 extra','MODERATION_PREVIEW_ONLY'],['/actrule 2\n/ban','RULE_ACTION_CHOICE'],
   ['/actrule@OtherBot 2','RULE_ACTION_CHOICE'],['/warnrule@OtherBot 2','MODERATION_PREVIEW_ONLY'],
   ['/actrule 2','GROUP_PERMISSIONS_VIEW'],['/lock','MODERATION_PREVIEW_ONLY'],
-  ['/delete','DELETE_PREVIEW_ONLY'],['/rules','MODERATION_PREVIEW_ONLY'],
+  ['/delete','MODERATION_PREVIEW_ONLY'],['/delete extra','DELETE_PREVIEW_ONLY'],['/delete@OtherBot','DELETE_PREVIEW_ONLY'],['/rules','MODERATION_PREVIEW_ONLY'],
   ['إنذار','MODERATION_PREVIEW_ONLY'],['إنذار 0','MODERATION_PREVIEW_ONLY']
  ] as const)assert.equal(reviewedAdminCommandKind(cmd,bot,reason),null,cmd+' / '+reason);
 });
