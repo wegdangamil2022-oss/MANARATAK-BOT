@@ -36,6 +36,7 @@ async function fixture(engine:'json'|'sqlite'){
 }
 type Method='getChat'|'getChatMember';
 function gateway(options:{botRight?:boolean;memberStatus?:string;chatType?:string;
+ sourceStatus?:string;sourceChatType?:string;
  throwOn?:Method;onCall?:(method:Method,index:number)=>Promise<void>|void}={}){
  const calls:string[]=[];let sequence=0;
  const request=(async(url:string|URL|Request,init?:RequestInit)=>{
@@ -47,13 +48,16 @@ function gateway(options:{botRight?:boolean;memberStatus?:string;chatType?:strin
   await options.onCall?.(method,sequence);
   if(options.throwOn===method)throw Error('network error');
   const body=JSON.parse(String(init?.body)) as {chat_id:string;user_id?:number};
-  assert.equal(body.chat_id,TARGET);
+  assert.ok(body.chat_id===TARGET||body.chat_id===SOURCE);
+  const isSource=body.chat_id===SOURCE;
   const result=method==='getChat'?
-   {id:Number(TARGET),type:options.chatType??'supergroup'}:
+   {id:Number(body.chat_id),type:isSource?
+     options.sourceChatType??'supergroup':options.chatType??'supergroup'}:
    body.user_id===BOT?
     {status:'administrator',user:{id:BOT,is_bot:true},
      can_restrict_members:options.botRight??true}:
-    {status:options.memberStatus??'member',user:{id:Number(SUBJECT),is_bot:false}};
+    {status:isSource?options.sourceStatus??'kicked':options.memberStatus??'member',
+     user:{id:Number(SUBJECT),is_bot:false}};
   return new Response(JSON.stringify({ok:true,result}),{status:200,
    headers:{'content-type':'application/json'}});
  }) as typeof fetch;
@@ -65,9 +69,10 @@ for(const engine of ['json','sqlite'] as const){
    const {gw,calls}=gateway();
    const report=await new NetworkTransferReadOnlyPreflight(f.store,f.policy,gw,f.now)
     .assess(OWNER,REVIEW);
-   assert.deepEqual(report,{status:'OBSERVED_ONLY',reason:'ORDINARY_MEMBER_OBSERVED'});
-   assert.deepEqual(calls,['getChat','getChatMember','getChatMember',
-    'getChatMember','getChat','getChatMember','getChatMember','getChatMember']);
+   assert.deepEqual(report,{status:'OBSERVED_ONLY',
+    reason:'SOURCE_RESTRICTION_AND_TARGET_MEMBER_OBSERVED'});
+   assert.deepEqual(calls,Array.from({length:4},
+    ()=>['getChat','getChatMember','getChatMember','getChatMember']).flat());
    const s=await f.store.snapshot();
    assert.equal(s.networkSanctionReviews![0]!.status,'REVIEWED_ONLY');
    assert.equal(s.moderationOperations.length,0);
@@ -116,11 +121,12 @@ for(const engine of ['json','sqlite'] as const){
    assert.deepEqual(calls,[]);
   }finally{await f.close();}
  });
- test('NETWORK-003 denied bot rights, restricted target and channel are never observed as eligible ('+engine+')',async()=>{
+ test('NETWORK-003 denied rights, external target restrictions and non-group chats cannot pass ('+engine+')',async()=>{
   const f=await fixture(engine);try{
    for(const options of [{botRight:false},{memberStatus:'administrator'},
     {memberStatus:'restricted'},{memberStatus:'kicked'},{chatType:'channel'},
-    {throwOn:'getChat' as const}]){
+    {sourceChatType:'channel'},{sourceStatus:'member'},
+    {sourceStatus:'administrator'},{throwOn:'getChat' as const}]){
     const {gw,calls}=gateway(options);
     const result=await new NetworkTransferReadOnlyPreflight(f.store,f.policy,gw,f.now)
      .assess(OWNER,REVIEW);
@@ -128,6 +134,15 @@ for(const engine of ['json','sqlite'] as const){
     assert.ok(calls.length>0);
     assert.equal(calls.some(name=>name.startsWith('ban')||name.startsWith('restrict')),false);
    }
+  }finally{await f.close();}
+ });
+ test('NETWORK-003 a reviewed BAN without a matching source ban is never eligible ('+engine+')',async()=>{
+  const f=await fixture(engine);try{
+   const {gw,calls}=gateway({sourceStatus:'member'});
+   assert.deepEqual(await new NetworkTransferReadOnlyPreflight(f.store,f.policy,gw,f.now)
+    .assess(OWNER,REVIEW),{status:'BLOCKED',reason:'SOURCE_NOT_VERIFIED'});
+   assert.equal(calls.includes('banChatMember'),false);
+   assert.equal(calls.includes('restrictChatMember'),false);
   }finally{await f.close();}
  });
  test('NETWORK-003 target revocation during awaited getChatMember makes stale not eligible ('+engine+')',async()=>{
