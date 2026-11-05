@@ -30,6 +30,7 @@ import {TelegramEphemeralTextSender} from './telegram-ephemeral-sender.js';
 import {TelegramTemporaryGroupSender} from './telegram-temporary-group-sender.js';
 import {CaptchaJoinNotices} from './captcha-join-notices.js';
 import {GroupServiceMessageCleanup} from './group-service-message-cleanup.js';
+import {GroupCleanupAudit,TelegramGroupCleanupAuditSender} from './group-cleanup-audit.js';
 import {GroupAdminCommandCleanup} from './group-admin-command-cleanup.js';
 import {CaptchaEscalationPolicy} from './captcha-escalation-policy.js';
 import {CaptchaService} from './captcha.js';
@@ -214,6 +215,10 @@ export async function createLiveTelegramServer(config:LiveTelegramConfig,
     if(!await safetyGate())return 'UNKNOWN';
     return (await new TelegramBotApiModerationGateway(check.token,request,safetyGate).inspectBotAdminRights(chat)).delete;
    }):undefined;
+ const cleanupAudit=serviceCleanup&&adminCommandCleanup&&check.phase3TimersEnabled===true?
+  new GroupCleanupAudit(store,policy,serviceCleanup,adminCommandCleanup,
+   new TelegramBotApiModerationGateway(check.token,request,safetyGate),
+   new TelegramGroupCleanupAuditSender(check.token,request),Date.now,safetyGate):undefined;
  const captchaEscalation=phase3?new CaptchaEscalationPolicy(store,policy,
   new CaptchaService(store,policy,(chat,actor)=>membership.verifyMembership(chat,actor),Date.now),Date.now):undefined;
  const welcomeFarewell=phase3?new GroupWelcomeFarewell(store,policy,
@@ -229,6 +234,7 @@ export async function createLiveTelegramServer(config:LiveTelegramConfig,
   ...(joinNotices?{joinNotices}:{}),
   ...(serviceCleanup?{serviceCleanup}:{}),
   ...(adminCommandCleanup?{adminCommandCleanup}:{}),
+  ...(cleanupAudit?{cleanupAudit}:{}),
   ...(captchaEscalation?{captchaEscalation}:{}),
   ...(welcomeFarewell?{welcomeFarewell}:{}),
   ...(phase3?{adminRoles:new TelegramAdminRoleGateway(check.token,request,safetyGate),moderation:phase3.moderation,purge:phase3.purge,groupPermissions:phase3.groupPermissions,protectionEnforcer:phase3.protectionEnforcer,moderationRights:{gateway:new TelegramBotApiModerationGateway(check.token,request,safetyGate),safety:safetyGate},ephemeralVerification:true}:{}),
@@ -257,6 +263,7 @@ export async function createLiveTelegramServer(config:LiveTelegramConfig,
    if(joinNotices){await joinNotices.drain();await joinNotices.cleanup();}
    if(serviceCleanup)await serviceCleanup.cleanup();
    if(adminCommandCleanup)await adminCommandCleanup.cleanup();
+   if(cleanupAudit)await cleanupAudit.drain();
    if(welcomeFarewell&&check.phase3TimersEnabled===true){await welcomeFarewell.drain();await welcomeFarewell.cleanup();}
    if(notices)await notices.drain();
    if(ruleNotices)await ruleNotices.drain();
