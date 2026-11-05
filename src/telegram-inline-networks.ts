@@ -384,8 +384,8 @@ export class OwnerNetworkEditor{
   const pages=Math.max(1,Math.ceil(targets.length/SIZE));
   if(p>=pages)return null;
   const rows=targets.slice(p*SIZE,(p+1)*SIZE).map(chat=>{
-   const existing=(s.networkSanctionReviews??[]).some(x=>x.networkId===c.networkId&&
-    x.subjectId===c.subjectId&&x.targetChatId===chat.id&&
+   const existing=(s.networkSanctionReviews??[]).some(x=>x.caseId===c.id&&
+    x.targetChatId===chat.id&&
     (x.status==='PENDING'||x.status==='REVIEWED_ONLY'));
    return existing?[btn('🔒 مراجعة مفتوحة: '+chat.id,'nw:1:rl:'+caseId+':0')]:
     [btn('🎯 مجموعة مستهدفة: '+chat.id,'nw:1:rk:'+caseId+':'+chat.id)];
@@ -408,8 +408,8 @@ export class OwnerNetworkEditor{
   if(!c||c.status!=='WATCHED'||!this.find(s,c.networkId))return null;
   if(!this.watchSources(s,actor,now,this.find(s,c.networkId)!)
    .some(chat=>chat.id===targetId&&chat.id!==c.sourceChatId))return null;
-  if((s.networkSanctionReviews??[]).some(x=>x.networkId===c.networkId&&
-   x.subjectId===c.subjectId&&x.targetChatId===targetId&&
+  if((s.networkSanctionReviews??[]).some(x=>x.caseId===c.id&&
+   x.targetChatId===targetId&&
    (x.status==='PENDING'||x.status==='REVIEWED_ONLY')))return null;
   return ui('<b>⚖️ اقتراح مراجعة إجراء — مجموعة واحدة</b>\n'+
    'المجموعة المستهدفة: <code>'+targetId+'</code>\n'+
