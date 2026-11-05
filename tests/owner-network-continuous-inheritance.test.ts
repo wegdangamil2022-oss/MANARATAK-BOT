@@ -169,6 +169,22 @@ for(const engine of ['json','sqlite'] as const){
    assert.equal(s.protectionPolicies?.find(x=>x.policy.chatId===B)!.policy.revision,2);
   }finally{await f.close();}
  });
+ test('NETWORK-002 refuses a restored target with a future policy timestamp ('+engine+')',async()=>{
+  const f=await fixture(engine);try{
+   await f.savePolicy(SOURCE,1);
+   const preview=await f.app().handle(cb(75,'nw:1:z:'+NET+':'+SOURCE+':0'));
+   assert.equal((await f.app().handle(cb(76,button(preview,'متابعة المصدر')))).status,'APPLIED');
+   await f.store.transaction(s=>{
+    s.protectionPolicies!.find(x=>x.policy.chatId===A)!.updatedAt=NOW+60_000;
+   });
+   assert.equal((await f.savePolicy(SOURCE,2,'source update')).status,'SAVED');
+   const state=await f.store.snapshot();
+   assert.equal(state.networkInheritance?.find(x=>x.targetChatId===A)!.status,'PAUSED');
+   assert.equal(state.protectionPolicies?.find(x=>x.policy.chatId===A)!.policy.revision,1);
+   assert.equal(state.networkInheritance?.find(x=>x.targetChatId===B)!.status,'ACTIVE');
+   assert.equal(state.protectionPolicies?.find(x=>x.policy.chatId===B)!.policy.revision,2);
+  }finally{await f.close();}
+ });
  test('NETWORK-002 corrupt inheritance metadata rejects the entire JSON/SQLite transaction ('+engine+')',async()=>{
   const f=await fixture(engine);try{
    await assert.rejects(f.store.transaction(s=>{
