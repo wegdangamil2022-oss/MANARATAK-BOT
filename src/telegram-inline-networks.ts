@@ -10,6 +10,7 @@ import type {NetworkWatchCase,NetworkWatchCategory,
  NetworkWatchDecision} from './network-watchlist-model.js';
 import {prepareNetworkSanctionReview,decideNetworkSanctionReview,
  networkSanctionReviewAccessible} from './network-sanction-review.js';
+import {inspectNetworkTransferLocal} from './network-transfer-preflight.js';
 import type {NetworkSanctionReview,NetworkSanctionKind,
  NetworkSanctionReviewDecision} from './network-sanction-review-model.js';
 import type {Policy} from './policy.js';
@@ -49,6 +50,7 @@ const sanctionKinds=new RegExp('^nw:1:rk:([a-f0-9]{12}):'+group+'$','u');
 const sanctionPreview=new RegExp('^nw:1:ra:([a-f0-9]{12}):'+group+':([MB])$','u');
 const sanctionList=new RegExp('^nw:1:rl:([a-f0-9]{12}):'+page+'$','u');
 const sanctionDetail=/^nw:1:ri:([a-f0-9]{12})$/u;
+const sanctionLocalCheck=/^nw:1:rf:([a-f0-9]{12})$/u;
 const sanctionDecision=/^nw:1:rd:([a-f0-9]{12}):([ADC])$/u;
 const stalePick=new RegExp('^nw:1:q:'+net+':'+revision+':'+group+':'+revision+':'+page+'$','u');
 const staleBatch=new RegExp('^nw:1:b:'+net+':'+revision+':'+page+'$','u');
@@ -87,7 +89,7 @@ export function validOwnerNetworkRoute(data:unknown):boolean{
  const preview=policyPreview.exec(data)??greetingPreview.exec(data);
  if(preview?.[4]!==undefined&&Number(preview[4])>255)return false;
  return data==='mi:1:i:01:03'||home.test(data)||begin.test(data)||
-  [list,detail,rename,remove,pick,toggle,stalePage,stalePick,staleBatch,policySources,policyPreview,greetingSources,greetingPreview,inheritancePage,inheritanceStop,watchList,watchOrigins,watchCategories,watchStart,watchCaseView,watchReview,sanctionTargets,sanctionKinds,sanctionPreview,sanctionList,sanctionDetail,sanctionDecision,confirm,cancel,historyPage,historyView].some(re=>re.test(data));
+  [list,detail,rename,remove,pick,toggle,stalePage,stalePick,staleBatch,policySources,policyPreview,greetingSources,greetingPreview,inheritancePage,inheritanceStop,watchList,watchOrigins,watchCategories,watchStart,watchCaseView,watchReview,sanctionTargets,sanctionKinds,sanctionPreview,sanctionList,sanctionDetail,sanctionLocalCheck,sanctionDecision,confirm,cancel,historyPage,historyView].some(re=>re.test(data));
 }
 function approved(s:BotState,policy:Policy,actor:string,now:number):Chat[]{
  const counts=new Map<string,number>();
@@ -477,6 +479,7 @@ export class OwnerNetworkEditor{
    buttons.push([btn('❌ رفض الاقتراح','nw:1:rd:'+id+':D')]);
   }else if(valid&&x.status==='REVIEWED_ONLY'){
    buttons.push([btn('🔒 إغلاق المراجعة','nw:1:rd:'+id+':C')]);
+   buttons.push([btn('🔎 فحص الجاهزية المحلية','nw:1:rf:'+id)]);
   }
   buttons.push([btn('↩️ كل المراجعات','nw:1:rl:'+x.caseId+':0')]);
   return ui('<b>🔎 مراجعة إجراء لمجموعة مستقلة</b>\n'+
@@ -486,6 +489,29 @@ export class OwnerNetworkEditor{
    (valid?'':'⚠️ تغيّر أصل البلاغ أو اعتماد المجموعة؛ لا يمكن اعتماد هذا السجل.\n')+
    'الموافقة البشرية تعني الاطلاع فقط ولا تتيح نقل العقوبة أو تنفيذها.',
    buttons);
+ }
+ /** Advisory owner-only local checkpoint. Never contacts Telegram and
+  * never creates a sanction, even when the recorded review is current. */
+ private sanctionLocalReadiness(s:BotState,actor:string,now:number,id:string):
+  OwnerInlineScreen|null{
+  if(!this.auth(s,actor,now))return null;
+  const rows=(s.networkSanctionReviews??[]).filter(x=>x.id===id),x=rows[0];
+  if(rows.length!==1||!x||!this.find(s,x.networkId))return null;
+  const result=inspectNetworkTransferLocal(s,this.policy,actor,now,id);
+  const reason:Record<string,string>={
+   REVIEW_NOT_CURRENT:'المراجعة غير مؤهلة أو تغيّرت صلاحية المصدر أو الوجهة.',
+   PROTECTED_LOCAL:'العضو محمي محليًا: المالك أو أحد مسؤولي المجموعة.',
+   UNRESOLVED_LOCAL:'توجد عملية إشراف معلقة أو مجهولة النتيجة.',
+   ACTIVE_LOCAL_REASON:'توجد عقوبة أو سبب نشط للمستخدم في المجموعة.',
+   LOCAL_LEDGER_UNSAFE:'سجل الإشراف يحتاج معالجة يدوية قبل أي تقييم.'};
+  return ui('<b>🔎 فحص الجاهزية المحلية فقط</b>\n'+
+   'المجموعة المستهدفة: <code>'+x.targetChatId+'</code>\n'+
+   'الحالة: '+(result.status==='MAY_OBSERVE'?
+    'اجتاز الحدود المحلية؛ يحتاج فحص Telegram المستقل.':
+    'غير مؤهلة حاليًا: '+reason[result.reason])+'\n'+
+   'هذا التقرير لا يجيز كتمًا أو حظرًا، ولا ينفذ اتصالًا مع Telegram.\n'+
+   'حقوق البوت وحالة المستخدم الفعلية لم تُفحص في هذه الشاشة.',
+   [[btn('↩️ تفاصيل المراجعة','nw:1:ri:'+id)]]);
  }
  private async previewSanctionDecision(actor:string,id:string,code:string):
   Promise<OwnerInlineScreen|null>{
@@ -1690,6 +1716,8 @@ export class OwnerNetworkEditor{
   if(rl)return this.sanctionReviewsPage(state,actor,now,rl[1]!,Number(rl[2]));
   const ri=sanctionDetail.exec(data);
   if(ri)return this.sanctionReviewDetails(state,actor,now,ri[1]!);
+  const rf=sanctionLocalCheck.exec(data);
+  if(rf)return this.sanctionLocalReadiness(state,actor,now,rf[1]!);
   const rd=sanctionDecision.exec(data);
   if(rd)return this.previewSanctionDecision(actor,rd[1]!,rd[2]!);
   const fl=inheritancePage.exec(data);
