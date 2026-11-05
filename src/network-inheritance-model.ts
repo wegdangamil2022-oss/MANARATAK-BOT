@@ -34,8 +34,9 @@ export function validNetworkInheritanceLink(v:unknown):v is NetworkInheritanceLi
   typeof v.targetDigest!=='string'||!/^[a-f0-9]{64}$/u.test(v.targetDigest)||
   !clock(v.createdAt)||!clock(v.lastSyncedAt)||
   (v.lastSyncedAt as number)<(v.createdAt as number)||!['ACTIVE','PAUSED'].includes(String(v.status)))return false;
- return v.status==='ACTIVE'?v.pausedReason===undefined:
-  typeof v.pausedReason==='string'&&pauseReasons.has(v.pausedReason);
+ return v.status==='ACTIVE'?!Object.hasOwn(v,'pausedReason'):
+  Object.hasOwn(v,'pausedReason')&&typeof v.pausedReason==='string'&&
+  pauseReasons.has(v.pausedReason);
 }
 export function validNetworkInheritanceLinks(v:unknown):v is NetworkInheritanceLink[]{
  if(!Array.isArray(v)||v.length>500||v.some(x=>!validNetworkInheritanceLink(x)))return false;
