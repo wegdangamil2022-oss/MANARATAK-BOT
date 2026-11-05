@@ -68,7 +68,7 @@
 | MOD-005 | 586 | NOT_REVIEWED_IN_THIS_PASS | لم تكتمل مطابقته في هذه المراجعة. |
 | MOD-006 | 587 | NOT_REVIEWED_IN_THIS_PASS | لم تكتمل مطابقته في هذه المراجعة. |
 | MOD-007 | 588 | NOT_REVIEWED_IN_THIS_PASS | لم تكتمل مطابقته في هذه المراجعة. |
-| MOD-008 | 589 | PARTIAL_LOCAL_REVIEW | Owner-consented original Telegram join/leave service message deletion now waits 60 seconds and rechecks bot delete rights and STOP, with terminal unknown outcomes and a one-day limit. Bot-owned CAPTCHA link notices also have distinct receipt-bound cleanup. Deletion of admin command messages and other service messages remains open; real Telegram acceptance is deferred. |
+| MOD-008 | 589 | PARTIAL_LOCAL_REVIEW | Owner-consented original Telegram join/leave service message deletion now waits 60 seconds and rechecks bot delete rights and STOP, with terminal unknown outcomes and a one-day limit. Bot-owned CAPTCHA link notices also have distinct receipt-bound cleanup. Owner-opted-in original moderator-command deletion (MODERATION_PREVIEW_ONLY / GROUP_PERMISSIONS_VIEW only) is now wired after an authorized group command and a confirmed private preview receipt, with separate consent, two-minute delay, and STOP/delete-rights checks. Other command types, other service-message classes and real Telegram acceptance remain open; see PHASE3_ADMIN_COMMAND_CLEANUP_AR.md. |
 | MOD-009 | 590 | NOT_REVIEWED_IN_THIS_PASS | لم تكتمل مطابقته في هذه المراجعة. |
 | MOD-010 | 591 | NOT_REVIEWED_IN_THIS_PASS | لم تكتمل مطابقته في هذه المراجعة. |
 | MOD-011 | 592 | NOT_REVIEWED_IN_THIS_PASS | لم تكتمل مطابقته في هذه المراجعة. |
