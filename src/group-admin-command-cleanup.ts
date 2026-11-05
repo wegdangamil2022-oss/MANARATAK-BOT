@@ -76,8 +76,13 @@ export class GroupAdminCommandCleanup{
  }
  private delivery(s:BotState,j:Pick<Job,'actor'|'updateKey'>):boolean{
   const rows=s.telegramReplyJobs?.filter(x=>x.updateKey===j.updateKey)??[],job=rows[0];
-  return rows.length===1&&!!job&&job.status==='SENT'&&job.privateReplyKind==='ADMIN_SCOPED'&&
-   job.plan?.chatId===j.actor&&msgId(job.messageId);
+  // The dispatcher *must* erase plan and privateReplyKind before its API
+  // attempt. Sender identity and ADMIN_SCOPED provenance were verified when
+  // this original command job was recorded, while the plan was still queued.
+  // Only the same job's later CONFIRMED -> SENT receipt can enable deletion.
+  return rows.length===1&&!!job&&job.status==='SENT'&&job.plan===undefined&&
+   job.privateReplyKind===undefined&&msgId(job.messageId)&&
+   at(job.startedAt)&&at(job.redactedAt)&&typeof job.attemptId==='string';
  }
  /** Called only from post-commit processing of a real, unedited group
   * command with an authorized moderation/lock preview. A stored ALLOW
