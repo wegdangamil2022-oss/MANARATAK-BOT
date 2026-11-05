@@ -81,7 +81,7 @@ for(const engine of ['json','sqlite'] as const){
     await f.enable();const {key,reason}=await f.receipt(61,OWNER);
     if(variant==='queued')await f.store.transaction(s=>{const j=s.telegramReplyJobs!.find(j=>j.updateKey===key)!;j.status='QUEUED';delete j.messageId;});
     if(variant==='rejected')await f.store.transaction(s=>{const j=s.telegramReplyJobs!.find(j=>j.updateKey===key)!;j.status='FAILED_CONFIRMED';});
-    if(variant==='wrong-recipient')await f.store.transaction(s=>{s.telegramReplyJobs!.find(j=>j.updateKey===key)!.plan.chatId='999';});
+    if(variant==='wrong-recipient')await f.store.transaction(s=>{s.telegramReplyJobs!.find(j=>j.updateKey===key)!.plan!.chatId='999';});
     if(variant==='wrong-status')await f.store.transaction(s=>{s.audit.find(a=>a.updateKey===key)!.decision='DENY';});
     const observed=await f.service.observeApproved(G,61,OWNER,key,'MODERATION',
      variant==='wrong-reason'?'RESPONSE_PLANNED_ONLY':reason,f.at());
