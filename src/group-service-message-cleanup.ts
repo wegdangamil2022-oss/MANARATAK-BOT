@@ -183,6 +183,24 @@ export class GroupServiceMessageCleanup{
   s.audit.push({actorId:this.policyAccess.ownerId,updateKey:j.key+':outcome',decision:'NOOP',
    reason:'GROUP_SERVICE_DELETE_'+reason,policyVersion:j.version,at:time(now)?now:j.issued});
  }
+ /** Verified historical deletion outcomes for private, content-free audit reports.
+  * Never treats an unverified restored journal row as a Telegram result. */
+ auditOutcomes(s:BotState,now:number):{key:string;chat:string;kind:'SERVICE';status:'ACKNOWLEDGED'|'FAILED_CONFIRMED'|'UNKNOWN_OUTCOME'|'NOT_SENT';at:number;version:number}[]{
+  if(!time(now))return [];
+  const valid=['ACKNOWLEDGED','FAILED_CONFIRMED','UNKNOWN_OUTCOME','NOT_SENT'] as const;
+  const out:{key:string;chat:string;kind:'SERVICE';status:typeof valid[number];at:number;version:number}[]=[];
+  for(const j of this.jobs(s,now)){
+   const started=this.marker(s,j,':started'),start=started[0],rows=this.marker(s,j,':outcome'),row=rows[0];
+   if(started.length!==1||!start||start.decision!=='ALLOW'||start.actorId!==this.policyAccess.ownerId||
+      start.reason!=='GROUP_SERVICE_DELETE_STARTED'||start.policyVersion!==j.version||
+      !time(start.at)||start.at<j.issued+60000||start.at>now||rows.length!==1||!row||
+      row.decision!=='NOOP'||row.actorId!==this.policyAccess.ownerId||row.policyVersion!==j.version||
+      !time(row.at)||row.at<start.at||row.at>now||now-row.at>=180000)continue;
+   const status=valid.find(v=>row.reason==='GROUP_SERVICE_DELETE_'+v);
+   if(status)out.push({key:j.key,chat:j.chat,kind:'SERVICE',status,at:row.at,version:j.version});
+  }
+  return out;
+ }
  async cleanup(limit=5):Promise<{deleted:number;unresolved:number}>{
   if(!Number.isSafeInteger(limit)||limit<1||limit>10)throw Error('SERVICE_CLEANUP_LIMIT_INVALID');
   let deleted=0,unresolved=0;
