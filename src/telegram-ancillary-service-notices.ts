@@ -27,7 +27,7 @@ const safeEmoji=(v:unknown):v is string=>
  typeof v==='string'&&v.length>0&&v.length<=128&&!/[\u0000-\u001f\u007f]/u.test(v);
 const uint=(v:unknown,maximum:number):v is number=>
  typeof v==='number'&&Number.isSafeInteger(v)&&v>0&&v<=maximum;
-const exact=(v:unknown,keys:readonly string[])=>obj(v)&&Object.keys(v).every(k=>keys.includes(k));
+const exact=(v:unknown,keys:readonly string[]):v is Record<string,unknown>=>obj(v)&&Object.keys(v).every(k=>keys.includes(k));
 export const ancillaryServiceFieldPresent=(message:Record<string,unknown>):boolean=>
  fields.some(k=>own(message,k));
 export const ancillaryServiceScope=(kind:AncillaryServiceKind):AncillaryServiceScope=>
