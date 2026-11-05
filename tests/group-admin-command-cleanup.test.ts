@@ -116,6 +116,9 @@ for(const engine of ['json','sqlite'] as const){
    assert.equal(await f.service.observeApproved(G,71,OWNER,key,'MODERATION',reason,f.at()),0);
    assert.equal(await f.service.observeApproved(G,72,OWNER,key,'MODERATION',reason,f.at()),0);
    assert.equal(await f.service.observeApproved(G,71,OWNER,key,'MODERATION',reason,f.at()-31000),0);
+   // Cleanup requires the independently confirmed private preview receipt;
+   // accepting the command itself must never be enough.
+   await f.deliver(key,71);
    f.advance(120000);assert.equal((await f.service.cleanup()).deleted,1);
   }finally{await f.close();}
  });
