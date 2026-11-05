@@ -77,7 +77,7 @@ export class GroupAdminCommandCleanup{
  private delivery(s:BotState,j:Pick<Job,'actor'|'updateKey'>):boolean{
   const rows=s.telegramReplyJobs?.filter(x=>x.updateKey===j.updateKey)??[],job=rows[0];
   return rows.length===1&&!!job&&job.status==='SENT'&&job.privateReplyKind==='ADMIN_SCOPED'&&
-   job.plan.chatId===j.actor&&msgId(job.messageId);
+   job.plan?.chatId===j.actor&&msgId(job.messageId);
  }
  /** Called only from post-commit processing of a real, unedited group
   * command with an authorized moderation/lock preview. A stored ALLOW
@@ -94,8 +94,8 @@ export class GroupAdminCommandCleanup{
       !this.policyAccess.has(s,actor,'chat.manage',chat,now)||
       !s.updates.some(u=>u.key===updateKey&&u.status==='DONE')||
       original.length!==1||original[0]!.decision!=='ALLOW'||original[0]!.reason!==reason||
-      queue.length!==1||queue[0]!.privateReplyKind!=='ADMIN_SCOPED'||queue[0]!.plan.chatId!==actor||
-      queue[0]!.plan.editMessageId!==undefined||!['QUEUED','SENDING','SENT','UNKNOWN_OUTCOME','FAILED_CONFIRMED'].includes(queue[0]!.status))return 0;
+      queue.length!==1||queue[0]!.privateReplyKind!=='ADMIN_SCOPED'||queue[0]!.plan?.chatId!==actor||
+      queue[0]!.plan?.editMessageId!==undefined||!['QUEUED','SENDING','SENT','UNKNOWN_OUTCOME','FAILED_CONFIRMED'].includes(queue[0]!.status))return 0;
    const jobs=this.jobs(s,now);
    // A webhook update can only identify a single deletion target, even after
    // state restore, and this feature cannot authorize another operation.
