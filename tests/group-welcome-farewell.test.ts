@@ -51,7 +51,7 @@ for(const engine of ['json','sqlite'] as const){
    }
   };
   const greetings=new GroupWelcomeFarewell(store,policy,sender,()=>now,async()=>safe,async()=>right);
-  const enable=async(kind:'WELCOME'|'FAREWELL'|'GUIDE',id:string,revision:number)=>
+  const enable=async(kind:'WELCOME'|'FAREWELL'|'GUIDE'|'RULES',id:string,revision:number)=>
    assert.equal(await greetings.configure(OWNER,G,kind,true,id,revision,greetings.epoch(await store.snapshot(),G,kind)),true);
   const observe=async(kind:'WELCOME'|'FAREWELL'='WELCOME',msg=71,upd=71,topicId?:number)=>
    greetings.observe(G,kind,msg,'b3-webhook:greetings:'+upd,now,topicId);
