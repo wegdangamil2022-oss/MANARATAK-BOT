@@ -334,6 +334,76 @@ for(const engine of ['json','sqlite'] as const){
    assert.equal(f.greetings.policy(await f.store.snapshot(),G,'GUIDE')?.enabled,false);
   }finally{await f.close();}
  });
+
+ test(engine+' read-only /rules summary defaults to off and never replaces the actual moderation policy',async()=>{
+  const f=await fixture();try{
+   const template=await f.create('قوانين مختصرة','📜 القوانين المعتمدة تجدها لدى المشرفين.');
+   assert.equal(f.greetings.policy(await f.store.snapshot(),G,'RULES')?.enabled,false);
+   const update=await f.app.handle({update_id:170,message:{message_id:170,date:f.now()/1000,
+    from:{id:302,is_bot:false},chat:{id:Number(G),type:'supergroup'},text:'/rules'}});
+   assert.equal(update.status,'IGNORED');
+   assert.equal((await f.greetings.drain()).sent,0);
+   assert.ok(template.id);
+  }finally{await f.close();}
+ });
+ test(engine+' /rules publishes only a saved Studio URL template on demand with group and topic isolation',async()=>{
+  const f=await fixture();try{
+   const t=await f.create('قوانين المجموعة','📜 راجع قوانين مجموعة منارتك. {التاريخ}','https://study.example.org/rules');
+   await f.enable('RULES',t.id,t.revision);
+   const cmd=(id:number,text:string,thread?:number)=>({update_id:id,message:{message_id:id,date:f.now()/1000,
+    from:{id:302,is_bot:false},chat:{id:Number(G),type:'supergroup'},text,
+    ...(thread?{message_thread_id:thread}:{})}});
+   assert.equal((await f.app.handle(cmd(170,'/rules@ManaratakBot',48))).reason,'GROUP_RULES_QUEUED');
+   assert.equal((await f.greetings.drain()).sent,1);
+   assert.equal(f.sent[0]!.topicId,48);
+   assert.match(f.sent[0]!.text,/قوانين مجموعة منارتك/u);
+   assert.deepEqual(f.sent[0]!.buttons,[[{text:'📚 دليل الطلاب',url:'https://study.example.org/rules'}]]);
+   assert.equal((await f.app.handle(cmd(171,'/rules'))).reason,'GROUP_RULES_RATE_LIMITED_OR_DISABLED');
+   f.advance(61000);
+   assert.equal((await f.app.handle(cmd(172,'/rules'))).reason,'GROUP_RULES_QUEUED');
+   assert.equal((await f.greetings.drain()).sent,1);
+  }finally{await f.close();}
+ });
+ test(engine+' /rules is not triggered by another bot mention, forwarded edit or bot account',async()=>{
+  const f=await fixture();try{
+   const t=await f.create('Rules','Group rules');
+   await f.enable('RULES',t.id,t.revision);
+   const base={message_id:181,date:f.now()/1000,from:{id:303,is_bot:false},chat:{id:Number(G),type:'supergroup'},text:'/rules'};
+   const wrong=await f.app.handle({update_id:181,message:{...base,text:'/rules@DifferentBot'}});
+   assert.notEqual(wrong.reason,'GROUP_RULES_QUEUED');
+   const fwd=await f.app.handle({update_id:182,message:{...base,message_id:182,forward_date:Math.floor(f.now()/1000)}});
+   assert.notEqual(fwd.reason,'GROUP_RULES_QUEUED');
+   const edit=await f.app.handle({update_id:183,edited_message:{...base,message_id:183}});
+   assert.notEqual(edit.reason,'GROUP_RULES_QUEUED');
+   const bot=await f.app.handle({update_id:184,message:{...base,message_id:184,from:{id:501,is_bot:true}}});
+   assert.notEqual(bot.reason,'GROUP_RULES_QUEUED');
+   assert.equal((await f.greetings.drain()).sent,0);
+  }finally{await f.close();}
+ });
+ test(engine+' owner rules menu confirms saved template independently without activating guide, welcome or farewell',async()=>{
+  const f=await fixture();try{
+   const t=await f.create('قوانين منارتك','📜 للقواعد تواصل مع المشرف.');
+   const owner=new TelegramWelcomeOwner(f.store,f.policy,f.greetings,f.now);
+   const root=await owner.handle(OWNER,'mi:1:i:09:03');
+   assert.match(root!.text,/القوانين والرسائل الثابتة/u);
+   const group=await owner.handle(OWNER,btn(root,G));
+   const editor=await owner.handle(OWNER,btn(group,'القوانين'));
+   const templates=await owner.handle(OWNER,btn(editor,'اختيار قالب'));
+   const preview=await owner.handle(OWNER,btn(templates,'قوانين منارتك'));
+   assert.match(preview!.text,/معاينة/u);
+   assert.ok(await owner.handle(OWNER,btn(preview,'تأكيد')));
+   assert.equal(f.greetings.policy(await f.store.snapshot(),G,'RULES')?.templateId,t.id);
+   assert.equal(f.greetings.policy(await f.store.snapshot(),G,'WELCOME')?.enabled,false);
+   assert.equal(f.greetings.policy(await f.store.snapshot(),G,'FAREWELL')?.enabled,false);
+   assert.equal(f.greetings.policy(await f.store.snapshot(),G,'GUIDE')?.enabled,false);
+   const rootAgain=await owner.handle(OWNER,'mi:1:i:09:03');
+   const groupAgain=await owner.handle(OWNER,btn(rootAgain,G));
+   const editorAgain=await owner.handle(OWNER,btn(groupAgain,'القوانين'));
+   const off=await owner.handle(OWNER,btn(editorAgain,'إيقاف القوانين'));
+   assert.ok(await owner.handle(OWNER,btn(off,'تأكيد')));
+   assert.equal(f.greetings.policy(await f.store.snapshot(),G,'RULES')?.enabled,false);
+  }finally{await f.close();}
+ });
  test(engine+' Telegram join and leave webhook routes enqueue only trusted local greeting events',async()=>{
   const f=await fixture();try{
    const t=await f.create('Welcome','Welcome');
