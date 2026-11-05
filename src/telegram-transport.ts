@@ -1,7 +1,7 @@
 import {CaptchaEnforcement} from './captcha-enforcement.js';
 import type {CaptchaJoinNotices} from './captcha-join-notices.js';
 import type {GroupWelcomeFarewell} from './group-welcome-farewell.js';
-import type {GroupAdminCommandCleanup} from './group-admin-command-cleanup.js';
+import {reviewedAdminCommandKind,type GroupAdminCommandCleanup} from './group-admin-command-cleanup.js';
 import {TelegramAdminCommandCleanupOwner} from './telegram-admin-command-cleanup-owner.js';
 import {TelegramWelcomeOwner} from './telegram-welcome-owner.js';
 import type {GroupServiceMessageCleanup} from './group-service-message-cleanup.js';
@@ -1737,15 +1737,11 @@ export class TelegramUpdateApplication {
        !event.callbackData&&!event.edited&&!event.forwarded&&
        event.messageId!==undefined&&event.sentAt!==undefined&&
        handled.plan?.chatId===event.actorId&&handled.adminUIAccess){
-     const m=/^\/(ban|mute|warn|unwarn|unban|unmute|kick|review|notice|lock|unlock)(?:@([A-Za-z][A-Za-z0-9_]{4,31}))?(?=\s|$)/u.exec(event.text);
-     if(m&&(!m[2]||m[2].toLowerCase()===this.opts.botUsername.toLowerCase())){
-      const kind=m[1]==='lock'||m[1]==='unlock'?'LOCK' as const:'MODERATION' as const;
-      if(kind==='MODERATION'&&handled.reason==='MODERATION_PREVIEW_ONLY'||
-         kind==='LOCK'&&handled.reason==='GROUP_PERMISSIONS_VIEW'){
-       try{await this.opts.adminCommandCleanup.observeApproved(event.chatId,event.messageId,
-        event.actorId,key,kind,handled.reason,event.sentAt);}
-       catch{/* Cleanup observation never invalidates a committed moderation preview. */}
-      }
+     const kind=reviewedAdminCommandKind(event.text,this.opts.botUsername,handled.reason);
+     if(kind){
+      try{await this.opts.adminCommandCleanup.observeApproved(event.chatId,event.messageId,
+       event.actorId,key,kind,handled.reason,event.sentAt);}
+      catch{/* Cleanup observation never invalidates a committed moderation preview. */}
      }
     }
     // Temporary actor IDs are only stored in the guarded queue, never returned.
