@@ -87,7 +87,7 @@ for(const engine of ['json','sqlite'] as const){
    assert.equal(s.networkWatchCases?.length,1);
    assert.equal(s.networkWatchCases?.[0]?.status,'PENDING');
    assert.equal(s.moderationOperations.length,0);
-   const list2=await f.app().handle(cb(11,'nw:1:u:'+NET+':0));
+   const list2=await f.app().handle(cb(11,'nw:1:u:'+NET+':0'));
    const details=await f.app().handle(cb(12,button(list2,MEMBER)));
    const review=await f.app().handle(cb(13,button(details,'اعتماد للمراقبة')));
    assert.equal((await f.app().handle(cb(14,button(review,'تأكيد الاعتماد')))).status,'APPLIED');
