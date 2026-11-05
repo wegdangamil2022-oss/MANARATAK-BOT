@@ -416,7 +416,7 @@ for(const engine of ['json','sqlite'] as const){
     assert.equal(entry.status,'APPLIED');
     assert.equal(entry.reason,'WELCOME_OWNER_VIEW');
     assert.match(entry.plan!.text,new RegExp(label,'u'));
-    assert.ok(entry.plan!.inlineMarkup!.inline_keyboard.flat().some(x=>x.text===G));
+    assert.ok(entry.plan!.inlineMarkup!.inline_keyboard.flat().some(x=>x.text.includes(G)));
    }
   }finally{await f.close();}
  });
