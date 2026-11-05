@@ -43,6 +43,72 @@ for(const engine of ['json','sqlite'] as const){
   assert.deepEqual(await f.service.cleanup(),{deleted:0,unresolved:0});
   assert.equal(f.calls.length,0);
  }finally{await f.close();}});
+
+ test(engine+' pin service cleanup requires a separate opt-in and never targets the pinned content',async()=>{const f=await fixture();try{
+  await f.enable();
+  assert.equal(f.service.policyPin(await f.store.snapshot(),G)?.enabled,false);
+  const pinEvent={update_id:200,message:{message_id:200,date:f.now()/1000,from:{id:100,is_bot:false},
+   chat:{id:Number(G),type:'supergroup'},pinned_message:{message_id:19,chat:{id:Number(G),type:'supergroup'}}}};
+  assert.equal((await f.app.handle(pinEvent)).reason,'PIN_OBSERVATION_ONLY');
+  f.advance(60000);assert.deepEqual(await f.service.cleanup(),{deleted:0,unresolved:0});
+  assert.equal(f.calls.length,0);
+  assert.equal(await f.service.configurePin(OWNER,G,true,f.service.epochPin(await f.store.snapshot(),G)),true);
+  assert.equal(f.service.policyPin(await f.store.snapshot(),G)?.enabled,true);
+  assert.equal(f.service.policy(await f.store.snapshot(),G)?.enabled,true);
+  f.advance(1000);
+  const newer={...pinEvent,update_id:201,message:{...pinEvent.message,message_id:201,date:f.now()/1000}};
+  assert.equal((await f.app.handle(newer)).reason,'PIN_OBSERVATION_ONLY');
+  assert.equal((await f.service.cleanup()).deleted,0);
+  f.advance(60000);
+  assert.deepEqual(await f.service.cleanup(),{deleted:1,unresolved:0});
+  assert.deepEqual(f.calls,[{chat:G,messageId:201}]);
+  assert.equal(f.calls.some(x=>x.messageId===19),false);
+ }finally{await f.close();}});
+ test(engine+' pin-only consent does not enable joining or leaving service message cleanup',async()=>{const f=await fixture();try{
+  assert.equal(await f.service.configurePin(OWNER,G,true,f.service.epochPin(await f.store.snapshot(),G)),true);
+  assert.equal(f.service.policy(await f.store.snapshot(),G)?.enabled,false);
+  assert.equal(await f.observe('JOIN',51,251),0);
+  assert.equal(await f.observe('LEAVE',52,252),0);
+  assert.equal(await f.service.observeService(G,'PIN',53,'b3-webhook:service-cleanup:253',f.now()),1);
+  assert.equal(await f.service.configurePin(OWNER,G,false,f.service.epochPin(await f.store.snapshot(),G)),true);
+  f.advance(60000);
+  assert.equal((await f.service.cleanup()).deleted,0);
+  assert.equal(f.calls.length,0);
+ }finally{await f.close();}});
+ test(engine+' malformed and mixed pinned service updates never enqueue deletion',async()=>{const f=await fixture();try{
+  await f.service.configurePin(OWNER,G,true,f.service.epochPin(await f.store.snapshot(),G));
+  const service=(messageId:number,pinnedId:number)=>({update_id:300+messageId,message:{
+   message_id:messageId,date:f.now()/1000,chat:{id:Number(G),type:'supergroup'},
+   from:{id:100,is_bot:false},pinned_message:{message_id:pinnedId,chat:{id:Number(G),type:'supergroup'}}}});
+  assert.equal((await f.app.handle(service(90,19))).reason,'PIN_OBSERVATION_ONLY');
+  assert.equal((await f.app.handle({...service(91,19),message:{...service(91,19).message,text:'unsafe'}})).reason,'INVALID_GROUP_PIN');
+  assert.equal((await f.app.handle({...service(92,19),message:{...service(92,19).message,new_chat_members:[{id:301,is_bot:false}]}})).reason,'INVALID_GROUP_PIN');
+  assert.equal((await f.app.handle(service(94,94))).reason,'INVALID_GROUP_PIN');
+  assert.equal((await f.app.handle({...service(95,19),message:{...service(95,19).message,pinned_message:{message_id:19,chat:{id:-999,type:'supergroup'}}}})).reason,'INVALID_GROUP_PIN');
+  assert.equal((await f.store.snapshot()).audit.filter(a=>/^group:service-message-job:[a-f0-9]{64}$/u.test(a.updateKey)).length,1);
+  f.advance(60000);
+  assert.deepEqual(await f.service.cleanup(),{deleted:1,unresolved:0});
+  assert.deepEqual(f.calls,[{chat:G,messageId:90}]);
+ }finally{await f.close();}});
+ test(engine+' owner pin cleanup control is separately previewed and one-shot',async()=>{const f=await fixture();try{
+  const ui=new TelegramCaptchaOwner(f.store,f.policy,f.captcha,()=>f.now(),undefined,undefined,f.service);
+  const root=await ui.handle(OWNER,'mi:1:i:09:04'),group=await ui.handle(OWNER,pick(root,G));
+  assert.equal(f.service.policyPin(await f.store.snapshot(),G)?.enabled,false);
+  const preview=await ui.handle(OWNER,pick(group,'تفعيل حذف إشعارات التثبيت'));
+  assert.match(preview?.text??'',/معاينة/u);
+  assert.equal(f.service.policyPin(await f.store.snapshot(),G)?.enabled,false);
+  const confirmation=pick(preview,'تأكيد');
+  assert.ok(await ui.handle(OWNER,confirmation));
+  assert.equal(f.service.policyPin(await f.store.snapshot(),G)?.enabled,true);
+  assert.equal(f.service.policy(await f.store.snapshot(),G)?.enabled,false);
+  assert.equal(await ui.handle(OWNER,confirmation),null);
+  const newRoot=await ui.handle(OWNER,'mi:1:i:09:04');
+  const newGroup=await ui.handle(OWNER,pick(newRoot,G));
+  const off=await ui.handle(OWNER,pick(newGroup,'إيقاف حذف إشعارات التثبيت'));
+  assert.ok(await ui.handle(OWNER,pick(off,'تأكيد')));
+  assert.equal(f.service.policyPin(await f.store.snapshot(),G)?.enabled,false);
+ }finally{await f.close();}});
+
  test(engine+' joined and left service messages are deleted after owner authorization and delay',async()=>{const f=await fixture();try{
   await f.enable();assert.equal(await f.observe('JOIN',41,12),1);
   assert.equal(await f.observe('LEAVE',42,13),1);
