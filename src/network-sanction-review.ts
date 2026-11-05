@@ -47,13 +47,14 @@ export function prepareNetworkSanctionReview(
 ):NetworkSanctionReview|null{
  const watch=networkWatchCaseAccessible(s,policy,actor,now,caseId);
  if(!clockValid(now)||!watch||watch.status!=='WATCHED'||watch.revision!==2||
+  watch.reviewedAt===undefined||now<watch.reviewedAt||
   !['MUTE','BAN'].includes(kind)||targetId===watch.sourceChatId||
   (s.networkSanctionReviews??[]).length>=500)return null;
  const target=targetGroup(s,policy,actor,now,watch.networkId,targetId);
  const network=(s.groupNetworks??[]).find(n=>n.id===watch.networkId);
  if(!target||!network||network.revision!==watch.networkRevision||
-  (s.networkSanctionReviews??[]).some(x=>x.networkId===watch.networkId&&
-   x.targetChatId===targetId&&x.subjectId===watch.subjectId&&
+  (s.networkSanctionReviews??[]).some(x=>x.caseId===watch.id&&
+   x.targetChatId===targetId&&
    (x.status==='PENDING'||x.status==='REVIEWED_ONLY')))return null;
  const id=randomBytes(6).toString('hex');
  if((s.networkSanctionReviews??[]).some(x=>x.id===id))return null;
