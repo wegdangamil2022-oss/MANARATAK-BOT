@@ -59,7 +59,7 @@ export function validNetworkSanctionReviews(v:unknown):v is NetworkSanctionRevie
  const rows=v as NetworkSanctionReview[];
  if(new Set(rows.map(x=>x.id)).size!==rows.length)return false;
  const live=rows.filter(x=>x.status==='PENDING'||x.status==='REVIEWED_ONLY');
- return new Set(live.map(x=>x.networkId+':'+x.subjectId+':'+x.targetChatId))
+ return new Set(live.map(x=>x.caseId+':'+x.targetChatId))
   .size===live.length;
 }
 /** Immutable case identity link must survive JSON and SQLite restoration.
@@ -76,6 +76,9 @@ export function validNetworkSanctionReviewReferences(
    source.sourceChatVersion===row.sourceChatVersion&&
    source.subjectId===row.subjectId&&source.revision>=row.caseRevision&&
    source.reviewedAt!==undefined&&row.requestedAt>=source.reviewedAt&&
-   (source.clearedAt===undefined||row.requestedAt<=source.clearedAt);
+   (source.clearedAt===undefined||
+    (row.requestedAt<=source.clearedAt&&
+     (row.reviewedAt===undefined||row.reviewedAt<=source.clearedAt)&&
+     (row.closedAt===undefined||row.closedAt<=source.clearedAt)));
  });
 }
