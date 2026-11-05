@@ -5,6 +5,7 @@ import {reviewedAdminCommandKind,type GroupAdminCommandCleanup} from './group-ad
 import {TelegramAdminCommandCleanupOwner} from './telegram-admin-command-cleanup-owner.js';
 import {TelegramWelcomeOwner} from './telegram-welcome-owner.js';
 import type {GroupServiceMessageCleanup} from './group-service-message-cleanup.js';
+import {ancillaryServiceFieldPresent,decodeAncillaryServiceNotice,type AncillaryServiceKind} from './telegram-ancillary-service-notices.js';
 import type {CaptchaEscalationPolicy} from './captcha-escalation-policy.js';
 import {VerifiedOnboardingWelcome} from './onboarding-welcome.js';
 import {CaptchaRuleGate} from './captcha-rules.js';
@@ -181,7 +182,7 @@ export interface TelegramApplicationOptions {
   captchaEscalation?:CaptchaEscalationPolicy;
 }
 
-type Event = {updateId: number; actorId: string; chatId: string; kind: 'private' | 'group'; text: string; displayName?:string; username?:string; topicId?:number; entities?:unknown; messageId?:number; sentAt?:number; replyTo?:unknown; joins?:string[]; serviceKind?:'JOIN'|'LEAVE'|'PIN'; leaveWasHuman?:boolean; pinnedMessageId?:number; document?: IncomingDocument; protectionMedia?:ProtectionMedia; edited?:true; forwarded?:true; callbackData?:string; callbackQueryId?:string; callbackMessageId?:number};
+type Event = {updateId: number; actorId: string; chatId: string; kind: 'private' | 'group'; text: string; displayName?:string; username?:string; topicId?:number; entities?:unknown; messageId?:number; sentAt?:number; replyTo?:unknown; joins?:string[]; serviceKind?:'JOIN'|'LEAVE'|'PIN'|AncillaryServiceKind; leaveWasHuman?:boolean; pinnedMessageId?:number; document?: IncomingDocument; protectionMedia?:ProtectionMedia; edited?:true; forwarded?:true; callbackData?:string; callbackQueryId?:string; callbackMessageId?:number};
 const isObject=(x:unknown):x is Record<string,unknown>=>Boolean(x)&&typeof x==='object'&&!Array.isArray(x);
 const positiveId=(x:unknown): x is number=>typeof x==='number'&&Number.isSafeInteger(x)&&x>0;
 const chatId=(x:unknown): x is number=>typeof x==='number'&&Number.isSafeInteger(x)&&x!==0;
@@ -228,7 +229,7 @@ function eventFrom(value:unknown):{event?:Event;reason:string} {
   }
   if(!isObject(value.message))return {reason:'UNSUPPORTED_EVENT'};
   const msg=value.message;
-  if(!isObject(msg.chat)||!isObject(msg.from)||!positiveId(msg.from.id)||(msg.from.is_bot!==false&&!(msg.from.is_bot===true&&msg.pinned_message!==undefined))||!chatId(msg.chat.id))return {reason:'INVALID_ACTOR_OR_CHAT'};
+  if(!isObject(msg.chat)||!isObject(msg.from)||!positiveId(msg.from.id)||(msg.from.is_bot!==false&&!(msg.from.is_bot===true&&(msg.pinned_message!==undefined||ancillaryServiceFieldPresent(msg))))||!chatId(msg.chat.id))return {reason:'INVALID_ACTOR_OR_CHAT'};
   if(msg.sender_chat!==undefined||msg.via_bot!==undefined||msg.is_automatic_forward===true)return {reason:'UNTRUSTED_FORWARD'};
   if(msg.date!==undefined&&(!positiveId(msg.date)||msg.date>8640000000000))return {reason:'INVALID_MESSAGE_DATE'};
   const forwarded=msg.forward_origin!==undefined||msg.forward_date!==undefined;
@@ -244,6 +245,12 @@ function eventFrom(value:unknown):{event?:Event;reason:string} {
   const displayName=kind==='group'?senderDisplayName(msg.from):undefined;
   const username=kind==='group'&&validProtectionUsername(msg.from.username)?msg.from.username:undefined;
   if(msg.message_thread_id!==undefined&&(!positiveId(msg.message_thread_id)||msg.message_thread_id>2147483647))return {reason:'INVALID_MESSAGE_TOPIC'};
+  const ancillary=decodeAncillaryServiceNotice(msg,msg.chat.type,forwarded);
+  if(ancillary.status==='INVALID')return {reason:'INVALID_GROUP_SERVICE_NOTICE'};
+  if(ancillary.status==='VALID')return {event:{updateId:value.update_id as number,
+   actorId:String(msg.from.id),chatId:String(msg.chat.id),kind:'group',text:'',
+   messageId:msg.message_id as number,sentAt:(msg.date as number)*1000,
+   serviceKind:ancillary.kind,...(msg.message_thread_id!==undefined?{topicId:msg.message_thread_id as number}:{})},reason:'VALID'};
   if(msg.pinned_message!==undefined){
    const pinned=msg.pinned_message;
    if(kind!=='group'||forwarded||!positiveId(msg.message_id)||!positiveId(msg.date)||!isObject(pinned)||!positiveId(pinned.message_id)||pinned.message_id>=msg.message_id||!isObject(pinned.chat)||pinned.chat.id!==msg.chat.id||!['group','supergroup'].includes(String(pinned.chat.type))||['text','caption','document','photo','video','animation','audio','voice','video_note','sticker','poll','contact','location','new_chat_members','left_chat_member','new_chat_title','new_chat_photo','delete_chat_photo','forum_topic_created','forum_topic_edited','forum_topic_closed','forum_topic_reopened','message_auto_delete_timer_changed'].some(k=>msg[k]!==undefined))return {reason:'INVALID_GROUP_PIN'};
@@ -493,6 +500,13 @@ export class TelegramUpdateApplication {
        'b3-webhook:'+this.opts.botId+':'+event.updateId,event.sentAt);
      if(!event.edited&&this.opts.messageMetadata)await this.opts.messageMetadata.observePinned(event.chatId,event.pinnedMessageId);
      return {status:'IGNORED',reason:'PIN_OBSERVATION_ONLY'};
+    }
+    if(event.serviceKind&&event.serviceKind!=='JOIN'&&event.serviceKind!=='LEAVE'&&event.serviceKind!=='PIN'){
+     if(event.kind!=='group'||event.edited||event.forwarded||event.messageId===undefined||event.sentAt===undefined)
+      return {status:'DENIED',reason:'INVALID_GROUP_SERVICE_NOTICE'};
+     if(this.opts.serviceCleanup)await this.opts.serviceCleanup.observeService(event.chatId,event.serviceKind,event.messageId,
+      'b3-webhook:'+this.opts.botId+':'+event.updateId,event.sentAt);
+     return {status:'IGNORED',reason:'GROUP_SERVICE_NOTICE_OBSERVED'};
     }
     const captcha=new CaptchaService(this.opts.store,this.opts.policy,this.opts.membership,this.clock),captchaEnforcement=new CaptchaEnforcement(this.opts.store,this.opts.policy,captcha,this.opts.moderation,this.opts.moderationRights,this.clock,this.opts.subscription),captchaRules=new CaptchaRuleGate(this.opts.store,this.opts.policy,captcha,this.opts.membership,this.clock);
     if(event.kind==='private'&&!event.callbackData?.startsWith('cr:1:')&&!event.callbackData?.startsWith('cp:1:')&&(event.callbackData!==undefined||!['/start','/captcha'].includes(event.text)))await captchaRules.cancel(event.actorId);
