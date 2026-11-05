@@ -243,19 +243,33 @@ export class OwnerNetworkEditor{
    'النسخ لا يمنح Telegram صلاحيات جديدة، ولا يشغّل ENFORCE.\n'+
    'أي سياسة وجهة موجودة تعتبر استثناء مستقلًا ولا يتم استبدالها.',rows);
  }
- private async previewNetworkPolicy(actor:string,id:string,sourceId:string,p:number):
+ /** Replacing a page preview revokes older unconsumed approvals for this
+  * owner/category/network/source/page, but leaves other pages independent. */
+ private revokeCopyPage(s:BotState,actor:string,kind:'policy'|'greeting',
+  id:string,sourceId:string,p:number):void{
+  const prefix=PREFIX+kind+':';
+  for(const c of s.callbacks){
+   if(c.actorId!==actor||c.used||c.revoked||!c.action.startsWith(prefix))continue;
+   let data:unknown;
+   try{data=JSON.parse(c.action.slice(prefix.length));}catch{continue;}
+   if(Array.isArray(data)&&data.length===6&&data[0]===id&&
+    data[2]===sourceId&&data[3]===p)c.revoked=true;
+  }
+ }
+ private async previewNetworkPolicy(actor:string,id:string,sourceId:string,p:number,mask=0):
   Promise<OwnerInlineScreen|null>{
   return this.store.transaction(s=>{
    const now=this.clock();
    const ctx=this.networkPolicySelection(s,actor,now,id,sourceId);
    if(!ctx||p<0||p>999||p>=Math.ceil(ctx.targets.length/SIZE))return null;
    const chosen=ctx.targets.slice(p*SIZE,(p+1)*SIZE);
-   if(!chosen.length)return null;
+   if(!validMask(mask,chosen.length))return null;
+   const selected=chosen.filter((_,i)=>(mask&(1<<i))===0);
    const ref='c_'+randomBytes(18).toString('base64url');
-   if(s.callbacks.some(row=>row.ref===ref))return null;
-   const snapshot=chosen.map(c=>c.id);
-   s.callbacks.push({ref,action:PREFIX+'policy:'+JSON.stringify([
-    id,ctx.network.revision,sourceId,p,snapshot,ctx.digest]),
+   if(selected.length&&s.callbacks.some(row=>row.ref===ref))return null;
+   this.revokeCopyPage(s,actor,'policy',id,sourceId,p);
+   if(selected.length)s.callbacks.push({ref,action:PREFIX+'policy:'+JSON.stringify([
+    id,ctx.network.revision,sourceId,p,selected.map(c=>c.id),ctx.digest]),
     actorId:actor,chatId:'private',policyVersion:0,
     oneShot:true,used:false,revoked:false,expiresAt:now+TTL});
    const nav:{text:string;callback_data:string}[]=[];
@@ -266,15 +280,18 @@ export class OwnerNetworkEditor{
     'الشبكة: '+escape(ctx.network.name)+' · v'+ctx.network.revision+'\n'+
     'المصدر: <code>'+sourceId+'</code> · وضع '+ctx.source.policy.mode+'\n'+
     'الصفحة: '+(p+1)+' من '+Math.ceil(ctx.targets.length/SIZE)+'\n'+
-    'النطاق: '+chosen.length+' مجموعات فقط (الحد 8 لكل اعتماد)\n'+
-    chosen.map(c=>'• <code>'+c.id+'</code> · v'+c.version).join('\n')+'\n'+
+    'النطاق: '+selected.length+' مجموعات فقط (الحد 8 لكل اعتماد) · مستبعدة: '+(chosen.length-selected.length)+'\n'+
+    chosen.map((c,i)=>((mask&(1<<i))?'🚫 مستبعدة: ':'✅ مختارة: ')+
+     '<code>'+c.id+'</code> · v'+c.version).join('\n')+'\n'+
     'القواعد: '+ctx.source.policy.rules.length+'\n'+
     'لن تُنسخ قوائم الاستثناء أو النطاقات المسموحة أو أعضاء الاستثناء من المصدر.\n'+
     'تُستثنى المجموعات ذات سياسة موجودة، حتى لو كانت متوقفة أو قديمة.\n'+
     'كل كتابة محلية داخل معاملة واحدة بعد موافقة المالك لمرة واحدة خلال دقيقتين.\n'+
     'لا عقوبات أو رسائل أو تغييرات Telegram.',
-    [[btn('✅ تأكيد نسخ السياسة محليًا','nw:1:c:'+ref.slice(2))],
-     [btn('✖ إلغاء المعاينة','nw:1:k:'+ref.slice(2))],
+    [...(selected.length?[[btn('✅ تأكيد نسخ السياسة محليًا','nw:1:c:'+ref.slice(2))],
+     [btn('✖ إلغاء المعاينة','nw:1:k:'+ref.slice(2))]]:[]),
+     ...chosen.map((c,i)=>[btn(((mask&(1<<i))?'✅ تضمين ':'🚫 استبعاد ')+c.id,
+      copyPageRoute('z',id,sourceId,p,mask^(1<<i)))]),
      ...(nav.length?[nav]:[]),
      [btn('↩️ اختيار المصدر','nw:1:y:'+id+':0')]]);
   });
@@ -348,17 +365,19 @@ export class OwnerNetworkEditor{
    'النسخ لا يشغل الترحيب أو الوداع أو الردود أو أي إجراء Telegram.\n'+
    'لا تُنسخ الصور والأزرار والروابط والإعدادات التشغيلية أو الأسرار.',rows);
  }
- private async previewGreeting(actor:string,id:string,sourceId:string,p:number):
+ private async previewGreeting(actor:string,id:string,sourceId:string,p:number,mask=0):
   Promise<OwnerInlineScreen|null>{
   return this.store.transaction(s=>{
    const now=this.clock();
    const ctx=this.greetingSelection(s,actor,now,id,sourceId);
    if(!ctx||p<0||p>999||p>=Math.ceil(ctx.targets.length/SIZE))return null;
-   const selected=ctx.targets.slice(p*SIZE,(p+1)*SIZE);
-   if(!selected.length||selected.length>SIZE)return null;
+   const candidates=ctx.targets.slice(p*SIZE,(p+1)*SIZE);
+   if(!validMask(mask,candidates.length))return null;
+   const selected=candidates.filter((_,i)=>(mask&(1<<i))===0);
    const ref='c_'+randomBytes(18).toString('base64url');
-   if(s.callbacks.some(c=>c.ref===ref))return null;
-   s.callbacks.push({ref,action:PREFIX+'greeting:'+JSON.stringify([
+   if(selected.length&&s.callbacks.some(c=>c.ref===ref))return null;
+   this.revokeCopyPage(s,actor,'greeting',id,sourceId,p);
+   if(selected.length)s.callbacks.push({ref,action:PREFIX+'greeting:'+JSON.stringify([
     id,ctx.network.revision,sourceId,p,selected.map(c=>c.id),ctx.digest]),
     actorId:actor,chatId:'private',policyVersion:0,
     expiresAt:now+TTL,oneShot:true,used:false,revoked:false});
@@ -369,16 +388,19 @@ export class OwnerNetworkEditor{
    return ui('<b>🔎 معاينة نشر قالب الترحيب المحلي</b>\n'+
     'الشبكة: '+escape(ctx.network.name)+' · v'+ctx.network.revision+'\n'+
     'المصدر: <code>'+sourceId+'</code> · إعداد v'+ctx.source.version+'\n'+
-    'النطاق: '+selected.length+' مجموعات (حد أقصى 8 لكل اعتماد)\n'+
-    selected.map(c=>'• <code>'+c.id+'</code> · v'+c.version).join('\n')+'\n'+
+    'النطاق: '+selected.length+' مجموعات (حد أقصى 8 لكل اعتماد) · مستبعدة: '+(candidates.length-selected.length)+'\n'+
+    candidates.map((c,i)=>((mask&(1<<i))?'🚫 مستبعدة: ':'✅ مختارة: ')+
+     '<code>'+c.id+'</code> · v'+c.version).join('\n')+'\n'+
     'مثال نص الترحيب: '+escape(ctx.source.welcome.text.slice(0,180))+'\n'+
     'قوالب الانضمام المخصصة: '+Object.keys(ctx.source.welcomeByJoin??{}).length+'\n'+
     'النسخ يشمل نصوص الترحيب والوداع وترجماتها وأنواع الانضمام والمغادرة فقط.\n'+
     'لن تُنسخ أي صورة أو زر أو رابط أو إعداد تشغيل أو قواعد رد، ولن يُفعل إرسال.\n'+
     'تُستثنى كل مجموعة لديها إعداد خاص ولو كان معطّلًا.\n'+
     'التأكيد لمرة واحدة خلال دقيقتين مع فحص الصلاحيات والإصدارات مجددًا.',
-    [[btn('✅ تأكيد نسخ قوالب الترحيب','nw:1:c:'+ref.slice(2))],
-     [btn('✖ إلغاء المعاينة','nw:1:k:'+ref.slice(2))],
+    [...(selected.length?[[btn('✅ تأكيد نسخ قوالب الترحيب','nw:1:c:'+ref.slice(2))],
+     [btn('✖ إلغاء المعاينة','nw:1:k:'+ref.slice(2))]]:[]),
+     ...candidates.map((c,i)=>[btn(((mask&(1<<i))?'✅ تضمين ':'🚫 استبعاد ')+c.id,
+      copyPageRoute('v',id,sourceId,p,mask^(1<<i)))]),
      ...(nav.length?[nav]:[]),
      [btn('↩️ اختيار المصدر','nw:1:w:'+id+':0')]]);
   });
