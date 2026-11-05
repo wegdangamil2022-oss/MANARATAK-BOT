@@ -52,9 +52,9 @@ function localEpoch(s:BotState):string{
 }
 export type NetworkTransferObservation=
  |{status:'BLOCKED';reason:NetworkTransferLocalBlock|
-   'UNTRUSTED_OBSERVER'|'TELEGRAM_NOT_GROUP'|'REMOTE_NOT_SAFE'|
-   'LOCAL_CHANGED'|'REMOTE_CHANGED'}
- |{status:'OBSERVED_ONLY';reason:'ORDINARY_MEMBER_OBSERVED'};
+   'UNTRUSTED_OBSERVER'|'TELEGRAM_NOT_GROUP'|'SOURCE_NOT_VERIFIED'|
+   'REMOTE_NOT_SAFE'|'LOCAL_CHANGED'|'REMOTE_CHANGED'}
+ |{status:'OBSERVED_ONLY';reason:'SOURCE_RESTRICTION_AND_TARGET_MEMBER_OBSERVED'};
 /** Read-only Telegram probe for ONE reviewed case and ONE destination.
  * It is deliberately NOT wired to Telegram moderation dispatch and never
  * calls setRestriction, banChatMember, restrictChatMember or stores a grant.
@@ -84,29 +84,47 @@ export class NetworkTransferReadOnlyPreflight{
    if(!authentic())return {status:'BLOCKED',reason:'UNTRUSTED_OBSERVER'};
    return null;
   };
-  const group=async():Promise<'GROUP'|'SUPERGROUP'|'NOT_GROUP'|'UNKNOWN'>=>{
-   try{return await this.gateway.inspectTrialGroupKind(review.targetChatId);}
+  const group=async(chatId:string):Promise<'GROUP'|'SUPERGROUP'|'NOT_GROUP'|'UNKNOWN'>=>{
+   try{return await this.gateway.inspectTrialGroupKind(chatId);}
    catch{return 'UNKNOWN';}
   };
-  const observe=async():Promise<string>=>{
-   try{return await this.gateway.observeRestriction(review.targetChatId,review.subjectId);}
+  const observe=async(chatId:string):Promise<string>=>{
+   try{return await this.gateway.observeRestriction(chatId,review.subjectId);}
    catch{return 'UNKNOWN';}
   };
-  const firstGroup=await group();
+  const isGroup=(kind:string)=>kind==='GROUP'||kind==='SUPERGROUP';
+  const expectedSource=review.kind==='BAN'?'BAN_PRESENT':'MUTE_PRESENT';
+  // An owner's proposed transfer is NOT evidence of a restriction existing
+  // at its origin. Observe source separately, rejecting a missing/mismatched
+  // restriction before even observing a destination member.
+  const firstSourceGroup=await group(review.sourceChatId);
   {const denied=await recheck();if(denied)return denied;}
-  if(firstGroup!=='GROUP'&&firstGroup!=='SUPERGROUP')
-   return {status:'BLOCKED',reason:'TELEGRAM_NOT_GROUP'};
-  const first=await observe();
+  if(!isGroup(firstSourceGroup))return {status:'BLOCKED',reason:'TELEGRAM_NOT_GROUP'};
+  const firstSource=await observe(review.sourceChatId);
   {const denied=await recheck();if(denied)return denied;}
-  if(first!=='NO_RESTRICTION')
+  if(firstSource!==expectedSource)
+   return {status:'BLOCKED',reason:'SOURCE_NOT_VERIFIED'};
+  const firstTargetGroup=await group(review.targetChatId);
+  {const denied=await recheck();if(denied)return denied;}
+  if(!isGroup(firstTargetGroup))return {status:'BLOCKED',reason:'TELEGRAM_NOT_GROUP'};
+  const firstTarget=await observe(review.targetChatId);
+  {const denied=await recheck();if(denied)return denied;}
+  if(firstTarget!=='NO_RESTRICTION')
    return {status:'BLOCKED',reason:'REMOTE_NOT_SAFE'};
-  const secondGroup=await group();
+  // Double observations guard transient rights/target drift. Even a matching
+  // result can never identify the original sanctioning administrator.
+  const secondSourceGroup=await group(review.sourceChatId);
   {const denied=await recheck();if(denied)return denied;}
-  if(firstGroup!==secondGroup)
-   return {status:'BLOCKED',reason:'REMOTE_CHANGED'};
-  const second=await observe();
+  if(firstSourceGroup!==secondSourceGroup)return {status:'BLOCKED',reason:'REMOTE_CHANGED'};
+  const secondSource=await observe(review.sourceChatId);
   {const denied=await recheck();if(denied)return denied;}
-  if(second!==first)return {status:'BLOCKED',reason:'REMOTE_CHANGED'};
-  return {status:'OBSERVED_ONLY',reason:'ORDINARY_MEMBER_OBSERVED'};
+  if(secondSource!==firstSource)return {status:'BLOCKED',reason:'REMOTE_CHANGED'};
+  const secondTargetGroup=await group(review.targetChatId);
+  {const denied=await recheck();if(denied)return denied;}
+  if(firstTargetGroup!==secondTargetGroup)return {status:'BLOCKED',reason:'REMOTE_CHANGED'};
+  const secondTarget=await observe(review.targetChatId);
+  {const denied=await recheck();if(denied)return denied;}
+  if(secondTarget!==firstTarget)return {status:'BLOCKED',reason:'REMOTE_CHANGED'};
+  return {status:'OBSERVED_ONLY',reason:'SOURCE_RESTRICTION_AND_TARGET_MEMBER_OBSERVED'};
  }
 }
