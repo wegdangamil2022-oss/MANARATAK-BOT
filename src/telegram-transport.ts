@@ -969,7 +969,17 @@ export class TelegramUpdateApplication {
      if(!this.opts.purge)return {status:'DENIED',reason:'DELETE_NOT_CONFIGURED'};
      const result=await previewReplyDelete(this.opts.store,this.opts.policy,this.opts.purge,actorId,chatId,event.messageId,text,event.replyTo,this.clock());
      const {screen,...outcome}=result;
-     return {...outcome,...(screen?{plan:this.plan(actorId,screen.text,undefined,screen.keyboard)}:{})};
+     if(!screen)return outcome;
+     // An original /delete command is only eligible for later opt-in cleanup
+     // when its separately reviewed private preview is dispatch-fenced for
+     // the same authorized moderator. Never grant deletion from a bare plan.
+     const now=this.clock(),state=await this.opts.store.snapshot();
+     const proof=this.opts.adminCommandCleanup&&this.opts.policy.canUseChat(state,chatId,'moderation')&&
+      this.opts.policy.has(state,actorId,'chat.manage',chatId,now)?
+      protectionUIEpoch(state,this.opts.policy,actorId,now):null;
+     return {...outcome,
+      ...(proof?{adminUIAccess:{actorId,epoch:proof,expiresAt:now+ADMIN_UI_TTL_MS}}:{}),
+      plan:this.plan(actorId,screen.text,undefined,screen.keyboard)};
     }
     if(kind==='group'&&/^\/(?:lock|unlock)(?:@[A-Za-z][A-Za-z0-9_]{4,31})?(?=\s|$)/u.test(text)){
      const m=/^\/(lock|unlock)(?:@([A-Za-z][A-Za-z0-9_]{4,31}))?(?: (messages|media|previews))?(?: ([1-9][0-9]{0,6})([smhd]))?$/u.exec(text);
