@@ -181,7 +181,7 @@ export interface TelegramApplicationOptions {
   captchaEscalation?:CaptchaEscalationPolicy;
 }
 
-type Event = {updateId: number; actorId: string; chatId: string; kind: 'private' | 'group'; text: string; displayName?:string; username?:string; topicId?:number; entities?:unknown; messageId?:number; sentAt?:number; replyTo?:unknown; joins?:string[]; serviceKind?:'JOIN'|'LEAVE'; leaveWasHuman?:boolean; pinnedMessageId?:number; document?: IncomingDocument; protectionMedia?:ProtectionMedia; edited?:true; forwarded?:true; callbackData?:string; callbackQueryId?:string; callbackMessageId?:number};
+type Event = {updateId: number; actorId: string; chatId: string; kind: 'private' | 'group'; text: string; displayName?:string; username?:string; topicId?:number; entities?:unknown; messageId?:number; sentAt?:number; replyTo?:unknown; joins?:string[]; serviceKind?:'JOIN'|'LEAVE'|'PIN'; leaveWasHuman?:boolean; pinnedMessageId?:number; document?: IncomingDocument; protectionMedia?:ProtectionMedia; edited?:true; forwarded?:true; callbackData?:string; callbackQueryId?:string; callbackMessageId?:number};
 const isObject=(x:unknown):x is Record<string,unknown>=>Boolean(x)&&typeof x==='object'&&!Array.isArray(x);
 const positiveId=(x:unknown): x is number=>typeof x==='number'&&Number.isSafeInteger(x)&&x>0;
 const chatId=(x:unknown): x is number=>typeof x==='number'&&Number.isSafeInteger(x)&&x!==0;
@@ -246,8 +246,8 @@ function eventFrom(value:unknown):{event?:Event;reason:string} {
   if(msg.message_thread_id!==undefined&&(!positiveId(msg.message_thread_id)||msg.message_thread_id>2147483647))return {reason:'INVALID_MESSAGE_TOPIC'};
   if(msg.pinned_message!==undefined){
    const pinned=msg.pinned_message;
-   if(kind!=='group'||forwarded||!positiveId(msg.message_id)||!positiveId(msg.date)||!isObject(pinned)||!positiveId(pinned.message_id)||!isObject(pinned.chat)||pinned.chat.id!==msg.chat.id||!['group','supergroup'].includes(String(pinned.chat.type))||['text','caption','document','photo','video','animation','audio','voice','video_note','sticker','poll','contact','location','new_chat_members','left_chat_member'].some(k=>msg[k]!==undefined))return {reason:'INVALID_GROUP_PIN'};
-   return {event:{updateId:value.update_id as number,actorId:String(msg.from.id),chatId:String(msg.chat.id),kind,text:'',pinnedMessageId:pinned.message_id},reason:'VALID'};
+   if(kind!=='group'||forwarded||!positiveId(msg.message_id)||!positiveId(msg.date)||!isObject(pinned)||!positiveId(pinned.message_id)||pinned.message_id>=msg.message_id||!isObject(pinned.chat)||pinned.chat.id!==msg.chat.id||!['group','supergroup'].includes(String(pinned.chat.type))||['text','caption','document','photo','video','animation','audio','voice','video_note','sticker','poll','contact','location','new_chat_members','left_chat_member','new_chat_title','new_chat_photo','delete_chat_photo','forum_topic_created','forum_topic_edited','forum_topic_closed','forum_topic_reopened','message_auto_delete_timer_changed'].some(k=>msg[k]!==undefined))return {reason:'INVALID_GROUP_PIN'};
+   return {event:{updateId:value.update_id as number,actorId:String(msg.from.id),chatId:String(msg.chat.id),kind,text:'',pinnedMessageId:pinned.message_id,messageId:msg.message_id,sentAt:msg.date*1000,serviceKind:'PIN'},reason:'VALID'};
   }
   if(msg.new_chat_members!==undefined){
    if(kind!=='group'||forwarded||!positiveId(msg.message_id)||!positiveId(msg.date)||!Array.isArray(msg.new_chat_members)||msg.new_chat_members.length<1||msg.new_chat_members.length>100||['text','caption','document','photo','video','animation','audio','voice','video_note','sticker','poll','contact','location','left_chat_member','reply_to_message'].some(k=>msg[k]!==undefined)||!msg.new_chat_members.every(m=>isObject(m)&&positiveId(m.id)&&typeof m.is_bot==='boolean')||new Set(msg.new_chat_members.map(m=>(m as Record<string,unknown>).id)).size!==msg.new_chat_members.length)return {reason:'INVALID_GROUP_JOINS'};
@@ -487,7 +487,13 @@ export class TelegramUpdateApplication {
   }
   private delivery(event:Event){return event.messageId!==undefined&&event.sentAt!==undefined?{messageId:event.messageId,sentAt:event.sentAt}:undefined;}
   private async process(event:Event):Promise<ProcessedReply> {
-    if(event.pinnedMessageId!==undefined){if(!event.edited&&this.opts.messageMetadata)await this.opts.messageMetadata.observePinned(event.chatId,event.pinnedMessageId);return {status:'IGNORED',reason:'PIN_OBSERVATION_ONLY'};}
+    if(event.pinnedMessageId!==undefined){
+     if(!event.edited&&this.opts.serviceCleanup&&event.serviceKind==='PIN'&&event.messageId!==undefined&&event.sentAt!==undefined)
+      await this.opts.serviceCleanup.observeService(event.chatId,'PIN',event.messageId,
+       'b3-webhook:'+this.opts.botId+':'+event.updateId,event.sentAt);
+     if(!event.edited&&this.opts.messageMetadata)await this.opts.messageMetadata.observePinned(event.chatId,event.pinnedMessageId);
+     return {status:'IGNORED',reason:'PIN_OBSERVATION_ONLY'};
+    }
     const captcha=new CaptchaService(this.opts.store,this.opts.policy,this.opts.membership,this.clock),captchaEnforcement=new CaptchaEnforcement(this.opts.store,this.opts.policy,captcha,this.opts.moderation,this.opts.moderationRights,this.clock,this.opts.subscription),captchaRules=new CaptchaRuleGate(this.opts.store,this.opts.policy,captcha,this.opts.membership,this.clock);
     if(event.kind==='private'&&!event.callbackData?.startsWith('cr:1:')&&!event.callbackData?.startsWith('cp:1:')&&(event.callbackData!==undefined||!['/start','/captcha'].includes(event.text)))await captchaRules.cancel(event.actorId);
     if(event.kind==='private'&&this.opts.policy.isOwner(event.actorId)){
