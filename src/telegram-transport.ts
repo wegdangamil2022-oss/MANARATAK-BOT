@@ -488,7 +488,7 @@ export class TelegramUpdateApplication {
     if(event.kind==='private'&&!event.callbackData?.startsWith('cr:1:')&&!event.callbackData?.startsWith('cp:1:')&&(event.callbackData!==undefined||!['/start','/captcha'].includes(event.text)))await captchaRules.cancel(event.actorId);
     if(event.kind==='private'&&this.opts.policy.isOwner(event.actorId)){
      if(this.opts.welcomeFarewell&&event.kind==='private'&&
-        (event.callbackData==='mi:1:i:09:01'||event.callbackData==='mi:1:i:09:02'||event.callbackData?.startsWith('wm:1:'))){
+        (event.callbackData==='mi:1:i:09:01'||event.callbackData==='mi:1:i:09:02'||event.callbackData==='mi:1:i:09:03'||event.callbackData?.startsWith('wm:1:'))){
       const view=await new TelegramWelcomeOwner(this.opts.store,this.opts.policy,this.opts.welcomeFarewell,this.clock).handle(event.actorId,event.callbackData!);
       return view?{status:'APPLIED',reason:'WELCOME_OWNER_VIEW',
        plan:this.plan(event.chatId,view.text,undefined,view.keyboard,event.callbackMessageId)}:
@@ -586,10 +586,17 @@ export class TelegramUpdateApplication {
        !event.edited&&!event.forwarded&&!event.joins&&
        event.actorId!==this.opts.botId&&event.messageId!==undefined&&
        event.sentAt!==undefined&&
-       (event.text==='/guide'||event.text==='/guide@'+this.opts.botUsername)){
-     const count=await this.opts.welcomeFarewell.observeGuide(event.chatId,event.messageId,
-      'b3-webhook:'+this.opts.botId+':'+event.updateId,event.sentAt,event.topicId);
-     return {status:'IGNORED',reason:count?'GROUP_GUIDE_QUEUED':'GROUP_GUIDE_RATE_LIMITED_OR_DISABLED'};
+       (event.text==='/guide'||event.text==='/guide@'+this.opts.botUsername||
+        event.text==='/rules'||event.text==='/rules@'+this.opts.botUsername)){
+     const guide=event.text==='/guide'||event.text==='/guide@'+this.opts.botUsername;
+     const count=guide?
+      await this.opts.welcomeFarewell.observeGuide(event.chatId,event.messageId,
+       'b3-webhook:'+this.opts.botId+':'+event.updateId,event.sentAt,event.topicId):
+      await this.opts.welcomeFarewell.observeRules(event.chatId,event.messageId,
+       'b3-webhook:'+this.opts.botId+':'+event.updateId,event.sentAt,event.topicId);
+     return {status:'IGNORED',reason:guide?
+      (count?'GROUP_GUIDE_QUEUED':'GROUP_GUIDE_RATE_LIMITED_OR_DISABLED'):
+      (count?'GROUP_RULES_QUEUED':'GROUP_RULES_RATE_LIMITED_OR_DISABLED')};
     }
     if(event.kind==='group'&&!event.callbackData&&!event.edited&&!event.joins&&event.sentAt!==undefined&&this.opts.subscription&&this.clock()>=event.sentAt&&this.clock()-event.sentAt<=30000){
      await this.opts.subscription.observeMember(event.chatId,event.actorId,event.sentAt);
