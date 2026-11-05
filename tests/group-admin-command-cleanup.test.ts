@@ -6,7 +6,7 @@ import {tmpdir} from 'node:os';
 import {BotStore} from '../src/store.js';
 import {Policy} from '../src/policy.js';
 import {protectionUIEpoch} from '../src/protection-ui-access.js';
-import {GroupAdminCommandCleanup} from '../src/group-admin-command-cleanup.js';
+import {GroupAdminCommandCleanup,reviewedAdminCommandKind} from '../src/group-admin-command-cleanup.js';
 import {TelegramAdminCommandCleanupOwner} from '../src/telegram-admin-command-cleanup-owner.js';
 import {isValidTelegramInlineKeyboard} from '../src/telegram-inline-owner.js';
 import {TelegramUpdateApplication} from '../src/telegram-transport.js';
@@ -16,6 +16,29 @@ import {ApprovedAnswerService,ResourceLinkService} from '../src/education-intera
 import type {OwnerInlineScreen} from '../src/telegram-inline-owner.js';
 
 const BASE=1700000000000,G='-100123',OWNER='100',MOD='201';
+
+test('reviewed admin cleanup recognizes only supported approved command families',()=>{
+ const bot='ManaratakBot';
+ for(const cmd of ['/ban','/warn','/unwarn','/unban','/unmute','/kick','/review','/notice','/mute',
+  '/warnrule 2','/muterule 2 300','/reviewrule 2','/noticerule 2','إنذار 2']){
+  assert.equal(reviewedAdminCommandKind(cmd,bot,'MODERATION_PREVIEW_ONLY'),'MODERATION',cmd);
+ }
+ for(const cmd of ['/lock messages','/unlock','/lock@ManaratakBot media']){
+  assert.equal(reviewedAdminCommandKind(cmd,bot,'GROUP_PERMISSIONS_VIEW'),'LOCK',cmd);
+ }
+ assert.equal(reviewedAdminCommandKind('/actrule 2',bot,'RULE_ACTION_CHOICE'),'RULE');
+ assert.equal(reviewedAdminCommandKind('/actrule@ManaratakBot 2',bot,'RULE_ACTION_CHOICE'),'RULE');
+ for(const [cmd,reason] of [
+  ['/actrule 2','MODERATION_PREVIEW_ONLY'],['/warnrule 2','RULE_ACTION_CHOICE'],
+  ['/noticerule 0','MODERATION_PREVIEW_ONLY'],['/muterule 2','MODERATION_PREVIEW_ONLY'],
+  ['/warnrule 2 extra','MODERATION_PREVIEW_ONLY'],['/actrule 2\n/ban','RULE_ACTION_CHOICE'],
+  ['/actrule@OtherBot 2','RULE_ACTION_CHOICE'],['/warnrule@OtherBot 2','MODERATION_PREVIEW_ONLY'],
+  ['/actrule 2','GROUP_PERMISSIONS_VIEW'],['/lock','MODERATION_PREVIEW_ONLY'],
+  ['/delete','DELETE_PREVIEW_ONLY'],['/rules','MODERATION_PREVIEW_ONLY'],
+  ['إنذار','MODERATION_PREVIEW_ONLY'],['إنذار 0','MODERATION_PREVIEW_ONLY']
+ ] as const)assert.equal(reviewedAdminCommandKind(cmd,bot,reason),null,cmd+' / '+reason);
+});
+
 const choose=(v:OwnerInlineScreen|null,label:string)=>{assert.ok(v);const x=v.keyboard.inline_keyboard.flat().find(x=>x.text.includes(label));assert.ok(x,label+' not in '+v.text);return x.callback_data;};
 for(const engine of ['json','sqlite'] as const){
  async function setup(){
@@ -34,8 +57,8 @@ for(const engine of ['json','sqlite'] as const){
   const enable=async()=>{
    assert.equal(await service.configure(OWNER,G,true,service.epoch(await store.snapshot(),G)),true);
   };
-  const receipt=async(n:number,actor=OWNER,kind:'MODERATION'|'LOCK'='MODERATION',delivered=true)=>{
-   const key='b3-webhook:adminclean:'+n,reason=kind==='MODERATION'?'MODERATION_PREVIEW_ONLY':'GROUP_PERMISSIONS_VIEW';
+  const receipt=async(n:number,actor=OWNER,kind:'MODERATION'|'LOCK'|'RULE'='MODERATION',delivered=true)=>{
+   const key='b3-webhook:adminclean:'+n,reason=kind==='MODERATION'?'MODERATION_PREVIEW_ONLY':kind==='LOCK'?'GROUP_PERMISSIONS_VIEW':'RULE_ACTION_CHOICE';
    await store.transaction(s=>{
     s.updates.push({key,status:'DONE',leaseUntil:now});
     s.audit.push({updateKey:key,decision:'ALLOW',reason,policyVersion:0,at:now});
@@ -90,6 +113,16 @@ for(const engine of ['json','sqlite'] as const){
    assert.deepEqual(f.deleted,[{chat:G,messageId:52}]);
   }finally{await f.close();}
  });
+
+ test(engine+' approved rule-action selection is cleaned only after confirmed private delivery',async()=>{
+  const f=await setup();try{
+   await f.enable();assert.equal(await f.observe(53,OWNER,'RULE'),1);
+   f.advance(120000);
+   assert.deepEqual(await f.service.cleanup(),{deleted:1,unresolved:0});
+   assert.deepEqual(f.deleted,[{chat:G,messageId:53}]);
+  }finally{await f.close();}
+ });
+
  test(engine+' unknown delivery, wrong-private recipient, and unauthorized reason cannot trigger cleanup',async()=>{
   for(const variant of ['queued','rejected','wrong-recipient','wrong-status','wrong-reason'] as const){
    const f=await setup();try{
