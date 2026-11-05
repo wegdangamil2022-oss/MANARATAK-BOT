@@ -130,7 +130,8 @@ export function synchronizeNetworkInheritance(s:BotState,policy:Policy,actor:str
      sourcePolicy.updatedAt>now||sourcePolicy.policy.mode==='ENFORCE')reason='SOURCE_STALE';
    else if(b.length!==1||!targetPolicy||!isValidGroupProtectionRecord(targetPolicy)||
      targetPolicy.chatPolicyVersion!==link.targetChatVersion||
-     targetPolicy.policy.mode==='ENFORCE')reason='TARGET_STALE';
+     targetPolicy.updatedAt>now||targetPolicy.policy.mode==='ENFORCE')
+    reason='TARGET_STALE';
    sourceVersion=sourcePolicy?.policy.revision;
    targetVersion=targetPolicy?.policy.revision;
   }else if(!reason){
