@@ -21,6 +21,8 @@ const btn=(v:OwnerInlineScreen|null,name:string)=>{
 };
 test('welcome and farewell is linked to an actual owner editor, not a catalogue-only placeholder',()=>{
  assert.equal(ownerInlineConnection('mi:1:i:09:01'),'EDITOR');
+ assert.equal(ownerInlineConnection('mi:1:i:09:02'),'EDITOR');
+ assert.equal(ownerInlineConnection('mi:1:i:09:03'),'EDITOR');
 });
 for(const engine of ['json','sqlite'] as const){
  async function fixture(){
@@ -402,6 +404,20 @@ for(const engine of ['json','sqlite'] as const){
    const off=await owner.handle(OWNER,btn(editorAgain,'إيقاف القوانين'));
    assert.ok(await owner.handle(OWNER,btn(off,'تأكيد')));
    assert.equal(f.greetings.policy(await f.store.snapshot(),G,'RULES')?.enabled,false);
+  }finally{await f.close();}
+ });
+
+ test(engine+' guide and rules owner routes work from actual private Telegram callback menu',async()=>{
+  const f=await fixture();try{
+   for(const [index,label] of [['02','دليل العضو'],['03','القوانين']] as const){
+    const entry=await f.app.handle({update_id:Number(index)+901,callback_query:{
+     id:'manual-menu-'+index,from:{id:100,is_bot:false},data:'mi:1:i:09:'+index,
+     message:{message_id:Number(index)+901,from:{id:999,is_bot:true},chat:{id:100,type:'private'}}}});
+    assert.equal(entry.status,'APPLIED');
+    assert.equal(entry.reason,'WELCOME_OWNER_VIEW');
+    assert.match(entry.plan!.text,new RegExp(label,'u'));
+    assert.ok(entry.plan!.inlineMarkup!.inline_keyboard.flat().some(x=>x.text===G));
+   }
   }finally{await f.close();}
  });
  test(engine+' Telegram join and leave webhook routes enqueue only trusted local greeting events',async()=>{
