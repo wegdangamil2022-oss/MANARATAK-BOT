@@ -138,3 +138,64 @@ for(const engine of ['json','sqlite'] as const){
   }finally{await f.close();}
  });
 }
+
+for(const engine of ['json','sqlite'] as const){
+ test('NETWORK-003 target-scoped transfer review requires its own human decisions ('+engine+')',async()=>{
+  const f=await fixture(engine);try{
+   await f.app().handle(cb(150,'nw:1:ca:'+NET+':'+SOURCE+':S'));
+   const draft=await f.app().handle(txt(151,MEMBER));
+   assert.equal((await f.app().handle(cb(152,button(draft,'تأكيد تسجيل')))).status,'APPLIED');
+   let watched=(await f.store.snapshot()).networkWatchCases![0]!;
+   const review=await f.app().handle(cb(153,'nw:1:rv:'+watched.id+':A'));
+   assert.equal((await f.app().handle(cb(154,button(review,'تأكيد الاعتماد')))).status,'APPLIED');
+   watched=(await f.store.snapshot()).networkWatchCases![0]!;
+   const details=await f.app().handle(cb(155,'nw:1:iv:'+watched.id));
+   const targets=await f.app().handle(cb(156,button(details,'مراجعة نقل')));
+   assert.match(targets.plan?.text??'',/مجموعة مستهدفة/);
+   const choose=await f.app().handle(cb(157,button(targets,OTHER)));
+   const preview=await f.app().handle(cb(158,button(choose,'كتم')));
+   assert.match(preview.plan?.text??'',/لا ينفذ/);
+   const token=button(preview,'تأكيد إنشاء');
+   assert.equal((await f.app().handle(cb(159,token,200))).status,'DENIED');
+   assert.equal((await f.app().handle(cb(160,token))).status,'APPLIED');
+   assert.equal((await f.app().handle(cb(161,token))).status,'DENIED');
+   let state=await f.store.snapshot();
+   assert.equal(state.networkSanctionReviews?.length,1);
+   assert.equal(state.networkSanctionReviews?.[0]?.targetChatId,OTHER);
+   assert.equal(state.networkSanctionReviews?.[0]?.status,'PENDING');
+   assert.equal(state.moderationOperations.length,0);
+   assert.equal(state.operations.length,0);
+   const transfer=state.networkSanctionReviews![0]!;
+   const transferDetails=await f.app().handle(cb(162,'nw:1:ri:'+transfer.id));
+   const decision=await f.app().handle(cb(163,button(transferDetails,'مراجعة يدوية فقط')));
+   assert.equal((await f.app().handle(cb(164,button(decision,'تأكيد')))).status,'APPLIED');
+   state=await f.store.snapshot();
+   assert.equal(state.networkSanctionReviews?.[0]?.status,'REVIEWED_ONLY');
+   assert.equal(state.moderationOperations.length,0);
+   const closeDetails=await f.app().handle(cb(165,'nw:1:ri:'+transfer.id));
+   const close=await f.app().handle(cb(166,button(closeDetails,'إغلاق')));
+   assert.equal((await f.app().handle(cb(167,button(close,'تأكيد')))).status,'APPLIED');
+   assert.equal((await f.store.snapshot()).networkSanctionReviews?.[0]?.status,'CLOSED');
+  }finally{await f.close();}
+ });
+ test('NETWORK-003 target approval drift and withdrawn source watch invalidate old transfer ('+engine+')',async()=>{
+  const f=await fixture(engine);try{
+   await f.app().handle(cb(180,'nw:1:ca:'+NET+':'+SOURCE+':S'));
+   const draft=await f.app().handle(txt(181,MEMBER));
+   await f.app().handle(cb(182,button(draft,'تأكيد تسجيل')));
+   const watch=(await f.store.snapshot()).networkWatchCases![0]!;
+   const approve=await f.app().handle(cb(183,'nw:1:rv:'+watch.id+':A'));
+   await f.app().handle(cb(184,button(approve,'تأكيد الاعتماد')));
+   const preview=await f.app().handle(cb(185,'nw:1:ra:'+watch.id+':'+OTHER+':B'));
+   const token=button(preview,'تأكيد إنشاء');
+   await f.policy.approveChat(OWNER,OTHER,['navigation','moderation']);
+   assert.equal((await f.app().handle(cb(186,token))).status,'DENIED');
+   assert.equal((await f.store.snapshot()).networkSanctionReviews?.length??0,0);
+   const watch2=(await f.store.snapshot()).networkWatchCases![0]!;
+   const clear=await f.app().handle(cb(187,'nw:1:rv:'+watch2.id+':C'));
+   await f.app().handle(cb(188,button(clear,'تأكيد')));
+   assert.equal((await f.app().handle(cb(189,'nw:1:rt:'+watch2.id+':0'))).status,'DENIED');
+   assert.equal((await f.store.snapshot()).moderationOperations.length,0);
+  }finally{await f.close();}
+ });
+}
