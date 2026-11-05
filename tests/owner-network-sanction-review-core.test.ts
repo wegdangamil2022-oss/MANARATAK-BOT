@@ -43,6 +43,7 @@ test('NETWORK-003 restored reviews reject duplicate active case-target and forge
  const reviewed=copy({status:'REVIEWED_ONLY',revision:2,reviewedBy:OWNER,reviewedAt:NOW+1});
  assert.equal(validNetworkSanctionReviews([reviewed,copy({id:'333333333333'})]),false);
  assert.equal(validNetworkSanctionReviews([example,copy({id:'333333333333',targetChatId:OTHER})]),true);
+ assert.equal(validNetworkSanctionReviews([example,copy({id:'333333333333',caseId:'444444444444'})]),true);
  const rejected=copy({status:'REJECTED',revision:2,reviewedBy:OWNER,reviewedAt:NOW+1});
  assert.equal(validNetworkSanctionReviews([rejected,copy({id:'333333333333'})]),true);
  assert.equal(validNetworkSanctionReviews(Array.from({length:501},(_,i)=>copy({
@@ -173,6 +174,37 @@ for(const engine of ['json','sqlite'] as const){
    await f.store.transaction(s=>{s.privateFeatures['owner.dashboard']=false;});
    assert.equal(await f.decide(p.id,1,'REVIEWED_ONLY'),false);
    assert.equal((await f.store.snapshot()).networkSanctionReviews![0]!.status,'PENDING');
+  }finally{await f.close();}
+ });
+}
+
+for(const engine of ['json','sqlite'] as const){
+ test('NETWORK-003 closed original case never blocks a distinct newly reviewed case in same target ('+engine+')',async()=>{
+  const f=await fixture(engine);try{
+   const older=(await f.propose())!;
+   await f.store.transaction(s=>{const old=s.networkWatchCases![0]!;
+    old.status='CLEARED';old.revision=3;old.clearedBy=OWNER;old.clearedAt=NOW;});
+   f.advance(1000);
+   await f.store.transaction(s=>{s.networkWatchCases!.push({
+    id:'333333333333',networkId:NET,networkRevision:1,
+    sourceChatId:SOURCE,sourceChatVersion:1,subjectId:SUBJECT,
+    category:'FLOOD',revision:2,status:'WATCHED',
+    submittedBy:OWNER,submittedAt:f.now()-100,
+    reviewedBy:OWNER,reviewedAt:f.now()-50
+   });});
+   const fresh=await f.store.transaction(s=>{
+    const row=prepareNetworkSanctionReview(s,f.policy,OWNER,f.now(),
+     '333333333333',TARGET,'BAN');
+    if(row){s.networkSanctionReviews??=[];s.networkSanctionReviews.push(row);}
+    return row;
+   });
+   assert.ok(fresh);
+   assert.notEqual(fresh.caseId,older.caseId);
+   const all=(await f.store.snapshot()).networkSanctionReviews!;
+   assert.equal(all.length,2);
+   assert.equal(all[0]!.status,'PENDING');
+   assert.equal(all[1]!.status,'PENDING');
+   assert.equal((await f.store.snapshot()).moderationOperations.length,0);
   }finally{await f.close();}
  });
 }
