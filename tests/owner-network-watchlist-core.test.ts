@@ -106,7 +106,11 @@ for(const engine of ['json','sqlite'] as const){
    const row=(await f.submit())!;
    await f.store.transaction(s=>{s.groupNetworks![0]!.revision++;});
    assert.equal(await f.review(row.id,1,'WATCHED'),false);
-   assert.equal(await f.submit('9001'),null);
+   // A newly submitted report is allowed against the *current* network epoch.
+   // Only previously approved/reviewed stale evidence must remain frozen.
+   const fresh=await f.submit('9001');
+   assert.ok(fresh);
+   assert.equal(fresh.networkRevision,2);
    await f.store.transaction(s=>{s.groupNetworks![0]!.revision=1;
     s.privateFeatures['owner.dashboard']=false;});
    assert.equal(await f.review(row.id,1,'WATCHED'),false);
