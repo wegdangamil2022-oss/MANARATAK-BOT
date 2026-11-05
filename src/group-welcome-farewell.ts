@@ -4,7 +4,7 @@ import type {Policy} from './policy.js';
 import {studioId,studioURL,validStudioContent,type StudioContent} from './button-studio-model.js';
 import type {TemporaryGroupSendResult,TemporaryGroupDeleteResult} from './telegram-temporary-group-sender.js';
 
-export type GreetingKind='WELCOME'|'FAREWELL'|'GUIDE';
+export type GreetingKind='WELCOME'|'FAREWELL'|'GUIDE'|'RULES';
 export type GroupGreetingPayload={chatId:string;text:string;buttons:{text:string;url:string}[][];topicId?:number};
 export interface GroupGreetingSender{
  send(payload:GroupGreetingPayload,verify:()=>Promise<boolean>):Promise<TemporaryGroupSendResult>;
@@ -18,7 +18,7 @@ const isTime=(v:unknown):v is number=>typeof v==='number'&&Number.isSafeInteger(
 const message=(v:unknown):v is number=>typeof v==='number'&&Number.isSafeInteger(v)&&v>0&&v<=2147483647;
 const webhook=(v:unknown):v is string=>typeof v==='string'&&/^b3-webhook:[A-Za-z0-9_-]{1,80}:[0-9]{1,16}$/u.test(v);
 const topic=(v:unknown):v is number=>typeof v==='number'&&Number.isSafeInteger(v)&&v>0&&v<=2147483647;
-const kind=(v:unknown):v is GreetingKind=>v==='WELCOME'||v==='FAREWELL'||v==='GUIDE';
+const kind=(v:unknown):v is GreetingKind=>v==='WELCOME'||v==='FAREWELL'||v==='GUIDE'||v==='RULES';
 const rows=(s:BotState,key:string)=>s.audit.filter(a=>a.updateKey===key);
 type Job={key:string;chat:string;kind:GreetingKind;messageId:number;updateKey:string;sentAt:number;issued:number;version:number;revision:number;stamp:string;templateId:string;templateRevision:number;templateDigest:string;topicId?:number};
 const format=(content:StudioContent,kind:GreetingKind,issued:number):string|null=>{
@@ -135,6 +135,11 @@ export class GroupWelcomeFarewell{
   * path; the shared queue reuses the same one-minute burst budget and receipts. */
  async observeGuide(chat:string,messageId:number,updateKey:string,sentAt:number,topicId?:number):Promise<number>{
   return this.observe(chat,'GUIDE',messageId,updateKey,sentAt,topicId);
+ }
+ /** A read-only, member-requested summary. Never changes the actual moderation
+  * rules and never proactively posts rules to a joining member. */
+ async observeRules(chat:string,messageId:number,updateKey:string,sentAt:number,topicId?:number):Promise<number>{
+  return this.observe(chat,'RULES',messageId,updateKey,sentAt,topicId);
  }
  /** Called only after Telegram webhook decoding of an authentic service event
   * or, for GUIDE, an explicit human /guide command. */
