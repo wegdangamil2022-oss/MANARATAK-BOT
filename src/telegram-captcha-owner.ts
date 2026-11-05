@@ -1,6 +1,7 @@
 import type {CaptchaEnforcement} from './captcha-enforcement.js';
 import type {CaptchaJoinNotices} from './captcha-join-notices.js';
 import type {GroupServiceMessageCleanup} from './group-service-message-cleanup.js';
+import type {GroupCleanupAudit} from './group-cleanup-audit.js';
 import type {CaptchaEscalationPolicy} from './captcha-escalation-policy.js';
 import {randomBytes} from 'node:crypto';
 import type {BotStore} from './store.js';
@@ -11,18 +12,19 @@ import {protectionUIEpoch,type AdminUIAccess} from './protection-ui-access.js';
 import type {OwnerInlineScreen} from './telegram-inline-owner.js';
 const PREFIX='captcha-owner:';
 export const validCaptchaOwnerRoute=(data:string)=>/^ca:1:[A-Za-z0-9_-]{24}$/u.exec(data)?.[0]===data;
-type Step={kind:'groups'|'edit'|'review'|'confirm'|'queue'|'case'|'accept'|'reject'|'accept-confirm'|'reject-confirm'|'enforce-on'|'enforce-off'|'enforce-on-confirm'|'enforce-off-confirm'|'rules-on'|'rules-off'|'rules-on-confirm'|'rules-off-confirm'|'notice-on'|'notice-off'|'notice-on-confirm'|'notice-off-confirm'|'service-on'|'service-off'|'service-on-confirm'|'service-off-confirm'|'pin-on'|'pin-off'|'pin-on-confirm'|'pin-off-confirm'|'meta-on'|'meta-off'|'meta-on-confirm'|'meta-off-confirm'|'forum-on'|'forum-off'|'forum-on-confirm'|'forum-off-confirm'|'escalation-on'|'escalation-off'|'escalation-on-confirm'|'escalation-off-confirm';page:number;group:string;settings:CaptchaSettings};
+type Step={kind:'groups'|'edit'|'review'|'confirm'|'queue'|'case'|'accept'|'reject'|'accept-confirm'|'reject-confirm'|'enforce-on'|'enforce-off'|'enforce-on-confirm'|'enforce-off-confirm'|'rules-on'|'rules-off'|'rules-on-confirm'|'rules-off-confirm'|'notice-on'|'notice-off'|'notice-on-confirm'|'notice-off-confirm'|'service-on'|'service-off'|'service-on-confirm'|'service-off-confirm'|'pin-on'|'pin-off'|'pin-on-confirm'|'pin-off-confirm'|'meta-on'|'meta-off'|'meta-on-confirm'|'meta-off-confirm'|'forum-on'|'forum-off'|'forum-on-confirm'|'forum-off-confirm'|'audit-on'|'audit-off'|'audit-on-confirm'|'audit-off-confirm'|'escalation-on'|'escalation-off'|'escalation-on-confirm'|'escalation-off-confirm';page:number;group:string;settings:CaptchaSettings};
 const defaults:CaptchaSettings={enabled:false,timeout:120,attempts:3};
 export class TelegramCaptchaOwner{
  private readonly rules:CaptchaRuleGate;
- constructor(private readonly store:BotStore,private readonly policy:Policy,private readonly captcha:CaptchaService,private readonly clock:()=>number,private readonly enforcement?:CaptchaEnforcement,private readonly joinNotices?:CaptchaJoinNotices,private readonly serviceCleanup?:GroupServiceMessageCleanup,private readonly escalation?:CaptchaEscalationPolicy){this.rules=new CaptchaRuleGate(store,policy,captcha,async()=> 'UNKNOWN',clock);}
+ constructor(private readonly store:BotStore,private readonly policy:Policy,private readonly captcha:CaptchaService,private readonly clock:()=>number,private readonly enforcement?:CaptchaEnforcement,private readonly joinNotices?:CaptchaJoinNotices,private readonly serviceCleanup?:GroupServiceMessageCleanup,private readonly escalation?:CaptchaEscalationPolicy,private readonly cleanupAudit?:GroupCleanupAudit){this.rules=new CaptchaRuleGate(store,policy,captcha,async()=> 'UNKNOWN',clock);}
  async cancel(actor:string):Promise<void>{const s=await this.store.snapshot();if(!s.callbacks.some(c=>c.actorId===actor&&c.ref.startsWith(PREFIX)&&!c.revoked))return;await this.store.transaction(s=>{for(const c of s.callbacks)if(c.actorId===actor&&c.ref.startsWith(PREFIX))c.revoked=true;});}
  async handle(actor:string,data:string):Promise<(OwnerInlineScreen&{access:AdminUIAccess})|null>{
   if(!this.policy.isOwner(actor))return null;const root=data==='mi:1:i:04:07'||data==='mi:1:i:04:10'||data==='mi:1:i:09:01'||data==='mi:1:i:09:04';if(!root&&!validCaptchaOwnerRoute(data))return null;
   const selected=await this.store.transaction(s=>{const now=this.clock();if(!Number.isSafeInteger(now)||now<0||now>8640000000000000-120000||!this.policy.privateFeature(s,'owner.dashboard',actor))return null;const epoch=captchaSource(s);let confirmationRef:string|undefined;let evidence:string|null=null;let step:Step={kind:'groups',group:'',page:0,settings:defaults};
-   if(!root){const rows=s.callbacks.filter(c=>c.ref===PREFIX+data.slice(5)),c=rows[0];if(rows.length!==1||!c||c.actorId!==actor||c.chatId!=='private'||c.policyVersion!==0||!c.oneShot||c.used||c.revoked||!Number.isSafeInteger(c.expiresAt)||now>=c.expiresAt||c.expiresAt>now+120000)return null;let values:unknown;try{values=JSON.parse(c.action);}catch{return null;}if(!Array.isArray(values)||![2,3].includes(values.length)||values[1]!==epoch)return null;const v=values[0] as Step;if(!v||typeof v!=='object'||Array.isArray(v)||Object.keys(v).sort().join(',')!=='group,kind,page,settings'||!['groups','edit','review','confirm','queue','case','accept','reject','accept-confirm','reject-confirm','enforce-on','enforce-off','enforce-on-confirm','enforce-off-confirm','rules-on','rules-off','rules-on-confirm','rules-off-confirm','notice-on','notice-off','notice-on-confirm','notice-off-confirm','service-on','service-off','service-on-confirm','service-off-confirm','pin-on','pin-off','pin-on-confirm','pin-off-confirm','meta-on','meta-off','meta-on-confirm','meta-off-confirm','forum-on','forum-off','forum-on-confirm','forum-off-confirm','escalation-on','escalation-off','escalation-on-confirm','escalation-off-confirm'].includes(v.kind)||!Number.isSafeInteger(v.page)||v.page<0||v.page>999||typeof v.group!=='string'||!v.settings||typeof v.settings!=='object'||Object.keys(v.settings).sort().join(',')!=='attempts,enabled,timeout'||typeof v.settings.enabled!=='boolean'||![60,120,300].includes(v.settings.timeout)||![1,3,5].includes(v.settings.attempts))return null;step=v;evidence=typeof values[2]==='string'?values[2]:null;if(['accept','reject','accept-confirm','reject-confirm'].includes(step.kind)&&(!evidence||this.captcha.caseEvidence(s,actor,step.group)!==evidence))return null;if(step.kind.startsWith('rules-')&&(!evidence||this.rules.epoch(s,step.group)!==evidence))return null;if(step.kind.startsWith('notice-')&&(!evidence||this.joinNotices?.epoch(s,step.group)!==evidence))return null;if(step.kind.startsWith('service-')&&(!evidence||this.serviceCleanup?.epoch(s,step.group)!==evidence))return null;if(step.kind.startsWith('pin-')&&(!evidence||this.serviceCleanup?.epochPin(s,step.group)!==evidence))return null;
+   if(!root){const rows=s.callbacks.filter(c=>c.ref===PREFIX+data.slice(5)),c=rows[0];if(rows.length!==1||!c||c.actorId!==actor||c.chatId!=='private'||c.policyVersion!==0||!c.oneShot||c.used||c.revoked||!Number.isSafeInteger(c.expiresAt)||now>=c.expiresAt||c.expiresAt>now+120000)return null;let values:unknown;try{values=JSON.parse(c.action);}catch{return null;}if(!Array.isArray(values)||![2,3].includes(values.length)||values[1]!==epoch)return null;const v=values[0] as Step;if(!v||typeof v!=='object'||Array.isArray(v)||Object.keys(v).sort().join(',')!=='group,kind,page,settings'||!['groups','edit','review','confirm','queue','case','accept','reject','accept-confirm','reject-confirm','enforce-on','enforce-off','enforce-on-confirm','enforce-off-confirm','rules-on','rules-off','rules-on-confirm','rules-off-confirm','notice-on','notice-off','notice-on-confirm','notice-off-confirm','service-on','service-off','service-on-confirm','service-off-confirm','pin-on','pin-off','pin-on-confirm','pin-off-confirm','meta-on','meta-off','meta-on-confirm','meta-off-confirm','forum-on','forum-off','forum-on-confirm','forum-off-confirm','audit-on','audit-off','audit-on-confirm','audit-off-confirm','escalation-on','escalation-off','escalation-on-confirm','escalation-off-confirm'].includes(v.kind)||!Number.isSafeInteger(v.page)||v.page<0||v.page>999||typeof v.group!=='string'||!v.settings||typeof v.settings!=='object'||Object.keys(v.settings).sort().join(',')!=='attempts,enabled,timeout'||typeof v.settings.enabled!=='boolean'||![60,120,300].includes(v.settings.timeout)||![1,3,5].includes(v.settings.attempts))return null;step=v;evidence=typeof values[2]==='string'?values[2]:null;if(['accept','reject','accept-confirm','reject-confirm'].includes(step.kind)&&(!evidence||this.captcha.caseEvidence(s,actor,step.group)!==evidence))return null;if(step.kind.startsWith('rules-')&&(!evidence||this.rules.epoch(s,step.group)!==evidence))return null;if(step.kind.startsWith('notice-')&&(!evidence||this.joinNotices?.epoch(s,step.group)!==evidence))return null;if(step.kind.startsWith('service-')&&(!evidence||this.serviceCleanup?.epoch(s,step.group)!==evidence))return null;if(step.kind.startsWith('pin-')&&(!evidence||this.serviceCleanup?.epochPin(s,step.group)!==evidence))return null;
    if(step.kind.startsWith('meta-')&&(!evidence||this.serviceCleanup?.epochGroupChanges(s,step.group)!==evidence))return null;
-   if(step.kind.startsWith('forum-')&&(!evidence||this.serviceCleanup?.epochForum(s,step.group)!==evidence))return null;if(step.kind.startsWith('escalation-')&&(!evidence||this.escalation?.epoch(s,step.group)!==evidence))return null;c.used=true;confirmationRef=c.ref;}
+   if(step.kind.startsWith('forum-')&&(!evidence||this.serviceCleanup?.epochForum(s,step.group)!==evidence))return null;
+   if(step.kind.startsWith('audit-')&&(!evidence||this.cleanupAudit?.epoch(s,step.group)!==evidence))return null;if(step.kind.startsWith('escalation-')&&(!evidence||this.escalation?.epoch(s,step.group)!==evidence))return null;c.used=true;confirmationRef=c.ref;}
    for(const c of s.callbacks)if(c.actorId===actor&&c.ref.startsWith(PREFIX)&&c.ref!==confirmationRef)c.revoked=true;return {step,epoch,confirmationRef,evidence};
   });if(!selected)return null;let step=selected.step;
   if(step.kind==='confirm'){if(!await this.captcha.configure(actor,step.group,step.settings,selected.epoch,selected.confirmationRef))return null;step={...step,kind:'edit'};}
@@ -50,6 +52,11 @@ export class TelegramCaptchaOwner{
       !await this.serviceCleanup.configureForum(actor,step.group,step.kind==='forum-on-confirm',selected.evidence,selected.confirmationRef))return null;
    step={...step,kind:'edit'};
   }
+  if(step.kind==='audit-on-confirm'||step.kind==='audit-off-confirm'){
+   if(!this.cleanupAudit||!selected.evidence||!selected.confirmationRef||
+      !await this.cleanupAudit.configure(actor,step.group,step.kind==='audit-on-confirm',selected.evidence,selected.confirmationRef))return null;
+   step={...step,kind:'edit'};
+  }
   if(step.kind==='escalation-on-confirm'||step.kind==='escalation-off-confirm'){
    if(!this.escalation||!selected.evidence||!selected.confirmationRef||
       !await this.escalation.configure(actor,step.group,step.kind==='escalation-on-confirm'?'EXTENDED':'STANDARD',selected.evidence,selected.confirmationRef))return null;
@@ -57,7 +64,7 @@ export class TelegramCaptchaOwner{
   }
   return this.store.transaction(s=>{const now=this.clock();if(!Number.isSafeInteger(now)||now<0||now>8640000000000000-120000||!this.policy.privateFeature(s,'owner.dashboard',actor)||selected.step.kind!=='confirm'&&captchaSource(s)!==selected.epoch)return null;
    const epoch=captchaSource(s),groups=s.chats.filter(c=>/^-[1-9][0-9]{0,15}$/u.exec(c.id)?.[0]===c.id&&Number.isSafeInteger(Number(c.id))&&s.chats.filter(x=>x.id===c.id).length===1&&this.policy.canUseChat(s,c.id,'moderation')).sort((a,b)=>a.id.localeCompare(b.id));
-   const b=(text:string,next:Step)=>{const nonce=randomBytes(18).toString('base64url');s.callbacks.push({ref:PREFIX+nonce,action:JSON.stringify([next,epoch,next.kind.startsWith('enforce-')?this.enforcement?.epoch(s,next.group)??null:next.kind.startsWith('rules-')?this.rules.epoch(s,next.group):next.kind.startsWith('notice-')?this.joinNotices?.epoch(s,next.group)??null:next.kind.startsWith('service-')?this.serviceCleanup?.epoch(s,next.group)??null:next.kind.startsWith('pin-')?this.serviceCleanup?.epochPin(s,next.group)??null:next.kind.startsWith('meta-')?this.serviceCleanup?.epochGroupChanges(s,next.group)??null:next.kind.startsWith('forum-')?this.serviceCleanup?.epochForum(s,next.group)??null:next.kind.startsWith('escalation-')?this.escalation?.epoch(s,next.group)??null:this.captcha.caseEvidence(s,actor,next.group)]),actorId:actor,chatId:'private',policyVersion:0,oneShot:true,used:false,revoked:false,expiresAt:now+120000});return {text,callback_data:'ca:1:'+nonce};};
+   const b=(text:string,next:Step)=>{const nonce=randomBytes(18).toString('base64url');s.callbacks.push({ref:PREFIX+nonce,action:JSON.stringify([next,epoch,next.kind.startsWith('enforce-')?this.enforcement?.epoch(s,next.group)??null:next.kind.startsWith('rules-')?this.rules.epoch(s,next.group):next.kind.startsWith('notice-')?this.joinNotices?.epoch(s,next.group)??null:next.kind.startsWith('service-')?this.serviceCleanup?.epoch(s,next.group)??null:next.kind.startsWith('pin-')?this.serviceCleanup?.epochPin(s,next.group)??null:next.kind.startsWith('meta-')?this.serviceCleanup?.epochGroupChanges(s,next.group)??null:next.kind.startsWith('forum-')?this.serviceCleanup?.epochForum(s,next.group)??null:next.kind.startsWith('audit-')?this.cleanupAudit?.epoch(s,next.group)??null:next.kind.startsWith('escalation-')?this.escalation?.epoch(s,next.group)??null:this.captcha.caseEvidence(s,actor,next.group)]),actorId:actor,chatId:'private',policyVersion:0,oneShot:true,used:false,revoked:false,expiresAt:now+120000});return {text,callback_data:'ca:1:'+nonce};};
    let text='',rows:{text:string;callback_data:string}[][]=[];
    if(step.kind==='groups'){if(step.page>=Math.max(1,Math.ceil(groups.length/8)))return null;text='<b>إعدادات الانضمام والدخول والخروج</b>\nاختر مجموعة لإدارة CAPTCHA، ورسائل الدخول والخروج والتثبيت وتغييرات المجموعة وإشعارات المنتدى الأصلية، وروابط فتح البوت. كل وظيفة تحتاج موافقة مستقلة.';for(const group of groups.slice(step.page*8,step.page*8+8))rows.push([b(group.id,{...step,kind:'edit',group:group.id})]);if(step.page>0)rows.push([b('السابق',{...step,page:step.page-1})]);if((step.page+1)*8<groups.length)rows.push([b('التالي',{...step,page:step.page+1})]);}
    else if(step.kind==='queue'){
@@ -133,6 +140,17 @@ export class TelegramCaptchaOwner{
      '\nيلزم إذن حذف الرسائل وSTOP آمن؛ هذا التفويض مستقل عن بقية إشعارات Telegram. لا تعاد النتائج الغامضة.';
     rows=[[b('✅ تأكيد تنظيف إشعارات المواضيع',{...step,kind:step.kind==='forum-on'?'forum-on-confirm':'forum-off-confirm'})],[b('↩️ إلغاء',{...step,kind:'edit'})]];
    }
+   else if(step.kind==='audit-on'||step.kind==='audit-off'){
+    if(!this.cleanupAudit||!groups.some(c=>c.id===step.group))return null;
+    const consent=this.cleanupAudit.policy(s,step.group);
+    if(!consent)return null;
+    text='<b>معاينة تدقيق الحذف في غرفة إدارة خاصة</b>\nالمجموعة: '+step.group+'\n'+
+     (step.kind==='audit-on'?
+      'سيُرسل ملخص واحد بحد أقصى لكل دقيقة مكتملة إلى غرفة الإشعارات المخوّلة رسميًا بموافقتي المجموعة والغرفة، بشرط أن يؤكد Telegram أنها ليست عامة. لا تتضمن الرسالة أسماء الطلاب ولا نصوص الأوامر ولا أرقام رسائل الحذف. إن تعذر إثبات الخصوصية فلن يُرسل أي ملخص.':
+      'سيُوقف إرسال ملخصات تدقيق الحذف فورًا؛ تبقى السجلات المحلية ولا تُستأنف الملخصات القديمة بعد إعادة التفعيل.')+
+     '\nهذا التفويض مستقل عن موافقات حذف رسائل الخدمة وأوامر المشرفين؛ ولا يفعّل الحذف أو إنشاء غرفة جديدة. تغيير الغرفة أو الصلاحيات يلغي التفويض القديم.';
+    rows=[[b('✅ تأكيد تدقيق الحذف',{...step,kind:step.kind==='audit-on'?'audit-on-confirm':'audit-off-confirm'})],[b('↩️ إلغاء',{...step,kind:'edit'})]];
+   }
    else if(step.kind==='escalation-on'||step.kind==='escalation-off'){
     if(!this.escalation||!groups.some(c=>c.id===step.group)||!this.captcha.settings(s,step.group)?.enabled)return null;
     text='<b>معاينة التدرج المتقدم لعقوبة CAPTCHA</b>\nالمجموعة: '+step.group+'\n'+
@@ -175,6 +193,12 @@ export class TelegramCaptchaOwner{
     text+='\nتنظيف إشعارات مواضيع المنتدى: '+(enabled?'مفعل بموافقة مستقلة':'متوقف');
     if(forum)rows.push([b(enabled?'إيقاف تنظيف إشعارات المواضيع':'تفعيل تنظيف إشعارات المواضيع',
      {...step,kind:enabled?'forum-off':'forum-on'})]);
+   }
+   if(step.kind==='edit'&&this.cleanupAudit){
+    const audit=this.cleanupAudit.policy(s,step.group),enabled=audit?.enabled===true;
+    text+='\nتدقيق الحذف إلى غرفة إشعارات خاصة: '+(enabled?'مفعل ومشروط بخصوصية الغرفة':'متوقف');
+    if(audit)rows.push([b(enabled?'إيقاف تدقيق الحذف':'تفعيل تدقيق الحذف',
+     {...step,kind:enabled?'audit-off':'audit-on'})]);
    }
    if(step.kind==='edit'&&this.serviceCleanup)rows.push([{text:'🧹 تنظيف أوامر المشرفين (موافقة مستقلة)',callback_data:'ac:1:h'}]);
    if(step.kind==='edit'&&this.escalation&&this.captcha.settings(s,step.group)?.enabled){
