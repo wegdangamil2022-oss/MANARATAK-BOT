@@ -4,7 +4,7 @@ import type {Policy} from './policy.js';
 import {studioId,studioURL,validStudioContent,type StudioContent} from './button-studio-model.js';
 import type {TemporaryGroupSendResult,TemporaryGroupDeleteResult} from './telegram-temporary-group-sender.js';
 
-export type GreetingKind='WELCOME'|'FAREWELL';
+export type GreetingKind='WELCOME'|'FAREWELL'|'GUIDE';
 export type GroupGreetingPayload={chatId:string;text:string;buttons:{text:string;url:string}[][];topicId?:number};
 export interface GroupGreetingSender{
  send(payload:GroupGreetingPayload,verify:()=>Promise<boolean>):Promise<TemporaryGroupSendResult>;
@@ -18,7 +18,7 @@ const isTime=(v:unknown):v is number=>typeof v==='number'&&Number.isSafeInteger(
 const message=(v:unknown):v is number=>typeof v==='number'&&Number.isSafeInteger(v)&&v>0&&v<=2147483647;
 const webhook=(v:unknown):v is string=>typeof v==='string'&&/^b3-webhook:[A-Za-z0-9_-]{1,80}:[0-9]{1,16}$/u.test(v);
 const topic=(v:unknown):v is number=>typeof v==='number'&&Number.isSafeInteger(v)&&v>0&&v<=2147483647;
-const kind=(v:unknown):v is GreetingKind=>v==='WELCOME'||v==='FAREWELL';
+const kind=(v:unknown):v is GreetingKind=>v==='WELCOME'||v==='FAREWELL'||v==='GUIDE';
 const rows=(s:BotState,key:string)=>s.audit.filter(a=>a.updateKey===key);
 type Job={key:string;chat:string;kind:GreetingKind;messageId:number;updateKey:string;sentAt:number;issued:number;version:number;revision:number;stamp:string;templateId:string;templateRevision:number;templateDigest:string;topicId?:number};
 const format=(content:StudioContent,kind:GreetingKind,issued:number):string|null=>{
@@ -31,7 +31,7 @@ const format=(content:StudioContent,kind:GreetingKind,issued:number):string|null
   clock=new Intl.DateTimeFormat(english?'en-GB':'ar',{timeZone:content.timezone,hour:'2-digit',minute:'2-digit',hour12:content.hour12}).format(issued);
  }catch{return null;}
  const replacements:Record<string,string>={
-  '{العضو}':kind==='WELCOME'?(english?'a new member':'عضو جديد'):(english?'one of our members':'أحد الأعضاء'),
+  '{العضو}':kind==='WELCOME'?(english?'a new member':'عضو جديد'):kind==='FAREWELL'?(english?'one of our members':'أحد الأعضاء'):(english?'a student':'طالب'),
   '{اسم_المجموعة}':english?'Manaratak learning group':'مجموعة منارتك',
   '{التاريخ}':date,'{الوقت}':clock,
   '{رابط_القوانين}':english?'Ask an admin for the group rules':'اطلب قوانين المجموعة من المشرف'
@@ -130,7 +130,14 @@ export class GroupWelcomeFarewell{
    return true;
   });
  }
- /** Called only after Telegram webhook decoding of an actual service message. */
+ /** GUIDE is a requested /guide command, never unsolicited. The transport must
+  * authenticate an unedited non-forwarded group text update before invoking this
+  * path; the shared queue reuses the same one-minute burst budget and receipts. */
+ async observeGuide(chat:string,messageId:number,updateKey:string,sentAt:number,topicId?:number):Promise<number>{
+  return this.observe(chat,'GUIDE',messageId,updateKey,sentAt,topicId);
+ }
+ /** Called only after Telegram webhook decoding of an authentic service event
+  * or, for GUIDE, an explicit human /guide command. */
  async observe(chat:string,type:GreetingKind,messageId:number,updateKey:string,sentAt:number,topicId?:number):Promise<number>{
   if(!group(chat)||!kind(type)||!message(messageId)||!webhook(updateKey)||!isTime(sentAt)||
       topicId!==undefined&&!topic(topicId))return 0;
