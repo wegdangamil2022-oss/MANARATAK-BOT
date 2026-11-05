@@ -2,6 +2,8 @@ import {createHash,randomBytes} from 'node:crypto';
 import type {BotStore,BotState,Chat} from './store.js';
 import type {GroupNetwork} from './group-network-model.js';
 import {validNetworkName} from './group-network-model.js';
+import {prepareNetworkInheritance,pauseNetworkInheritanceByOwner} from './network-inheritance.js';
+import type {NetworkInheritanceLink} from './network-inheritance-model.js';
 import type {Policy} from './policy.js';
 import {defaultCommunityConfig,emptyCommunityState,validCommunityConfig,
  type CommunityConfig} from './phase4-community-model.js';
@@ -26,6 +28,8 @@ const excludeMask='([1-9][0-9]{0,2})';
 const policyPreview=new RegExp('^nw:1:z:'+net+':'+group+':'+page+'(?::'+excludeMask+')?$','u');
 const greetingSources=new RegExp('^nw:1:w:'+net+':'+page+'$','u');
 const greetingPreview=new RegExp('^nw:1:v:'+net+':'+group+':'+page+'(?::'+excludeMask+')?$','u');
+const inheritancePage=new RegExp('^nw:1:f:'+net+':'+page+'$','u');
+const inheritanceStop=/^nw:1:j:([a-f0-9]{12})$/u;
 const stalePick=new RegExp('^nw:1:q:'+net+':'+revision+':'+group+':'+revision+':'+page+'$','u');
 const staleBatch=new RegExp('^nw:1:b:'+net+':'+revision+':'+page+'$','u');
 const toggle=new RegExp('^nw:1:t:'+net+':'+revision+':'+group+':'+revision+':'+page+'$','u');
@@ -49,7 +53,7 @@ export function validOwnerNetworkRoute(data:unknown):boolean{
  const preview=policyPreview.exec(data)??greetingPreview.exec(data);
  if(preview?.[4]!==undefined&&Number(preview[4])>255)return false;
  return data==='mi:1:i:01:03'||home.test(data)||begin.test(data)||
-  [list,detail,rename,remove,pick,toggle,stalePage,stalePick,staleBatch,policySources,policyPreview,greetingSources,greetingPreview,confirm,cancel,historyPage,historyView].some(re=>re.test(data));
+  [list,detail,rename,remove,pick,toggle,stalePage,stalePick,staleBatch,policySources,policyPreview,greetingSources,greetingPreview,inheritancePage,inheritanceStop,confirm,cancel,historyPage,historyView].some(re=>re.test(data));
 }
 function approved(s:BotState,policy:Policy,actor:string,now:number):Chat[]{
  const counts=new Map<string,number>();
@@ -131,6 +135,7 @@ export class OwnerNetworkEditor{
    [[btn('👥 إدارة المجموعات','nw:1:g:'+n.id+':0')],
     [btn('📑 سياسات الشبكة المشتركة','nw:1:y:'+n.id+':0')],
     [btn('👋 قوالب الترحيب المشتركة','nw:1:w:'+n.id+':0')],
+     [btn('🔁 المتابعة التلقائية','nw:1:f:'+n.id+':0')],
     ...(stale>0?[[btn('🧹 مراجعة الارتباطات القديمة','nw:1:s:'+n.id+':0')]]:[]),
     [btn('✏️ إعادة تسمية الشبكة','nw:1:e:'+n.id)],
     ...(n.members.length===0?[[btn('🗑️ حذف الشبكة','nw:1:x:'+n.id)]]:[]),
