@@ -109,6 +109,133 @@ for(const engine of ['json','sqlite'] as const){
   assert.equal(f.service.policyPin(await f.store.snapshot(),G)?.enabled,false);
  }finally{await f.close();}});
 
+
+ test(engine+' group metadata notices require their own consent and clean original service IDs only',async()=>{const f=await fixture();try{
+  const mk=(id:number,part:Record<string,unknown>)=>({update_id:1200+id,message:{message_id:id,date:f.now()/1000,
+   from:{id:777,is_bot:false},chat:{id:Number(G),type:'supergroup'},...part}});
+  await f.enable();await f.service.configurePin(OWNER,G,true,f.service.epochPin(await f.store.snapshot(),G));
+  assert.equal(f.service.policyGroupChanges(await f.store.snapshot(),G)?.enabled,false);
+  const title=mk(300,{new_chat_title:'Important new name'});
+  assert.equal((await f.app.handle(title)).reason,'GROUP_SERVICE_NOTICE_OBSERVED');
+  f.advance(60000);assert.equal((await f.service.cleanup()).deleted,0);
+  assert.equal(await f.service.configureGroupChanges(OWNER,G,true,f.service.epochGroupChanges(await f.store.snapshot(),G)),true);
+  const messages=[
+   mk(301,{new_chat_title:'Private student information'}),
+   mk(302,{new_chat_photo:[{file_id:'photoFileId-123',file_unique_id:'photoUnique123',width:100,height:100,file_size:321}]}),
+   mk(303,{delete_chat_photo:true})];
+  for(const v of messages)assert.equal((await f.app.handle(v)).reason,'GROUP_SERVICE_NOTICE_OBSERVED');
+  const serialized=JSON.stringify((await f.store.snapshot()).audit);
+  assert.equal(serialized.includes('Private student information'),false);
+  assert.equal(serialized.includes('photoFileId-123'),false);
+  f.advance(60000);assert.deepEqual(await f.service.cleanup(),{deleted:3,unresolved:0});
+  assert.deepEqual(f.calls.map(x=>x.messageId),[301,302,303]);
+  assert.equal(f.service.policy(await f.store.snapshot(),G)?.enabled,true);
+  assert.equal(f.service.policyPin(await f.store.snapshot(),G)?.enabled,true);
+ }finally{await f.close();}});
+ test(engine+' forum service notices are separately approved, including topic and general-topic actions',async()=>{const f=await fixture();try{
+  const mk=(id:number,part:Record<string,unknown>,thread=true)=>({update_id:1400+id,message:{message_id:id,date:f.now()/1000,
+   from:{id:999,is_bot:true},chat:{id:Number(G),type:'supergroup'},...(thread?{message_thread_id:101}:{}),...part}});
+  assert.equal(await f.service.configureGroupChanges(OWNER,G,true,f.service.epochGroupChanges(await f.store.snapshot(),G)),true);
+  const created=mk(400,{forum_topic_created:{name:'Announcements',icon_color:7322096}});
+  assert.equal((await f.app.handle(created)).reason,'GROUP_SERVICE_NOTICE_OBSERVED');
+  f.advance(60000);assert.equal((await f.service.cleanup()).deleted,0);
+  assert.equal(await f.service.configureForum(OWNER,G,true,f.service.epochForum(await f.store.snapshot(),G)),true);
+  const updates=[
+   mk(401,{forum_topic_created:{name:'Private internal topic',icon_color:7322096}}),
+   mk(402,{forum_topic_edited:{name:'New topic name'}}),
+   mk(403,{forum_topic_closed:{}}),
+   mk(404,{forum_topic_reopened:{}}),
+   mk(405,{general_forum_topic_hidden:{}},false),
+   mk(406,{general_forum_topic_unhidden:{}},false)];
+  for(const v of updates)assert.equal((await f.app.handle(v)).reason,'GROUP_SERVICE_NOTICE_OBSERVED');
+  assert.equal(JSON.stringify((await f.store.snapshot()).audit).includes('Private internal topic'),false);
+  f.advance(60000);assert.deepEqual(await f.service.cleanup(10),{deleted:6,unresolved:0});
+  assert.deepEqual(f.calls.map(x=>x.messageId),[401,402,403,404,405,406]);
+  assert.equal(f.service.policyGroupChanges(await f.store.snapshot(),G)?.enabled,true);
+  assert.equal(f.service.policyForum(await f.store.snapshot(),G)?.enabled,true);
+ }finally{await f.close();}});
+ test(engine+' malformed and combined group-service notifications fail closed before queueing',async()=>{const f=await fixture();try{
+  await f.service.configureGroupChanges(OWNER,G,true,f.service.epochGroupChanges(await f.store.snapshot(),G));
+  await f.service.configureForum(OWNER,G,true,f.service.epochForum(await f.store.snapshot(),G));
+  const mk=(id:number,fields:Record<string,unknown>,type='supergroup')=>({update_id:2000+id,message:{message_id:id,date:f.now()/1000,
+   chat:{id:Number(G),type},from:{id:777,is_bot:false},...fields}});
+  const bad=[
+   mk(501,{new_chat_title:'Hello',text:'student data'}),
+   mk(502,{new_chat_title:'Hello',delete_chat_photo:true}),
+   mk(503,{delete_chat_photo:false}),
+   mk(504,{new_chat_title:''}),
+   mk(505,{new_chat_photo:[]}),
+   mk(506,{new_chat_photo:[{width:30,height:30}]}),
+   mk(507,{new_chat_title:'Hey',pinned_message:{message_id:90,chat:{id:Number(G),type:'supergroup'}}}),
+   mk(508,{forum_topic_created:{name:'X'}}),
+   mk(509,{forum_topic_edited:{}}),
+   mk(510,{forum_topic_closed:{name:'Unexpected'}}),
+   mk(511,{forum_topic_closed:{}},'group'),
+   mk(512,{forum_topic_closed:{},text:'hello'}),
+   mk(513,{forum_topic_closed:{},forward_date:100}),
+   mk(514,{new_chat_photo:'not a photo array'}),
+   mk(515,{forum_topic_created:{name:'ok',icon_color:-1}}),
+   mk(516,{forum_topic_reopened:{},new_chat_photo:[{file_id:'photoFileId-123',width:100,height:100}]}),
+   mk(517,{forum_topic_edited:{name:'hi'},document:{file_id:'doc12345678'}})
+  ];
+  for(const v of bad)assert.notEqual((await f.app.handle(v)).reason,'GROUP_SERVICE_NOTICE_OBSERVED');
+  assert.equal((await f.store.snapshot()).audit.some(a=>a.updateKey.startsWith('group:service-message-job:')),false);
+  f.advance(60000);assert.equal((await f.service.cleanup()).deleted,0);
+ }finally{await f.close();}});
+ test(engine+' independent metadata and forum consent revoke queued cleanup, STOP and missing rights deny deletion',async()=>{for(const scenario of ['off','version','stop','rights','unknown'] as const){
+  const f=await fixture();try{
+   await f.service.configureGroupChanges(OWNER,G,true,f.service.epochGroupChanges(await f.store.snapshot(),G));
+   await f.service.configureForum(OWNER,G,true,f.service.epochForum(await f.store.snapshot(),G));
+   assert.equal(await f.service.observeService(G,'GROUP_TITLE',521,'b3-webhook:service-cleanup:521',f.now()),1);
+   assert.equal(await f.service.observeService(G,'TOPIC_CLOSED',522,'b3-webhook:service-cleanup:522',f.now()),1);
+   f.advance(60000);
+   if(scenario==='off')await f.service.configureGroupChanges(OWNER,G,false,f.service.epochGroupChanges(await f.store.snapshot(),G));
+   if(scenario==='version')await f.store.transaction(s=>{s.chats.find(x=>x.id===G)!.version++;});
+   if(scenario==='stop')f.stop();if(scenario==='rights')f.rights('DENIED');if(scenario==='unknown')f.result('UNKNOWN_OUTCOME');
+   const first=await f.service.cleanup();
+   if(scenario==='off'){assert.equal(first.deleted,1);assert.deepEqual(f.calls.map(x=>x.messageId),[522]);}
+   else if(scenario==='version'){assert.equal(first.deleted,0);assert.equal(f.calls.length,0);}
+   else if(scenario==='stop'||scenario==='rights'){assert.equal(first.deleted,0);assert.equal(f.calls.length,0);}
+   else{assert.equal(first.unresolved,2);assert.equal(f.calls.length,2);}
+   f.start();f.rights('GRANTED');f.result('ACKNOWLEDGED');
+   const again=await f.service.cleanup();
+   if(scenario==='unknown'||scenario==='version'||scenario==='off')assert.equal(again.deleted,0);
+   else assert.equal(again.deleted,2);
+  }finally{await f.close();}
+ }});
+ test(engine+' service consent scopes stay isolated when configuration audit is forged',async()=>{const f=await fixture();try{
+  await f.service.configureGroupChanges(OWNER,G,true,f.service.epochGroupChanges(await f.store.snapshot(),G));
+  await f.service.configureForum(OWNER,G,true,f.service.epochForum(await f.store.snapshot(),G));
+  await f.service.observeService(G,'GROUP_PHOTO_REMOVED',531,'b3-webhook:service-cleanup:531',f.now());
+  await f.service.observeService(G,'TOPIC_CLOSED',532,'b3-webhook:service-cleanup:532',f.now());
+  await f.store.transaction(s=>{s.audit.find(a=>a.updateKey==='group:group-change-cleanup-policy:'+G)!.actorId='999';});
+  f.advance(60000);
+  assert.deepEqual(await f.service.cleanup(),{deleted:1,unresolved:0});
+  assert.deepEqual(f.calls.map(x=>x.messageId),[532]);
+ }finally{await f.close();}});
+ test(engine+' owner settings expose separate preview-confirm-stop for group changes and forum notifications',async()=>{const f=await fixture();try{
+  const ui=new TelegramCaptchaOwner(f.store,f.policy,f.captcha,()=>f.now(),undefined,undefined,f.service);
+  const root=await ui.handle(OWNER,'mi:1:i:09:04');const group=await ui.handle(OWNER,pick(root,G));
+  assert.equal(f.service.policyGroupChanges(await f.store.snapshot(),G)?.enabled,false);
+  assert.equal(f.service.policyForum(await f.store.snapshot(),G)?.enabled,false);
+  const preview=await ui.handle(OWNER,pick(group,'تفعيل تنظيف تغييرات المجموعة'));
+  assert.match(preview?.text??'',/معاينة/u);
+  assert.equal(f.service.policyGroupChanges(await f.store.snapshot(),G)?.enabled,false);
+  const token=pick(preview,'تأكيد');assert.ok(await ui.handle(OWNER,token));
+  assert.equal(await ui.handle(OWNER,token),null);
+  assert.equal(f.service.policyGroupChanges(await f.store.snapshot(),G)?.enabled,true);
+  const root2=await ui.handle(OWNER,'mi:1:i:09:04');const group2=await ui.handle(OWNER,pick(root2,G));
+  const forumPreview=await ui.handle(OWNER,pick(group2,'تفعيل تنظيف إشعارات المواضيع'));
+  assert.match(forumPreview?.text??'',/معاينة/u);
+  assert.ok(await ui.handle(OWNER,pick(forumPreview,'تأكيد')));
+  assert.equal(f.service.policyForum(await f.store.snapshot(),G)?.enabled,true);
+  const root3=await ui.handle(OWNER,'mi:1:i:09:04');const group3=await ui.handle(OWNER,pick(root3,G));
+  const off=await ui.handle(OWNER,pick(group3,'إيقاف تنظيف تغييرات المجموعة'));
+  assert.ok(await ui.handle(OWNER,pick(off,'تأكيد')));
+  assert.equal(f.service.policyGroupChanges(await f.store.snapshot(),G)?.enabled,false);
+  assert.equal(f.service.policyForum(await f.store.snapshot(),G)?.enabled,true);
+ }finally{await f.close();}});
+
  test(engine+' joined and left service messages are deleted after owner authorization and delay',async()=>{const f=await fixture();try{
   await f.enable();assert.equal(await f.observe('JOIN',41,12),1);
   assert.equal(await f.observe('LEAVE',42,13),1);
