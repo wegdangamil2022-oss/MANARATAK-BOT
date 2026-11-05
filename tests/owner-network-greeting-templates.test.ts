@@ -66,11 +66,14 @@ async function fixture(engine:'json'|'sqlite',targets=[TARGET,OVERRIDE]){
   close:()=>rm(dir,{recursive:true,force:true})};
 }
 test('NETWORK-002 greeting callback routes are canonical and limited to 64 bytes',()=>{
- for(const key of ['nw:1:w:'+NETWORK+':0','nw:1:w:'+NETWORK+':999',
+ for(const key of ['nw:1:v:'+NETWORK+':'+SOURCE+':0:1','nw:1:v:'+NETWORK+':'+SOURCE+':0:255',
+  'nw:1:w:'+NETWORK+':0','nw:1:w:'+NETWORK+':999',
   'nw:1:v:'+NETWORK+':'+SOURCE+':0','nw:1:v:'+NETWORK+':'+SOURCE+':999'])
   assert.equal(validOwnerNetworkRoute(key),true,key);
  for(const key of ['nw:1:w:'+NETWORK+':00','nw:1:w:'+NETWORK+':1000',
   'nw:1:v:'+NETWORK+':'+SOURCE+':-1','nw:1:v:'+NETWORK+':123:0',
+   'nw:1:v:'+NETWORK+':'+SOURCE+':0:0','nw:1:v:'+NETWORK+':'+SOURCE+':0:01',
+   'nw:1:v:'+NETWORK+':'+SOURCE+':0:256',
   'nw:1:v:ABCDEF123456:'+SOURCE+':0','nw:1:v:'+NETWORK+':'+SOURCE+':0\n'])
   assert.equal(validOwnerNetworkRoute(key),false,key);
 });
