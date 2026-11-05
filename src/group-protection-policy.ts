@@ -2,6 +2,7 @@ import {advanceFloodWindow} from './protection-flood.js';
 import {protectionEntityLinks} from './protection-message-entities.js';
 import {BotStore,type BotState} from './store.js';
 import type {Policy} from './policy.js';
+import {pauseNetworkInheritanceForLocalEdit,synchronizeNetworkInheritance} from './network-inheritance.js';
 import {isValidProtectionPolicy,evaluateProtectionRules,type GroupProtectionRecord,type ProtectionEvaluation,type ProtectionMessage} from './protection-rules.js';
 type Inspection={status:'DENIED'|'UNCONFIGURED'|'STALE'}|{status:'CONFIGURED';record:GroupProtectionRecord;enforcementConnected:false};
 const clockValid=(n:number)=>Number.isSafeInteger(n)&&n>=0&&n<=8640000000000000;
@@ -38,6 +39,8 @@ export class GroupProtectionPolicyService{
    if(old)state.protectionPolicies[state.protectionPolicies.indexOf(old)]=record;
    else state.protectionPolicies.push(record);
    if(state.protectionFloodWindows)state.protectionFloodWindows=state.protectionFloodWindows.filter(w=>w.chatId!==candidate.chatId);
+   pauseNetworkInheritanceForLocalEdit(state,'POLICY',candidate.chatId);
+   synchronizeNetworkInheritance(state,this.policy,actor,now,'POLICY',candidate.chatId);
    state.audit.push({actorId:actor,updateKey:'protection:policy:'+candidate.chatId+':'+candidate.revision,
     decision:'ALLOW',reason:'PROTECTION_POLICY_SAVED_'+candidate.mode,policyVersion:expectedChatRevision,at:now});
    return {status:'SAVED' as const,revision:candidate.revision};
