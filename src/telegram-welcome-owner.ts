@@ -4,14 +4,14 @@ import type {Policy} from './policy.js';
 import type {OwnerInlineScreen} from './telegram-inline-owner.js';
 import {GroupWelcomeFarewell,savedGreetingVersion,type GreetingKind} from './group-welcome-farewell.js';
 
-const PREFIX='welcome-owner:',ROOT='mi:1:i:09:01',TTL=120000;
+const PREFIX='welcome-owner:',ROOT='mi:1:i:09:01',GUIDE_ROOT='mi:1:i:09:02',TTL=120000;
 const esc=(s:string)=>s.replace(/&/gu,'&amp;').replace(/</gu,'&lt;').replace(/>/gu,'&gt;').replace(/"/gu,'&quot;').replace(/'/gu,'&#39;');
 const int=(v:unknown):v is number=>typeof v==='number'&&Number.isSafeInteger(v)&&v>=0&&v<=8640000000000000-TTL;
 const group=(v:unknown):v is string=>typeof v==='string'&&/^-[1-9][0-9]{0,15}$/u.test(v)&&Number.isSafeInteger(Number(v));
 type Kind='GROUPS'|'GROUP'|'EDIT'|'TEMPLATES'|'PREVIEW'|'CONFIRM'|'OFF_PREVIEW'|'OFF_CONFIRM';
 type Step={kind:Kind;page:number;chat:string;greeting:GreetingKind;templateId:string;templateRevision:number};
 const initial:Step={kind:'GROUPS',page:0,chat:'',greeting:'WELCOME',templateId:'',templateRevision:0};
-const title=(kind:GreetingKind)=>kind==='WELCOME'?'الترحيب':'الوداع';
+const title=(kind:GreetingKind)=>kind==='WELCOME'?'الترحيب':kind==='FAREWELL'?'الوداع':'دليل العضو الجديد';
 export const validWelcomeOwnerRoute=(route:string):boolean=>/^wm:1:[A-Za-z0-9_-]{24}$/u.test(route);
 export class TelegramWelcomeOwner{
  constructor(private readonly store:BotStore,private readonly policy:Policy,
@@ -30,17 +30,17 @@ export class TelegramWelcomeOwner{
   const s=v as Record<string,unknown>;
   return Object.keys(s).sort().join(',')==='chat,greeting,kind,page,templateId,templateRevision'&&
    ['GROUPS','GROUP','EDIT','TEMPLATES','PREVIEW','CONFIRM','OFF_PREVIEW','OFF_CONFIRM'].includes(String(s.kind))&&
-   ['WELCOME','FAREWELL'].includes(String(s.greeting))&&Number.isSafeInteger(s.page)&&
+   ['WELCOME','FAREWELL','GUIDE'].includes(String(s.greeting))&&Number.isSafeInteger(s.page)&&
    Number(s.page)>=0&&Number(s.page)<=999&&typeof s.chat==='string'&&
    typeof s.templateId==='string'&&Number.isSafeInteger(s.templateRevision);
  }
  async handle(actor:string,data:string):Promise<OwnerInlineScreen|null>{
-  if(!this.policy.isOwner(actor)||(data!==ROOT&&!validWelcomeOwnerRoute(data)))return null;
+  if(!this.policy.isOwner(actor)||(data!==ROOT&&data!==GUIDE_ROOT&&!validWelcomeOwnerRoute(data)))return null;
   const chosen=await this.store.transaction(s=>{
    const now=this.clock();
    if(!this.auth(s,actor,now))return null;
-   let step:Step=initial,ref:string|undefined,expected:string|null=null;
-   if(data!==ROOT){
+   let step:Step=data===GUIDE_ROOT?{...initial,greeting:'GUIDE'}:initial,ref:string|undefined,expected:string|null=null;
+   if(data!==ROOT&&data!==GUIDE_ROOT){
     const found=s.callbacks.filter(c=>c.ref===PREFIX+data.slice(5)),c=found[0];
     if(found.length!==1||!c||c.actorId!==actor||c.chatId!=='private'||c.policyVersion!==0||
        !c.oneShot||c.used||c.revoked||!int(c.expiresAt)||c.expiresAt<=now||c.expiresAt>now+TTL)return null;
@@ -89,18 +89,20 @@ export class TelegramWelcomeOwner{
     if(step.page+1<pages)page.push(make('التالي ➡️',{...step,page:step.page+1}));
     if(page.length)rows.push(page);
     rows.push([back]);
-    return ui('<b>👋 الترحيب والوداع</b>\nاختر مجموعة معتمدة لربط قالب محفوظ من استوديو الأزرار.\n'+
+    return ui('<b>'+(step.greeting==='GUIDE'?'🧭 دليل العضو الجديد':'👋 الترحيب والوداع')+'</b>\nاختر مجموعة معتمدة لربط قالب محفوظ من استوديو الأزرار.\n'+
      'الرسائل العامة متوقفة افتراضيًا، ولا تُرسل مراسلات خاصة استباقية.',rows);
    }
    if(step.kind==='GROUP'){
     const welcome=this.greetings.policy(s,step.chat,'WELCOME'),
-     bye=this.greetings.policy(s,step.chat,'FAREWELL');
+     bye=this.greetings.policy(s,step.chat,'FAREWELL'),guide=this.greetings.policy(s,step.chat,'GUIDE');
     return ui('<b>👋 الترحيب والوداع للمجموعة</b>\n'+esc(step.chat)+
      '\nالترحيب: '+(welcome?.enabled?'مفعل':'متوقف')+
      '\nالوداع: '+(bye?.enabled?'مفعل':'متوقف')+
+     '\nدليل العضو الجديد: '+(guide?.enabled?'مفعل عبر /guide':'متوقف')+
      '\nيمكن تخصيص رسالة كل نوع باختيار إصدار محفوظ من استوديو القوالب، ثم معاينة وتأكيد مستقل.',
      [[make('👋 الترحيب',{...step,kind:'EDIT',greeting:'WELCOME'})],
       [make('🚪 الوداع',{...step,kind:'EDIT',greeting:'FAREWELL'})],
+      [make('🧭 دليل العضو',{...step,kind:'EDIT',greeting:'GUIDE'})],
       [make('↩️ المجموعات',{...initial})],[back]]);
    }
    if(step.kind==='EDIT'){
@@ -112,7 +114,7 @@ export class TelegramWelcomeOwner{
     return ui('<b>'+title(step.greeting)+' للمجموعة</b>\n'+esc(step.chat)+
      '\nالحالة: '+(current.enabled?'✅ مفعلة':'متوقفة')+
      '\n'+(current.enabled?'معرّف الإصدار المحفوظ: '+esc(current.templateId)+' · '+current.templateRevision:'لم يُعتمد قالب للإرسال.')+
-     '\nقالب محفوظ فقط، والإرسال لا يبدأ دون تفعيل مستقل. تُحذف رسالة البوت العامة المؤكدة بعد خمس دقائق.',rows);
+     '\nقالب محفوظ فقط، '+(step.greeting==='GUIDE'?'ولا يُرسل دليل العضو إلا عند طلب /guide داخل المجموعة.':'والإرسال لا يبدأ دون تفعيل مستقل.')+' تُحذف رسالة البوت العامة المؤكدة بعد خمس دقائق.',rows);
    }
    if(step.kind==='TEMPLATES'){
     const versions=(s.buttonStudio?.templates??[]).flatMap(t=>{
@@ -141,7 +143,7 @@ export class TelegramWelcomeOwner{
      '\nالقالب: '+esc(saved.content.name)+' · الإصدار '+step.templateRevision+
      '\n\n'+esc(rendered.text)+
      (rendered.buttons.length?'\nالأزرار: '+rendered.buttons.flat().map(x=>esc(x.text)).join(' · '):'')+
-     '\n\nيستلزم النشر تفعيلًا مستقلًا، ويُرسل بنص عام دون ذكر هوية الطلاب الفعلية.\n'+
+     '\n\nيستلزم النشر تفعيلًا مستقلًا، '+(step.greeting==='GUIDE'?'ولا يرسل الدليل دون أمر /guide.':'ويُرسل بنص عام دون ذكر هوية الطلاب الفعلية.')+'\n'+
      'لا تتغير هذه النسخة عند تحرير مسودة الاستوديو.',
      [[make('✅ تأكيد تفعيل '+title(step.greeting),{...step,kind:'CONFIRM'})],
       [make('↩️ اختيار قالب آخر',{...step,kind:'TEMPLATES',page:0})]]);
