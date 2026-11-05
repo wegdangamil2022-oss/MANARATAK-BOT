@@ -978,6 +978,16 @@ export class OwnerNetworkEditor{
     c.oneShot!==true||c.used!==false||c.revoked!==false||
     !Number.isSafeInteger(c.expiresAt)||c.expiresAt<=now||c.expiresAt>now+TTL)return null;
    c.revoked=true;
+   for(const kind of ['policy','greeting'] as const){
+    const prefixes=[PREFIX+kind+':',PREFIX+kind+'-follow:'];
+    const prefix=prefixes.find(x=>c.action.startsWith(x));
+    if(!prefix)continue;
+    let data:unknown;
+    try{data=JSON.parse(c.action.slice(prefix.length));}catch{continue;}
+    if(Array.isArray(data)&&data.length===6&&typeof data[0]==='string'&&
+     typeof data[2]==='string'&&Number.isSafeInteger(data[3]))
+     this.revokeCopyPage(s,actor,kind,data[0],data[2],data[3]);
+   }
    s.audit.push({actorId:actor,updateKey:'owner-network:cancel:'+nonce,decision:'NOOP',
     reason:'OWNER_NETWORK_PREVIEW_CANCELLED',policyVersion:0,at:now});
    return ui('<b>✖ أُلغيت معاينة الشبكة</b>\nأُبطل التأكيد في قاعدة البيانات دون تعديل الشبكات.',
@@ -1005,7 +1015,9 @@ export class OwnerNetworkEditor{
    'OWNER_NETWORK_DELETED','OWNER_NETWORK_MEMBER_ADDED','OWNER_NETWORK_MEMBER_REMOVED',
    'OWNER_NETWORK_STALE_MEMBER_REMOVED','OWNER_NETWORK_STALE_MEMBERS_PRUNED',
    'OWNER_NETWORK_MONITOR_POLICIES_COPIED',
-   'OWNER_NETWORK_GREETING_TEMPLATES_COPIED']);
+   'OWNER_NETWORK_GREETING_TEMPLATES_COPIED',
+   'OWNER_NETWORK_MONITOR_POLICIES_FOLLOWED','OWNER_NETWORK_GREETING_TEMPLATES_FOLLOWED',
+   'OWNER_NETWORK_INHERITANCE_PAUSED']);
   const entries:{nonce:string;reason:string;at:number;description:string}[]=[];
   for(const a of s.audit){
    if(!reasons.has(a.reason))continue;
@@ -1027,7 +1039,10 @@ export class OwnerNetworkEditor{
    else if(c.action.startsWith(PREFIX+'clean:'))prefix=PREFIX+'clean:';
    else if(c.action.startsWith(PREFIX+'clean-batch:'))prefix=PREFIX+'clean-batch:';
    else if(c.action.startsWith(PREFIX+'policy:'))prefix=PREFIX+'policy:';
+   else if(c.action.startsWith(PREFIX+'policy-follow:'))prefix=PREFIX+'policy-follow:';
    else if(c.action.startsWith(PREFIX+'greeting:'))prefix=PREFIX+'greeting:';
+   else if(c.action.startsWith(PREFIX+'greeting-follow:'))prefix=PREFIX+'greeting-follow:';
+   else if(c.action.startsWith(PREFIX+'stop-follow:'))prefix=PREFIX+'stop-follow:';
    else continue;
    try{values=JSON.parse(c.action.slice(prefix.length));}catch{continue;}
    if(!Array.isArray(values))continue;
@@ -1084,8 +1099,9 @@ export class OwnerNetworkEditor{
     description='الشبكة: '+values[0]+' · العدد: '+values[3].length+
      ' · الارتباطات القديمة: '+values[3].map((row:[string,number])=>row[0]).join('، ');
    }
-   if(description===null&&prefix===PREFIX+'policy:'&&
-    a.reason==='OWNER_NETWORK_MONITOR_POLICIES_COPIED'&&values.length===6&&
+   if(description===null&&(prefix===PREFIX+'policy:'||prefix===PREFIX+'policy-follow:')&&
+    a.reason===(prefix===PREFIX+'policy:'?'OWNER_NETWORK_MONITOR_POLICIES_COPIED':
+     'OWNER_NETWORK_MONITOR_POLICIES_FOLLOWED')&&values.length===6&&
     typeof values[0]==='string'&&/^[a-f0-9]{12}$/u.test(values[0])&&
     Number.isSafeInteger(values[1])&&values[1]>=1&&
     a.policyVersion===values[1]&&typeof values[2]==='string'&&validId(values[2])&&
@@ -1097,8 +1113,9 @@ export class OwnerNetworkEditor{
     description='الشبكة: '+values[0]+' · نسخ السياسة من '+values[2]+
      ' إلى '+values[4].length+' مجموعات';
    }
-   if(description===null&&prefix===PREFIX+'greeting:'&&
-    a.reason==='OWNER_NETWORK_GREETING_TEMPLATES_COPIED'&&values.length===6&&
+   if(description===null&&(prefix===PREFIX+'greeting:'||prefix===PREFIX+'greeting-follow:')&&
+    a.reason===(prefix===PREFIX+'greeting:'?'OWNER_NETWORK_GREETING_TEMPLATES_COPIED':
+     'OWNER_NETWORK_GREETING_TEMPLATES_FOLLOWED')&&values.length===6&&
     typeof values[0]==='string'&&/^[a-f0-9]{12}$/u.test(values[0])&&
     Number.isSafeInteger(values[1])&&values[1]>=1&&
     a.policyVersion===values[1]&&typeof values[2]==='string'&&validId(values[2])&&
@@ -1110,6 +1127,12 @@ export class OwnerNetworkEditor{
     description='الشبكة: '+values[0]+' · قوالب نصية من '+values[2]+
      ' إلى '+values[4].length+' مجموعات';
    }
+   if(description===null&&prefix===PREFIX+'stop-follow:'&&
+    a.reason==='OWNER_NETWORK_INHERITANCE_PAUSED'&&values.length===3&&
+    typeof values[0]==='string'&&/^[a-f0-9]{12}$/u.test(values[0])&&
+    typeof values[1]==='string'&&/^[a-f0-9]{12}$/u.test(values[1])&&
+    typeof values[2]==='string'&&/^[a-f0-9]{64}$/u.test(values[2]))
+    description='إيقاف متابعة شبكة '+values[1]+' · الرابط '+values[0];
    if(description!==null)entries.push({nonce:matched[1]!,reason:a.reason,at:a.at,description});
   }
   entries.sort((a,b)=>b.at-a.at||b.nonce.localeCompare(a.nonce));
@@ -1128,7 +1151,10 @@ export class OwnerNetworkEditor{
     e.reason==='OWNER_NETWORK_STALE_MEMBER_REMOVED'?'تنظيف ارتباط قديم':
     e.reason==='OWNER_NETWORK_STALE_MEMBERS_PRUNED'?'تنظيف جماعي':
     e.reason==='OWNER_NETWORK_MONITOR_POLICIES_COPIED'?'نسخ سياسة الشبكة':
-    e.reason==='OWNER_NETWORK_GREETING_TEMPLATES_COPIED'?'نسخ قوالب الترحيب':'فصل مجموعة')+
+    e.reason==='OWNER_NETWORK_GREETING_TEMPLATES_COPIED'?'نسخ قوالب الترحيب':
+    e.reason==='OWNER_NETWORK_MONITOR_POLICIES_FOLLOWED'?'متابعة الحماية':
+    e.reason==='OWNER_NETWORK_GREETING_TEMPLATES_FOLLOWED'?'متابعة الترحيب':
+    e.reason==='OWNER_NETWORK_INHERITANCE_PAUSED'?'إيقاف متابعة':'فصل مجموعة')+
     ' · '+new Date(e.at).toISOString().slice(0,16).replace('T',' '),
     'nw:1:r:v:'+e.nonce)]);
   const nav:{text:string;callback_data:string}[]=[];
