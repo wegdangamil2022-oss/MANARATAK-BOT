@@ -236,6 +236,58 @@ for(const engine of ['json','sqlite'] as const){
   assert.equal(f.service.policyForum(await f.store.snapshot(),G)?.enabled,true);
  }finally{await f.close();}});
 
+
+ test(engine+' a webhook update cannot switch service scope or forge a second deletion',async()=>{const f=await fixture();try{
+  await f.service.configureGroupChanges(OWNER,G,true,f.service.epochGroupChanges(await f.store.snapshot(),G));
+  await f.service.configureForum(OWNER,G,true,f.service.epochForum(await f.store.snapshot(),G));
+  assert.equal(await f.service.observeService(G,'GROUP_TITLE',610,'b3-webhook:service-cleanup:610',f.now()),1);
+  assert.equal(await f.service.observeService(G,'TOPIC_CREATED',611,'b3-webhook:service-cleanup:610',f.now()),0);
+  assert.equal(await f.service.observeService(G,'TOPIC_CREATED',610,'b3-webhook:service-cleanup:611',f.now()),0);
+  assert.equal(await f.service.observeService(G,'TOPIC_CREATED',611,'b3-webhook:service-cleanup:611',f.now()),1);
+  f.advance(60000);assert.equal((await f.service.cleanup()).deleted,2);
+  assert.deepEqual(f.calls.map(x=>x.messageId),[610,611]);
+ }finally{await f.close();}});
+ test(engine+' group and forum notifications share a strict 40-per-minute service cleanup queue limit',async()=>{const f=await fixture();try{
+  await f.service.configureGroupChanges(OWNER,G,true,f.service.epochGroupChanges(await f.store.snapshot(),G));
+  await f.service.configureForum(OWNER,G,true,f.service.epochForum(await f.store.snapshot(),G));
+  for(let i=0;i<40;i++)assert.equal(await f.service.observeService(G,i%2?'TOPIC_CLOSED':'GROUP_TITLE',700+i,'b3-webhook:service-cleanup:'+(700+i),f.now()),1);
+  assert.equal(await f.service.observeService(G,'TOPIC_REOPENED',740,'b3-webhook:service-cleanup:740',f.now()),0);
+  f.advance(60000);assert.equal((await f.service.cleanup(10)).deleted,10);
+  assert.deepEqual(f.calls.map(x=>x.messageId),Array.from({length:10},(_,i)=>700+i));
+ }finally{await f.close();}});
+ test(engine+' tampered persisted group notice cannot be reclassified as forum or trigger deletion',async()=>{const f=await fixture();try{
+  await f.service.configureGroupChanges(OWNER,G,true,f.service.epochGroupChanges(await f.store.snapshot(),G));
+  await f.service.configureForum(OWNER,G,true,f.service.epochForum(await f.store.snapshot(),G));
+  assert.equal(await f.service.observeService(G,'GROUP_TITLE',810,'b3-webhook:service-cleanup:810',f.now()),1);
+  await f.store.transaction(s=>{const row=s.audit.find(a=>/^group:service-message-job:[a-f0-9]{64}$/u.test(a.updateKey))!;
+   const payload=JSON.parse(row.reason.slice('GROUP_SERVICE_MESSAGE_V1:'.length));payload.kind='TOPIC_CLOSED';
+   row.reason='GROUP_SERVICE_MESSAGE_V1:'+JSON.stringify(payload);});
+  f.advance(60000);assert.deepEqual(await f.service.cleanup(),{deleted:0,unresolved:0});
+  assert.equal(f.calls.length,0);
+ }finally{await f.close();}});
+ test(engine+' changing forum consent mid-Telegram call invalidates receipt without repeating unknown deletion',async()=>{const f=await fixture();try{
+  await f.service.configureForum(OWNER,G,true,f.service.epochForum(await f.store.snapshot(),G));
+  assert.equal(await f.service.observeService(G,'TOPIC_EDITED',900,'b3-webhook:service-cleanup:900',f.now()),1);
+  f.advance(60000);
+  f.during(async()=>{assert.equal(await f.service.configureForum(OWNER,G,false,f.service.epochForum(await f.store.snapshot(),G)),true);});
+  assert.deepEqual(await f.service.cleanup(),{deleted:0,unresolved:1});
+  assert.equal(f.calls.length,1);
+  assert.equal(await f.service.configureForum(OWNER,G,true,f.service.epochForum(await f.store.snapshot(),G)),true);
+  assert.deepEqual(await f.service.cleanup(),{deleted:0,unresolved:0});
+  assert.equal(f.calls.length,1);
+ }finally{await f.close();}});
+ test(engine+' stale owner forum consent confirmation fails on group revision change',async()=>{const f=await fixture();try{
+  const ui=new TelegramCaptchaOwner(f.store,f.policy,f.captcha,()=>f.now(),undefined,undefined,f.service);
+  const root=await ui.handle(OWNER,'mi:1:i:09:04');
+  const group=await ui.handle(OWNER,pick(root,G));
+  const preview=await ui.handle(OWNER,pick(group,'تفعيل تنظيف إشعارات المواضيع'));
+  const confirm=pick(preview,'تأكيد');
+  await f.store.transaction(s=>{s.chats.find(x=>x.id===G)!.version++;});
+  assert.equal(await ui.handle(OWNER,confirm),null);
+  assert.notEqual(f.service.policyForum(await f.store.snapshot(),G)?.enabled,true);
+  assert.equal(f.calls.length,0);
+ }finally{await f.close();}});
+
  test(engine+' joined and left service messages are deleted after owner authorization and delay',async()=>{const f=await fixture();try{
   await f.enable();assert.equal(await f.observe('JOIN',41,12),1);
   assert.equal(await f.observe('LEAVE',42,13),1);
