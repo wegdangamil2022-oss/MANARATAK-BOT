@@ -6,7 +6,7 @@ import {tmpdir} from 'node:os';
 import {BotStore} from '../src/store.js';
 import {Policy} from '../src/policy.js';
 import {validNetworkSanctionReview,validNetworkSanctionReviews,
- type NetworkSanctionReview} from '../src/network-sanction-review-model.js';
+ validNetworkSanctionReviewReferences,type NetworkSanctionReview} from '../src/network-sanction-review-model.js';
 import {prepareNetworkSanctionReview,decideNetworkSanctionReview,
  networkSanctionReviewAccessible} from '../src/network-sanction-review.js';
 
@@ -49,6 +49,18 @@ test('NETWORK-003 restored reviews reject duplicate active case-target and forge
   id:i.toString(16).padStart(12,'0'),targetChatId:'-'+String(100000+i)
  }))),false);
  for(const value of [null,undefined,{},42,'[]'])assert.equal(validNetworkSanctionReviews(value),false);
+});
+test('NETWORK-003 restored human review cannot be later than withdrawn source evidence',()=>{
+ const withdrawn={
+  id:example.caseId,networkId:NET,networkRevision:1,sourceChatId:SOURCE,
+  sourceChatVersion:1,subjectId:SUBJECT,category:'SPAM' as const,
+  revision:3,status:'CLEARED' as const,submittedBy:OWNER,submittedAt:NOW-100,
+  reviewedBy:OWNER,reviewedAt:NOW-50,clearedBy:OWNER,clearedAt:NOW+50
+ };
+ const forged=copy({status:'REVIEWED_ONLY',revision:2,reviewedBy:OWNER,reviewedAt:NOW+60});
+ assert.equal(validNetworkSanctionReview(forged),true);
+ assert.equal(validNetworkSanctionReviewReferences([forged] as NetworkSanctionReview[],
+  [withdrawn]),false);
 });
 async function fixture(engine:'json'|'sqlite'){
  const dir=await mkdtemp(join(tmpdir(),'network-sanction-review-'));let now=NOW;
@@ -134,6 +146,33 @@ for(const engine of ['json','sqlite'] as const){
    await assert.rejects(()=>f.store.transaction(s=>{
     s.networkSanctionReviews![0]!.caseId='999999999999';
    }),/schema/i);
+  }finally{await f.close();}
+ });
+}
+
+for(const engine of ['json','sqlite'] as const){
+ test('NETWORK-003 rollback before human review cannot create future-dated transfer ('+engine+')',async()=>{
+  const f=await fixture(engine);try{
+   await f.store.transaction(s=>{s.groupNetworks![0]!.updatedAt=NOW-200;});
+   f.advance(-75);
+   assert.equal(await f.propose(),null);
+   assert.equal((await f.store.snapshot()).networkSanctionReviews?.length??0,0);
+  }finally{await f.close();}
+ });
+ test('NETWORK-003 concurrent proposals share one active per-target review ('+engine+')',async()=>{
+  const f=await fixture(engine);try{
+   const [a,b]=await Promise.all([f.propose(),f.propose()]);
+   assert.equal([a,b].filter(Boolean).length,1);
+   assert.equal((await f.store.snapshot()).networkSanctionReviews?.length,1);
+   assert.equal((await f.store.snapshot()).moderationOperations.length,0);
+  }finally{await f.close();}
+ });
+ test('NETWORK-003 dashboard-off cannot authorize a pending target decision ('+engine+')',async()=>{
+  const f=await fixture(engine);try{
+   const p=(await f.propose())!;
+   await f.store.transaction(s=>{s.privateFeatures['owner.dashboard']=false;});
+   assert.equal(await f.decide(p.id,1,'REVIEWED_ONLY'),false);
+   assert.equal((await f.store.snapshot()).networkSanctionReviews![0]!.status,'PENDING');
   }finally{await f.close();}
  });
 }
