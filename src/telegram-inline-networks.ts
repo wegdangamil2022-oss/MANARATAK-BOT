@@ -726,6 +726,27 @@ export class OwnerNetworkEditor{
      [[btn('📋 قائمة الشبكات','nw:1:p:0'),
        btn('🏠 لوحة المالك','mi:1:h')]]);
    }
+   if(receipt.action.startsWith(PREFIX+'stop-follow:')){
+    try{data=JSON.parse(receipt.action.slice((PREFIX+'stop-follow:').length));}
+    catch{return null;}
+    if(!Array.isArray(data)||data.length!==3||
+     typeof data[0]!=='string'||!/^[a-f0-9]{12}$/u.test(data[0])||
+     typeof data[1]!=='string'||!/^[a-f0-9]{12}$/u.test(data[1])||
+     typeof data[2]!=='string'||!/^[a-f0-9]{64}$/u.test(data[2]))return null;
+    const links=(s.networkInheritance??[]).filter(x=>x.id===data[0]),link=links[0];
+    if(links.length!==1||!link||link.networkId!==data[1]||
+      link.status!=='ACTIVE'||this.linkProof(s,link)!==data[2]||
+      !pauseNetworkInheritanceByOwner(s,link.id))return null;
+    receipt.used=true;
+    s.audit.push({actorId:actor,updateKey:'owner-network:'+nonce,
+     decision:'ALLOW',reason:'OWNER_NETWORK_INHERITANCE_PAUSED',
+     policyVersion:link.networkRevision,at:now});
+    return ui('<b>⏸ أُوقفت المتابعة الآلية محليًا</b>\n'+
+     'المجموعة: <code>'+link.targetChatId+'</code>\n'+
+     'إعداد المجموعة لم يتغير. لن تتابع المصدر من الآن.',
+     [[btn('🔁 المتابعات','nw:1:f:'+link.networkId+':0)],
+      [btn('🌐 بطاقة الشبكة','nw:1:d:'+link.networkId)]]);
+   }
    if(receipt.action.startsWith(PREFIX+'policy:')||
       receipt.action.startsWith(PREFIX+'policy-follow:')){
     const following=receipt.action.startsWith(PREFIX+'policy-follow:');
@@ -1157,6 +1178,10 @@ export class OwnerNetworkEditor{
   if(py)return this.policySourceList(state,actor,now,py[1]!,Number(py[2]));
   const pz=policyPreview.exec(data);
   if(pz)return this.previewNetworkPolicy(actor,pz[1]!,pz[2]!,Number(pz[3]),Number(pz[4]??0));
+  const fl=inheritancePage.exec(data);
+  if(fl)return this.inheritedTargetsScreen(state,actor,now,fl[1]!,Number(fl[2]));
+  const fj=inheritanceStop.exec(data);
+  if(fj)return this.previewStopInheritance(actor,fj[1]!);
   const gw=greetingSources.exec(data);
   if(gw)return this.greetingSourcesScreen(state,actor,now,gw[1]!,Number(gw[2]));
   const gv=greetingPreview.exec(data);
