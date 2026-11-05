@@ -5,6 +5,7 @@ import {reviewedAdminCommandKind,type GroupAdminCommandCleanup} from './group-ad
 import {TelegramAdminCommandCleanupOwner} from './telegram-admin-command-cleanup-owner.js';
 import {TelegramWelcomeOwner} from './telegram-welcome-owner.js';
 import type {GroupServiceMessageCleanup} from './group-service-message-cleanup.js';
+import type {GroupCleanupAudit} from './group-cleanup-audit.js';
 import {ancillaryServiceFieldPresent,decodeAncillaryServiceNotice,type AncillaryServiceKind} from './telegram-ancillary-service-notices.js';
 import type {CaptchaEscalationPolicy} from './captcha-escalation-policy.js';
 import {VerifiedOnboardingWelcome} from './onboarding-welcome.js';
@@ -178,6 +179,8 @@ export interface TelegramApplicationOptions {
   adminCommandCleanup?:GroupAdminCommandCleanup;
   /** Original Telegram join/leave service message cleanup, separately owner-approved. */
   serviceCleanup?:GroupServiceMessageCleanup;
+  /** Owner-consented private-room deletion audit, independent of Telegram cleanup. */
+  cleanupAudit?:GroupCleanupAudit;
   /** Local safe graduated CAPTCHA retry policy; separate owner approval. */
   captchaEscalation?:CaptchaEscalationPolicy;
 }
@@ -524,7 +527,7 @@ export class TelegramUpdateApplication {
        plan:this.plan(event.chatId,view.text,undefined,view.keyboard,event.callbackMessageId)}:
        {status:'DENIED',reason:'WELCOME_OWNER_UNAVAILABLE'};
      }
-     const owner=new TelegramCaptchaOwner(this.opts.store,this.opts.policy,captcha,this.clock,captchaEnforcement,this.opts.joinNotices,this.opts.serviceCleanup,this.opts.captchaEscalation);
+     const owner=new TelegramCaptchaOwner(this.opts.store,this.opts.policy,captcha,this.clock,captchaEnforcement,this.opts.joinNotices,this.opts.serviceCleanup,this.opts.captchaEscalation,this.opts.cleanupAudit);
      if(event.callbackData==='mi:1:i:04:07'||event.callbackData==='mi:1:i:04:10'||event.callbackData==='mi:1:i:09:01'||event.callbackData==='mi:1:i:09:04'||event.callbackData?.startsWith('ca:1:')){const view=await owner.handle(event.actorId,event.callbackData);return view?{status:'APPLIED',reason:'CAPTCHA_OWNER_VIEW',adminUIAccess:view.access,plan:this.plan(event.actorId,view.text,undefined,view.keyboard,event.callbackMessageId)}:{status:'DENIED',reason:'CAPTCHA_OWNER_UNAVAILABLE'};}
      await owner.cancel(event.actorId);
     }
