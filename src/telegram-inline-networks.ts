@@ -1026,6 +1026,60 @@ export class OwnerNetworkEditor{
     receipt.revoked!==false||!Number.isSafeInteger(receipt.expiresAt)||
     receipt.expiresAt<=now||receipt.expiresAt>now+TTL)return null;
    let data:unknown;
+   if(receipt.action.startsWith(PREFIX+'sanction-propose:')){
+    try{data=JSON.parse(receipt.action.slice((PREFIX+'sanction-propose:').length));}
+    catch{return null;}
+    if(!Array.isArray(data)||data.length!==6||
+     typeof data[0]!=='string'||!/^[a-f0-9]{12}$/u.test(data[0])||
+     data[1]!==2||
+     typeof data[2]!=='string'||!validId(data[2])||
+     !Number.isSafeInteger(data[3])||data[3]<1||
+     typeof data[4]!=='string'||!sanctionKind[data[4]]||
+     typeof data[5]!=='string'||!/^[a-f0-9]{64}$/u.test(data[5])||
+     this.watchProof(s)!==data[5])return null;
+    const [caseId,_,targetId,targetVersion,code]=data as
+     [string,number,string,number,string,string];
+    const row=prepareNetworkSanctionReview(s,this.policy,actor,now,
+     caseId,targetId,sanctionKind[code]!);
+    if(!row||row.targetChatVersion!==targetVersion)return null;
+    s.networkSanctionReviews??=[];
+    s.networkSanctionReviews.push(row);receipt.used=true;
+    s.audit.push({actorId:actor,updateKey:'owner-network:'+nonce,
+     decision:'ALLOW',reason:'OWNER_NETWORK_SANCTION_REVIEW_PROPOSED',
+     policyVersion:row.revision,at:now});
+    return ui('<b>✅ سُجل اقتراح المراجعة المستقلة</b>\n'+
+     'المجموعة: <code>'+row.targetChatId+'</code>\n'+
+     'حالة الاقتراح: بانتظار مراجعة بشرية. لا عقوبات حية في Telegram.',
+     [[btn('🔎 تفاصيل المراجعة','nw:1:ri:'+row.id)],
+      [btn('↩️ البلاغ','nw:1:iv:'+row.caseId)]]);
+   }
+   if(receipt.action.startsWith(PREFIX+'sanction-decision:')){
+    try{data=JSON.parse(receipt.action.slice((PREFIX+'sanction-decision:').length));}
+    catch{return null;}
+    if(!Array.isArray(data)||data.length!==4||
+     typeof data[0]!=='string'||!/^[a-f0-9]{12}$/u.test(data[0])||
+     !Number.isSafeInteger(data[1])||data[1]<1||
+     typeof data[2]!=='string'||!['REVIEWED_ONLY','REJECTED','CLOSED'].includes(data[2])||
+     typeof data[3]!=='string'||!/^[a-f0-9]{64}$/u.test(data[3])||
+     this.watchProof(s)!==data[3])return null;
+    const [id,expected,decision]=data as
+     [string,number,NetworkSanctionReviewDecision,string];
+    const before=networkSanctionReviewAccessible(s,this.policy,actor,now,id);
+    if(!before||!decideNetworkSanctionReview(s,this.policy,actor,now,id,
+     expected,decision))return null;
+    receipt.used=true;
+    s.audit.push({actorId:actor,updateKey:'owner-network:'+nonce,
+     decision:'ALLOW',reason:decision==='REVIEWED_ONLY'?
+      'OWNER_NETWORK_SANCTION_REVIEWED_MANUALLY':decision==='REJECTED'?
+      'OWNER_NETWORK_SANCTION_REVIEW_REJECTED':'OWNER_NETWORK_SANCTION_REVIEW_CLOSED',
+     policyVersion:expected+1,at:now});
+    return ui('<b>✅ حُفظ قرار المراجعة المستقلة</b>\n'+
+     'المجموعة: <code>'+before.targetChatId+'</code>\n'+
+     'الحالة: '+sanctionStatus[decision]+'\n'+
+     'لم تُنفَّذ أي عقوبة ولم تُرسل تعليمات إلى Telegram.',
+     [[btn('🔎 تفاصيل المراجعة','nw:1:ri:'+id)],
+      [btn('↩️ قائمة مراجعات البلاغ','nw:1:rl:'+before.caseId+':0')]]);
+   }
    if(receipt.action.startsWith(PREFIX+'watch-add:')){
     try{data=JSON.parse(receipt.action.slice((PREFIX+'watch-add:').length));}
     catch{return null;}
