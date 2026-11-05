@@ -252,9 +252,10 @@ export class OwnerNetworkEditor{
   * owner/category/network/source/page, but leaves other pages independent. */
  private revokeCopyPage(s:BotState,actor:string,kind:'policy'|'greeting',
   id:string,sourceId:string,p:number):void{
-  const prefix=PREFIX+kind+':';
+  const prefixes=[PREFIX+kind+':',PREFIX+kind+'-follow:'];
   for(const c of s.callbacks){
-   if(c.actorId!==actor||c.used||c.revoked||!c.action.startsWith(prefix))continue;
+   const prefix=prefixes.find(prefix=>c.action.startsWith(prefix));
+   if(c.actorId!==actor||c.used||c.revoked||!prefix)continue;
    let data:unknown;
    try{data=JSON.parse(c.action.slice(prefix.length));}catch{continue;}
    if(Array.isArray(data)&&data.length===6&&data[0]===id&&
@@ -271,12 +272,16 @@ export class OwnerNetworkEditor{
    if(!validMask(mask,chosen.length))return null;
    const selected=chosen.filter((_,i)=>(mask&(1<<i))===0);
    const ref='c_'+randomBytes(18).toString('base64url');
-   if(selected.length&&s.callbacks.some(row=>row.ref===ref))return null;
+   const followRef='c_'+randomBytes(18).toString('base64url');
+   if(selected.length&&(ref===followRef||s.callbacks.some(row=>
+    row.ref===ref||row.ref===followRef)))return null;
    this.revokeCopyPage(s,actor,'policy',id,sourceId,p);
-   if(selected.length)s.callbacks.push({ref,action:PREFIX+'policy:'+JSON.stringify([
-    id,ctx.network.revision,sourceId,p,selected.map(c=>c.id),ctx.digest]),
-    actorId:actor,chatId:'private',policyVersion:0,
-    oneShot:true,used:false,revoked:false,expiresAt:now+TTL});
+   if(selected.length)for(const [targetRef,kind] of [
+    [ref,'policy'],[followRef,'policy-follow']] as const)
+    s.callbacks.push({ref:targetRef,action:PREFIX+kind+':'+JSON.stringify([
+     id,ctx.network.revision,sourceId,p,selected.map(c=>c.id),ctx.digest]),
+     actorId:actor,chatId:'private',policyVersion:0,
+     oneShot:true,used:false,revoked:false,expiresAt:now+TTL});
    const nav:{text:string;callback_data:string}[]=[];
    if(p)nav.push(btn('⬅️ السابق','nw:1:z:'+id+':'+sourceId+':'+(p-1)));
    if((p+1)*SIZE<ctx.targets.length)nav.push(
@@ -291,9 +296,11 @@ export class OwnerNetworkEditor{
     'القواعد: '+ctx.source.policy.rules.length+'\n'+
     'لن تُنسخ قوائم الاستثناء أو النطاقات المسموحة أو أعضاء الاستثناء من المصدر.\n'+
     'تُستثنى المجموعات ذات سياسة موجودة، حتى لو كانت متوقفة أو قديمة.\n'+
-    'كل كتابة محلية داخل معاملة واحدة بعد موافقة المالك لمرة واحدة خلال دقيقتين.\n'+
+    'النسخ مرة واحدة هو الافتراضي. «متابعة المصدر» خيار مستقل: تحديث تلقائي محلي فقط عند اعتماد المالك تعديل المصدر.\n'+
+    'أي تعديل محلي أو فقد اعتماد أو تغيّر عضوية يوقف المتابعة دون إعادة تشغيلها تلقائيا.\n'+
     'لا عقوبات أو رسائل أو تغييرات Telegram.',
     [...(selected.length?[[btn('✅ تأكيد نسخ السياسة محليًا','nw:1:c:'+ref.slice(2))],
+     [btn('🔁 نسخ مع متابعة المصدر تلقائيًا','nw:1:c:'+followRef.slice(2))],
      [btn('✖ إلغاء المعاينة','nw:1:k:'+ref.slice(2))]]:[]),
      ...chosen.map((c,i)=>[btn(((mask&(1<<i))?'✅ تضمين ':'🚫 استبعاد ')+c.id,
       copyPageRoute('z',id,sourceId,p,mask^(1<<i)))]),
@@ -380,12 +387,16 @@ export class OwnerNetworkEditor{
    if(!validMask(mask,candidates.length))return null;
    const selected=candidates.filter((_,i)=>(mask&(1<<i))===0);
    const ref='c_'+randomBytes(18).toString('base64url');
-   if(selected.length&&s.callbacks.some(c=>c.ref===ref))return null;
+   const followRef='c_'+randomBytes(18).toString('base64url');
+   if(selected.length&&(ref===followRef||s.callbacks.some(c=>
+    c.ref===ref||c.ref===followRef)))return null;
    this.revokeCopyPage(s,actor,'greeting',id,sourceId,p);
-   if(selected.length)s.callbacks.push({ref,action:PREFIX+'greeting:'+JSON.stringify([
-    id,ctx.network.revision,sourceId,p,selected.map(c=>c.id),ctx.digest]),
-    actorId:actor,chatId:'private',policyVersion:0,
-    expiresAt:now+TTL,oneShot:true,used:false,revoked:false});
+   if(selected.length)for(const [targetRef,kind] of [
+    [ref,'greeting'],[followRef,'greeting-follow']] as const)
+    s.callbacks.push({ref:targetRef,action:PREFIX+kind+':'+JSON.stringify([
+     id,ctx.network.revision,sourceId,p,selected.map(c=>c.id),ctx.digest]),
+     actorId:actor,chatId:'private',policyVersion:0,
+     expiresAt:now+TTL,oneShot:true,used:false,revoked:false});
    const nav:{text:string;callback_data:string}[]=[];
    if(p)nav.push(btn('⬅️ السابق','nw:1:v:'+id+':'+sourceId+':'+(p-1)));
    if((p+1)*SIZE<ctx.targets.length)nav.push(
@@ -401,8 +412,10 @@ export class OwnerNetworkEditor{
     'النسخ يشمل نصوص الترحيب والوداع وترجماتها وأنواع الانضمام والمغادرة فقط.\n'+
     'لن تُنسخ أي صورة أو زر أو رابط أو إعداد تشغيل أو قواعد رد، ولن يُفعل إرسال.\n'+
     'تُستثنى كل مجموعة لديها إعداد خاص ولو كان معطّلًا.\n'+
-    'التأكيد لمرة واحدة خلال دقيقتين مع فحص الصلاحيات والإصدارات مجددًا.',
+    'يمكن النسخ مرة واحدة أو اختيار المتابعة التلقائية المحلية بعد موافقة صريحة.\n'+
+    'لا تتبع المتابعة الأزرار والصور والروابط والردود؛ التغيير المحلي يوقفها فورًا.',
     [...(selected.length?[[btn('✅ تأكيد نسخ قوالب الترحيب','nw:1:c:'+ref.slice(2))],
+     [btn('🔁 نسخ مع متابعة المصدر تلقائيًا','nw:1:c:'+followRef.slice(2))],
      [btn('✖ إلغاء المعاينة','nw:1:k:'+ref.slice(2))]]:[]),
      ...candidates.map((c,i)=>[btn(((mask&(1<<i))?'✅ تضمين ':'🚫 استبعاد ')+c.id,
       copyPageRoute('v',id,sourceId,p,mask^(1<<i)))]),
