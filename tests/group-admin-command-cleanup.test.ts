@@ -76,7 +76,7 @@ for(const engine of ['json','sqlite'] as const){
     job.attemptId='11111111-2222-4333-8444-555555555555';
     delete job.plan;delete job.privateReplyKind;delete job.adminUIAccess;
    });
-  const observe=async(n=51,actor=OWNER,kind:'MODERATION'|'LOCK'='MODERATION')=>{
+  const observe=async(n=51,actor=OWNER,kind:'MODERATION'|'LOCK'|'RULE'='MODERATION')=>{
    const {key,reason}=await receipt(n,actor,kind);
    const result=await service.observeApproved(G,n,actor,key,kind,reason,now);
    if(result)await deliver(key,n);
