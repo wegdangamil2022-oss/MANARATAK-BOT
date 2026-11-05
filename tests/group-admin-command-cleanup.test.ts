@@ -9,6 +9,10 @@ import {protectionUIEpoch} from '../src/protection-ui-access.js';
 import {GroupAdminCommandCleanup} from '../src/group-admin-command-cleanup.js';
 import {TelegramAdminCommandCleanupOwner} from '../src/telegram-admin-command-cleanup-owner.js';
 import {isValidTelegramInlineKeyboard} from '../src/telegram-inline-owner.js';
+import {TelegramUpdateApplication} from '../src/telegram-transport.js';
+import {EducationService} from '../src/education.js';
+import {EducationAdminFacade} from '../src/education-admin.js';
+import {ApprovedAnswerService,ResourceLinkService} from '../src/education-interactions.js';
 import type {OwnerInlineScreen} from '../src/telegram-inline-owner.js';
 
 const BASE=1700000000000,G='-100123',OWNER='100',MOD='201';
@@ -156,6 +160,33 @@ for(const engine of ['json','sqlite'] as const){
   const f=await setup();try{
    await f.enable();await f.observe();f.advance(86400001);
    assert.equal((await f.service.cleanup()).deleted,0);
+  }finally{await f.close();}
+ });
+ test(engine+' Telegram private callback routes real admin cleanup owner editor without enabling deletion on open',async()=>{
+  const f=await setup();try{
+   const education=new EducationService(f.store,f.policy,f.at);
+   const app=new TelegramUpdateApplication({store:f.store,policy:f.policy,education,
+    admin:new EducationAdminFacade(f.store,f.policy,education,f.at),
+    faq:new ApprovedAnswerService(f.store,f.policy,f.at),
+    links:new ResourceLinkService(f.store,f.policy,f.at),
+    botId:'adminclean',botUsername:'ManaratakBot',membership:async()=> 'VERIFIED',
+    clock:f.at,adminCommandCleanup:f.service,ownerMenuMode:'inline'});
+   const cb=(n:number,data:string)=>({update_id:n,callback_query:{id:'cb'+n,
+    from:{id:Number(OWNER),is_bot:false},data,
+    message:{message_id:3,chat:{id:Number(OWNER),type:'private'},from:{id:123456,is_bot:true}}}});
+   const root=await app.handle(cb(801,'ac:1:h'));
+   assert.equal(root.status,'APPLIED');assert.ok(root.plan?.inlineMarkup);
+   const group=await app.handle(cb(802,choose({text:root.plan!.text,keyboard:root.plan!.inlineMarkup!},G)));
+   assert.equal(group.status,'APPLIED');assert.ok(group.plan?.inlineMarkup);
+   const preview=await app.handle(cb(803,choose({text:group.plan!.text,keyboard:group.plan!.inlineMarkup!},'تفعيل')));
+   assert.equal(preview.status,'APPLIED');assert.match(preview.plan?.text??'',/معاينة/u);
+   assert.equal(f.service.policy(await f.store.snapshot(),G)?.enabled,false);
+   const confirm=choose({text:preview.plan!.text,keyboard:preview.plan!.inlineMarkup!},'تأكيد');
+   const activated=await app.handle(cb(804,confirm));
+   assert.equal(activated.status,'APPLIED');
+   assert.equal(f.service.policy(await f.store.snapshot(),G)?.enabled,true);
+   const replay=await app.handle(cb(805,confirm));
+   assert.equal(replay.status,'DENIED');
   }finally{await f.close();}
  });
  test(engine+' owner inline control previews consent, issues single-use confirmation and off switch',async()=>{
