@@ -8,6 +8,10 @@ import {networkWatchCaseAccessible,prepareNetworkWatchCase,
  reviewNetworkWatchCase} from './network-watchlist.js';
 import type {NetworkWatchCase,NetworkWatchCategory,
  NetworkWatchDecision} from './network-watchlist-model.js';
+import {prepareNetworkSanctionReview,decideNetworkSanctionReview,
+ networkSanctionReviewAccessible} from './network-sanction-review.js';
+import type {NetworkSanctionReview,NetworkSanctionKind,
+ NetworkSanctionReviewDecision} from './network-sanction-review-model.js';
 import type {Policy} from './policy.js';
 import {defaultCommunityConfig,emptyCommunityState,validCommunityConfig,
  type CommunityConfig} from './phase4-community-model.js';
@@ -40,6 +44,12 @@ const watchCategories=new RegExp('^nw:1:cs:'+net+':'+group+'$','u');
 const watchStart=new RegExp('^nw:1:ca:'+net+':'+group+':([SFIO])$','u');
 const watchCaseView=/^nw:1:iv:([a-f0-9]{12})$/u;
 const watchReview=/^nw:1:rv:([a-f0-9]{12}):([ADC])$/u;
+const sanctionTargets=new RegExp('^nw:1:rt:([a-f0-9]{12}):'+page+'$','u');
+const sanctionKinds=new RegExp('^nw:1:rk:([a-f0-9]{12}):'+group+'$','u');
+const sanctionPreview=new RegExp('^nw:1:ra:([a-f0-9]{12}):'+group+':([MB])$','u');
+const sanctionList=new RegExp('^nw:1:rl:([a-f0-9]{12}):'+page+'$','u');
+const sanctionDetail=/^nw:1:ri:([a-f0-9]{12})$/u;
+const sanctionDecision=/^nw:1:rd:([a-f0-9]{12}):([ADC])$/u;
 const stalePick=new RegExp('^nw:1:q:'+net+':'+revision+':'+group+':'+revision+':'+page+'$','u');
 const staleBatch=new RegExp('^nw:1:b:'+net+':'+revision+':'+page+'$','u');
 const toggle=new RegExp('^nw:1:t:'+net+':'+revision+':'+group+':'+revision+':'+page+'$','u');
@@ -62,6 +72,11 @@ const watchLabel:Record<NetworkWatchCategory,string>={
 const watchStatus:Record<NetworkWatchCase['status'],string>={
  PENDING:'⏳ بانتظار المراجعة',WATCHED:'👁️ متابعة معلوماتية',
  DISMISSED:'❌ مرفوض',CLEARED:'✅ رُفع الاشتباه'};
+const sanctionStatus:Record<NetworkSanctionReview['status'],string>={
+ PENDING:'⏳ ينتظر قرارًا لكل مجموعة',REVIEWED_ONLY:'🔎 مراجعة يدوية فقط',
+ REJECTED:'❌ رُفض الاقتراح',CLOSED:'🔒 أُغلق الاقتراح'};
+const sanctionKind:Record<string,NetworkSanctionKind>={M:'MUTE',B:'BAN'};
+const sanctionLabel:Record<NetworkSanctionKind,string>={MUTE:'كتم',BAN:'حظر'};
 /** A bit is an exclusion on a page of up to eight candidates. */
 const validMask=(mask:number,length:number)=>Number.isSafeInteger(mask)&&mask>=0&&
  length>=1&&length<=SIZE&&mask<2**length;
@@ -72,7 +87,7 @@ export function validOwnerNetworkRoute(data:unknown):boolean{
  const preview=policyPreview.exec(data)??greetingPreview.exec(data);
  if(preview?.[4]!==undefined&&Number(preview[4])>255)return false;
  return data==='mi:1:i:01:03'||home.test(data)||begin.test(data)||
-  [list,detail,rename,remove,pick,toggle,stalePage,stalePick,staleBatch,policySources,policyPreview,greetingSources,greetingPreview,inheritancePage,inheritanceStop,watchList,watchOrigins,watchCategories,watchStart,watchCaseView,watchReview,confirm,cancel,historyPage,historyView].some(re=>re.test(data));
+  [list,detail,rename,remove,pick,toggle,stalePage,stalePick,staleBatch,policySources,policyPreview,greetingSources,greetingPreview,inheritancePage,inheritanceStop,watchList,watchOrigins,watchCategories,watchStart,watchCaseView,watchReview,sanctionTargets,sanctionKinds,sanctionPreview,sanctionList,sanctionDetail,sanctionDecision,confirm,cancel,historyPage,historyView].some(re=>re.test(data));
 }
 function approved(s:BotState,policy:Policy,actor:string,now:number):Chat[]{
  const counts=new Map<string,number>();
@@ -189,7 +204,8 @@ export class OwnerNetworkEditor{
  }
  private watchProof(s:BotState):string{
   return createHash('sha256').update(JSON.stringify([
-   s.groupNetworks??[],s.networkWatchCases??[],s.chats,s.privateSettingsRevision??0,
+   s.groupNetworks??[],s.networkWatchCases??[],s.networkSanctionReviews??[],
+   s.chats,s.privateSettingsRevision??0,
    s.privateFeatures['owner.dashboard']
   ])).digest('hex');
  }
@@ -318,7 +334,9 @@ export class OwnerNetworkEditor{
    rows.push([btn('❌ رفض البلاغ','nw:1:rv:'+id+':D')]);
   }else if(current&&c.status==='WATCHED'){
    rows.push([btn('✅ رفع الاشتباه','nw:1:rv:'+id+':C')]);
+   rows.push([btn('↗️ مراجعة نقل إجراء لمجموعة','nw:1:rt:'+id+':0')]);
   }
+  rows.push([btn('📋 سجلات مراجعات المجموعات','nw:1:rl:'+id+':0')]);
   rows.push([btn('↩️ البلاغات','nw:1:u:'+c.networkId+':0')]);
   return ui('<b>🔎 تفاصيل بلاغ الشبكة</b>\n'+
    'المعرّف: <code>'+c.subjectId+'</code>\n'+
@@ -350,6 +368,149 @@ export class OwnerNetworkEditor{
     'القرار: '+label+'\nلن يغيّر أي مجموعة ولا يطلب حظرًا أو كتمًا في Telegram.',
     [[btn('✅ تأكيد '+label,'nw:1:c:'+ref.slice(2))],
      [btn('✖ إلغاء القرار','nw:1:k:'+ref.slice(2))]]);
+  });
+ }
+
+
+ /** All destination groups must be individually authorized at the point of
+  * display AND confirmation; network membership is just a local association. */
+ private sanctionTargetsPage(s:BotState,actor:string,now:number,caseId:string,p:number):
+  OwnerInlineScreen|null{
+  const c=networkWatchCaseAccessible(s,this.policy,actor,now,caseId);
+  if(!c||c.status!=='WATCHED')return null;
+  const n=this.find(s,c.networkId);if(!n)return null;
+  const targets=this.watchSources(s,actor,now,n)
+   .filter(chat=>chat.id!==c.sourceChatId);
+  const pages=Math.max(1,Math.ceil(targets.length/SIZE));
+  if(p>=pages)return null;
+  const rows=targets.slice(p*SIZE,(p+1)*SIZE).map(chat=>{
+   const existing=(s.networkSanctionReviews??[]).some(x=>x.networkId===c.networkId&&
+    x.subjectId===c.subjectId&&x.targetChatId===chat.id&&
+    (x.status==='PENDING'||x.status==='REVIEWED_ONLY'));
+   return existing?[btn('🔒 مراجعة مفتوحة: '+chat.id,'nw:1:rl:'+caseId+':0')]:
+    [btn('🎯 مجموعة مستهدفة: '+chat.id,'nw:1:rk:'+caseId+':'+chat.id)];
+  });
+  const nav:{text:string;callback_data:string}[]=[];
+  if(p)nav.push(btn('⬅️ السابق','nw:1:rt:'+caseId+':'+(p-1)));
+  if((p+1)*SIZE<targets.length)nav.push(btn('➡️ التالي','nw:1:rt:'+caseId+':'+(p+1)));
+  if(nav.length)rows.push(nav);
+  rows.push([btn('↩️ تفاصيل البلاغ','nw:1:iv:'+caseId)]);
+  return ui('<b>🎯 اختر مجموعة مستهدفة واحدة</b>\n'+
+   'الشبكة: '+escape(n.name)+'\n'+
+   'المصدر: <code>'+c.sourceChatId+'</code> · المستخدم: <code>'+c.subjectId+'</code>\n'+
+   'كل مجموعة تحتاج اقتراحًا وموافقة بشرية مستقلة؛ لا يوجد زر تطبيق جماعي.\n'+
+   'البلاغ لا يثبت عقوبة فعلية في المصدر. هذا مسار مراجعة محلية فقط.',
+   rows);
+ }
+ private sanctionKindsPage(s:BotState,actor:string,now:number,caseId:string,
+  targetId:string):OwnerInlineScreen|null{
+  const c=networkWatchCaseAccessible(s,this.policy,actor,now,caseId);
+  if(!c||c.status!=='WATCHED'||!this.find(s,c.networkId))return null;
+  if(!this.watchSources(s,actor,now,this.find(s,c.networkId)!)
+   .some(chat=>chat.id===targetId&&chat.id!==c.sourceChatId))return null;
+  if((s.networkSanctionReviews??[]).some(x=>x.networkId===c.networkId&&
+   x.subjectId===c.subjectId&&x.targetChatId===targetId&&
+   (x.status==='PENDING'||x.status==='REVIEWED_ONLY')))return null;
+  return ui('<b>⚖️ اقتراح مراجعة إجراء — مجموعة واحدة</b>\n'+
+   'المجموعة المستهدفة: <code>'+targetId+'</code>\n'+
+   'حدد نوع الإجراء للاطلاع والمراجعة فقط.\n'+
+   'لا ينفذ البوت أي حظر أو كتم ولا يعتبر البلاغ إثباتًا.',
+   [[btn('🔇 كتم للمراجعة','nw:1:ra:'+caseId+':'+targetId+':M')],
+    [btn('🚫 حظر للمراجعة','nw:1:ra:'+caseId+':'+targetId+':B')],
+    [btn('↩️ تغيير المجموعة','nw:1:rt:'+caseId+':0')]]);
+ }
+ private async previewSanctionProposal(actor:string,caseId:string,targetId:string,
+  code:string):Promise<OwnerInlineScreen|null>{
+  return this.store.transaction(s=>{
+   const now=this.clock(),kind=sanctionKind[code];
+   if(!this.auth(s,actor,now)||!kind)return null;
+   const row=prepareNetworkSanctionReview(s,this.policy,actor,now,caseId,targetId,kind);
+   if(!row)return null;
+   const ref='c_'+randomBytes(18).toString('base64url');
+   if(s.callbacks.some(c=>c.ref===ref))return null;
+   s.callbacks.push({ref,action:PREFIX+'sanction-propose:'+JSON.stringify([
+    caseId,row.caseRevision,targetId,row.targetChatVersion,code,this.watchProof(s)]),
+    actorId:actor,chatId:'private',policyVersion:0,oneShot:true,
+    used:false,revoked:false,expiresAt:now+TTL});
+   return ui('<b>🔎 معاينة اقتراح مراجعة إجراء</b>\n'+
+    'معرّف العضو: <code>'+row.subjectId+'</code>\n'+
+    'المصدر: <code>'+row.sourceChatId+'</code>\n'+
+    'المستهدفة: <code>'+targetId+'</code> · v'+row.targetChatVersion+'\n'+
+    'نوع الاقتراح: '+sanctionLabel[kind]+'\n'+
+    'سيسجل اقتراحًا لمجموعة واحدة فقط بانتظار مراجعة بشرية ثانية.\n'+
+    'لا ينفذ أي عقوبة ولا يرسل أمرًا إلى Telegram.',
+    [[btn('✅ تأكيد إنشاء المراجعة','nw:1:c:'+ref.slice(2))],
+     [btn('✖ إلغاء','nw:1:k:'+ref.slice(2))]]);
+  });
+ }
+ private sanctionReviewsPage(s:BotState,actor:string,now:number,caseId:string,p:number):
+  OwnerInlineScreen|null{
+  if(!this.auth(s,actor,now))return null;
+  const cases=(s.networkWatchCases??[]).filter(c=>c.id===caseId),c=cases[0];
+  if(cases.length!==1||!c||!this.find(s,c.networkId))return null;
+  const items=(s.networkSanctionReviews??[]).filter(x=>x.caseId===caseId)
+   .sort((a,b)=>b.requestedAt-a.requestedAt||a.id.localeCompare(b.id));
+  const pages=Math.max(1,Math.ceil(items.length/SIZE));
+  if(p>=pages)return null;
+  const rows=items.slice(p*SIZE,(p+1)*SIZE).map(x=>
+   [btn(sanctionStatus[x.status]+' · '+x.targetChatId,
+    'nw:1:ri:'+x.id)]);
+  const nav:{text:string;callback_data:string}[]=[];
+  if(p)nav.push(btn('⬅️ السابق','nw:1:rl:'+caseId+':'+(p-1)));
+  if((p+1)*SIZE<items.length)nav.push(btn('➡️ التالي','nw:1:rl:'+caseId+':'+(p+1)));
+  if(nav.length)rows.push(nav);
+  rows.push([btn('↩️ البلاغ الأصلي','nw:1:iv:'+caseId)]);
+  return ui('<b>📋 مراجعات المجموعات — للقراءة فقط</b>\n'+
+   'المستخدم: <code>'+c.subjectId+'</code> · الاقتراحات: '+items.length+'\n'+
+   'كل سجل يخص مجموعة محددة؛ لا يجيز تنفيذ أي عقوبة في Telegram.',
+   rows);
+ }
+ private sanctionReviewDetails(s:BotState,actor:string,now:number,id:string):
+  OwnerInlineScreen|null{
+  if(!this.auth(s,actor,now))return null;
+  const rows=(s.networkSanctionReviews??[]).filter(x=>x.id===id),x=rows[0];
+  if(rows.length!==1||!x||!this.find(s,x.networkId))return null;
+  const valid=networkSanctionReviewAccessible(s,this.policy,actor,now,id)!==null;
+  const buttons:{text:string;callback_data:string}[][]=[];
+  if(valid&&x.status==='PENDING'){
+   buttons.push([btn('🔎 مراجعة يدوية فقط','nw:1:rd:'+id+':A')]);
+   buttons.push([btn('❌ رفض الاقتراح','nw:1:rd:'+id+':D')]);
+  }else if(valid&&x.status==='REVIEWED_ONLY'){
+   buttons.push([btn('🔒 إغلاق المراجعة','nw:1:rd:'+id+':C')]);
+  }
+  buttons.push([btn('↩️ كل المراجعات','nw:1:rl:'+x.caseId+':0')]);
+  return ui('<b>🔎 مراجعة إجراء لمجموعة مستقلة</b>\n'+
+   'المجموعة المستهدفة: <code>'+x.targetChatId+'</code> · v'+x.targetChatVersion+'\n'+
+   'معرّف العضو: <code>'+x.subjectId+'</code>\n'+
+   'اقتراح: '+sanctionLabel[x.kind]+' · '+sanctionStatus[x.status]+'\n'+
+   (valid?'':'⚠️ تغيّر أصل البلاغ أو اعتماد المجموعة؛ لا يمكن اعتماد هذا السجل.\n')+
+   'الموافقة البشرية تعني الاطلاع فقط ولا تتيح نقل العقوبة أو تنفيذها.',
+   buttons);
+ }
+ private async previewSanctionDecision(actor:string,id:string,code:string):
+  Promise<OwnerInlineScreen|null>{
+  return this.store.transaction(s=>{
+   const now=this.clock();
+   if(!this.auth(s,actor,now))return null;
+   const row=networkSanctionReviewAccessible(s,this.policy,actor,now,id);
+   const decision:NetworkSanctionReviewDecision|undefined=code==='A'?'REVIEWED_ONLY':
+    code==='D'?'REJECTED':code==='C'?'CLOSED':undefined;
+   if(!row||!decision||!(row.status==='PENDING'&&decision!=='CLOSED'||
+    row.status==='REVIEWED_ONLY'&&decision==='CLOSED'))return null;
+   const ref='c_'+randomBytes(18).toString('base64url');
+   if(s.callbacks.some(x=>x.ref===ref))return null;
+   s.callbacks.push({ref,action:PREFIX+'sanction-decision:'+JSON.stringify([
+    id,row.revision,decision,this.watchProof(s)]),
+    actorId:actor,chatId:'private',policyVersion:0,oneShot:true,
+    used:false,revoked:false,expiresAt:now+TTL});
+   const label=decision==='REVIEWED_ONLY'?'المراجعة اليدوية فقط':
+    decision==='REJECTED'?'رفض الاقتراح':'إغلاق المراجعة';
+   return ui('<b>🔎 معاينة قرار مراجعة إجراء</b>\n'+
+    'المجموعة: <code>'+row.targetChatId+'</code>\n'+
+    'القرار: '+label+'\n'+
+    'لن يُرسل طلب كتم أو حظر إلى Telegram، ولا تؤثر الموافقة على مجموعات أخرى.',
+    [[btn('✅ تأكيد '+label,'nw:1:c:'+ref.slice(2))],
+     [btn('✖ إلغاء','nw:1:k:'+ref.slice(2))]]);
   });
  }
 
@@ -1465,6 +1626,18 @@ export class OwnerNetworkEditor{
   if(wv)return this.watchDetails(state,actor,now,wv[1]!);
   const wr=watchReview.exec(data);
   if(wr)return this.previewWatchDecision(actor,wr[1]!,wr[2]!);
+  const rt=sanctionTargets.exec(data);
+  if(rt)return this.sanctionTargetsPage(state,actor,now,rt[1]!,Number(rt[2]));
+  const rk=sanctionKinds.exec(data);
+  if(rk)return this.sanctionKindsPage(state,actor,now,rk[1]!,rk[2]!);
+  const ra=sanctionPreview.exec(data);
+  if(ra)return this.previewSanctionProposal(actor,ra[1]!,ra[2]!,ra[3]!);
+  const rl=sanctionList.exec(data);
+  if(rl)return this.sanctionReviewsPage(state,actor,now,rl[1]!,Number(rl[2]));
+  const ri=sanctionDetail.exec(data);
+  if(ri)return this.sanctionReviewDetails(state,actor,now,ri[1]!);
+  const rd=sanctionDecision.exec(data);
+  if(rd)return this.previewSanctionDecision(actor,rd[1]!,rd[2]!);
   const fl=inheritancePage.exec(data);
   if(fl)return this.inheritedTargetsScreen(state,actor,now,fl[1]!,Number(fl[2]));
   const fj=inheritanceStop.exec(data);
