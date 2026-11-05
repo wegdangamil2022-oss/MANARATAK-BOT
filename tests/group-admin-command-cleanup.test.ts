@@ -5,6 +5,7 @@ import {join} from 'node:path';
 import {tmpdir} from 'node:os';
 import {BotStore} from '../src/store.js';
 import {Policy} from '../src/policy.js';
+import {protectionUIEpoch} from '../src/protection-ui-access.js';
 import {GroupAdminCommandCleanup} from '../src/group-admin-command-cleanup.js';
 import {TelegramAdminCommandCleanupOwner} from '../src/telegram-admin-command-cleanup-owner.js';
 import {isValidTelegramInlineKeyboard} from '../src/telegram-inline-owner.js';
@@ -36,15 +37,25 @@ for(const engine of ['json','sqlite'] as const){
     s.audit.push({updateKey:key,decision:'ALLOW',reason,policyVersion:0,at:now});
     s.telegramReplyJobs??=[];
     s.telegramReplyJobs.push({updateKey:key,plan:{chatId:actor,parseMode:'HTML',text:'<b>مراجعة الإجراء</b>'},
-     privateReplyKind:'ADMIN_SCOPED',status:delivered?'SENT':'QUEUED',queuedAt:now,...(delivered?{messageId:n+1000}:{})});
+     privateReplyKind:'ADMIN_SCOPED',status:'QUEUED',queuedAt:now,
+     adminUIAccess:{actorId:actor,epoch:protectionUIEpoch(s,policy,actor,now)??'a'.repeat(64),expiresAt:now+120000}});
    });
    return {key,reason};
   };
+  const deliver=async(key:string,n:number,status:'SENT'|'FAILED_CONFIRMED'='SENT')=>
+   store.transaction(s=>{
+    const job=s.telegramReplyJobs!.find(j=>j.updateKey===key)!;
+    job.status=status;job.messageId=n+1000;job.startedAt=now;job.redactedAt=now;
+    job.attemptId='11111111-2222-4333-8444-555555555555';
+    delete job.plan;delete job.privateReplyKind;delete job.adminUIAccess;
+   });
   const observe=async(n=51,actor=OWNER,kind:'MODERATION'|'LOCK'='MODERATION')=>{
    const {key,reason}=await receipt(n,actor,kind);
-   return service.observeApproved(G,n,actor,key,kind,reason,now);
+   const result=await service.observeApproved(G,n,actor,key,kind,reason,now);
+   if(result)await deliver(key,n);
+   return result;
   };
-  return {dir,store,policy,service,deleted,enable,observe,receipt,at:()=>now,advance:(v:number)=>{now+=v;},
+  return {dir,store,policy,service,deleted,enable,observe,receipt,deliver,at:()=>now,advance:(v:number)=>{now+=v;},
    stop:()=>{stop=true;},start:()=>{stop=false;},rights:(v:typeof rights)=>{rights=v;},
    response:(v:typeof response)=>{response=v;},during:(fn:()=>Promise<void>)=>{during=fn;},
    close:()=>rm(dir,{recursive:true,force:true})};
@@ -79,13 +90,14 @@ for(const engine of ['json','sqlite'] as const){
   for(const variant of ['queued','rejected','wrong-recipient','wrong-status','wrong-reason'] as const){
    const f=await setup();try{
     await f.enable();const {key,reason}=await f.receipt(61,OWNER);
-    if(variant==='queued')await f.store.transaction(s=>{const j=s.telegramReplyJobs!.find(j=>j.updateKey===key)!;j.status='QUEUED';delete j.messageId;});
-    if(variant==='rejected')await f.store.transaction(s=>{const j=s.telegramReplyJobs!.find(j=>j.updateKey===key)!;j.status='FAILED_CONFIRMED';});
+
     if(variant==='wrong-recipient')await f.store.transaction(s=>{s.telegramReplyJobs!.find(j=>j.updateKey===key)!.plan!.chatId='999';});
     if(variant==='wrong-status')await f.store.transaction(s=>{s.audit.find(a=>a.updateKey===key)!.decision='DENY';});
     const observed=await f.service.observeApproved(G,61,OWNER,key,'MODERATION',
      variant==='wrong-reason'?'RESPONSE_PLANNED_ONLY':reason,f.at());
     if(variant==='wrong-reason'||variant==='wrong-status'||variant==='wrong-recipient')assert.equal(observed,0);
+    else assert.equal(observed,1);
+    if(variant==='rejected')await f.deliver(key,61,'FAILED_CONFIRMED');
     f.advance(120000);
     assert.equal((await f.service.cleanup()).deleted,0);assert.equal(f.deleted.length,0);
    }finally{await f.close();}
