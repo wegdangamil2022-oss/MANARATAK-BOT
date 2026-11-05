@@ -52,6 +52,11 @@ async function fixture(engine:'json'|'sqlite'){
  return {store,policy,app,advance:(n:number)=>{now+=n;},
   close:()=>rm(dir,{recursive:true,force:true})};
 }
+test('NETWORK-003 local-transfer-readiness route is canonical and never trusts forged IDs',()=>{
+ assert.equal(validOwnerNetworkRoute('nw:1:rf:333333333333'),true);
+ assert.equal(validOwnerNetworkRoute('nw:1:rf:33333333333G'),false);
+ assert.equal(validOwnerNetworkRoute('nw:1:rf:333333333333:extra'),false);
+});
 test('NETWORK-003 callback routes are canonical and under Telegram 64-byte limit',()=>{
  const good=['nw:1:u:'+NET+':0','nw:1:o:'+NET+':0',
   'nw:1:cs:'+NET+':'+SOURCE,'nw:1:ca:'+NET+':'+SOURCE+':S',
@@ -195,6 +200,40 @@ for(const engine of ['json','sqlite'] as const){
    const clear=await f.app().handle(cb(187,'nw:1:rv:'+watch2.id+':C'));
    await f.app().handle(cb(188,button(clear,'تأكيد')));
    assert.equal((await f.app().handle(cb(189,'nw:1:rt:'+watch2.id+':0'))).status,'DENIED');
+   assert.equal((await f.store.snapshot()).moderationOperations.length,0);
+  }finally{await f.close();}
+ });
+}
+
+for(const engine of ['json','sqlite'] as const){
+ test('NETWORK-003 owner transfer details offer purely local preflight without Telegram I/O ('+engine+')',async()=>{
+  const f=await fixture(engine);try{
+   await f.store.transaction(s=>{
+    s.networkWatchCases=[{id:'222222222222',networkId:NET,networkRevision:1,
+     sourceChatId:SOURCE,sourceChatVersion:1,subjectId:MEMBER,
+     category:'SPAM',revision:2,status:'WATCHED',submittedBy:OWNER,
+     submittedAt:NOW-300,reviewedBy:OWNER,reviewedAt:NOW-250}];
+    s.networkSanctionReviews=[{id:'333333333333',caseId:'222222222222',
+     caseRevision:2,networkId:NET,networkRevision:1,sourceChatId:SOURCE,
+     sourceChatVersion:1,targetChatId:OTHER,targetChatVersion:1,
+     subjectId:MEMBER,kind:'MUTE',revision:2,status:'REVIEWED_ONLY',
+     requestedBy:OWNER,requestedAt:NOW-200,reviewedBy:OWNER,reviewedAt:NOW-100}];
+   });
+   const detail=await f.app().handle(cb(310,'nw:1:ri:333333333333'));
+   const route=button(detail,'فحص الجاهزية المحلية');
+   assert.equal(route,'nw:1:rf:333333333333');
+   assert.equal((await f.app().handle(cb(311,route,200))).status,'DENIED');
+   assert.equal((await f.app().handle(cb(312,route,100,true))).status,'DENIED');
+   const report=await f.app().handle(cb(313,route));
+   assert.equal(report.status,'APPLIED');
+   assert.match(report.plan?.text??'',/محلية فقط/);
+   assert.match(report.plan?.text??'',/لا يجيز/);
+   assert.match(report.plan?.text??'',/Telegram/);
+   assert.equal((await f.store.snapshot()).moderationOperations.length,0);
+   await f.store.transaction(s=>{s.groupNetworks![0]!.revision++;});
+   const stale=await f.app().handle(cb(314,route));
+   assert.equal(stale.status,'APPLIED');
+   assert.match(stale.plan?.text??'',/غير مؤهلة|تحتاج/);
    assert.equal((await f.store.snapshot()).moderationOperations.length,0);
   }finally{await f.close();}
  });
