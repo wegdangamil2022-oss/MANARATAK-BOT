@@ -667,8 +667,11 @@ export class OwnerNetworkEditor{
      [[btn('📋 قائمة الشبكات','nw:1:p:0'),
        btn('🏠 لوحة المالك','mi:1:h')]]);
    }
-   if(receipt.action.startsWith(PREFIX+'policy:')){
-    try{data=JSON.parse(receipt.action.slice((PREFIX+'policy:').length));}
+   if(receipt.action.startsWith(PREFIX+'policy:')||
+      receipt.action.startsWith(PREFIX+'policy-follow:')){
+    const following=receipt.action.startsWith(PREFIX+'policy-follow:');
+    const prefix=PREFIX+(following?'policy-follow:':'policy:');
+    try{data=JSON.parse(receipt.action.slice(prefix.length));}
     catch{return null;}
     if(!Array.isArray(data)||data.length!==6||
      typeof data[0]!=='string'||!/^[a-f0-9]{12}$/u.test(data[0])||
@@ -698,24 +701,37 @@ export class OwnerNetworkEditor{
     });
     if(drafts.length!==ids.length||drafts.some(d=>
      !isValidProtectionPolicy(d.policy)||!isValidGroupProtectionRecord(d)))return null;
+    const links=following?drafts.map(d=>prepareNetworkInheritance(
+     s,this.policy,actor,now,'POLICY',ctx.network,sourceId,d.policy.chatId,
+     ctx.source.policy.revision,d.policy)):[];
+    if(following&&((s.networkInheritance?.length??0)+links.length>500||
+     links.some(x=>!x)||new Set(links.map(x=>x!.id)).size!==links.length))return null;
     s.protectionPolicies??=[];
     for(const draft of drafts)s.protectionPolicies.push(draft);
+    if(following){s.networkInheritance??=[];s.networkInheritance.push(
+     ...links as NetworkInheritanceLink[]);}
     receipt.used=true;
+    this.revokeCopyPage(s,actor,'policy',id,sourceId,p);
     s.audit.push({actorId:actor,updateKey:'owner-network:'+nonce,
-     decision:'ALLOW',reason:'OWNER_NETWORK_MONITOR_POLICIES_COPIED',
+     decision:'ALLOW',reason:following?'OWNER_NETWORK_MONITOR_POLICIES_FOLLOWED':
+      'OWNER_NETWORK_MONITOR_POLICIES_COPIED',
      policyVersion:revision,at:now});
     return ui('<b>✅ نُسخت سياسة الشبكة محليًا</b>\n'+
      'الشبكة: '+escape(ctx.network.name)+'\n'+
      'المجموعات المستفيدة: '+drafts.length+'\n'+
      'الأوضاع لا تتجاوز OFF أو MONITOR.\n'+
+     (following?'المتابعة التلقائية محلية ومشروطة بموافقة المالك، وتُوقف عند أي استثناء.\n':'')+
      'سياسات الاستثناء لم تتغير؛ لا اتصالات Telegram ولا عقوبات.',
      [[btn('🌐 بطاقة الشبكة','nw:1:d:'+id)],
       [btn('📑 مصادر السياسة','nw:1:y:'+id+':0')]]);
    }
 
 
-   if(receipt.action.startsWith(PREFIX+'greeting:')){
-    try{data=JSON.parse(receipt.action.slice((PREFIX+'greeting:').length));}
+   if(receipt.action.startsWith(PREFIX+'greeting:')||
+      receipt.action.startsWith(PREFIX+'greeting-follow:')){
+    const following=receipt.action.startsWith(PREFIX+'greeting-follow:');
+    const prefix=PREFIX+(following?'greeting-follow:':'greeting:');
+    try{data=JSON.parse(receipt.action.slice(prefix.length));}
     catch{return null;}
     if(!Array.isArray(data)||data.length!==6||
      typeof data[0]!=='string'||!/^[a-f0-9]{12}$/u.test(data[0])||
@@ -753,16 +769,26 @@ export class OwnerNetworkEditor{
     });
     if(drafts.length!==ids.length||drafts.some(d=>!validCommunityConfig(d)||
      d.welcome.enabled||d.farewell.enabled||d.repliesEnabled))return null;
+    const links=following?drafts.map(d=>prepareNetworkInheritance(
+     s,this.policy,actor,now,'GREETING',ctx.network,sourceId,d.chatId,
+     ctx.source.version,d)):[];
+    if(following&&((s.networkInheritance?.length??0)+links.length>500||
+     links.some(x=>!x)||new Set(links.map(x=>x!.id)).size!==links.length))return null;
     s.phase4Community??=emptyCommunityState();
     s.phase4Community.configs.push(...drafts);
+    if(following){s.networkInheritance??=[];s.networkInheritance.push(
+     ...links as NetworkInheritanceLink[]);}
     receipt.used=true;
+    this.revokeCopyPage(s,actor,'greeting',id,sourceId,p);
     s.audit.push({actorId:actor,updateKey:'owner-network:'+nonce,
-     decision:'ALLOW',reason:'OWNER_NETWORK_GREETING_TEMPLATES_COPIED',
+     decision:'ALLOW',reason:following?'OWNER_NETWORK_GREETING_TEMPLATES_FOLLOWED':
+      'OWNER_NETWORK_GREETING_TEMPLATES_COPIED',
      policyVersion:revision,at:now});
     return ui('<b>✅ حُفظت قوالب الترحيب والوداع</b>\n'+
      'الشبكة: '+escape(ctx.network.name)+'\n'+
      'عدد المجموعات: '+drafts.length+'\n'+
      'جميع قوالب المجموعة الجديدة معطّلة حتى يفعّلها مالك المجموعة.\n'+
+     (following?'النسخ يتبع تعديلات القوالب التي يعتمدها المالك ما لم تُعدل محليًا.\n':'')+
      'لم تُنسخ الوسائط أو الروابط أو إعدادات التشغيل، ولا اتصال Telegram.',
      [[btn('🌐 بطاقة الشبكة','nw:1:d:'+id)],
       [btn('👋 قوالب الترحيب','nw:1:w:'+id+':0')]]);
