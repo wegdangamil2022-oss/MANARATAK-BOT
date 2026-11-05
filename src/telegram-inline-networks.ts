@@ -4,6 +4,10 @@ import type {GroupNetwork} from './group-network-model.js';
 import {validNetworkName} from './group-network-model.js';
 import {prepareNetworkInheritance,pauseNetworkInheritanceByOwner} from './network-inheritance.js';
 import type {NetworkInheritanceLink} from './network-inheritance-model.js';
+import {networkWatchCaseAccessible,prepareNetworkWatchCase,
+ reviewNetworkWatchCase} from './network-watchlist.js';
+import type {NetworkWatchCase,NetworkWatchCategory,
+ NetworkWatchDecision} from './network-watchlist-model.js';
 import type {Policy} from './policy.js';
 import {defaultCommunityConfig,emptyCommunityState,validCommunityConfig,
  type CommunityConfig} from './phase4-community-model.js';
@@ -30,6 +34,12 @@ const greetingSources=new RegExp('^nw:1:w:'+net+':'+page+'$','u');
 const greetingPreview=new RegExp('^nw:1:v:'+net+':'+group+':'+page+'(?::'+excludeMask+')?$','u');
 const inheritancePage=new RegExp('^nw:1:f:'+net+':'+page+'$','u');
 const inheritanceStop=/^nw:1:j:([a-f0-9]{12})$/u;
+const watchList=new RegExp('^nw:1:u:'+net+':'+page+'$','u');
+const watchOrigins=new RegExp('^nw:1:o:'+net+':'+page+'$','u');
+const watchCategories=new RegExp('^nw:1:cs:'+net+':'+group+'$','u');
+const watchStart=new RegExp('^nw:1:ca:'+net+':'+group+':([SFIO])$','u');
+const watchCaseView=/^nw:1:iv:([a-f0-9]{12})$/u;
+const watchReview=/^nw:1:rv:([a-f0-9]{12}):([ADC])$/u;
 const stalePick=new RegExp('^nw:1:q:'+net+':'+revision+':'+group+':'+revision+':'+page+'$','u');
 const staleBatch=new RegExp('^nw:1:b:'+net+':'+revision+':'+page+'$','u');
 const toggle=new RegExp('^nw:1:t:'+net+':'+revision+':'+group+':'+revision+':'+page+'$','u');
@@ -43,6 +53,15 @@ const escape=(value:string)=>value.replace(/&/gu,'&amp;').replace(/</gu,'&lt;')
  .replace(/>/gu,'&gt;').replace(/"/gu,'&quot;').replace(/'/gu,'&#39;');
 const validId=(value:string)=>/^-[1-9][0-9]{0,15}$/u.test(value)&&Number.isSafeInteger(Number(value));
 const validClock=(value:number)=>Number.isSafeInteger(value)&&value>=0&&value<=8_640_000_000_000_000-INPUT_TTL;
+const validSubject=(value:string)=>/^[1-9][0-9]{0,15}$/u.test(value)&&
+ Number.isSafeInteger(Number(value));
+const watchKind:Record<string,NetworkWatchCategory>={S:'SPAM',F:'FLOOD',
+ I:'IMPERSONATION',O:'OTHER'};
+const watchLabel:Record<NetworkWatchCategory,string>={
+ SPAM:'إزعاج',FLOOD:'إغراق',IMPERSONATION:'انتحال',OTHER:'أخرى'};
+const watchStatus:Record<NetworkWatchCase['status'],string>={
+ PENDING:'⏳ بانتظار المراجعة',WATCHED:'👁️ متابعة معلوماتية',
+ DISMISSED:'❌ مرفوض',CLEARED:'✅ رُفع الاشتباه'};
 /** A bit is an exclusion on a page of up to eight candidates. */
 const validMask=(mask:number,length:number)=>Number.isSafeInteger(mask)&&mask>=0&&
  length>=1&&length<=SIZE&&mask<2**length;
@@ -53,7 +72,7 @@ export function validOwnerNetworkRoute(data:unknown):boolean{
  const preview=policyPreview.exec(data)??greetingPreview.exec(data);
  if(preview?.[4]!==undefined&&Number(preview[4])>255)return false;
  return data==='mi:1:i:01:03'||home.test(data)||begin.test(data)||
-  [list,detail,rename,remove,pick,toggle,stalePage,stalePick,staleBatch,policySources,policyPreview,greetingSources,greetingPreview,inheritancePage,inheritanceStop,confirm,cancel,historyPage,historyView].some(re=>re.test(data));
+  [list,detail,rename,remove,pick,toggle,stalePage,stalePick,staleBatch,policySources,policyPreview,greetingSources,greetingPreview,inheritancePage,inheritanceStop,watchList,watchOrigins,watchCategories,watchStart,watchCaseView,watchReview,confirm,cancel,historyPage,historyView].some(re=>re.test(data));
 }
 function approved(s:BotState,policy:Policy,actor:string,now:number):Chat[]{
  const counts=new Map<string,number>();
@@ -136,6 +155,7 @@ export class OwnerNetworkEditor{
     [btn('📑 سياسات الشبكة المشتركة','nw:1:y:'+n.id+':0')],
     [btn('👋 قوالب الترحيب المشتركة','nw:1:w:'+n.id+':0')],
      [btn('🔁 المتابعة التلقائية','nw:1:f:'+n.id+':0')],
+     [btn('🛡️ بلاغات الشبكة المركزية','nw:1:u:'+n.id+':0')],
     ...(stale>0?[[btn('🧹 مراجعة الارتباطات القديمة','nw:1:s:'+n.id+':0')]]:[]),
     [btn('✏️ إعادة تسمية الشبكة','nw:1:e:'+n.id)],
     ...(n.members.length===0?[[btn('🗑️ حذف الشبكة','nw:1:x:'+n.id)]]:[]),
@@ -158,6 +178,179 @@ export class OwnerNetworkEditor{
    'اختر المجموعة للمعاينة قبل الإضافة أو الفصل.\n'+
    'لا يتيح الربط أي مشاركة آلية للمحتوى أو صلاحيات إدارة.',
    rows);
+ }
+
+ /** NETWORK-003 cases are private owner-reviewed allegations, never Telegram ban lists.
+  * Watch state can only be listed within a network that exists locally. */
+ private watchSources(s:BotState,actor:string,now:number,n:GroupNetwork):Chat[]{
+  return approved(s,this.policy,actor,now).filter(c=>c.scopes.includes('moderation')&&
+   this.policy.canUseChat(s,c.id,'moderation')&&
+   n.members.some(m=>m.chatId===c.id&&m.version===c.version));
+ }
+ private watchProof(s:BotState):string{
+  return createHash('sha256').update(JSON.stringify([
+   s.groupNetworks??[],s.networkWatchCases??[],s.chats,s.privateSettingsRevision??0,
+   s.privateFeatures['owner.dashboard']
+  ])).digest('hex');
+ }
+ private watchPage(s:BotState,actor:string,now:number,id:string,p:number):OwnerInlineScreen|null{
+  const n=this.find(s,id);if(!n||!this.auth(s,actor,now))return null;
+  const records=(s.networkWatchCases??[]).filter(c=>c.networkId===id)
+   .sort((a,b)=>b.submittedAt-a.submittedAt||a.id.localeCompare(b.id));
+  const pages=Math.max(1,Math.ceil(records.length/SIZE));
+  if(p>=pages)return null;
+  const items=records.slice(p*SIZE,(p+1)*SIZE);
+  const rows=items.map(c=>[btn(watchStatus[c.status]+' · '+c.subjectId,
+   'nw:1:iv:'+c.id)]);
+  const nav:{text:string;callback_data:string}[]=[];
+  if(p)nav.push(btn('⬅️ السابق','nw:1:u:'+id+':'+(p-1)));
+  if(p+1<pages)nav.push(btn('➡️ التالي','nw:1:u:'+id+':'+(p+1)));
+  if(nav.length)rows.push(nav);
+  rows.push([btn('➕ تقديم بلاغ للمراجعة','nw:1:o:'+id+':0')]);
+  rows.push([btn('🌐 بطاقة الشبكة','nw:1:d:'+id),btn('🏠 لوحة المالك','mi:1:h')]);
+  return ui('<b>🛡️ البلاغات المركزية — '+escape(n.name)+'</b>\n'+
+   'مراجعة بشرية لازمة لكل بلاغ. الحالات: '+records.length+
+   ' · صفحة '+(p+1)+' من '+pages+'\n'+
+   'أي بلاغ أو موافقة هنا مجرد إشارة محلية للمالك؛ لا حظر أو كتم أو ترحيل عقوبات إلى مجموعات أخرى.',
+   rows);
+ }
+ private watchOriginsPage(s:BotState,actor:string,now:number,id:string,p:number):
+  OwnerInlineScreen|null{
+  const n=this.find(s,id);if(!n)return null;
+  const available=this.watchSources(s,actor,now,n);
+  const pages=Math.max(1,Math.ceil(available.length/SIZE));if(p>=pages)return null;
+  const rows=available.slice(p*SIZE,(p+1)*SIZE)
+   .map(c=>[btn('👥 المصدر: '+c.id,'nw:1:cs:'+id+':'+c.id)]);
+  const nav:{text:string;callback_data:string}[]=[];
+  if(p)nav.push(btn('⬅️ السابق','nw:1:o:'+id+':'+(p-1)));
+  if(p+1<pages)nav.push(btn('➡️ التالي','nw:1:o:'+id+':'+(p+1)));
+  if(nav.length)rows.push(nav);
+  rows.push([btn('↩️ البلاغات','nw:1:u:'+id+':0')]);
+  return ui('<b>👥 اختر مجموعة مصدر البلاغ</b>\n'+
+   'يجب أن تكون المجموعة مرتبطة بالشبكة ومعتمدة حاليًا ولها نطاق الإشراف.\n'+
+   'لا تعتمد عضوية الشبكة صلاحيات Telegram.',
+   rows);
+ }
+ private watchCategoriesPage(s:BotState,actor:string,now:number,id:string,sourceId:string):
+  OwnerInlineScreen|null{
+  const n=this.find(s,id);
+  if(!n||!this.watchSources(s,actor,now,n).some(c=>c.id===sourceId))return null;
+  return ui('<b>🛡️ تصنيف البلاغ قبل إدخال المعرّف</b>\n'+
+   'المصدر: <code>'+sourceId+'</code>\n'+
+   'التصنيف ادعاء إداري قابل للرفض، وليس دليلًا على مخالفة.\n'+
+   'لا تُنقل عقوبة بين المجموعات.',
+   [['S','F','I','O'].map(code=>btn(watchLabel[watchKind[code]!],
+    'nw:1:ca:'+id+':'+sourceId+':'+code))],
+    [btn('↩️ تغيير المصدر','nw:1:o:'+id+':0')]]);
+ }
+ private async startWatchInput(actor:string,id:string,sourceId:string,code:string):
+  Promise<OwnerInlineScreen|null>{
+  return this.store.transaction(s=>{
+   const now=this.clock(),n=this.find(s,id),kind=watchKind[code];
+   const source=n?this.watchSources(s,actor,now,n).find(c=>c.id===sourceId):null;
+   if(!this.auth(s,actor,now)||!n||!source||!kind||
+    (s.networkWatchCases??[]).length>=400)return null;
+   for(const c of s.callbacks)if(c.actorId===actor&&
+    c.action.startsWith(PREFIX+'input:')&&!c.used&&!c.revoked)c.revoked=true;
+   const ref='c_'+randomBytes(18).toString('base64url');
+   if(s.callbacks.some(c=>c.ref===ref))return null;
+   s.callbacks.push({ref,action:PREFIX+'input:watch:'+JSON.stringify([
+    id,n.revision,sourceId,source.version,code]),actorId:actor,
+    chatId:'private',policyVersion:0,oneShot:true,used:false,revoked:false,
+    expiresAt:now+INPUT_TTL});
+   return ui('<b>📝 إدخال معرّف الشخص للبلاغ</b>\n'+
+    'الشبكة: '+escape(n.name)+'\nالمجموعة: <code>'+sourceId+'</code>\n'+
+    'التصنيف: '+watchLabel[kind]+'\n'+
+    'أرسل معرّف مستخدم Telegram الرقمي الموجب فقط، دون اسم أو رقم هاتف أو محادثات.\n'+
+    'ستظهر معاينة مستقلة قبل التسجيل؛ لا يُعاقب المستخدم تلقائيًا. تنتهي الخطوة بعد عشر دقائق.',
+    [[btn('↩️ إلغاء الإدخال','nw:1:u:'+id+':0')]]);
+  });
+ }
+ private async previewWatchMember(actor:string,subjectId:string):
+  Promise<OwnerInlineScreen|null>{
+  if(!validSubject(subjectId))throw Error('NETWORK_WATCH_MEMBER_INVALID');
+  return this.store.transaction(s=>{
+   const now=this.clock();if(!this.auth(s,actor,now))throw Error('NETWORK_DISABLED');
+   const pend=s.callbacks.filter(c=>c.actorId===actor&&
+    c.action.startsWith(PREFIX+'input:')&&!c.used&&!c.revoked),intent=pend[0];
+   if(pend.length!==1||!intent||!intent.action.startsWith(PREFIX+'input:watch:')||
+    intent.chatId!=='private'||intent.policyVersion!==0||intent.oneShot!==true||
+    !Number.isSafeInteger(intent.expiresAt)||intent.expiresAt<=now||
+    intent.expiresAt>now+INPUT_TTL)throw Error('NETWORK_WATCH_INPUT_EXPIRED');
+   let input:unknown;
+   try{input=JSON.parse(intent.action.slice((PREFIX+'input:watch:').length));}
+   catch{throw Error('NETWORK_WATCH_INPUT_INVALID');}
+   if(!Array.isArray(input)||input.length!==5||
+    typeof input[0]!=='string'||typeof input[1]!=='number'||
+    typeof input[2]!=='string'||typeof input[3]!=='number'||
+    typeof input[4]!=='string'||!watchKind[input[4]])throw Error('NETWORK_WATCH_INPUT_INVALID');
+   const [id,revision,sourceId,sourceVersion,code]=input as
+    [string,number,string,number,string];
+   const n=this.find(s,id);
+   const sample=prepareNetworkWatchCase(s,this.policy,actor,now,id,sourceId,
+    subjectId,watchKind[code]!);
+   if(!n||n.revision!==revision||!sample||
+    sample.sourceChatVersion!==sourceVersion)throw Error('NETWORK_WATCH_STALE');
+   const ref='c_'+randomBytes(18).toString('base64url');
+   if(s.callbacks.some(c=>c.ref===ref))return null;
+   s.callbacks.push({ref,action:PREFIX+'watch-add:'+JSON.stringify([
+    id,revision,sourceId,sourceVersion,subjectId,code,this.watchProof(s)]),
+    actorId:actor,chatId:'private',policyVersion:0,oneShot:true,
+    used:false,revoked:false,expiresAt:now+TTL});
+   intent.used=true;
+   return ui('<b>🔎 معاينة بلاغ الشبكة</b>\n'+
+    'الشبكة: '+escape(n.name)+'\nمجموعة المصدر: <code>'+sourceId+'</code>\n'+
+    'المعرّف: <code>'+subjectId+'</code>\nالتصنيف: '+watchLabel[watchKind[code]!]+'\n'+
+    'سيُحفظ كبلاغ ينتظر قرار المالك. لا حظر ولا كتم ولا إشعار للمجموعات الأخرى.',
+    [[btn('✅ تأكيد تسجيل البلاغ','nw:1:c:'+ref.slice(2))],
+     [btn('✖ إلغاء المعاينة','nw:1:k:'+ref.slice(2))]]);
+  });
+ }
+ private watchDetails(s:BotState,actor:string,now:number,id:string):
+  OwnerInlineScreen|null{
+  if(!this.auth(s,actor,now))return null;
+  const matches=(s.networkWatchCases??[]).filter(c=>c.id===id),c=matches[0];
+  if(matches.length!==1||!c||!this.find(s,c.networkId))return null;
+  const current=networkWatchCaseAccessible(s,this.policy,actor,now,id)!==null;
+  const rows:{text:string;callback_data:string}[][]=[];
+  if(current&&c.status==='PENDING'){
+   rows.push([btn('✅ اعتماد للمراقبة','nw:1:rv:'+id+':A')]);
+   rows.push([btn('❌ رفض البلاغ','nw:1:rv:'+id+':D')]);
+  }else if(current&&c.status==='WATCHED'){
+   rows.push([btn('✅ رفع الاشتباه','nw:1:rv:'+id+':C')]);
+  }
+  rows.push([btn('↩️ البلاغات','nw:1:u:'+c.networkId+':0')]);
+  return ui('<b>🔎 تفاصيل بلاغ الشبكة</b>\n'+
+   'المعرّف: <code>'+c.subjectId+'</code>\n'+
+   'مجموعة المصدر: <code>'+c.sourceChatId+'</code>\n'+
+   'التصنيف: '+watchLabel[c.category]+'\n'+
+   'الحالة: '+watchStatus[c.status]+' · الإصدار '+c.revision+'\n'+
+   (current?'':'⚠️ اعتماد المصدر أو إصدار الشبكة قديم؛ المراجعة معطلة.\n')+
+   'المراقبة إشارة معلوماتية للمالك، لا تنفيذ عقوبة ولا دليل تلقائي.',
+   rows);
+ }
+ private async previewWatchDecision(actor:string,id:string,code:string):
+  Promise<OwnerInlineScreen|null>{
+  return this.store.transaction(s=>{
+   const now=this.clock(),c=networkWatchCaseAccessible(s,this.policy,actor,now,id);
+   const decision:NetworkWatchDecision|undefined=code==='A'?'WATCHED':
+    code==='D'?'DISMISSED':code==='C'?'CLEARED':undefined;
+   if(!c||!decision||!(c.status==='PENDING'&&decision!=='CLEARED'||
+     c.status==='WATCHED'&&decision==='CLEARED'))return null;
+   const ref='c_'+randomBytes(18).toString('base64url');
+   if(s.callbacks.some(row=>row.ref===ref))return null;
+   s.callbacks.push({ref,action:PREFIX+'watch-review:'+JSON.stringify([
+    id,c.revision,decision,this.watchProof(s)]),actorId:actor,
+    chatId:'private',policyVersion:0,oneShot:true,used:false,
+    revoked:false,expiresAt:now+TTL});
+   const label=decision==='WATCHED'?'الاعتماد':decision==='DISMISSED'?'الرفض':'رفع الاشتباه';
+   return ui('<b>🔎 معاينة قرار بشري للبلاغ</b>\n'+
+    'المعرّف: <code>'+c.subjectId+'</code>\n'+
+    'الشبكة: <code>'+c.networkId+'</code>\n'+
+    'القرار: '+label+'\nلن يغيّر أي مجموعة ولا يطلب حظرًا أو كتمًا في Telegram.',
+    [[btn('✅ تأكيد '+label,'nw:1:c:'+ref.slice(2))],
+     [btn('✖ إلغاء القرار','nw:1:k:'+ref.slice(2))]]);
+  });
  }
 
  /** Stale association cleanup never reauthorizes a group or changes Telegram rights. */
@@ -599,6 +792,9 @@ export class OwnerNetworkEditor{
   const snapshot=await this.store.snapshot();
   if(!snapshot.callbacks.some(c=>c.actorId===actor&&c.action.startsWith(PREFIX+'input:')&&
    !c.used&&!c.revoked))return null;
+  if(snapshot.callbacks.some(c=>c.actorId===actor&&
+   c.action.startsWith(PREFIX+'input:watch:')&&!c.used&&!c.revoked))
+   return this.previewWatchMember(actor,name);
   if(!validNetworkName(name))throw Error('NETWORK_INVALID_NAME');
   return this.store.transaction(s=>{
    const now=this.clock();
@@ -669,6 +865,58 @@ export class OwnerNetworkEditor{
     receipt.revoked!==false||!Number.isSafeInteger(receipt.expiresAt)||
     receipt.expiresAt<=now||receipt.expiresAt>now+TTL)return null;
    let data:unknown;
+   if(receipt.action.startsWith(PREFIX+'watch-add:')){
+    try{data=JSON.parse(receipt.action.slice((PREFIX+'watch-add:').length));}
+    catch{return null;}
+    if(!Array.isArray(data)||data.length!==7||
+     typeof data[0]!=='string'||!/^[a-f0-9]{12}$/u.test(data[0])||
+     !Number.isSafeInteger(data[1])||data[1]<1||
+     typeof data[2]!=='string'||!validId(data[2])||
+     !Number.isSafeInteger(data[3])||data[3]<1||
+     typeof data[4]!=='string'||!validSubject(data[4])||
+     typeof data[5]!=='string'||!watchKind[data[5]]||
+     typeof data[6]!=='string'||!/^[a-f0-9]{64}$/u.test(data[6])||
+     this.watchProof(s)!==data[6])return null;
+    const [networkId,revision,sourceId,sourceVersion,subjectId,code]=data as
+     [string,number,string,number,string,string,string];
+    const n=this.find(s,networkId);
+    if(!n||n.revision!==revision)return null;
+    const row=prepareNetworkWatchCase(s,this.policy,actor,now,networkId,
+     sourceId,subjectId,watchKind[code]!);
+    if(!row||row.sourceChatVersion!==sourceVersion)return null;
+    s.networkWatchCases??=[];s.networkWatchCases.push(row);receipt.used=true;
+    s.audit.push({actorId:actor,updateKey:'owner-network:'+nonce,
+     decision:'ALLOW',reason:'OWNER_NETWORK_WATCH_PROPOSED',policyVersion:row.revision,at:now});
+    return ui('<b>✅ سُجّل البلاغ للمراجعة البشرية</b>\n'+
+     'المعرّف: <code>'+row.subjectId+'</code>\n'+
+     'الحالة: بانتظار المراجعة. لا عقوبات أو نشر في المجموعات.',
+     [[btn('🔎 مراجعة البلاغ','nw:1:iv:'+row.id)],
+      [btn('🛡️ البلاغات','nw:1:u:'+networkId+':0')]]);
+   }
+   if(receipt.action.startsWith(PREFIX+'watch-review:')){
+    try{data=JSON.parse(receipt.action.slice((PREFIX+'watch-review:').length));}
+    catch{return null;}
+    if(!Array.isArray(data)||data.length!==4||
+     typeof data[0]!=='string'||!/^[a-f0-9]{12}$/u.test(data[0])||
+     !Number.isSafeInteger(data[1])||data[1]<1||
+     typeof data[2]!=='string'||!['WATCHED','DISMISSED','CLEARED'].includes(data[2])||
+     typeof data[3]!=='string'||!/^[a-f0-9]{64}$/u.test(data[3])||
+     this.watchProof(s)!==data[3])return null;
+    const [id,revision,decision]=data as
+     [string,number,NetworkWatchDecision,string];
+    const before=networkWatchCaseAccessible(s,this.policy,actor,now,id);
+    if(!before||!reviewNetworkWatchCase(s,this.policy,actor,now,id,
+      revision,decision))return null;
+    receipt.used=true;
+    s.audit.push({actorId:actor,updateKey:'owner-network:'+nonce,
+     decision:'ALLOW',reason:decision==='WATCHED'?'OWNER_NETWORK_WATCH_REVIEWED':
+      decision==='DISMISSED'?'OWNER_NETWORK_WATCH_DISMISSED':'OWNER_NETWORK_WATCH_CLEARED',
+     policyVersion:revision+1,at:now});
+    return ui('<b>✅ حُفظ القرار البشري محليًا</b>\n'+
+     'الحالة: '+watchStatus[decision]+'\nلا عقوبة أو نقل بين المجموعات.',
+     [[btn('🔎 تفاصيل البلاغ','nw:1:iv:'+id)],
+      [btn('🛡️ البلاغات','nw:1:u:'+before.networkId+':0')]]);
+   }
    if(receipt.action.startsWith(PREFIX+'create:')){
     try{data=JSON.parse(receipt.action.slice((PREFIX+'create:').length));}catch{return null;}
     if(!Array.isArray(data)||data.length!==2||!validNetworkName(data[0])||
@@ -1205,6 +1453,18 @@ export class OwnerNetworkEditor{
   if(py)return this.policySourceList(state,actor,now,py[1]!,Number(py[2]));
   const pz=policyPreview.exec(data);
   if(pz)return this.previewNetworkPolicy(actor,pz[1]!,pz[2]!,Number(pz[3]),Number(pz[4]??0));
+  const wu=watchList.exec(data);
+  if(wu)return this.watchPage(state,actor,now,wu[1]!,Number(wu[2]));
+  const wo=watchOrigins.exec(data);
+  if(wo)return this.watchOriginsPage(state,actor,now,wo[1]!,Number(wo[2]));
+  const wc=watchCategories.exec(data);
+  if(wc)return this.watchCategoriesPage(state,actor,now,wc[1]!,wc[2]!);
+  const ws=watchStart.exec(data);
+  if(ws)return this.startWatchInput(actor,ws[1]!,ws[2]!,ws[3]!);
+  const wv=watchCaseView.exec(data);
+  if(wv)return this.watchDetails(state,actor,now,wv[1]!);
+  const wr=watchReview.exec(data);
+  if(wr)return this.previewWatchDecision(actor,wr[1]!,wr[2]!);
   const fl=inheritancePage.exec(data);
   if(fl)return this.inheritedTargetsScreen(state,actor,now,fl[1]!,Number(fl[2]));
   const fj=inheritanceStop.exec(data);
