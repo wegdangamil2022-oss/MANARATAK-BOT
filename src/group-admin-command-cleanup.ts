@@ -190,6 +190,24 @@ export class GroupAdminCommandCleanup{
   s.audit.push({actorId:this.policyAccess.ownerId,updateKey:j.key+':outcome',decision:'NOOP',
    reason:'GROUP_ADMIN_COMMAND_DELETE_'+status,policyVersion:j.version,at:at(now)?now:j.issued});
  }
+ /** Original-command cleanup receipts only, without retaining actor/target text. */
+ auditOutcomes(s:BotState,now:number):{key:string;chat:string;kind:'COMMAND';status:'ACKNOWLEDGED'|'FAILED_CONFIRMED'|'UNKNOWN_OUTCOME'|'NOT_SENT';at:number;version:number}[]{
+  if(!at(now))return [];
+  const valid=['ACKNOWLEDGED','FAILED_CONFIRMED','UNKNOWN_OUTCOME','NOT_SENT'] as const;
+  const out:{key:string;chat:string;kind:'COMMAND';status:typeof valid[number];at:number;version:number}[]=[];
+  for(const j of this.jobs(s,now)){
+   const started=suffix(s,j.key,':started'),start=started[0],
+    rows=suffix(s,j.key,':outcome'),row=rows[0];
+   if(started.length!==1||!start||start.decision!=='ALLOW'||start.actorId!==this.policyAccess.ownerId||
+      start.reason!=='GROUP_ADMIN_COMMAND_DELETE_STARTED'||start.policyVersion!==j.version||
+      !at(start.at)||start.at<j.issued+120000||start.at>now||
+      rows.length!==1||!row||row.decision!=='NOOP'||row.actorId!==this.policyAccess.ownerId||
+      row.policyVersion!==j.version||!at(row.at)||row.at<start.at||row.at>now||now-row.at>=180000)continue;
+   const status=valid.find(v=>row.reason==='GROUP_ADMIN_COMMAND_DELETE_'+v);
+   if(status)out.push({key:j.key,chat:j.chat,kind:'COMMAND',status,at:row.at,version:j.version});
+  }
+  return out;
+ }
  async cleanup(limit=5):Promise<{deleted:number;unresolved:number}>{
   if(!Number.isSafeInteger(limit)||limit<1||limit>10)throw Error('ADMIN_COMMAND_CLEANUP_LIMIT_INVALID');
   let deleted=0,unresolved=0;
