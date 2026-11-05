@@ -56,7 +56,7 @@ async function fixture(engine:'json'|'sqlite',targets=[TARGET,OVERRIDE]){
    buttons:[{text:'Rules',url:'https://example.org/rules'}]};
   src.welcomeByJoin={SELF:'أهلًا بانضمامك {العضو}',BATCH:'أهلًا بالجميع'};
   src.farewell={enabled:true,text:'إلى اللقاء {العضو}'};
-  src.rulesUrl='https://example.org/rules';
+  src.rulesUrl='https://t.me/StudyinEurope3';
   src.privateWelcomeEnabled=true;
   src.repliesEnabled=true;
   s.phase4Community.configs.push(src);
