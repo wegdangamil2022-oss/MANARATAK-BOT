@@ -1,6 +1,8 @@
 import {CaptchaEnforcement} from './captcha-enforcement.js';
 import type {CaptchaJoinNotices} from './captcha-join-notices.js';
 import type {GroupWelcomeFarewell} from './group-welcome-farewell.js';
+import type {GroupAdminCommandCleanup} from './group-admin-command-cleanup.js';
+import {TelegramAdminCommandCleanupOwner} from './telegram-admin-command-cleanup-owner.js';
 import {TelegramWelcomeOwner} from './telegram-welcome-owner.js';
 import type {GroupServiceMessageCleanup} from './group-service-message-cleanup.js';
 import type {CaptchaEscalationPolicy} from './captcha-escalation-policy.js';
@@ -171,6 +173,8 @@ export interface TelegramApplicationOptions {
   joinNotices?:CaptchaJoinNotices;
   /** Public welcome/farewell messages, owner-approved per group and saved studio version. */
   welcomeFarewell?:GroupWelcomeFarewell;
+  /** Independently consented cleanup of already-authorized admin commands. */
+  adminCommandCleanup?:GroupAdminCommandCleanup;
   /** Original Telegram join/leave service message cleanup, separately owner-approved. */
   serviceCleanup?:GroupServiceMessageCleanup;
   /** Local safe graduated CAPTCHA retry policy; separate owner approval. */
@@ -487,6 +491,12 @@ export class TelegramUpdateApplication {
     const captcha=new CaptchaService(this.opts.store,this.opts.policy,this.opts.membership,this.clock),captchaEnforcement=new CaptchaEnforcement(this.opts.store,this.opts.policy,captcha,this.opts.moderation,this.opts.moderationRights,this.clock,this.opts.subscription),captchaRules=new CaptchaRuleGate(this.opts.store,this.opts.policy,captcha,this.opts.membership,this.clock);
     if(event.kind==='private'&&!event.callbackData?.startsWith('cr:1:')&&!event.callbackData?.startsWith('cp:1:')&&(event.callbackData!==undefined||!['/start','/captcha'].includes(event.text)))await captchaRules.cancel(event.actorId);
     if(event.kind==='private'&&this.opts.policy.isOwner(event.actorId)){
+     if(this.opts.adminCommandCleanup&&event.callbackData?.startsWith('ac:1:')){
+      const view=await new TelegramAdminCommandCleanupOwner(this.opts.store,this.opts.policy,this.opts.adminCommandCleanup,this.clock).handle(event.actorId,event.callbackData);
+      return view?{status:'APPLIED',reason:'ADMIN_COMMAND_CLEANUP_OWNER_VIEW',
+       plan:this.plan(event.actorId,view.text,undefined,view.keyboard,event.callbackMessageId)}:
+       {status:'DENIED',reason:'ADMIN_COMMAND_CLEANUP_OWNER_UNAVAILABLE'};
+     }
      if(this.opts.welcomeFarewell&&event.kind==='private'&&
         (event.callbackData==='mi:1:i:09:01'||event.callbackData==='mi:1:i:09:02'||event.callbackData==='mi:1:i:09:03'||event.callbackData?.startsWith('wm:1:'))){
       const view=await new TelegramWelcomeOwner(this.opts.store,this.opts.policy,this.opts.welcomeFarewell,this.clock).handle(event.actorId,event.callbackData!);
@@ -1694,7 +1704,7 @@ export class TelegramUpdateApplication {
     }
     const callback=event.callbackData??'';
     const ownerScreen=event.kind==='private'&&this.opts.policy.isOwner(event.actorId)&&(
-     /^(?:mi:1:|oi:1:|ou:1:|sc:1:|cf:1:|ec:1:|oc:1:|od:1:|gw:1:|gt:1:|gs:1:|gb:1:|nw:1:|gp:1:|of:1:|ol:1:|st:1:|ps:1:|pr:1:|pd:1:|pq:1:|mr:1:|mp:1:|c_)/u.test(callback)||
+     /^(?:mi:1:|ac:1:|oi:1:|ou:1:|sc:1:|cf:1:|ec:1:|oc:1:|od:1:|gw:1:|gt:1:|gs:1:|gb:1:|nw:1:|gp:1:|of:1:|ol:1:|st:1:|ps:1:|pr:1:|pd:1:|pq:1:|mr:1:|mp:1:|c_)/u.test(callback)||
      event.text==='/ownerinline'||event.text==='/ownerlegacy'||event.text==='/ownerrecover'||isOwnerMenuText(event.text)||(event.document!==undefined&&handled.plan?.inlineMarkup!==undefined)||
      handled.reason==='CATEGORY_TEXT_PREVIEW'||handled.reason==='NETWORK_TEXT_PREVIEW'||handled.reason==='DELEGATION_TEXT_PREVIEW'||handled.reason==='STUDIO_DRAFT_SAVED');
     if(ownerScreen&&handled.plan&&!handled.adminUIAccess){
@@ -1721,6 +1731,23 @@ export class TelegramUpdateApplication {
     // No external call occurs before the outbox row exists.
     await this.opts.store.finish(key,audit,handled.plan,handled.groupQuestionAccess,
      handled.groupMenuAccess,handled.privateGroupAccess,handled.adminUIAccess,handled.privateLibraryAccess,studioInput&&!!handled.adminUIAccess,handled.communityAccess,handled.communityClose,handled.verificationScoped===true,handled.verificationEphemeral===true,handled.verificationEphemeralTopicId,handled.verificationOutcome);
+    // Only authenticated, reviewed group admin-command messages produce
+    // cleanup evidence, after their private preview intent is durable.
+    if(this.opts.adminCommandCleanup&&handled.status==='APPLIED'&&event.kind==='group'&&
+       !event.callbackData&&!event.edited&&!event.forwarded&&
+       event.messageId!==undefined&&event.sentAt!==undefined&&
+       handled.plan?.chatId===event.actorId&&handled.adminUIAccess){
+     const m=/^\/(ban|mute|warn|unwarn|unban|unmute|kick|review|notice|lock|unlock)(?:@([A-Za-z][A-Za-z0-9_]{4,31}))?(?=\s|$)/u.exec(event.text);
+     if(m&&(!m[2]||m[2].toLowerCase()===this.opts.botUsername.toLowerCase())){
+      const kind=m[1]==='lock'||m[1]==='unlock'?'LOCK' as const:'MODERATION' as const;
+      if(kind==='MODERATION'&&handled.reason==='MODERATION_PREVIEW_ONLY'||
+         kind==='LOCK'&&handled.reason==='GROUP_PERMISSIONS_VIEW'){
+       try{await this.opts.adminCommandCleanup.observeApproved(event.chatId,event.messageId,
+        event.actorId,key,kind,handled.reason,event.sentAt);}
+       catch{/* Cleanup observation never invalidates a committed moderation preview. */}
+      }
+     }
+    }
     // Temporary actor IDs are only stored in the guarded queue, never returned.
     const {groupQuestionAccess:_,groupMenuAccess:__,privateGroupAccess:___,adminUIAccess:____,privateLibraryAccess:_____,communityAccess:______,communityClose:_______,verificationScoped:________,verificationEphemeral:_________,verificationEphemeralTopicId:__________,verificationOutcome:___________,...publicResult}=handled;
     const visible=publicResult.plan?{...publicResult,deliveryKey:key}:publicResult;
