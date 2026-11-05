@@ -10,7 +10,7 @@ const actorId=(v:unknown):v is string=>typeof v==='string'&&/^[1-9][0-9]{0,15}$/
 const at=(v:unknown):v is number=>typeof v==='number'&&Number.isSafeInteger(v)&&v>=0&&v<=8640000000000000-120000;
 const msgId=(v:unknown):v is number=>typeof v==='number'&&Number.isSafeInteger(v)&&v>0&&v<=2147483647;
 const update=(v:unknown):v is string=>typeof v==='string'&&/^b3-webhook:[A-Za-z0-9_-]{1,80}:[0-9]{1,16}$/u.test(v);
-type Kind='MODERATION'|'LOCK'|'RULE';
+type Kind='MODERATION'|'LOCK'|'RULE'|'DELETE';
 type Consent={enabled:boolean;revision:number;stamp:string};
 type Job={key:string;chat:string;actor:string;kind:Kind;reason:string;messageId:number;
  updateKey:string;sentAt:number;issued:number;version:number;revision:number;stamp:string};
@@ -18,12 +18,15 @@ const suffix=(s:BotState,k:string,x:string)=>s.audit.filter(a=>a.updateKey===k+x
 const known=(kind:Kind,reason:string):boolean=>
  kind==='MODERATION'&&reason==='MODERATION_PREVIEW_ONLY'||
  kind==='LOCK'&&reason==='GROUP_PERMISSIONS_VIEW'||
- kind==='RULE'&&reason==='RULE_ACTION_CHOICE';
+ kind==='RULE'&&reason==='RULE_ACTION_CHOICE'||
+ kind==='DELETE'&&reason==='DELETE_PREVIEW_ONLY';
 /** Selects a narrow cleanup class only AFTER an original group command has
  * successfully produced a reviewed, authorized private admin UI. This
  * classifier never authorizes moderation or execution on its own. */
 export function reviewedAdminCommandKind(text:string,botUsername:string,reason:string):Kind|null{
  if(!/^[A-Za-z][A-Za-z0-9_]{4,31}$/u.test(botUsername))return null;
+ const deleteCommand=/^\/delete(?:@([A-Za-z][A-Za-z0-9_]{4,31}))?$/u.exec(text);
+ if(deleteCommand&&(!deleteCommand[1]||deleteCommand[1].toLowerCase()===botUsername.toLowerCase())&&known('DELETE',reason))return 'DELETE';
  const verifiedMention=(username:string|undefined)=>!username||username.toLowerCase()===botUsername.toLowerCase();
  const basic=/^\/(ban|mute|warn|unwarn|unban|unmute|kick|review|notice|lock|unlock)(?:@([A-Za-z][A-Za-z0-9_]{4,31}))?(?=\s|$)/u.exec(text);
  if(basic&&verifiedMention(basic[2])){
