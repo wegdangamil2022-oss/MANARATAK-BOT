@@ -744,7 +744,7 @@ export class OwnerNetworkEditor{
     return ui('<b>⏸ أُوقفت المتابعة الآلية محليًا</b>\n'+
      'المجموعة: <code>'+link.targetChatId+'</code>\n'+
      'إعداد المجموعة لم يتغير. لن تتابع المصدر من الآن.',
-     [[btn('🔁 المتابعات','nw:1:f:'+link.networkId+':0)],
+     [[btn('🔁 المتابعات','nw:1:f:'+link.networkId+':0')],
       [btn('🌐 بطاقة الشبكة','nw:1:d:'+link.networkId)]]);
    }
    if(receipt.action.startsWith(PREFIX+'policy:')||
