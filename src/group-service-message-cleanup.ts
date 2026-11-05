@@ -2,16 +2,23 @@ import {createHash} from 'node:crypto';
 import type {BotState,BotStore,AuditRecord} from './store.js';
 import type {Policy} from './policy.js';
 import type {TemporaryGroupDeleteResult,TelegramTemporaryGroupSender} from './telegram-temporary-group-sender.js';
+import {ancillaryServiceScope,type AncillaryServiceKind,type AncillaryServiceScope} from './telegram-ancillary-service-notices.js';
 
-const P='group:service-cleanup-policy:',P_PIN='group:pin-cleanup-policy:',ROOT='group:service-message-job:',PREFIX='GROUP_SERVICE_MESSAGE_V1:';
+const P='group:service-cleanup-policy:',P_PIN='group:pin-cleanup-policy:',P_GROUP='group:group-change-cleanup-policy:',P_FORUM='group:forum-cleanup-policy:',ROOT='group:service-message-job:',PREFIX='GROUP_SERVICE_MESSAGE_V1:';
 const digest=(v:unknown)=>createHash('sha256').update(JSON.stringify(v)).digest('hex');
 const group=(v:unknown):v is string=>typeof v==='string'&&/^-[1-9][0-9]{0,15}$/u.test(v)&&Number.isSafeInteger(Number(v));
 const time=(v:unknown):v is number=>typeof v==='number'&&Number.isSafeInteger(v)&&v>=0&&v<=8640000000000000-120000;
 const message=(v:unknown):v is number=>typeof v==='number'&&Number.isSafeInteger(v)&&v>0&&v<=2147483647;
 const update=(v:unknown):v is string=>typeof v==='string'&&/^b3-webhook:[A-Za-z0-9_-]{1,80}:[0-9]{1,16}$/u.test(v);
 type Consent={enabled:boolean;revision:number;stamp:string};
-type Kind='JOIN'|'LEAVE'|'PIN';
-type Scope='JOIN'|'PIN';
+type Kind='JOIN'|'LEAVE'|'PIN'|AncillaryServiceKind;
+type Scope='JOIN'|'PIN'|AncillaryServiceScope;
+const ancillaryKinds:readonly AncillaryServiceKind[]=['GROUP_TITLE','GROUP_PHOTO','GROUP_PHOTO_REMOVED',
+ 'TOPIC_CREATED','TOPIC_EDITED','TOPIC_CLOSED','TOPIC_REOPENED','TOPIC_HIDDEN','TOPIC_UNHIDDEN'];
+const isKind=(v:unknown):v is Kind=>typeof v==='string'&&
+ (v==='JOIN'||v==='LEAVE'||v==='PIN'||ancillaryKinds.includes(v as AncillaryServiceKind));
+const scopeFor=(kind:Kind):Scope=>kind==='JOIN'||kind==='LEAVE'?'JOIN':
+ kind==='PIN'?'PIN':ancillaryServiceScope(kind);
 type Job={key:string;chat:string;kind:Kind;messageId:number;issued:number;sentAt:number;updateKey:string;version:number;revision:number;stamp:string};
 type DeleteGateway=Pick<TelegramTemporaryGroupSender,'delete'>;
 const suffix=(s:BotState,k:string,name:string)=>s.audit.filter(a=>a.updateKey===k+name);
@@ -27,18 +34,24 @@ export class GroupServiceMessageCleanup{
   private readonly safety:()=>Promise<boolean>,
   private readonly deleteRights:(chat:string)=>Promise<'GRANTED'|'DENIED'|'UNKNOWN'>){}
  private stamp(s:BotState,chat:string,scope:Scope='JOIN'):string{
-  return digest([scope==='PIN'?'PIN_SERVICE_CLEANUP_V1':'SERVICE_CLEANUP_V1',this.policyAccess.ownerId,chat,
+  return digest([scope==='JOIN'?'SERVICE_CLEANUP_V1':
+   scope==='PIN'?'PIN_SERVICE_CLEANUP_V1':
+   scope==='GROUP'?'GROUP_CHANGES_SERVICE_CLEANUP_V1':'FORUM_SERVICE_CLEANUP_V1',this.policyAccess.ownerId,chat,
    s.chats.filter(c=>c.id===chat),s.grants.filter(g=>g.chatId===chat),
    s.privateFeatures,s.privateSettingsRevision??null]);
  }
- private policyKey(scope:Scope):string{return scope==='PIN'?P_PIN:P;}
+ private policyKey(scope:Scope):string{return scope==='JOIN'?P:scope==='PIN'?P_PIN:scope==='GROUP'?P_GROUP:P_FORUM;}
  private epochFor(s:BotState,chat:string,scope:Scope):string{
   return digest([this.stamp(s,chat,scope),s.audit.filter(a=>a.updateKey===this.policyKey(scope)+chat)]);
  }
  epoch(s:BotState,chat:string):string{return this.epochFor(s,chat,'JOIN');}
  epochPin(s:BotState,chat:string):string{return this.epochFor(s,chat,'PIN');}
+ epochGroupChanges(s:BotState,chat:string):string{return this.epochFor(s,chat,'GROUP');}
+ epochForum(s:BotState,chat:string):string{return this.epochFor(s,chat,'FORUM');}
  policy(s:BotState,chat:string):Consent|null{return this.policyFor(s,chat,'JOIN');}
  policyPin(s:BotState,chat:string):Consent|null{return this.policyFor(s,chat,'PIN');}
+ policyGroupChanges(s:BotState,chat:string):Consent|null{return this.policyFor(s,chat,'GROUP');}
+ policyForum(s:BotState,chat:string):Consent|null{return this.policyFor(s,chat,'FORUM');}
  private policyFor(s:BotState,chat:string,scope:Scope):Consent|null{
   if(!group(chat)||!time(this.clock())||!this.policyAccess.canUseChat(s,chat,'moderation')||
      s.chats.filter(c=>c.id===chat).length!==1)return null;
@@ -62,6 +75,12 @@ export class GroupServiceMessageCleanup{
  async configurePin(actor:string,chat:string,enabled:boolean,expected:string,confirmationRef?:string):Promise<boolean>{
   return this.configureFor(actor,chat,enabled,expected,'PIN',confirmationRef);
  }
+ async configureGroupChanges(actor:string,chat:string,enabled:boolean,expected:string,confirmationRef?:string):Promise<boolean>{
+  return this.configureFor(actor,chat,enabled,expected,'GROUP',confirmationRef);
+ }
+ async configureForum(actor:string,chat:string,enabled:boolean,expected:string,confirmationRef?:string):Promise<boolean>{
+  return this.configureFor(actor,chat,enabled,expected,'FORUM',confirmationRef);
+ }
  private async configureFor(actor:string,chat:string,enabled:boolean,expected:string,scope:Scope,confirmationRef?:string):Promise<boolean>{
   if(!group(chat)||typeof enabled!=='boolean'||typeof expected!=='string'||!/^[a-f0-9]{64}$/u.test(expected))return false;
   return this.store.transaction(s=>{
@@ -77,20 +96,24 @@ export class GroupServiceMessageCleanup{
    const version=this.policyAccess.chatRevision(s,chat),revision=old.revision+1,
     record={actorId:actor,updateKey:policyKey+chat,decision:'ALLOW' as const,
      reason:JSON.stringify({enabled,revision,stamp:old.stamp}),policyVersion:version,at:now};
-   const updateKey=(scope==='PIN'?'group:pin-cleanup-change:':'group:service-cleanup-change:')+digest([chat,now,revision,old.stamp]);
+   const updateKey=(scope==='JOIN'?'group:service-cleanup-change:':
+    scope==='PIN'?'group:pin-cleanup-change:':
+    scope==='GROUP'?'group:group-change-cleanup-change:':'group:forum-cleanup-change:')+digest([chat,now,revision,old.stamp]);
    if(s.audit.some(a=>a.updateKey===updateKey))return false;
    const existing=s.audit.find(a=>a.updateKey===policyKey+chat);
    if(existing)Object.assign(existing,record);else s.audit.push(record);
-   s.audit.push({actorId:actor,updateKey,decision:'ALLOW',reason:(scope==='PIN'?'PIN_SERVICE_CLEANUP_POLICY_UPDATE:':'SERVICE_CLEANUP_POLICY_UPDATE:')+digest(record),policyVersion:version,at:now});
+   s.audit.push({actorId:actor,updateKey,decision:'ALLOW',reason:(scope==='JOIN'?'SERVICE_CLEANUP_POLICY_UPDATE:':
+    scope==='PIN'?'PIN_SERVICE_CLEANUP_POLICY_UPDATE:':
+    scope==='GROUP'?'GROUP_CHANGES_SERVICE_CLEANUP_POLICY_UPDATE:':'FORUM_SERVICE_CLEANUP_POLICY_UPDATE:')+digest(record),policyVersion:version,at:now});
    return true;
   });
  }
  /** Invoked only by trusted Telegram service-event handling. PIN is the
   * service notification's own message ID, NEVER pinned_message.message_id. */
  async observeService(chat:string,kind:Kind,messageId:number,updateKey:string,sentAt:number):Promise<number>{
-  if(!group(chat)||!['JOIN','LEAVE','PIN'].includes(kind)||!message(messageId)||!update(updateKey)||!time(sentAt))return 0;
+  if(!group(chat)||!isKind(kind)||!message(messageId)||!update(updateKey)||!time(sentAt))return 0;
   return this.store.transaction(s=>{
-   const now=this.clock(),consent=this.policyFor(s,chat,kind==='PIN'?'PIN':'JOIN');
+   const now=this.clock(),consent=this.policyFor(s,chat,scopeFor(kind));
    if(!time(now)||sentAt>now||now-sentAt>30000||!consent?.enabled)return 0;
    const existing=this.jobs(s,now);
    // One Telegram update identifies one service message. A replay with a
@@ -124,7 +147,7 @@ export class GroupServiceMessageCleanup{
     if(!raw||typeof raw!=='object'||Array.isArray(raw))continue;
     const d=raw as Record<string,unknown>;
     if(Object.keys(d).sort().join(',')!=='chat,issued,kind,messageId,revision,sentAt,stamp,updateKey,version'||
-       !group(d.chat)||!['JOIN','LEAVE','PIN'].includes(String(d.kind))||!message(d.messageId)||
+       !group(d.chat)||!isKind(d.kind)||!message(d.messageId)||
        !update(d.updateKey)||!time(d.sentAt)||!time(d.issued)||
        d.issued!==a.at||Number(d.issued)<Number(d.sentAt)||Number(d.issued)-Number(d.sentAt)>30000||
        !Number.isSafeInteger(d.revision)||Number(d.revision)<1||
@@ -139,7 +162,7 @@ export class GroupServiceMessageCleanup{
  }
  private eligible(s:BotState,job:Job,now:number):boolean{
   if(!time(now)||now<job.issued+60000||now>=job.issued+86400000)return false;
-  const c=this.policyFor(s,job.chat,job.kind==='PIN'?'PIN':'JOIN');
+  const c=this.policyFor(s,job.chat,scopeFor(job.kind));
   if(!c?.enabled||c.stamp!==job.stamp||c.revision!==job.revision||
      this.policyAccess.chatRevision(s,job.chat)!==job.version)return false;
   const matches=this.jobs(s,now).filter(n=>n.chat===job.chat&&n.messageId===job.messageId);
