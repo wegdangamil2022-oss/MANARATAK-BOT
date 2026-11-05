@@ -3,6 +3,7 @@ import {BotStore,type BotState} from './store.js';
 import {reviewedGroupFAQAnswer,resolvedCommunityReply} from './phase4-community-sources.js';
 import {groupMenuEpochDigest} from './telegram-group-access.js';
 import {Policy} from './policy.js';
+import {pauseNetworkInheritanceForLocalEdit,synchronizeNetworkInheritance} from './network-inheritance.js';
 import {validCommunityPhotoId,validCommunityLinkButtons,communityLinkKeyboard,
  type CommunityLinkKeyboard} from './phase4-community-rich.js';
 import {defaultCommunityConfig,emptyCommunityState,validCommunityConfig,
@@ -401,6 +402,8 @@ export class Phase4CommunityService{
    }
    st!.configs=st!.configs.filter(c=>c.chatId!==config.chatId);
    st!.configs.push(config);
+   pauseNetworkInheritanceForLocalEdit(s,'GREETING',config.chatId);
+   synchronizeNetworkInheritance(s,this.policy,actorId,now,'GREETING',config.chatId);
    st!.drafts=st!.drafts.filter(d=>d.actorId!==actorId);
    s.audit.push({updateKey:'p4-community:'+draft.id,actorId,decision:'ALLOW',
     reason:'COMMUNITY_'+draft.kind,policyVersion:config.version,at:now});
