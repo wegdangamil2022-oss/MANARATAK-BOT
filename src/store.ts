@@ -1,6 +1,7 @@
 import {isValidFloodWindow,type FloodWindow} from './protection-flood.js';
 import {validGroupNetworks,type GroupNetwork} from './group-network-model.js';
 import {validNetworkInheritanceLinks,type NetworkInheritanceLink} from './network-inheritance-model.js';
+import {validNetworkWatchCases,type NetworkWatchCase} from './network-watchlist-model.js';
 import {validCommunityFolders,type CommunityFolder} from './community-folder-model.js';
 import {validCommunityState,type CommunityAutomationState} from './phase4-community-model.js';
 import {validCommunityPhotoId,validCommunityLinkKeyboard} from './phase4-community-rich.js';
@@ -174,6 +175,8 @@ export interface BotState {
   groupNetworks?:GroupNetwork[];
   /** Explicit owner-opted, fail-closed, local only network inheritance links. */
   networkInheritance?:NetworkInheritanceLink[];
+  /** NETWORK-003: owner-reviewed advisory only; not a ban/mute propagation ledger. */
+  networkWatchCases?:NetworkWatchCase[];
   schemaVersion: 8;
   /** Optional additive per-group monitor policy, validated on every read/write. */
   protectionPolicies?:GroupProtectionRecord[];
@@ -260,6 +263,7 @@ export class BotStore {
       (previous.phase4Community!==undefined&&!validCommunityState(previous.phase4Community))||
       (previous.groupNetworks!==undefined&&!validGroupNetworks(previous.groupNetworks))||
       (previous.networkInheritance!==undefined&&!validNetworkInheritanceLinks(previous.networkInheritance))||
+      (previous.networkWatchCases!==undefined&&!validNetworkWatchCases(previous.networkWatchCases))||
       (previous.communityFolders!==undefined&&!validCommunityFolders(previous.communityFolders))||
       (previous.privateSettingsRevision!==undefined&&(typeof previous.privateSettingsRevision!=='number'||!Number.isSafeInteger(previous.privateSettingsRevision)||previous.privateSettingsRevision<0||previous.privateSettingsRevision>=Number.MAX_SAFE_INTEGER))||
       (previous.buttonStudio!==undefined&&!validStudioState(previous.buttonStudio))||
