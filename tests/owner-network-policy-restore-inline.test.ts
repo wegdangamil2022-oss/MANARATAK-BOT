@@ -44,12 +44,6 @@ for(const engine of ['json','sqlite'] as const){
     targetChatId:A,targetChatVersion:1,targetRevision:1,
     targetDigest:'a'.repeat(64),createdAt:now-300,lastSyncedAt:now-200,
     status:'ACTIVE'
-   },{
-    id:'333333333333',kind:'POLICY',networkId:OTHER,networkRevision:1,
-    sourceChatId:A,sourceChatVersion:1,sourceRevision:1,
-    targetChatId:OUT,targetChatVersion:1,targetRevision:1,
-    targetDigest:'b'.repeat(64),createdAt:now-300,lastSyncedAt:now-200,
-    status:'ACTIVE'
    }];
    assert.ok(captureNetworkPolicySnapshot(s,policy,OWNER,now,N,A,ID));
    s.protectionPolicies![0]!.policy={
@@ -82,12 +76,34 @@ for(const engine of ['json','sqlite'] as const){
    assert.equal(p.policy.revision,3);
    assert.equal(p.chatPolicyVersion,1);
    assert.equal(s.networkPolicySnapshots?.[0]?.policy.revision,1);
-   assert.deepEqual(s.networkInheritance?.map(x=>x.status),['PAUSED','PAUSED']);
-   assert.deepEqual(s.networkInheritance?.map(x=>x.pausedReason),['LOCAL_OVERRIDE','SOURCE_STALE']);
+   assert.deepEqual(s.networkInheritance?.map(x=>x.status),['PAUSED']);
+   assert.deepEqual(s.networkInheritance?.map(x=>x.pausedReason),['LOCAL_OVERRIDE']);
    assert.equal(s.moderationOperations.length,0);
    assert.equal(s.operations.length,0);
    assert.ok(s.audit.some(x=>x.reason==='OWNER_NETWORK_POLICY_SNAPSHOT_RESTORED'));
    assert.equal(inspectSavedNetworkPolicy(s,f.policy,OWNER,f.clock(),ID)?.equivalent,true);
+  }finally{await f.close();}
+ });
+ test(engine+' NETWORK-005 restores archived source settings while pausing its local downstream link',async()=>{
+  const f=await fixture();try{
+   await f.store.transaction(s=>{
+    s.networkInheritance=[{
+     id:'222222222222',kind:'POLICY',networkId:N,networkRevision:1,
+     sourceChatId:A,sourceChatVersion:1,sourceRevision:1,
+     targetChatId:B,targetChatVersion:1,targetRevision:1,
+     targetDigest:'a'.repeat(64),createdAt:NOW-300,lastSyncedAt:NOW-200,
+     status:'ACTIVE'
+    }];
+   });
+   const before=await f.store.snapshot();
+   const screen=await f.editor.handle(OWNER,'nw:1:rr:'+ID);
+   assert.match(screen?.text??'',/روابط توريث/u);
+   assert.ok(await f.editor.handle(OWNER,click(screen,'تأكيد استرجاع')));
+   const after=await f.store.snapshot();
+   assert.equal(after.networkInheritance?.[0]?.status,'PAUSED');
+   assert.equal(after.networkInheritance?.[0]?.pausedReason,'SOURCE_STALE');
+   assert.deepEqual(after.protectionPolicies?.find(x=>x.policy.chatId===B),
+    before.protectionPolicies?.find(x=>x.policy.chatId===B));
   }finally{await f.close();}
  });
  test(engine+' NETWORK-005 restoration never enables OFF monitoring, even if the archived mode was MONITOR',async()=>{
