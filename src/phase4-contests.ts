@@ -148,7 +148,21 @@ export class Phase4ContestService{
   return this.store.transaction(s=>{
    const d=contests(s),m=d.members.find(x=>x.contestId===id&&x.memberId===memberId);
    if(!m||m.status!=='ACTIVE')return false;
-   m.status='WITHDRAWN';m.withdrawnAt=this.clock();
+   const now=this.clock(),c=d.contests.find(x=>x.id===id);
+   const linked=new Set(c?.quizIds??[]),qd=quizzes(s);
+   let modified=false;
+   qd.answers=qd.answers.filter(a=>{
+    if(a.memberId!==memberId||!linked.has(a.quizId)||a.status!=='ACTIVE')
+     return true;
+    const quiz=qd.quizzes.find(q=>q.id===a.quizId);
+    if(quiz?.closedAt!==undefined&&now>quiz.closedAt+7*86_400_000){
+     modified=true;return false;
+    }
+    a.status='WITHDRAWN';delete a.choice;a.withdrawnAt=now;
+    modified=true;return true;
+   });
+   if(modified)s.phase4Quizzes=qd;
+   m.status='WITHDRAWN';m.withdrawnAt=now;
    s.phase4Contests=d;return true;
   });
  }
