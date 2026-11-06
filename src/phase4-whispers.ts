@@ -202,6 +202,13 @@ export class Phase4WhisperService{
    return total;
   });
  }
+ /** Owner-only private preview. Never expose a stored text in public UI. */
+ async ownerView(actor:string,id:string):Promise<WhisperMessage|null>{
+  const s=await this.store.snapshot(),rows=clone(s).messages.filter(x=>x.id===id),row=rows[0];
+  if(rows.length!==1||!row||this.scope(s,actor,row.chatId)!==row.chatVersion||
+   row.creatorId!==actor)return null;
+  return structuredClone(row);
+ }
  /** Public metadata never reveals secret, recipient ID, or who reserved a seat.
   * This does not imply that a public Telegram post exists. */
  async publicSummary(actor:string,id:string):Promise<string>{
