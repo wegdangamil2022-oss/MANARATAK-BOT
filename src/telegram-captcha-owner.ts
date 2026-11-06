@@ -146,7 +146,7 @@ export class TelegramCaptchaOwner{
     if(!consent)return null;
     text='<b>معاينة تدقيق الحذف في وجهة خاصة معتمدة</b>\nالمجموعة: '+step.group+'\n'+
      (step.kind==='audit-on'?
-      'سيُرسل ملخص واحد بحد أقصى لكل دقيقة مكتملة إلى غرفة الإشعارات المخوّلة رسميًا بموافقتي المجموعة والغرفة، بشرط أن يؤكد Telegram أنها ليست عامة. لا تتضمن الرسالة أسماء الطلاب ولا نصوص الأوامر ولا أرقام رسائل الحذف. إن تعذر إثبات الخصوصية فلن يُرسل أي ملخص.':
+      (this.cleanupAudit.channel(s,step.group)?.channel?'سيُرسل ملخص واحد بحد أقصى لكل دقيقة إلى قناة التدقيق الخاصة التي اعتمدها المالك، بعد تحقق Telegram من خصوصية القناة وحق البوت في نشر الرسائل.':'سيُرسل ملخص واحد بحد أقصى لكل دقيقة مكتملة إلى غرفة الإشعارات المخوّلة رسميًا بموافقتي المجموعة والغرفة، بشرط أن يؤكد Telegram أنها ليست عامة.')+' لا تتضمن الرسالة أسماء الطلاب ولا نصوص الأوامر ولا أرقام رسائل الحذف. إن تعذر إثبات الخصوصية فلن يُرسل أي ملخص.':
       'سيُوقف إرسال ملخصات تدقيق الحذف فورًا؛ تبقى السجلات المحلية ولا تُستأنف الملخصات القديمة بعد إعادة التفعيل.')+
      '\nهذا التفويض مستقل عن موافقات حذف رسائل الخدمة وأوامر المشرفين؛ ولا يفعّل الحذف أو إنشاء غرفة جديدة. تغيير الغرفة أو الصلاحيات يلغي التفويض القديم.';
     rows=[[b('✅ تأكيد تدقيق الحذف',{...step,kind:step.kind==='audit-on'?'audit-on-confirm':'audit-off-confirm'})],[b('↩️ إلغاء',{...step,kind:'edit'})]];
@@ -195,9 +195,10 @@ export class TelegramCaptchaOwner{
      {...step,kind:enabled?'forum-off':'forum-on'})]);
    }
    if(step.kind==='edit'&&this.cleanupAudit){
-    const audit=this.cleanupAudit.policy(s,step.group),enabled=audit?.enabled===true,ready=this.cleanupAudit.ready(s,step.group);
-    text+='\nتدقيق الحذف إلى غرفة إشعارات خاصة: '+(enabled?'مفعل ومشروط بخصوصية الغرفة':'متوقف');
-    if(!ready)text+='\nيتطلب تفعيل التدقيق ربط غرفة إشعارات إدارة معتمدة بموافقتَي المجموعة والغرفة.';
+    const audit=this.cleanupAudit.policy(s,step.group),enabled=audit?.enabled===true,ready=this.cleanupAudit.ready(s,step.group),channel=this.cleanupAudit.channel(s,step.group)?.channel;
+    text+='\nتدقيق الحذف إلى '+(channel?'قناة Telegram الخاصة '+channel:'غرفة إشعارات خاصة')+': '+(enabled?'مفعل ومشروط بفحص Telegram الحالي':'متوقف');
+    if(!ready)text+='\nيتطلب تفعيل التدقيق اعتماد قناة Telegram خاصة أو ربط غرفة إشعارات إدارة معتمدة بموافقتَي المجموعة والغرفة.';
+    rows.push([{text:'📢 إعداد قناة Telegram الخاصة للتدقيق',callback_data:'cu:1:h'}]);
     if(audit&&ready)rows.push([b(enabled?'إيقاف تدقيق الحذف':'تفعيل تدقيق الحذف',
      {...step,kind:enabled?'audit-off':'audit-on'})]);
    }
