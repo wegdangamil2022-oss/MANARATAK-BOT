@@ -1,5 +1,5 @@
 import {createHash,randomBytes} from 'node:crypto';
-import {networkAdministrativeEvents} from './network-administrative-events.js';
+import {networkAdministrativeEvents,type NetworkAdministrativeEventKind} from './network-administrative-events.js';
 import type {BotStore,BotState,Chat} from './store.js';
 import type {GroupNetwork} from './group-network-model.js';
 import {validNetworkName} from './group-network-model.js';
@@ -30,6 +30,11 @@ const home=/^nw:1:h$/u,begin=/^nw:1:n$/u;
 const list=new RegExp('^nw:1:p:'+page+'$','u');
 const detail=new RegExp('^nw:1:d:'+net+'$','u');
 const eventPage=new RegExp('^nw:1:ev:'+net+':'+page+'$','u');
+const eventFiltered=new RegExp('^nw:1:ef:'+net+':'+page+':([awres]):(0|-[1-9][0-9]{0,15})$','u');
+const eventGroupPage=new RegExp('^nw:1:eg:'+net+':([awres]):'+page+'$','u');
+const eventKinds:Record<'w'|'r'|'e'|'s',NetworkAdministrativeEventKind>={
+ w:'WATCH_CASE',r:'SANCTION_REVIEW',e:'EMERGENCY',s:'SNAPSHOT'};
+
 const policySources=new RegExp('^nw:1:y:'+net+':'+page+'$','u');
 const policyPreview=new RegExp('^nw:1:z:'+net+':'+group+':'+page+'$','u');
 const followList=new RegExp('^nw:1:f:'+net+':'+page+'$','u');
@@ -68,7 +73,7 @@ export function validOwnerNetworkRoute(data:unknown):boolean{
    validOwnerNetworkBulkServiceRoute(data)||validOwnerNetworkPolicyDiffRoute(data)||validOwnerNetworkPolicySnapshotRoute(data)||
    validOwnerNetworkPolicyRestoreRoute(data)||
    validOwnerNetworkSanctionRoute(data)||
-  [list,detail,eventPage,policySources,policyPreview,followList,followStop,
+  [list,detail,eventPage,eventFiltered,eventGroupPage,policySources,policyPreview,followList,followStop,
    bulkList,bulkToggle,bulkPreview,multiStart,multiMove,multiToggle,multiPreview,multiCancel,
    emergencyHome,emergencyStop,emergencyResume,rename,remove,pick,toggle,
    stalePage,stalePick,staleBatch,confirm,cancel,historyPage,historyView].some(re=>re.test(data));
@@ -539,24 +544,66 @@ export class OwnerNetworkEditor{
     ...(n.members.length===0?[[btn('🗑️ حذف الشبكة','nw:1:x:'+n.id)]]:[]),
     [btn('📋 الشبكات','nw:1:p:0'),btn('🏠 لوحة المالك','mi:1:h')]]);
  }
- private administrativeEvents(s:BotState,actor:string,now:number,id:string,p:number):OwnerInlineScreen|null{
-  const events=networkAdministrativeEvents(s,this.policy,actor,now,id);
+ private administrativeEvents(s:BotState,actor:string,now:number,id:string,p:number,
+  kind:'a'|'w'|'r'|'e'|'s'='a',chatId='0'):OwnerInlineScreen|null{
+  const selectedKind=kind==='a'?undefined:eventKinds[kind];
+  const events=networkAdministrativeEvents(s,this.policy,actor,now,id,{
+   kind:selectedKind,chatId:chatId==='0'?undefined:chatId
+  });
   const n=this.find(s,id),pages=Math.max(1,Math.ceil((events??[]).length/SIZE));
   if(!events||!n||p>=pages)return null;
-  const rows=events.slice(p*SIZE,(p+1)*SIZE).map(e=>{
+  const items=events.slice(p*SIZE,(p+1)*SIZE).map(e=>{
    const time=new Date(e.at).toISOString().slice(0,16).replace('T',' ');
    return '• '+time+' UTC — '+escape(e.label)+(e.chatId?' · <code>'+e.chatId+'</code>':'');
   });
+  const route=(k:string,chat=chatId,page=0)=>
+   'nw:1:ef:'+id+':'+page+':'+k+':'+chat;
   const nav:{text:string;callback_data:string}[]=[];
-  if(p)nav.push(btn('⬅️ السابق','nw:1:ev:'+id+':'+(p-1)));
-  if(p+1<pages)nav.push(btn('➡️ التالي','nw:1:ev:'+id+':'+(p+1)));
-  const buttons=nav.length?[nav]:[];
-  buttons.push([btn('↩️ بطاقة الشبكة','nw:1:d:'+id)]);
+  if(p)nav.push(btn('⬅️ السابق',route(kind,chatId,p-1)));
+  if(p+1<pages)nav.push(btn('➡️ التالي',route(kind,chatId,p+1)));
+  const rows:{text:string;callback_data:string}[][]=[];
+  if(nav.length)rows.push(nav);
+  rows.push([btn((kind==='a'?'✅ ':'')+'📋 الكل',route('a')),
+   btn((kind==='w'?'✅ ':'')+'🛡️ البلاغات',route('w'))]);
+  rows.push([btn((kind==='r'?'✅ ':'')+'📑 مراجعات العقوبات',route('r')),
+   btn((kind==='e'?'✅ ':'')+'🚨 الطوارئ',route('e'))]);
+  rows.push([btn((kind==='s'?'✅ ':'')+'📸 نسخ السياسات',route('s'))]);
+  rows.push([btn('👥 حسب المجموعة','nw:1:eg:'+id+':'+kind+':0'),
+   btn('🌐 كل المجموعات',route(kind,'0'))]);
+  rows.push([btn('↩️ بطاقة الشبكة','nw:1:d:'+id)]);
+  const names={a:'جميع الأحداث',w:'البلاغات',r:'مراجعات العقوبات',
+   e:'الطوارئ',s:'نسخ السياسات'} as const;
   return ui('<b>🔔 الأحداث الإدارية للشبكة</b>\n'+
+   'الشبكة: '+escape(n.name)+' · صفحة '+(p+1)+'/'+pages+
+   ' · عدد النتائج: '+events.length+'\n'+
+   'التصنيف: '+names[kind]+' · المجموعات: '+
+   (chatId==='0'?'الكل':'<code>'+chatId+'</code>')+'\n'+
+   'سجل محلي للقراءة فقط؛ لا يُرسل إشعارات ولا يمنح صلاحيات.\n'+
+   (items.join('\n')||'لا توجد أحداث لهذا الاختيار.')+'\n'+
+   'لا تظهر هويات الطلاب أو تفاصيل البلاغات الحساسة.',rows);
+ }
+ private eventGroupSelector(s:BotState,actor:string,now:number,id:string,
+  kind:'a'|'w'|'r'|'e'|'s',p:number):OwnerInlineScreen|null{
+  const n=this.find(s,id);
+  if(!n||networkAdministrativeEvents(s,this.policy,actor,now,id)===null)return null;
+  const approvedGroups=approved(s,this.policy,actor,now);
+  const groups=n.members.filter(m=>approvedGroups.some(c=>c.id===m.chatId&&
+   c.version===m.version&&c.scopes.includes('moderation')))
+   .map(m=>m.chatId).sort((a,b)=>a.localeCompare(b));
+  const pages=Math.max(1,Math.ceil(groups.length/SIZE));
+  if(p>=pages)return null;
+  const rows:{text:string;callback_data:string}[][]=groups.slice(p*SIZE,(p+1)*SIZE)
+   .map(chat=>[btn('👥 '+chat,'nw:1:ef:'+id+':0:'+kind+':'+chat)]);
+  const nav:{text:string;callback_data:string}[]=[];
+  if(p)nav.push(btn('⬅️ السابق','nw:1:eg:'+id+':'+kind+':'+(p-1)));
+  if(p+1<pages)nav.push(btn('➡️ التالي','nw:1:eg:'+id+':'+kind+':'+(p+1)));
+  if(nav.length)rows.push(nav);
+  rows.push([btn('🌐 كل المجموعات','nw:1:ef:'+id+':0:'+kind+':0')]);
+  return ui('<b>👥 اختيار مجموعة لتصفية الأحداث</b>\n'+
    'الشبكة: '+escape(n.name)+' · صفحة '+(p+1)+'/'+pages+'\n'+
-   'سجل محلي للقراءة فقط؛ لا يُرسل إشعارات ولا يمنح أي صلاحيات.\n'+
-   (rows.join('\n')||'لا توجد أحداث إدارية متاحة للمراجعة.')+'\n'+
-   'لا تُعرض بيانات الطلاب أو تفاصيل البلاغات الحساسة.',buttons);
+   (groups.length?'تظهر المجموعات المعتمدة حاليًا فقط.':
+    'لا توجد مجموعات مؤهلة لهذا الاختيار.')+'\n'+
+   'يُعاد فحص صلاحية الإدارة عند فتح الأحداث.',rows);
  }
  private members(s:BotState,actor:string,now:number,id:string,p:number):OwnerInlineScreen|null{
   const n=this.find(s,id);if(!n)return null;
@@ -1303,6 +1350,12 @@ export class OwnerNetworkEditor{
   const l=list.exec(data);if(l)return this.networkList(state,Number(l[1]));
   const d=detail.exec(data);if(d)return this.networkCard(state,actor,now,d[1]!);
   const ev=eventPage.exec(data);if(ev)return this.administrativeEvents(state,actor,now,ev[1]!,Number(ev[2]));
+  const ef=eventFiltered.exec(data);
+  if(ef)return this.administrativeEvents(state,actor,now,ef[1]!,Number(ef[2]),
+   ef[3] as 'a'|'w'|'r'|'e'|'s',ef[4]!);
+  const eg=eventGroupPage.exec(data);
+  if(eg)return this.eventGroupSelector(state,actor,now,eg[1]!,
+   eg[2] as 'a'|'w'|'r'|'e'|'s',Number(eg[3]));
   const ps=policySources.exec(data);if(ps)return this.policySourcePage(state,actor,now,ps[1]!,Number(ps[2]));
   const pp=policyPreview.exec(data);if(pp)return this.previewPolicy(actor,pp[1]!,pp[2]!,Number(pp[3]));
   const ms=multiStart.exec(data);
