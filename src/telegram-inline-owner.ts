@@ -21,6 +21,7 @@ import {validCommunityFolderRoute} from './telegram-community-folders.js';
 import {validPhase4CommunityRoute} from './phase4-community-ui.js';
 import {validWhisperOwnerRoute} from './phase4-whisper-owner.js';
 import {validQuizOwnerRoute} from './phase4-quiz-owner.js';
+import {validGameCatalogOwnerRoute} from './phase4-game-catalog-owner.js';
 /** The approved 2026-10-23 owner catalogue from docs/أزرار_منارتك.md.
  * READ-ONLY navigation: do NOT treat a visible catalogue item as a permission
  * or operationally implemented action. Existing owner actions remain available
@@ -708,6 +709,7 @@ export function isValidTelegramInlineKeyboard(input:unknown):input is TelegramIn
      !validPhase4CommunityRoute(button.callback_data)&&
      !validWhisperOwnerRoute(button.callback_data)&&
      !validQuizOwnerRoute(button.callback_data)&&
+     !validGameCatalogOwnerRoute(button.callback_data)&&
      !/^pd:1:[cx]:[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}:[a-f0-9]{16}$/u.test(button.callback_data)&&
      !/^si:2:[ascuef]:(?:h|p:(?:0|[1-9][0-9]{0,2})|c:(?:0|[1-9][0-9]{0,2}):[1-8]:[a-f0-9]{12}|l:(?:0|[1-9][0-9]{0,2}):[1-8]:[a-f0-9]{12}:(?:0|[1-9][0-9]{0,2})|r:(?:0|[1-9][0-9]{0,2}):[1-8]:[a-f0-9]{12}:(?:0|[1-9][0-9]{0,2}):[1-8]:[a-f0-9]{12})$/u.test(button.callback_data))
     return false;
@@ -725,7 +727,7 @@ const navigation=(back:string,home=true)=>{
 export function ownerInlineConnection(data:string):'EDITOR'|'VIEW'|'SPECIFICATION'|null{
  const m=/^mi:1:i:([0-9]{2}):([0-9]{2})$/u.exec(data);if(!m||m[0]!==data)return null;
  const section=ownerInlineSections[Number(m[1])-1];if(!section||Number(m[2])<1||Number(m[2])>section.items.length)return null;
- if((data==='mi:1:i:08:03'||data==='mi:1:i:09:06'||data==='mi:1:i:09:07'||data==='mi:1:i:09:08'||data==='mi:1:i:09:09'||data==='mi:1:i:09:10'||data==='mi:1:i:09:11'||data==='mi:1:i:09:12'||data==='mi:1:i:09:13'||data==='mi:1:i:09:14'||data==='mi:1:i:09:15'||data==='mi:1:i:09:16')||/^mi:1:i:04:0[234]$/u.test(data)||data==='mi:1:i:13:04'||delegationOwnerEntry(data)||/^mi:1:i:01:(?:03|06|07|08|12)$/u.test(data)||data==='mi:1:i:10:16'||data==='mi:1:i:11:03'||studioOwnerEntry(data))return 'EDITOR';
+ if((data==='mi:1:i:08:01'||data==='mi:1:i:08:03'||data==='mi:1:i:09:06'||data==='mi:1:i:09:07'||data==='mi:1:i:09:08'||data==='mi:1:i:09:09'||data==='mi:1:i:09:10'||data==='mi:1:i:09:11'||data==='mi:1:i:09:12'||data==='mi:1:i:09:13'||data==='mi:1:i:09:14'||data==='mi:1:i:09:15'||data==='mi:1:i:09:16')||/^mi:1:i:04:0[234]$/u.test(data)||data==='mi:1:i:13:04'||delegationOwnerEntry(data)||/^mi:1:i:01:(?:03|06|07|08|12)$/u.test(data)||data==='mi:1:i:10:16'||data==='mi:1:i:11:03'||studioOwnerEntry(data))return 'EDITOR';
  if(ownerInlineLinkedReadOnly(data)!==null||/^mi:1:i:01:(?:09|10|11)$/u.test(data)||data==='mi:1:i:03:01'||data==='mi:1:i:02:01'||data==='mi:1:i:02:15'||data==='mi:1:i:02:16'||data==='mi:1:i:02:13'||/^mi:1:i:02:(?:0[5678]|12)$/u.test(data))return 'VIEW';
  return 'SPECIFICATION';
 }
