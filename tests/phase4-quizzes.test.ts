@@ -102,6 +102,39 @@ for(const engine of ['json','sqlite'] as const){
    assert.equal((await f.svc.info(USER,q.id)),null);
   }finally{await f.close();}
  });
+ test('GAME-002 '+engine+': five verified accounts unlock only aggregate scores, with one active round per group',async()=>{
+  const f=await fixture(engine);try{
+   const q=await f.svc.draft(OWNER,GROUP,input);
+   const other=await f.svc.draft(OWNER,GROUP,{...input,title:'تدريب ثان في المنح'});
+   assert.equal(await f.svc.open(OWNER,q.id,1),true);
+   assert.equal(await f.svc.open(OWNER,other.id,1),false);
+   const ids=['200','201','202','203','204'];
+   for(let i=0;i<ids.length;i++)
+    assert.equal((await f.svc.answer(ids[i]!,q.id,i%4)).status,'RECORDED');
+   assert.equal(await f.svc.close(OWNER,q.id,2),true);
+   const result=await f.svc.results(OWNER,q.id);
+   assert.deepEqual(result,{total:5,correct:1,counts:[2,1,1,1]});
+   assert.doesNotMatch(JSON.stringify(result),/memberId|200|201|202|203|204/);
+   assert.equal(await f.svc.open(OWNER,other.id,1),true);
+   assert.equal(await f.svc.results(USER,q.id),null);
+  }finally{await f.close();}
+ });
+ test('GAME-012 '+engine+': group reapproval during Telegram membership lookup fails closed',async()=>{
+  const f=await fixture(engine);try{
+   const q=await f.svc.draft(OWNER,GROUP,input);await f.svc.open(OWNER,q.id,1);
+   let entered!:()=>void,release!:()=>void;
+   const started=new Promise<void>(yes=>{entered=yes;});
+   const hold=new Promise<void>(yes=>{release=yes;});
+   const slow=new Phase4QuizService(f.store,f.policy,f.clock,
+    async()=>{entered();await hold;return 'VERIFIED';});
+   const pending=slow.answer(USER,q.id,1);
+   await started;
+   await f.policy.revokeChat(OWNER,GROUP);
+   release();
+   assert.equal((await pending).status,'STALE');
+   assert.equal((await f.store.snapshot()).phase4Quizzes?.answers.length,0);
+  }finally{await f.close();}
+ });
  test('GAME-011 '+engine+': expiration and retention remove identifiers and obsolete quiz evidence',async()=>{
   const f=await fixture(engine);try{
    const q=await f.svc.draft(OWNER,GROUP,input);await f.svc.open(OWNER,q.id,1);
