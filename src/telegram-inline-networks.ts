@@ -478,7 +478,7 @@ export class OwnerNetworkEditor{
     return ui('<b>✅ أوقفت متابعة السياسة محليًا</b>\n'+
      'المجموعة: '+link.targetChatId+'\nبقية المجموعات تستمر باستقلالية.\n'+
      'لم تُحذف سياسة ولا تُنفذ عقوبة Telegram.',
-     [[btn('⏸️ إدارة المتابعة','nw:1:f:'+n.id+':0)],
+     [[btn('⏸️ إدارة المتابعة','nw:1:f:'+n.id+':0')],
       [btn('🌐 بطاقة الشبكة','nw:1:d:'+n.id)]]);
    }
    if(receipt.action.startsWith(PREFIX+'policy-follow:')){
