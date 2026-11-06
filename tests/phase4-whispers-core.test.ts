@@ -59,7 +59,10 @@ for(const engine of ['json','sqlite'] as const){
    const results=await Promise.all(ids.map(id=>f.service.reserve(id,d.id)));
    assert.equal(results.filter(x=>x.status==='HELD').length,3);
    assert.equal(results.filter(x=>x.status==='FULL').length,27);
-   const repeats=await Promise.all(Array.from({length:10},()=>f.service.reserve(USER,d.id)));
+   const firstWinner=results.findIndex(x=>x.status==='HELD');
+   assert.ok(firstWinner>=0);
+   const repeats=await Promise.all(Array.from({length:10},()=>
+    f.service.reserve(ids[firstWinner]!,d.id)));
    assert.ok(repeats.every(x=>x.status==='ALREADY_HELD'));
    const s=await f.store.snapshot();
    assert.equal(s.phase4Whispers?.reservations.length,3);
