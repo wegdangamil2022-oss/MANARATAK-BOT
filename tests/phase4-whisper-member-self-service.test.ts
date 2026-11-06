@@ -75,7 +75,7 @@ for(const engine of ['json','sqlite'] as const){
    await f.service.consent(USER,GROUP,true);
    const result=await whisperMemberScreen(f.service,USER,'/whisperseat '+d.id);
    assert.ok(result);
-   assert.doesNotMatch(result.text,/PRIVATE SECRET|<tag>|\\/start|\/whisperseat/);
+   assert.doesNotMatch(result.text,/PRIVATE SECRET|<tag>|\/start|\/whisperseat/);
    assert.match(result.text,/حجز|مقعد/);
    assert.equal((await f.store.snapshot()).phase4Whispers?.reservations.length,1);
    const again=await whisperMemberScreen(f.service,USER,'/whisperseat '+d.id);
