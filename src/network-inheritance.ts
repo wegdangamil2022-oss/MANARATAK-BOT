@@ -2,6 +2,7 @@ import {createHash,randomBytes} from 'node:crypto';
 import type {BotState,Chat} from './store.js';
 import type {Policy} from './policy.js';
 import type {GroupNetwork} from './group-network-model.js';
+import {networkEmergencyStopped} from './network-emergency-stop.js';
 import {isValidProtectionPolicy,isValidGroupProtectionRecord,
  type ProtectionPolicy,type GroupProtectionRecord} from './protection-rules.js';
 import {validNetworkInheritanceLink,validNetworkInheritanceLinks,
@@ -34,7 +35,8 @@ export function prepareNetworkInheritance(s:BotState,policy:Policy,actor:string,
    !templateAllowed(targetPolicy)||targetPolicy.chatId!==targetId||
    !Number.isSafeInteger(sourceRevision)||sourceRevision<1||
    (s.networkInheritance??[]).length>=500||
-   !validNetworkInheritanceLinks(s.networkInheritance??[]))return null;
+   !validNetworkInheritanceLinks(s.networkInheritance??[])||
+   networkEmergencyStopped(s,network.id))return null;
  const source=approvedMember(s,policy,actor,now,network,sourceId),
   target=approvedMember(s,policy,actor,now,network,targetId);
  const linked=(s.networkInheritance??[]).filter(x=>x.kind===kind);
@@ -85,8 +87,9 @@ export function synchronizeNetworkInheritance(s:BotState,policy:Policy,actor:str
   x.sourceChatId===sourceId&&x.status==='ACTIVE');
  for(const link of links){
   let reason:NetworkInheritancePauseReason|null=null;
+  if(networkEmergencyStopped(s,link.networkId))reason='NETWORK_EMERGENCY';
   const candidates=(s.groupNetworks??[]).filter(n=>n.id===link.networkId),n=candidates[0];
-  if(!validClock(now)||!policy.isOwner(actor))reason='OWNER_REQUIRED';
+  if(!reason&&(!validClock(now)||!policy.isOwner(actor)))reason='OWNER_REQUIRED';
   else if(candidates.length!==1||!n||n.revision!==link.networkRevision)reason='NETWORK_STALE';
   const from=n&&!reason?approvedMember(s,policy,actor,now,n,link.sourceChatId):null;
   const to=n&&!reason?approvedMember(s,policy,actor,now,n,link.targetChatId):null;
