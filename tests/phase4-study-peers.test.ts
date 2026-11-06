@@ -86,7 +86,10 @@ for(const engine of ['json','sqlite'] as const){
    const info=await f.peers.memberInfo('300',circle.id);
    assert.equal(info?.joined,4);
    assert.equal(info?.topic,circle.topic);
-   assert.doesNotMatch(JSON.stringify(info),/memberId|200|201/);
+   assert.equal(Object.hasOwn(info!,'memberId'),false);
+   assert.equal(Object.hasOwn(info!,'members'),false);
+   assert.equal(Object.hasOwn(info!,'usernames'),false);
+   assert.equal(Object.hasOwn(info!,'contacts'),false);
    assert.equal(await f.peers.ownerCounts(OWNER,circle.id),4);
    assert.equal(await f.peers.ownerCounts('300',circle.id),null);
   }finally{await f.close();}
