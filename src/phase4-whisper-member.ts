@@ -27,8 +27,6 @@ export async function whisperMemberScreen(
 ):Promise<WhisperMemberScreen|null>{
  const request=parseWhisperMemberCommand(text);
  if(!request)return null;
- const fixed='<text>غير مستخدم</text>';
- void fixed;
  try{
   if(request.kind==='ON'||request.kind==='OFF'){
    const ok=await service.consent(actor,request.chatId,request.kind==='ON');
