@@ -4,13 +4,14 @@ import {Phase4DiscussionService} from './phase4-discussions.js';
  * This parser never treats the session/question ID as an access token. */
 export type DiscussionMemberCommand=
  |{kind:'ASK';sessionId:string;text:string}
- |{kind:'WITHDRAW'|'STATUS';questionId:string};
+ |{kind:'WITHDRAW'|'STATUS'|'ANSWER';questionId:string};
 export function parseDiscussionMemberCommand(value:string):DiscussionMemberCommand|null{
  if(typeof value!=='string'||value.length>530)return null;
  const ask=/^\/discussask ([a-f0-9]{24}) ([^\r\n]{4,400})$/u.exec(value);
  if(ask)return {kind:'ASK',sessionId:ask[1]!,text:ask[2]!};
- const other=/^\/discuss(withdraw|status) ([a-f0-9]{24})$/u.exec(value);
- if(other)return {kind:other[1]==='withdraw'?'WITHDRAW':'STATUS',questionId:other[2]!};
+ const other=/^\/discuss(withdraw|status|answer) ([a-f0-9]{24})$/u.exec(value);
+ if(other)return {kind:other[1]==='withdraw'?'WITHDRAW':
+  other[1]==='answer'?'ANSWER':'STATUS',questionId:other[2]!};
  return null;
 }
 export interface DiscussionMemberScreen{readonly text:string;}
@@ -43,6 +44,15 @@ export async function discussionMemberScreen(
    return {text:removed?
     '✅ تم سحب سؤالك وحذف نصه من السجل النشط. لا يمكن استرداد ما ظهر سابقًا في معاينة.':
     '🔒 تعذّر سحب هذا السؤال أو لم يعد لديك سؤال نشط بهذا الرقم.'};
+  }
+  if(cmd.kind==='ANSWER'){
+   const verified=await service.myApprovedAnswer(actor,cmd.questionId);
+   const escape=(x:string)=>x.replace(/&/gu,'&amp;').replace(/</gu,'&lt;')
+    .replace(/>/gu,'&gt;').replace(/"/gu,'&quot;').replace(/'/gu,'&#39;');
+   return {text:verified?
+    '📚 إجابة معتمدة من الأسئلة الشائعة:\n'+escape(verified.answer)+
+    '\nالمصدر المعتمد: <code>'+escape(verified.sourceId)+'</code>':
+    '🔒 لا توجد إجابة موثقة سارية لهذا السؤال أو لم تعد متاحة لهذا الحساب.'};
   }
   const status=await service.myQuestion(actor,cmd.questionId);
   const labels={
