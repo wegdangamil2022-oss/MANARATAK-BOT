@@ -39,7 +39,7 @@ export class TelegramGroupCleanupAuditSender{
   try{
    const response=await this.request('https://api.telegram.org/bot'+this.token+'/sendMessage',{
     method:'POST',headers:{'content-type':'application/json'},
-    body:JSON.stringify({chat_id:batch.room,text,link_preview_options:{is_disabled:true}}),
+    body:JSON.stringify({chat_id:batch.room,text,protect_content:true,link_preview_options:{is_disabled:true}}),
     redirect:'error',signal:AbortSignal.timeout(8000)});
    const raw=await response.text();if(raw.length>16384)return 'UNKNOWN_OUTCOME';
    const data:unknown=JSON.parse(raw);if(!obj(data))return 'UNKNOWN_OUTCOME';
@@ -77,6 +77,7 @@ export class GroupCleanupAudit{
    s.chats.filter(c=>c.id===chat),s.grants.filter(g=>g.chatId===chat),
    s.privateFeatures,s.privateSettingsRevision??null,target]);
  }
+ ready(s:BotState,chat:string):boolean{return !!this.target(s,chat,this.clock());}
  epoch(s:BotState,chat:string):string{
   const now=this.clock();
   return digest([this.stamp(s,chat,now),s.audit.filter(a=>a.updateKey===POLICY+chat)]);
