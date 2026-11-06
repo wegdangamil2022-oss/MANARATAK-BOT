@@ -8,11 +8,16 @@ import {eligibleNetworkServiceTargets,applyNetworkSelectedServiceDisable,
 
 /** NETWORK-004: owner-private, network-scoped, restrictive local group-service
  * controls. Never dispatch Telegram API calls, sanctions, grants or messages. */
-const PREFIX='owner-network-service:',TTL=120_000,SIZE=8;
+const PREFIX='owner-network-service:',TTL=120_000,SESSION_TTL=600_000,SIZE=8;
 const net='([a-f0-9]{12})',page='(0|[1-9][0-9]{0,2})',mode='([am])';
 const home=new RegExp('^nw:1:sh:'+net+'$','u');
 const listing=new RegExp('^nw:1:sl:'+net+':'+mode+':'+page+'$','u');
 const toggle=new RegExp('^nw:1:st:'+net+':'+mode+':'+page+':([a-f0-9]{2}):([0-7]):([a-f0-9]{12})$','u');
+const sessionStart=new RegExp('^nw:1:qx:'+net+':'+mode+'$','u');
+const sessionMove=/^nw:1:qp:([A-Za-z0-9_-]{24}):(0|[1-9][0-9]{0,2}):(0|[1-9][0-9]{0,2})$/u;
+const sessionToggle=/^nw:1:qt:([A-Za-z0-9_-]{24}):(0|[1-9][0-9]{0,2}):([0-7])$/u;
+const sessionPreview=/^nw:1:qv:([A-Za-z0-9_-]{24}):(0|[1-9][0-9]{0,2})$/u;
+const sessionCancel=/^nw:1:qk:([A-Za-z0-9_-]{24}):(0|[1-9][0-9]{0,2})$/u;
 const preview=new RegExp('^nw:1:sv:'+net+':'+mode+':'+page+':([a-f0-9]{2}):([a-f0-9]{12})$','u');
 const confirm=/^nw:1:sc:([A-Za-z0-9_-]{24})$/u;
 const cancel=/^nw:1:sk:([A-Za-z0-9_-]{24})$/u;
@@ -30,7 +35,8 @@ const escape=(v:string)=>v.replace(/&/gu,'&amp;').replace(/</gu,'&lt;')
 const goodTime=(t:number)=>Number.isSafeInteger(t)&&t>=0&&t<=8_640_000_000_000_000-TTL;
 export function validOwnerNetworkBulkServiceRoute(value:unknown):boolean{
  return typeof value==='string'&&Buffer.byteLength(value,'utf8')<=64&&
-  [home,listing,toggle,preview,confirm,cancel,history,detail].some(r=>r.test(value));
+  [home,listing,toggle,preview,confirm,cancel,history,detail,
+   sessionStart,sessionMove,sessionToggle,sessionPreview,sessionCancel].some(r=>r.test(value));
 }
 export class OwnerNetworkBulkServiceEditor {
  constructor(private readonly store:BotStore,private readonly policy:Policy,
@@ -59,11 +65,152 @@ export class OwnerNetworkBulkServiceEditor {
    (stopped?'⛔ الشبكة موقوفة طارئًا؛ لن تُنشأ معاينة إجراء إضافي.\n':'')+
    'اختر إيقاف المساعد الذكي أو إيقاف المراقبة محليًا، ثم المجموعات المستهدفة، ثم عاين التأثير قبل التأكيد.\n'+
    'لا حظر أو كتم أو تغيير أذونات Telegram.',[
-    [btn('🤖 إيقاف المساعد للمجموعات','nw:1:sl:'+id+':a:0')],
-    [btn('🛡️ إيقاف المراقبة للمجموعات','nw:1:sl:'+id+':m:0')],
+    [btn('🤖 إيقاف المساعد للمجموعات','nw:1:qx:'+id+':a')],
+    [btn('🛡️ إيقاف المراقبة للمجموعات','nw:1:qx:'+id+':m')],
     [btn('🕘 سجل إيقاف خدمات الشبكة','nw:1:sa:'+id+':0')],
     [btn('↩️ بطاقة الشبكة','nw:1:d:'+id)]
    ]);
+ }
+ /** NETWORK-004 selection sessions are private, owner-bound, expiring
+  * callback records. Versions prevent stale Telegram keyboards from
+  * changing the target list. No session ever authorizes a service change. */
+ private readSession(s:BotState,actor:string,now:number,nonce:string):
+  {record:BotState['callbacks'][number];id:string;m:Mode;ids:string[];
+   version:number;page:number;eligible:NetworkServiceControlImpact[]}|null{
+  if(!this.allowed(s,actor,now)||!goodTime(now)||
+   now>8_640_000_000_000_000-SESSION_TTL||
+   !/^[A-Za-z0-9_-]{24}$/u.test(nonce))return null;
+  const rows=s.callbacks.filter(c=>c.ref==='b_'+nonce),record=rows[0];
+  if(rows.length!==1||!record||record.actorId!==actor||
+   record.chatId!=='private'||record.policyVersion!==0||
+   record.oneShot!==false||record.used!==false||record.revoked!==false||
+   !Number.isSafeInteger(record.expiresAt)||record.expiresAt<=now||
+   record.expiresAt>now+SESSION_TTL||
+   !record.action.startsWith(PREFIX+'select:'))return null;
+  let data:unknown;
+  try{data=JSON.parse(record.action.slice((PREFIX+'select:').length));}catch{return null;}
+  if(!Array.isArray(data)||data.length!==6||
+   typeof data[0]!=='string'||!/^[a-f0-9]{12}$/u.test(data[0])||
+   !['a','m'].includes(String(data[1]))||
+   typeof data[2]!=='string'||!/^[a-f0-9]{64}$/u.test(data[2])||
+   !Array.isArray(data[3])||data[3].length>SIZE||
+   data[3].some((id:unknown)=>typeof id!=='string'||
+    !/^-[1-9][0-9]{0,15}$/u.test(id)||!Number.isSafeInteger(Number(id)))||
+   new Set(data[3]).size!==data[3].length||
+   !Number.isSafeInteger(data[4])||data[4]<0||data[4]>999||
+   !Number.isSafeInteger(data[5])||data[5]<0||data[5]>999)return null;
+  const [id,m,proof,ids,version,page]=data as
+   [string,Mode,string,string[],number,number];
+  if(this.targetProof(s,id,m)!==proof)return null;
+  const eligible=this.eligible(s,actor,now,id,m);
+  if(!eligible?.length||page>=Math.ceil(eligible.length/SIZE)||
+   ids.some(chatId=>!eligible.some(x=>x.chatId===chatId)))return null;
+  return {record,id,m,ids,version,page,eligible};
+ }
+ private sessionPage(s:BotState,actor:string,now:number,nonce:string,
+  expectedVersion?:number,capHit=false):OwnerInlineScreen|null{
+  const selected=this.readSession(s,actor,now,nonce);
+  if(!selected||(expectedVersion!==undefined&&selected.version!==expectedVersion))return null;
+  const pages=Math.ceil(selected.eligible.length/SIZE);
+  const visible=selected.eligible.slice(selected.page*SIZE,(selected.page+1)*SIZE);
+  const rows=visible.map((item,i)=>[
+   btn((selected.ids.includes(item.chatId)?'✅ ':'▫️ ')+item.chatId,
+    'nw:1:qt:'+nonce+':'+selected.version+':'+i)
+  ]);
+  if(selected.ids.length)rows.push([btn('🔎 معاينة '+selected.ids.length+' مجموعة مختارة',
+   'nw:1:qv:'+nonce+':'+selected.version)]);
+  const nav:{text:string;callback_data:string}[]=[];
+  if(selected.page)nav.push(btn('⬅️ السابق','nw:1:qp:'+nonce+':'+
+   selected.version+':'+(selected.page-1)));
+  if(selected.page+1<pages)nav.push(btn('➡️ التالي','nw:1:qp:'+nonce+':'+
+   selected.version+':'+(selected.page+1)));
+  if(nav.length)rows.push(nav);
+  rows.push([btn('✖ إلغاء الاختيار','nw:1:qk:'+nonce+':'+selected.version)]);
+  rows.push([btn('↩️ إيقاف خدمات الشبكة','nw:1:sh:'+selected.id)]);
+  return ui('<b>👥 اختر مجموعات الشبكة من صفحات متعددة</b>\n'+
+   'الإجراء: '+label(selected.m)+'\nالمختارة: '+selected.ids.length+' من '+SIZE+
+   ' · صفحة '+(selected.page+1)+'/'+pages+'\n'+
+   (capHit?'⚠️ وصلت إلى الحد الأقصى (8 مجموعات). ألغِ اختيارًا لتحديد أخرى.\n':'')+
+   'اختياراتك محفوظة عند التنقل بين الصفحات. لا تغيير في السياسات أو Telegram قبل التأكيد.',rows);
+ }
+ private async startSession(actor:string,networkId:string,m:Mode):Promise<OwnerInlineScreen|null>{
+  return this.store.transaction(s=>{
+   const now=this.clock();
+   if(!this.allowed(s,actor,now)||now>8_640_000_000_000_000-SESSION_TTL||
+    !this.eligible(s,actor,now,networkId,m)?.length||
+    s.callbacks.filter(c=>c.actorId===actor&&c.action.startsWith(PREFIX)&&
+     !c.used&&!c.revoked&&c.expiresAt>now).length>=100)return null;
+   const ref='b_'+randomBytes(18).toString('base64url');
+   if(s.callbacks.some(c=>c.ref===ref))return null;
+   // One active owner selection at a time. A fresh mode or network
+   // invalidates all unfinished service-control selection sessions.
+   for(const c of s.callbacks)
+    if(c.actorId===actor&&c.chatId==='private'&&
+     c.action.startsWith(PREFIX+'select:')&&!c.used&&!c.revoked)c.revoked=true;
+   s.callbacks.push({ref,action:PREFIX+'select:'+JSON.stringify([
+    networkId,m,this.targetProof(s,networkId,m),[],0,0]),
+    actorId:actor,chatId:'private',policyVersion:0,oneShot:false,
+    used:false,revoked:false,expiresAt:now+SESSION_TTL});
+   return this.sessionPage(s,actor,now,ref.slice(2),0);
+  });
+ }
+ private async updateSession(actor:string,nonce:string,revision:number,
+  action:'MOVE'|'TOGGLE'|'PREVIEW'|'CANCEL',arg?:number):Promise<OwnerInlineScreen|null>{
+  return this.store.transaction(s=>{
+   const now=this.clock(),session=this.readSession(s,actor,now,nonce);
+   if(!session||session.version!==revision)return null;
+   if(action==='CANCEL'){
+    session.record.revoked=true;
+    return ui('<b>✖ أُلغي اختيار المجموعات</b>\nلم تتغير خدمات أو سياسات المجموعات.',[
+     [btn('↩️ إيقاف خدمات الشبكة','nw:1:sh:'+session.id)]
+    ]);
+   }
+   if(action==='PREVIEW'){
+    const chosen=session.eligible.filter(x=>session.ids.includes(x.chatId));
+    if(!chosen.length||chosen.length!==session.ids.length)return null;
+    const networks=(s.groupNetworks??[]).filter(n=>n.id===session.id),n=networks[0];
+    if(networks.length!==1||!n)return null;
+    const ref='c_'+randomBytes(18).toString('base64url');
+    if(s.callbacks.some(c=>c.ref===ref))return null;
+    const ids=chosen.map(x=>x.chatId);
+    s.callbacks.push({ref,action:PREFIX+'disable:'+JSON.stringify([
+     session.id,n.revision,session.m,999,ids,this.targetProof(s,session.id,session.m)]),
+     actorId:actor,chatId:'private',policyVersion:0,oneShot:true,
+     used:false,revoked:false,expiresAt:now+TTL});
+    session.record.revoked=true;
+    return ui('<b>🔎 معاينة '+label(session.m)+' للمجموعات المختارة</b>\n'+
+     'الشبكة: '+escape(n.name)+'\nالمجموعات المختارة: '+ids.length+'\n'+
+     chosen.map(x=>'• <code>'+x.chatId+'</code>: '+x.before+
+      ' ← OFF؛ متابعات ستتوقف: '+x.linkedPolicies).join('\n')+'\n'+
+     (session.m==='a'?'تعطيل المساعد يرفع إصدار المجموعة وقد يتطلب مراجعة ربطها.\n':
+      'تعطيل المراقبة يحفظ القواعد والاستثناءات ويوقف الروابط المرتبطة.\n')+
+     'لا تغيير في صلاحيات Telegram ولا كتم أو حظر. التأكيد صالح لدقيقتين ولمرة واحدة.',[
+      [btn('✅ تأكيد '+label(session.m),'nw:1:sc:'+ref.slice(2))],
+      [btn('✖ إلغاء المعاينة','nw:1:sk:'+ref.slice(2))]
+     ]);
+   }
+   if(session.version>=999)return null;
+   const pages=Math.ceil(session.eligible.length/SIZE);
+   if(action==='MOVE'){
+    if(arg===undefined||!Number.isSafeInteger(arg)||arg<0||arg>=pages||
+     Math.abs(arg-session.page)!==1)return null;
+    session.page=arg;
+   }else if(action==='TOGGLE'){
+    const visible=session.eligible.slice(session.page*SIZE,(session.page+1)*SIZE);
+    if(arg===undefined||!Number.isSafeInteger(arg)||arg<0||arg>=visible.length)return null;
+    const chatId=visible[arg]!.chatId;
+    if(session.ids.includes(chatId))session.ids=session.ids.filter(id=>id!==chatId);
+    else{
+     if(session.ids.length>=SIZE)return this.sessionPage(s,actor,now,nonce,revision,true);
+     session.ids.push(chatId);
+    }
+   }else return null;
+   session.version++;
+   session.record.action=PREFIX+'select:'+JSON.stringify([
+    session.id,session.m,this.targetProof(s,session.id,session.m),
+    session.ids,session.version,session.page]);
+   return this.sessionPage(s,actor,now,nonce,session.version);
+  });
  }
  private list(s:BotState,actor:string,now:number,id:string,m:Mode,p:number,
   mask:number,proof?:string):OwnerInlineScreen|null{
@@ -158,7 +305,8 @@ export class OwnerNetworkBulkServiceEditor {
    const networks=(s.groupNetworks??[]).filter(n=>n.id===networkId);
    if(networks.length!==1||networks[0]!.revision!==revision||
     this.targetProof(s,networkId,m)!==proof)return null;
-   const eligible=this.eligible(s,actor,now,networkId,m),visible=eligible?.slice(p*SIZE,(p+1)*SIZE);
+   const eligible=this.eligible(s,actor,now,networkId,m),
+    visible=p===999?eligible:eligible?.slice(p*SIZE,(p+1)*SIZE);
    if(!visible||!ids.every(id=>visible.some(row=>row.chatId===id))||
     JSON.stringify(visible.filter(row=>ids.includes(row.chatId)).map(row=>row.chatId))!==
      JSON.stringify(ids))return null;
@@ -250,6 +398,16 @@ export class OwnerNetworkBulkServiceEditor {
   const k=cancel.exec(data);if(k)return this.receipt(actor,k[1]!,'CANCEL');
   const s=await this.store.snapshot(),now=this.clock();
   if(!this.allowed(s,actor,now))return null;
+  const start=sessionStart.exec(data);
+  if(start)return this.startSession(actor,start[1]!,start[2] as Mode);
+  const move=sessionMove.exec(data);
+  if(move)return this.updateSession(actor,move[1]!,Number(move[2]),'MOVE',Number(move[3]));
+  const change=sessionToggle.exec(data);
+  if(change)return this.updateSession(actor,change[1]!,Number(change[2]),'TOGGLE',Number(change[3]));
+  const view=sessionPreview.exec(data);
+  if(view)return this.updateSession(actor,view[1]!,Number(view[2]),'PREVIEW');
+  const cancelSelection=sessionCancel.exec(data);
+  if(cancelSelection)return this.updateSession(actor,cancelSelection[1]!,Number(cancelSelection[2]),'CANCEL');
   const h=home.exec(data);if(h)return this.screen(s,actor,now,h[1]!);
   const lp=listing.exec(data);
   if(lp)return this.list(s,actor,now,lp[1]!,lp[2] as Mode,Number(lp[3]),0);
