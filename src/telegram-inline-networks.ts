@@ -419,7 +419,7 @@ export class OwnerNetworkEditor{
    if(action==='CANCEL'){
     session.record.revoked=true;
     return ui('<b>✖ أُلغي اختيار مجموعات الشبكة</b>\nلم تتغير المتابعات أو السياسات.',[
-     [btn('⏸️ إدارة المتابعات','nw:1:f:'+session.networkId+':0)]]);
+     [btn('⏸️ إدارة المتابعات','nw:1:f:'+session.networkId+':0')]]);
    }
    const active=this.bulkActive(s,session.networkId);
    const pages=Math.ceil(active.length/SIZE),pageRows=active.slice(
