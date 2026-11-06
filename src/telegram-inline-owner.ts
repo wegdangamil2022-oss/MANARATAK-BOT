@@ -723,7 +723,7 @@ const navigation=(back:string,home=true)=>{
 export function ownerInlineConnection(data:string):'EDITOR'|'VIEW'|'SPECIFICATION'|null{
  const m=/^mi:1:i:([0-9]{2}):([0-9]{2})$/u.exec(data);if(!m||m[0]!==data)return null;
  const section=ownerInlineSections[Number(m[1])-1];if(!section||Number(m[2])<1||Number(m[2])>section.items.length)return null;
- if(data==='mi:1:i:09:06'||/^mi:1:i:04:0[234]$/u.test(data)||data==='mi:1:i:13:04'||delegationOwnerEntry(data)||/^mi:1:i:01:(?:03|06|07|08|12)$/u.test(data)||data==='mi:1:i:10:16'||data==='mi:1:i:11:03'||studioOwnerEntry(data))return 'EDITOR';
+ if((data==='mi:1:i:09:06'||data==='mi:1:i:09:07')||/^mi:1:i:04:0[234]$/u.test(data)||data==='mi:1:i:13:04'||delegationOwnerEntry(data)||/^mi:1:i:01:(?:03|06|07|08|12)$/u.test(data)||data==='mi:1:i:10:16'||data==='mi:1:i:11:03'||studioOwnerEntry(data))return 'EDITOR';
  if(ownerInlineLinkedReadOnly(data)!==null||/^mi:1:i:01:(?:09|10|11)$/u.test(data)||data==='mi:1:i:03:01'||data==='mi:1:i:02:01'||data==='mi:1:i:02:15'||data==='mi:1:i:02:16'||data==='mi:1:i:02:13'||/^mi:1:i:02:(?:0[5678]|12)$/u.test(data))return 'VIEW';
  return 'SPECIFICATION';
 }
