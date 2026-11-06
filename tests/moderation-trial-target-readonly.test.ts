@@ -194,17 +194,25 @@ test('local trial-target CLI rejects unsafe requests without exposing token or i
  const noArgs=spawnSync(process.execPath,[cli],{env,encoding:'utf8'});
  assert.equal(noArgs.status,1);
  assert.equal(noArgs.stdout,'');
- assert.ok(noArgs.stderr.startsWith('MANARATAK_MODERATION_TARGET_INVALID_REQUEST\n'));
+ assert.equal(noArgs.stderr,'MANARATAK_MODERATION_TARGET_INVALID_REQUEST\n');
  const ownerTarget=spawnSync(process.execPath,[cli,'--offline-only',
   '--state','/nonexistent/secret.sqlite','--backup','/nonexistent/backup.sqlite',
   '--safety','/nonexistent/stop.flag','--stale-ms','900000',
   '--trial-chat',CHAT,'--trial-target',OWNER],{env,encoding:'utf8'});
  assert.equal(ownerTarget.status,1);
  assert.equal(ownerTarget.stdout,'');
- assert.ok(ownerTarget.stderr.startsWith('MANARATAK_MODERATION_TARGET_CHECK_FAILED\n'));
+ assert.equal(ownerTarget.stderr,'MANARATAK_MODERATION_TARGET_CHECK_FAILED\n');
  assert.equal((ownerTarget.stderr+noArgs.stderr).includes(TOKEN),false);
  assert.equal((ownerTarget.stderr+noArgs.stderr).includes(CHAT),false);
  assert.equal((ownerTarget.stderr+noArgs.stderr).includes(OWNER),false);
+});
+test('invalid trial-target requests never load SQLite or its runtime diagnostics',()=>{
+ const cli=fileURLToPath(new URL('../src/moderation-trial-target-cli.js',import.meta.url));
+ const preload='data:text/javascript,'+encodeURIComponent("import {registerHooks} from 'node:module';registerHooks({resolve(specifier,context,next){if(specifier==='node:sqlite')throw Error('UNEXPECTED_SQLITE_IMPORT');return next(specifier,context);}});");
+ const env={...process.env,TELEGRAM_BOT_TOKEN:TOKEN,BOT_OWNER_ID:OWNER};
+ for(const args of [[],['--offline-only','--state','/nonexistent/secret.sqlite','--backup','/nonexistent/backup.sqlite','--safety','/nonexistent/stop.flag','--stale-ms','900000','--trial-chat',CHAT,'--trial-target',OWNER]]){
+  const result=spawnSync(process.execPath,['--import',preload,cli,...args],{env,encoding:'utf8'});assert.equal(result.status,1);assert.equal(result.stdout,'');assert.equal(result.stderr,args.length?'MANARATAK_MODERATION_TARGET_CHECK_FAILED\n':'MANARATAK_MODERATION_TARGET_INVALID_REQUEST\n');
+ }
 });
 test('a replaced target reader cannot produce a false PASS during Telegram member reads',async()=>{
  const f=await fixture();try{

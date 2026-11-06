@@ -11,6 +11,9 @@ import {ApprovedAnswerService,ResourceLinkService} from '../src/education-intera
 import {TelegramUpdateApplication} from '../src/telegram-transport.js';
 import {ownerMenuLabels} from '../src/telegram-owner-menu.js';
 import {isValidTelegramReplyKeyboard} from '../src/telegram-menu.js';
+import {summarizeSubscriptionActivity} from '../src/subscription-activity-summary.js';
+import {recordSubscriptionRightsLoss} from '../src/subscription-change-alert.js';
+import {recordChannelUnavailability} from '../src/subscription-channel-unavailable.js';
 const OWNER='100',GROUP='-100123',CHANNEL='-100200';
 const m=(id:number,text:string,actor=100,group=false)=>({
  update_id:id,message:{message_id:id,chat:{id:group?Number(GROUP):actor,type:group?'supergroup':'private'},
@@ -43,6 +46,19 @@ test('B3 owner /admin private dashboard offers an actual safely sized subscripti
  }finally{await f.close();}
 });
 for(const engine of ['json','sqlite'] as const){
+ test('B3 '+engine+': aggregate verification metrics exclude duplicates, unrelated events and old records',async()=>{
+  const f=await setup(engine);try{const now=Date.now();await f.store.transaction(s=>{
+   const add=(id:number,status:string,at=now)=>{const key='b3-webhook:bot-main:'+id;s.audit.push({updateKey:key,decision:'ALLOW',reason:'SUBSCRIPTION_VERIFICATION_VIEW',policyVersion:0,at},{updateKey:key+':subscription-metric',decision:'ALLOW',reason:'SUBSCRIPTION_METRIC_'+status,policyVersion:0,at});};
+   add(101,'MEMBER');add(102,'NOT_MEMBER');add(103,'UNAVAILABLE');add(104,'MEMBER',now-86400001);add(105,'MEMBER');s.audit.push({...s.audit.find(a=>a.updateKey==='b3-webhook:bot-main:105:subscription-metric')!});
+  });const a=summarizeSubscriptionActivity(await f.store.snapshot(),now);assert.equal(a.member,1);assert.equal(a.notMember,1);assert.equal(a.unavailable,1);assert.equal(a.deliveryConfirmed,0);assert.equal(a.deliveryUnresolved,3);
+  const r=await f.app().handle(m(50,ownerMenuLabels.subscriptionHealth));assert.match(r.plan?.text??'',/50\.0٪/);assert.match(r.plan?.text??'',/تعذر التحقق: 1/);assert.match(r.plan?.text??'',/نسبة الوصول غير متاحة/);assert.ok(!(r.plan?.text??'').includes('101'));assert.ok(keys(r).includes(ownerMenuLabels.groups));
+  }finally{await f.close();}
+ });
+ test('B3 '+engine+': owner screen reports confirmed historical rights-loss observations without identifiers',async()=>{
+  const f=await setup(engine);try{const now=Date.now();await f.store.transaction(s=>{recordSubscriptionRightsLoss(s,OWNER,GROUP,CHANNEL,1,f.policy.chatRevision(s,GROUP),now);recordChannelUnavailability(s,now);recordChannelUnavailability(s,now,'MANUAL');recordChannelUnavailability(s,now,'MANUAL');});
+   const r=await f.app().handle(m(51,ownerMenuLabels.subscriptionHealth));assert.match(r.plan?.text??'',/رصد فقد الإشراف: 1/);assert.match(r.plan?.text??'',/تنبيه معلق: 1/);assert.match(r.plan?.text??'',/تعذر فحوص الإشراف الآلية المسجلة: 1/);assert.match(r.plan?.text??'',/تعذر فحوص الإشراف اليدوية المسجلة: 2/);assert.ok(!(r.plan?.text??'').includes(GROUP));assert.ok(!(r.plan?.text??'').includes(CHANNEL));assert.ok(keys(r).includes(ownerMenuLabels.groups));
+  }finally{await f.close();}
+ });
  test('B3 '+engine+': owner report has only aggregate local health and current authorized group/channel counts',async()=>{
   const f=await setup(engine);try{
    const before=await f.store.snapshot();

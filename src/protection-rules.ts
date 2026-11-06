@@ -1,19 +1,22 @@
+import {createHash} from 'node:crypto';
 import {isValidFloodPolicy,type FloodPolicy} from './protection-flood.js';
 /** Local policy evaluation only. No text storage, media download, classifier,
  * database, Telegram gateway or authority to punish belongs in this module. */
 export type ProtectionAction='REVIEW'|'WARN'|'DELETE'|'MUTE';
 export type ProtectionMessageType='TEXT'|'PHOTO'|'VIDEO'|'ANIMATION'|'STICKER'|'DOCUMENT'|'AUDIO'|'VOICE'|'VIDEO_NOTE'|'CONTACT'|'LOCATION'|'POLL';
 type BaseRule={id:string;enabled:boolean;action:ProtectionAction};
-export type ProtectionRule=BaseRule & ({kind:'WORD';value:string;match?:'PARTIAL'}|{kind:'PHRASE';value:string}|{kind:'FRAUD';identity:string;payment:string}|{kind:'LOOKALIKE';domain:string}|{kind:'NAME';name:string;trustedId:string}|{kind:'TYPE';type:ProtectionMessageType}|{kind:'LINK';hosts:'*'|string[]}|{kind:'FORWARD'}|{kind:'LIMIT';metric:'MENTIONS'|'HASHTAGS'|'LENGTH'|'QUOTES';maximum:number});
-export interface ProtectionPolicy{chatId:string;revision:number;mode:'OFF'|'MONITOR'|'ENFORCE';rules:ProtectionRule[];allowedDomains:string[];allowedPhrases:string[];exemptMemberIds:string[];flood?:FloodPolicy;joinRaid?:{enabled:boolean;minimumMembers:number;windowMs:number;lockSeconds:number};night?:{enabled:boolean;startMinute:number;endMinute:number;offsetMinutes:number};raid?:{enabled:boolean;minimumMembers:number;minimumMessages:number;lockSeconds:number};escalation?:{enabled:boolean;afterWarnings:number;windowMs:number};temporaryExemptions?:{memberId:string;createdAt:number;expiresAt:number}[];}
-export interface ProtectionMessage{chatId:string;memberId:string;type:ProtectionMessageType;text?:string;caption?:string;links?:string[];forwarded?:boolean;mentionCount?:number;quoteCount?:number;displayName?:string;}
+export type ProtectionRule=BaseRule & ({kind:'WORD';value:string;match?:'PARTIAL'}|{kind:'PHRASE';value:string}|{kind:'FRAUD';identity:string;payment:string}|{kind:'LOOKALIKE';domain:string}|{kind:'NAME';name:string;trustedId:string}|{kind:'USERNAME';username:string;trustedId:string}|{kind:'TYPE';type:ProtectionMessageType}|{kind:'LINK';hosts:'*'|string[]}|{kind:'FORWARD'}|{kind:'HIDDEN'}|{kind:'PHONE'}|{kind:'LIMIT';metric:'MENTIONS'|'HASHTAGS'|'LENGTH'|'QUOTES';maximum:number});
+export interface ProtectionPolicy{chatId:string;revision:number;mode:'OFF'|'MONITOR'|'ENFORCE';rules:ProtectionRule[];allowedDomains:string[];allowedPhrases:string[];exemptMemberIds:string[];flood?:FloodPolicy;joinRaid?:{enabled:boolean;minimumMembers:number;windowMs:number;lockSeconds:number};night?:{enabled:boolean;startMinute:number;endMinute:number;offsetMinutes:number};raid?:{enabled:boolean;minimumMembers:number;minimumMessages:number;lockSeconds:number};escalation?:{enabled:boolean;afterWarnings:number;windowMs:number;muteSeconds?:number};temporaryExemptions?:{memberId:string;createdAt:number;expiresAt:number}[];ruleExemptions?:{memberId:string;ruleId:string;ruleDigest:string;createdAt:number;expiresAt:number;grantedBy:string}[];}
+export interface ProtectionMessage{chatId:string;memberId:string;type:ProtectionMessageType;text?:string;caption?:string;links?:string[];forwarded?:boolean;mentionCount?:number;quoteCount?:number;phoneEntity?:boolean;vcardFile?:boolean;displayName?:string;username?:string;}
 export interface ProtectionEvaluation{status:'INVALID_POLICY'|'INVALID_MESSAGE'|'OFF'|'EXEMPT'|'CLEAR'|'MATCH';matchedRuleIds:string[];proposedAction:ProtectionAction|null;authorizedToSend:false;}
 const object=(v:unknown):v is Record<string,unknown>=>v!==null&&typeof v==='object'&&!Array.isArray(v);
 const keys=(v:Record<string,unknown>,expected:string[])=>Object.keys(v).length===expected.length&&expected.every(k=>Object.hasOwn(v,k));
 const typeNames=['TEXT','PHOTO','VIDEO','ANIMATION','STICKER','DOCUMENT','AUDIO','VOICE','VIDEO_NOTE','CONTACT','LOCATION','POLL'];
 const actions=['REVIEW','WARN','DELETE','MUTE'];
-const group=(v:unknown):v is string=>typeof v==='string'&&/^-[1-9][0-9]{0,15}$/u.test(v)&&Number.isSafeInteger(Number(v));
-const member=(v:unknown):v is string=>typeof v==='string'&&/^[1-9][0-9]{0,15}$/u.test(v)&&Number.isSafeInteger(Number(v));
+export function protectionRuleFingerprint(rule:ProtectionRule):string{const {enabled:_,action:__,...identity}=rule;return createHash('sha256').update(JSON.stringify(identity)).digest('hex');}
+const group=(v:unknown):v is string=>typeof v==='string'&&/^-[1-9][0-9]{0,15}$/u.exec(v)?.[0]===v&&Number.isSafeInteger(Number(v));
+const member=(v:unknown):v is string=>typeof v==='string'&&/^[1-9][0-9]{0,15}$/u.exec(v)?.[0]===v&&Number.isSafeInteger(Number(v));
+export const validProtectionUsername=(v:unknown):v is string=>typeof v==='string'&&/^[A-Za-z][A-Za-z0-9_]{4,31}$/u.exec(v)?.[0]===v;
 /** Conservative normalization: do not stem Arabic or equate ة with ه. */
 export const normalizeProtectionText=(text:string):string=>text.normalize('NFKC').replace(/[\p{M}\p{Cf}\u0640]/gu,'')
  .replace(/[أإآٱ]/gu,'ا').replace(/ى/gu,'ي').toLowerCase().replace(/[^\p{L}\p{N}]+/gu,' ').trim().replace(/ +/gu,' ');
@@ -39,7 +42,7 @@ function validRaid(v:unknown):boolean{
   Number(v.minimumMembers)>=2&&Number(v.minimumMembers)<=100&&Number(v.minimumMessages)>=Number(v.minimumMembers)&&Number(v.minimumMessages)<=1000&&Number(v.lockSeconds)>=60&&Number(v.lockSeconds)<=600;
 }
 function validEscalation(v:unknown):boolean{
- return object(v)&&keys(v,['enabled','afterWarnings','windowMs'])&&typeof v.enabled==='boolean'&&typeof v.afterWarnings==='number'&&
+ return object(v)&&keys(v,['enabled','afterWarnings','windowMs',...(Object.hasOwn(v,'muteSeconds')?['muteSeconds']:[])])&&(!Object.hasOwn(v,'muteSeconds')||typeof v.muteSeconds==='number'&&Number.isSafeInteger(v.muteSeconds)&&v.muteSeconds>=60&&v.muteSeconds<=86400)&&typeof v.enabled==='boolean'&&typeof v.afterWarnings==='number'&&
   Number.isSafeInteger(v.afterWarnings)&&v.afterWarnings>=1&&v.afterWarnings<=20&&typeof v.windowMs==='number'&&
   Number.isSafeInteger(v.windowMs)&&v.windowMs>=60000&&v.windowMs<=86400000;
 }
@@ -52,15 +55,19 @@ function validTemporaryExemptions(v:unknown):boolean{
   seen.add(e.memberId);return true;
  });
 }
+function validRuleExemptions(v:unknown,rules:unknown):boolean{
+ if(!Array.isArray(v)||v.length>100||!Array.isArray(rules))return false;const seen=new Set<string>();
+ return v.every(e=>{if(!object(e)||!keys(e,['memberId','ruleId','ruleDigest','createdAt','expiresAt','grantedBy'])||!member(e.memberId)||!member(e.grantedBy)||typeof e.ruleId!=='string'||!rules.some(r=>object(r)&&r.id===e.ruleId)||typeof e.ruleDigest!=='string'||/^[a-f0-9]{64}$/u.exec(e.ruleDigest)?.[0]!==e.ruleDigest||!Number.isSafeInteger(e.createdAt)||Number(e.createdAt)<0||!Number.isSafeInteger(e.expiresAt)||Number(e.expiresAt)>8640000000000000||Number(e.expiresAt)<Number(e.createdAt)+60000||Number(e.expiresAt)>Number(e.createdAt)+86400000)return false;const key=JSON.stringify([e.memberId,e.ruleId]);if(seen.has(key))return false;seen.add(key);return true;});
+}
 export function protectionMemberExempt(config:ProtectionPolicy,memberId:string,now:number):boolean{
  return config.exemptMemberIds.includes(memberId)||Boolean(config.temporaryExemptions?.some(e=>e.memberId===memberId&&now>=e.createdAt&&now<e.expiresAt));
 }
 export function isValidProtectionPolicy(v:unknown):v is ProtectionPolicy{
- if(!object(v)||!keys(v,['chatId','revision','mode','rules','allowedDomains','allowedPhrases','exemptMemberIds',...(Object.hasOwn(v,'flood')?['flood']:[]),...(Object.hasOwn(v,'temporaryExemptions')?['temporaryExemptions']:[]),...(Object.hasOwn(v,'escalation')?['escalation']:[]),...(Object.hasOwn(v,'raid')?['raid']:[]),...(Object.hasOwn(v,'night')?['night']:[]),...(Object.hasOwn(v,'joinRaid')?['joinRaid']:[])])||Object.hasOwn(v,'flood')&&!isValidFloodPolicy(v.flood)||!group(v.chatId)||
+ if(!object(v)||!keys(v,['chatId','revision','mode','rules','allowedDomains','allowedPhrases','exemptMemberIds',...(Object.hasOwn(v,'flood')?['flood']:[]),...(Object.hasOwn(v,'temporaryExemptions')?['temporaryExemptions']:[]),...(Object.hasOwn(v,'ruleExemptions')?['ruleExemptions']:[]),...(Object.hasOwn(v,'escalation')?['escalation']:[]),...(Object.hasOwn(v,'raid')?['raid']:[]),...(Object.hasOwn(v,'night')?['night']:[]),...(Object.hasOwn(v,'joinRaid')?['joinRaid']:[])])||Object.hasOwn(v,'flood')&&!isValidFloodPolicy(v.flood)||!group(v.chatId)||
   !Number.isSafeInteger(v.revision)||typeof v.revision!=='number'||v.revision<1||(typeof v.mode!=='string'||!['OFF','MONITOR','ENFORCE'].includes(v.mode))||
   !stringList(v.allowedDomains,host,100)||!stringList(v.allowedPhrases,phrase,100)||!stringList(v.exemptMemberIds,member,100)||
-  Object.hasOwn(v,'joinRaid')&&!validJoinRaid(v.joinRaid)||Object.hasOwn(v,'night')&&!validNight(v.night)||Object.hasOwn(v,'raid')&&(!validRaid(v.raid)||(v.raid as {enabled:boolean}).enabled&&!(v.flood as FloodPolicy|undefined)?.enabled)||Object.hasOwn(v,'escalation')&&!validEscalation(v.escalation)||Object.hasOwn(v,'temporaryExemptions')&&!validTemporaryExemptions(v.temporaryExemptions)||!Array.isArray(v.rules)||v.rules.length>100)return false;
- const seen=new Set<string>(),protectedNames=new Set<string>();
+  Object.hasOwn(v,'joinRaid')&&!validJoinRaid(v.joinRaid)||Object.hasOwn(v,'night')&&!validNight(v.night)||Object.hasOwn(v,'raid')&&(!validRaid(v.raid)||(v.raid as {enabled:boolean}).enabled&&!(v.flood as FloodPolicy|undefined)?.enabled)||Object.hasOwn(v,'escalation')&&!validEscalation(v.escalation)||Object.hasOwn(v,'temporaryExemptions')&&!validTemporaryExemptions(v.temporaryExemptions)||Object.hasOwn(v,'ruleExemptions')&&!validRuleExemptions(v.ruleExemptions,v.rules)||!Array.isArray(v.rules)||v.rules.length>100)return false;
+ const seen=new Set<string>(),protectedNames=new Set<string>(),protectedUsernames=new Set<string>();
  return v.rules.every(r=>{
   if(!object(r)||typeof r.id!=='string'||!/^[A-Za-z0-9][A-Za-z0-9_-]{0,47}$/u.test(r.id)||seen.has(r.id)||
    typeof r.enabled!=='boolean'||(typeof r.action!=='string'||!actions.includes(r.action)))return false;
@@ -74,20 +81,27 @@ export function isValidProtectionPolicy(v:unknown):v is ProtectionPolicy{
    const name=normalizeProtectionText(r.name);if(protectedNames.has(name))return false;
    protectedNames.add(name);return true;
   }
+  if(r.kind==='USERNAME'){
+   if(!keys(r,['id','enabled','action','kind','username','trustedId'])||!validProtectionUsername(r.username)||!member(r.trustedId))return false;
+   const username=r.username.toLowerCase();if(protectedUsernames.has(username))return false;protectedUsernames.add(username);return true;
+  }
   if(r.kind==='LIMIT')return keys(r,['id','enabled','action','kind','metric','maximum'])&&typeof r.metric==='string'&&['MENTIONS','HASHTAGS','LENGTH','QUOTES'].includes(r.metric)&&typeof r.maximum==='number'&&Number.isSafeInteger(r.maximum)&&r.maximum>=1&&r.maximum<=(r.metric==='LENGTH'?4096:100);
-  if(r.kind==='FORWARD')return keys(r,['id','enabled','action','kind']);
+  if(r.kind==='FORWARD'||r.kind==='PHONE'||r.kind==='HIDDEN')return keys(r,['id','enabled','action','kind']);
   if(r.kind==='TYPE')return keys(r,['id','enabled','action','kind','type'])&&typeof r.type==='string'&&typeNames.includes(r.type);
   return r.kind==='LINK'&&keys(r,['id','enabled','action','kind','hosts'])&&
    (r.hosts==='*'||stringList(r.hosts,host,100)&&r.hosts.length>0);
  });
 }
 function validMessage(v:unknown,chatId:string):v is ProtectionMessage{
- if(!object(v)||Object.keys(v).some(k=>!['chatId','memberId','type','text','caption','links','forwarded','mentionCount','quoteCount','displayName'].includes(k))||v.chatId!==chatId||
+ if(!object(v)||Object.keys(v).some(k=>!['chatId','memberId','type','text','caption','links','forwarded','mentionCount','quoteCount','phoneEntity','vcardFile','displayName','username'].includes(k))||v.chatId!==chatId||
   !member(v.memberId)||typeof v.type!=='string'||!typeNames.includes(v.type)||v.text!==undefined&&v.caption!==undefined)return false;
  if(v.quoteCount!==undefined&&(typeof v.quoteCount!=='number'||!Number.isSafeInteger(v.quoteCount)||v.quoteCount<0||v.quoteCount>100))return false;
- if(v.mentionCount!==undefined&&(typeof v.mentionCount!=='number'||!Number.isSafeInteger(v.mentionCount)||v.mentionCount<0||v.mentionCount>100))return false;
+ if(v.mentionCount!==undefined&&(typeof v.mentionCount!=='number'||!Number.isSafeInteger(v.mentionCount)||v.mentionCount<0||v.mentionCount>101))return false;
  if(v.forwarded!==undefined&&typeof v.forwarded!=='boolean')return false;
+ if(v.phoneEntity!==undefined&&typeof v.phoneEntity!=='boolean')return false;
+ if(v.vcardFile!==undefined&&(typeof v.vcardFile!=='boolean'||v.type!=='DOCUMENT'))return false;
  if(v.displayName!==undefined&&(typeof v.displayName!=='string'||v.displayName.length>128||v.displayName.length===0||/[\u0000-\u001f\u007f]/u.test(v.displayName)))return false;
+ if(v.username!==undefined&&!validProtectionUsername(v.username))return false;
  if(v.text!==undefined&&(v.type!=='TEXT'||typeof v.text!=='string'||v.text.length>4096||v.text.includes('\0')))return false;
  if(v.caption!==undefined&&(v.type==='TEXT'||typeof v.caption!=='string'||v.caption.length>4096||v.caption.includes('\0')))return false;
  return v.links===undefined||stringList(v.links,x=>typeof x==='string'&&x.length>=1&&x.length<=2048&&urlHost(x)!==null,100);
@@ -140,16 +154,22 @@ export function evaluateProtectionRules(config:unknown,input:unknown,now:number=
  const hosts=new Set([...extracted,...(input.links??[])].map(urlHost).filter((h):h is string=>h!==null));
  const matches=config.rules.filter(r=>{
   if(!r.enabled)return false;
+  if(config.ruleExemptions?.some(e=>e.memberId===input.memberId&&e.ruleId===r.id&&e.ruleDigest===protectionRuleFingerprint(r)&&now>=e.createdAt&&now<e.expiresAt))return false;
   if(r.kind==='WORD'&&r.match==='PARTIAL')return lexicalBody.includes(normalizeProtectionText(r.value));
   if(r.kind==='WORD'||r.kind==='PHRASE')return contains(lexicalBody,r.value);
   if(r.kind==='FRAUD')return containsSeparate(lexicalBody,r.identity,r.payment);
   if(r.kind==='LOOKALIKE')return [...hosts].some(h=>!config.allowedDomains.includes(h)&&resemblesDomain(h,r.domain));
   if(r.kind==='NAME')return input.memberId!==r.trustedId&&input.displayName!==undefined&&normalizeProtectionText(input.displayName)===normalizeProtectionText(r.name);
+  if(r.kind==='USERNAME')return input.memberId!==r.trustedId&&input.username!==undefined&&(input.username.toLowerCase()===r.username.toLowerCase()||oneEdit(input.username.toLowerCase(),r.username.toLowerCase()));
   if(r.kind==='LIMIT'){
    const count=r.metric==='QUOTES'?(input.quoteCount??0):r.metric==='LENGTH'?Array.from(body).length:r.metric==='MENTIONS'?Math.max(input.mentionCount??0,[...body.matchAll(/(?<![\p{L}\p{N}_])@[A-Za-z][A-Za-z0-9_]{4,31}(?![A-Za-z0-9_])/gu)].length):[...body.matchAll(/(?<![\p{L}\p{N}_])#[\p{L}\p{N}_]+/gu)].length;
    return count>r.maximum;
   }
+  // Match embedded separators only, excluding script joiners and combining marks.
+  // Educational phrase exceptions mask their own tokens, not the entire message.
+  if(r.kind==='HIDDEN')return [...body.matchAll(/[\p{L}\p{N}][\p{L}\p{N}\p{M}\u200b\u2060\ufeff\u202a-\u202e\u2066-\u2069]*[\p{L}\p{N}]/gu)].some(m=>/[\u200b\u2060\ufeff\u202a-\u202e\u2066-\u2069]/u.test(m[0])&&contains(lexicalBody,m[0]));
   if(r.kind==='FORWARD')return input.forwarded===true;
+  if(r.kind==='PHONE')return input.type==='CONTACT'||input.phoneEntity===true||input.vcardFile===true||/(?<![\p{L}\p{N}_])\+(?:[0-9\u0660-\u0669\u06f0-\u06f9][ ()-]*){7,14}[0-9\u0660-\u0669\u06f0-\u06f9](?![\p{L}\p{N}_])/u.test(body)||/(?:^|\r?\n)BEGIN:VCARD\s*\r?\n[\s\S]{0,4000}?(?:^|\r?\n)END:VCARD(?:\s|$)/imu.test(body);
   if(r.kind==='TYPE')return r.type===input.type;
   if(r.kind!=='LINK')return false;
   const targets=r.hosts;

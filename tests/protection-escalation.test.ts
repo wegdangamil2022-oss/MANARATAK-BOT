@@ -16,12 +16,24 @@ const route=(s:OwnerInlineScreen|null,p:string)=>{const b=s?.keyboard.inline_key
 test('escalation schema rejects unsafe windows and unsupported actions',()=>{
  assert.ok(isValidProtectionPolicy(config));for(const escalation of [{enabled:true,afterWarnings:0,windowMs:60000},{enabled:true,afterWarnings:21,windowMs:60000},{enabled:true,afterWarnings:2,windowMs:59999},{enabled:true,afterWarnings:2,windowMs:86400001},{enabled:true,afterWarnings:2,windowMs:60000,action:'BAN'}])assert.equal(isValidProtectionPolicy({...config,escalation}),false);
 });
+test('escalation mute duration is optional, bounded and strictly typed',()=>{
+ assert.equal(isValidProtectionPolicy({...config,escalation:{...config.escalation!,muteSeconds:300}}),true);
+ for(const muteSeconds of [undefined,0,59,86401,60.5,'300'])assert.equal(isValidProtectionPolicy({...config,escalation:{...config.escalation!,muteSeconds}}),false);
+});
 for(const engine of ['json','sqlite'] as const){
  async function fixture(){
   const dir=await mkdtemp(join(tmpdir(),'escalation-')),store=new BotStore(join(dir,'state.'+engine),{engine});let now=100000;
   const policy=new Policy(store,'100',()=>now);await policy.approveChat('100','-100',['moderation']);const gateway=new FakeModerationGateway(),moderation=new ModerationService(store,policy,gateway,()=>now),port=moderationProtectionEnforcer(moderation),service=new GroupProtectionPolicyService(store,policy,()=>now,port);
   return {store,policy,gateway,service,moderation,editor:new TelegramProtectionEditor(store,policy,()=>now,port),time:(v:number)=>{now=v;},close:()=>rm(dir,{recursive:true,force:true})};
  }
+ test(engine+' expired warnings cannot authorize escalation even while their historical active flag is preserved',async()=>{
+  const f=await fixture();try{
+   await f.service.save('100',config,1,0);
+   await f.store.transaction(s=>{s.warnings.push({chatId:'-100',memberId:'300',actorId:'100',reference:'law_v1_p1_m41',at:99000,active:true,expiresAt:100000},{chatId:'-100',memberId:'300',actorId:'100',reference:'law_v1_p1_m42',at:99000,active:true,expiresAt:100000});});
+   await f.service.observeIncomingText('300','-100','spam',[],'b3-webhook:expiry:1');
+   const s=await f.store.snapshot();assert.equal(f.gateway.calls.length,0);assert.equal(s.warnings.length,3);assert.equal(s.warnings[0]!.active,true);assert.equal(s.moderationReasons.length,0);
+  }finally{await f.close();}
+ });
  test(engine+' escalation emits one bounded sanction, deduplicates, respects window, active warnings and exemptions',async()=>{
   const f=await fixture();try{
    await f.service.save('100',config,1,0);const observe=(id:number,member='300')=>f.service.observeIncomingText(member,'-100','spam',[],'b3-webhook:test:'+id);
@@ -41,6 +53,16 @@ for(const engine of ['json','sqlite'] as const){
    const original=f.gateway.isProtected.bind(f.gateway);let changed=false;f.gateway.isProtected=async(c,m)=>{if(!changed){changed=true;if(change==='expiry')f.time(160000);else await f.store.transaction(s=>{s.warnings[0]!.active=false;});}return original(c,m);};
    await f.service.observeIncomingText('300','-100','spam',[],'b3-webhook:test:1');assert.equal(f.gateway.calls.length,0);assert.equal((await f.store.snapshot()).moderationReasons.length,0);
   }finally{await f.close();}}
+ });
+ test(engine+' configured escalation duration reaches one sanction and old two-value edits preserve it',async()=>{
+  const f=await fixture();try{
+   await f.service.save('100',{...config,escalation:{...config.escalation!,muteSeconds:300}},1,0);await f.moderation.issueWarning('100','-100','300','a');await f.moderation.issueWarning('100','-100','300','b');await f.service.observeIncomingText('300','-100','spam',[],'b3-webhook:test:901');assert.equal((await f.store.snapshot()).moderationReasons[0]!.expiresAt,400000);assert.equal(f.gateway.calls.length,1);
+   let g=await f.editor.handle((await f.editor.link('100','-100'))!,'100'),view=await f.editor.handle(route(g,'pr:1:B:'),'100');assert.match(view!.text,/300/u);await f.editor.handle(route(view,'pr:1:C:'),'100');await f.editor.handleText('100','3 120',false);assert.equal((await f.store.snapshot()).protectionPolicies![0]!.policy.escalation!.muteSeconds,300);
+   g=await f.editor.handle((await f.editor.link('100','-100'))!,'100');view=await f.editor.handle(route(g,'pr:1:B:'),'100');await f.editor.handle(route(view,'pr:1:C:'),'100');assert.equal((await f.editor.handleText('100','3 120 59',false))!.reason,'PROTECTION_EDITOR_INPUT_REJECTED');assert.equal((await f.store.snapshot()).protectionPolicies![0]!.policy.escalation!.muteSeconds,300);await f.editor.handleText('100','3 120 600',false);assert.equal((await f.store.snapshot()).protectionPolicies![0]!.policy.escalation!.muteSeconds,600);
+  }finally{await f.close();}
+ });
+ test(engine+' custom escalation cannot activate on an enforcer that does not accept its duration',async()=>{
+  const f=await fixture();try{let called=false;const limited=new GroupProtectionPolicyService(f.store,f.policy,()=>100000,{supports:()=>true,execute:async()=>{called=true;return 'APPLIED';}});assert.equal((await limited.save('100',{...config,escalation:{...config.escalation!,muteSeconds:300}},1,0)).status,'ENFORCEMENT_NOT_CONNECTED');assert.equal(called,false);assert.equal((await f.store.snapshot()).protectionPolicies?.length??0,0);}finally{await f.close();}
  });
  test(engine+' escalation editor starts disabled, validates, cancels and rejects stale toggles',async()=>{
   const f=await fixture();try{

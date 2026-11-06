@@ -1,4 +1,5 @@
 import {createPhase3ModerationRuntime} from './phase3-moderation-runtime.js';
+import {TelegramMessageMetadataCollector} from './telegram-message-metadata.js';
 import {GroupProtectionPolicyService} from './group-protection-policy.js';
 import {startProtectionMaintenance} from './protection-maintenance.js';
 import {createServer,type Server} from 'node:http';
@@ -18,6 +19,25 @@ import {SubscriptionGate} from './subscription.js';
 import {ModerationService,FakeModerationGateway} from './moderation.js';
 import {readTelegramSafetySwitch,createTelegramSafetyGate} from './telegram-safety-switch.js';
 import {ModerationReportNoticeDispatcher} from './moderation-report-notices.js';
+import {NetworkEventAlertDispatcher} from './network-event-alerts.js';
+import {RuleNoticeDispatcher} from './group-rule-notices.js';
+import {SubscriptionChangeAlertDispatcher} from './subscription-change-alert.js';
+import {SubscriptionRightsMonitor} from './subscription-rights-monitor.js';
+import {AdminRoomOncallDispatcher} from './admin-room-oncall.js';
+import {AdminRoomNoticeDispatcher,AdminRoomDailyDispatcher,TelegramAdminRoomNoticeSender} from './admin-room-notices.js';
+import {TelegramBotApiModerationGateway} from './telegram-moderation-gateway.js';
+import {TelegramAdminRoleGateway} from './telegram-admin-role-gateway.js';
+import {TelegramEphemeralTextSender} from './telegram-ephemeral-sender.js';
+import {TelegramTemporaryGroupSender} from './telegram-temporary-group-sender.js';
+import {CaptchaJoinNotices} from './captcha-join-notices.js';
+import {GroupServiceMessageCleanup} from './group-service-message-cleanup.js';
+import {GroupCleanupAudit,TelegramGroupCleanupAuditSender} from './group-cleanup-audit.js';
+import {TelegramPrivateAuditChannelReader} from './telegram-private-audit-channel.js';
+import {GroupAdminCommandCleanup} from './group-admin-command-cleanup.js';
+import {CaptchaEscalationPolicy} from './captcha-escalation-policy.js';
+import {CaptchaService} from './captcha.js';
+import {GroupWelcomeFarewell} from './group-welcome-farewell.js';
+import {TelegramGroupGreetingSender} from './telegram-group-greeting-sender.js';
 
 export interface LiveTelegramConfig{
  ownerId:string;botId:string;botUsername:string;stateFile:string;
@@ -176,20 +196,67 @@ export async function createLiveTelegramServer(config:LiveTelegramConfig,
  // admin in the requested approved group before consulting a student's status.
  const membership=new TelegramBotApiMembershipGateway(check.token,request);
  const phase3=check.phase3ModerationEnabled?await createPhase3ModerationRuntime(store,policy,check.token,request,safetyGate,Date.now,check.phase3TimersEnabled===true):undefined;
+ const messageMetadata=phase3&&check.phase3TimersEnabled===true?new TelegramMessageMetadataCollector(store,policy):undefined;
  // SubscriptionGate.verify uses only read-only membership checks. The existing
  // moderation gateway stays mock-only unless the explicit phase-3 option is selected.
  const subscription=new SubscriptionGate(store,policy,membership,
   phase3?.moderation??new ModerationService(store,policy,new FakeModerationGateway()));
+ const joinNotices=phase3&&check.phase3TimersEnabled===true?new CaptchaJoinNotices(
+  store,policy,new CaptchaService(store,policy,(chat,actor)=>membership.verifyMembership(chat,actor),Date.now),
+  new TelegramTemporaryGroupSender(check.token,request),check.botUsername,Date.now,safetyGate):undefined;
+ const serviceCleanup=phase3&&check.phase3TimersEnabled===true?
+  new GroupServiceMessageCleanup(store,policy,new TelegramTemporaryGroupSender(check.token,request),
+   Date.now,safetyGate,async chat=>{
+    if(!await safetyGate())return 'UNKNOWN';
+    const gateway=new TelegramBotApiModerationGateway(check.token,request,safetyGate);
+    return (await gateway.inspectBotAdminRights(chat)).delete;
+   }):undefined;
+ const adminCommandCleanup=phase3&&check.phase3TimersEnabled===true?
+  new GroupAdminCommandCleanup(store,policy,new TelegramTemporaryGroupSender(check.token,request),
+   Date.now,safetyGate,async chat=>{
+    if(!await safetyGate())return 'UNKNOWN';
+    return (await new TelegramBotApiModerationGateway(check.token,request,safetyGate).inspectBotAdminRights(chat)).delete;
+   }):undefined;
+ const cleanupAudit=serviceCleanup&&adminCommandCleanup&&check.phase3TimersEnabled===true?
+  new GroupCleanupAudit(store,policy,serviceCleanup,adminCommandCleanup,
+   new TelegramBotApiModerationGateway(check.token,request,safetyGate),
+   new TelegramGroupCleanupAuditSender(check.token,request),Date.now,safetyGate,
+   new TelegramPrivateAuditChannelReader(check.token,request)):undefined;
+ const captchaEscalation=phase3?new CaptchaEscalationPolicy(store,policy,
+  new CaptchaService(store,policy,(chat,actor)=>membership.verifyMembership(chat,actor),Date.now),Date.now):undefined;
+ const welcomeFarewell=phase3?new GroupWelcomeFarewell(store,policy,
+  new TelegramGroupGreetingSender(check.token,request),Date.now,safetyGate,
+  async chat=>{
+   if(!await safetyGate())return 'UNKNOWN';
+   const rights=await new TelegramBotApiModerationGateway(check.token,request,safetyGate).inspectBotAdminRights(chat);
+   return rights.delete;
+  }):undefined;
  const app=new TelegramUpdateApplication({store,policy,education,admin,faq,links,
   botId:check.botId,botUsername:check.botUsername,
-  ...(phase3?{moderation:phase3.moderation,groupPermissions:phase3.groupPermissions,protectionEnforcer:phase3.protectionEnforcer}:{}),
+  ...(messageMetadata?{messageMetadata}:{}),
+  ...(joinNotices?{joinNotices}:{}),
+  ...(serviceCleanup?{serviceCleanup}:{}),
+  ...(adminCommandCleanup?{adminCommandCleanup}:{}),
+  ...(cleanupAudit?{cleanupAudit}:{}),
+  ...(captchaEscalation?{captchaEscalation}:{}),
+  ...(welcomeFarewell?{welcomeFarewell}:{}),
+  ...(phase3?{adminRoles:new TelegramAdminRoleGateway(check.token,request,safetyGate),moderation:phase3.moderation,purge:phase3.purge,groupPermissions:phase3.groupPermissions,protectionEnforcer:phase3.protectionEnforcer,moderationRights:{gateway:new TelegramBotApiModerationGateway(check.token,request,safetyGate),safety:safetyGate},ephemeralVerification:true}:{}),
   membership:(chatId,actorId)=>membership.verifyMembership(chatId,actorId),subscription,
   documentDownload:new TelegramBotApiDocumentDownloader(check.token,request,safetyGate),
   moderationSafetyFile:check.safetySwitchFile,ownerMenuMode:'inline',studentMenuMode:'inline'});
  const dispatcher=new TelegramReplyDispatcher(store,policy,
   new TelegramBotApiTextSender(check.token,request),Date.now,safetyGate,subscription,
-  (chatId,actorId)=>membership.verifyMembership(chatId,actorId));
+  (chatId,actorId)=>membership.verifyMembership(chatId,actorId),phase3?new TelegramEphemeralTextSender(check.token,request,safetyGate):undefined,!!phase3&&check.phase3TimersEnabled===true,
+  phase3&&check.phase3TimersEnabled===true?{sender:new TelegramTemporaryGroupSender(check.token,request),botUsername:check.botUsername}:undefined);
  const notices=phase3?new ModerationReportNoticeDispatcher(store,policy,new TelegramBotApiTextSender(check.token,request),Date.now,safetyGate):undefined;
+ const networkAlerts=phase3&&check.phase3TimersEnabled===true?
+  new NetworkEventAlertDispatcher(store,policy,new TelegramBotApiTextSender(check.token,request),Date.now,safetyGate):undefined;
+ const ruleNotices=phase3&&check.phase3TimersEnabled===true?new RuleNoticeDispatcher(store,policy,phase3.moderation,new TelegramBotApiTextSender(check.token,request),Date.now,safetyGate):undefined;
+ const subscriptionChangeAlerts=phase3&&check.phase3TimersEnabled===true?new SubscriptionChangeAlertDispatcher(store,policy,new TelegramBotApiTextSender(check.token,request),Date.now,safetyGate):undefined;
+ const subscriptionRightsMonitor=phase3&&check.phase3TimersEnabled===true?new SubscriptionRightsMonitor(store,policy,membership,Date.now,safetyGate):undefined;
+ const oncall=phase3&&check.phase3TimersEnabled===true?new AdminRoomOncallDispatcher(store,policy,new TelegramBotApiTextSender(check.token,request),Date.now,safetyGate):undefined;
+ const roomNotices=phase3&&check.phase3TimersEnabled===true?new AdminRoomNoticeDispatcher(store,policy,new TelegramBotApiModerationGateway(check.token,request,safetyGate),new TelegramAdminRoomNoticeSender(check.token,request),Date.now,safetyGate):undefined;
+ const roomDaily=phase3&&check.phase3TimersEnabled===true?new AdminRoomDailyDispatcher(store,policy,new TelegramBotApiModerationGateway(check.token,request,safetyGate),new TelegramAdminRoomNoticeSender(check.token,request),Date.now,safetyGate):undefined;
  const server=createServer(telegramWebhookListener(app,check.webhookSecret,dispatcher,{},safetyGate,
   new TelegramBotApiCallbackAcker(check.token,request)));
  server.once('listening',()=>{
@@ -197,8 +264,20 @@ export async function createLiveTelegramServer(config:LiveTelegramConfig,
   const cleanup=startProtectionMaintenance(async()=>{
    const result=await protection.cleanupFloodWindows();
    if(phase3)await phase3.tick(check.phase3TimersEnabled===true);
-   if(phase3&&check.phase3TimersEnabled===true){const verified=await subscription.tickAutomatic(true,safetyGate);if(verified.status==='INVALID')throw Error('SUBSCRIPTION_MAINTENANCE_INVALID');}
+   if(phase3&&check.phase3TimersEnabled===true){await messageMetadata!.prune();const verified=await subscription.tickAutomatic(true,safetyGate);if(verified.status==='INVALID')throw Error('SUBSCRIPTION_MAINTENANCE_INVALID');const pending=await dispatcher.drainVerificationFallbacks();if(pending.status==='INVALID')throw Error('SUBSCRIPTION_FALLBACK_INVALID');const cleaned=await dispatcher.cleanupVerificationFallbacks();if(cleaned.status==='INVALID')throw Error('SUBSCRIPTION_CLEANUP_INVALID');}
+   if(joinNotices){await joinNotices.drain();await joinNotices.cleanup();}
+   if(serviceCleanup)await serviceCleanup.cleanup();
+   if(adminCommandCleanup)await adminCommandCleanup.cleanup();
+   if(cleanupAudit)await cleanupAudit.drain();
+   if(welcomeFarewell&&check.phase3TimersEnabled===true){await welcomeFarewell.drain();await welcomeFarewell.cleanup();}
    if(notices)await notices.drain();
+   if(networkAlerts)await networkAlerts.drain();
+   if(ruleNotices)await ruleNotices.drain();
+   if(subscriptionRightsMonitor)await subscriptionRightsMonitor.tick();
+   if(subscriptionChangeAlerts)await subscriptionChangeAlerts.drain();
+   if(oncall)await oncall.drain();
+   if(roomNotices)await roomNotices.drain();
+   if(roomDaily)await roomDaily.drain();
    if(result.status==='CLOCK_UNTRUSTED')throw Error('PROTECTION_CLOCK_UNTRUSTED');
   },undefined,()=>process.stderr.write('PROTECTION_MAINTENANCE_FAILED\n'));
   protectionMaintenanceStops.set(server,cleanup.stop);

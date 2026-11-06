@@ -1,0 +1,291 @@
+import {test} from 'node:test';
+import assert from 'node:assert/strict';
+import {mkdtemp,rm} from 'node:fs/promises';
+import {tmpdir} from 'node:os';
+import {join} from 'node:path';
+import {BotStore} from '../src/store.js';
+import {Policy} from '../src/policy.js';
+import {CaptchaService,captchaSource} from '../src/captcha.js';
+import {CaptchaEnforcement} from '../src/captcha-enforcement.js';
+import {CaptchaJoinNotices} from '../src/captcha-join-notices.js';
+import type {TemporaryGroupNotice} from '../src/telegram-temporary-group-sender.js';
+import {TelegramCaptchaOwner} from '../src/telegram-captcha-owner.js';
+import type {OwnerInlineScreen} from '../src/telegram-inline-owner.js';
+import {ModerationService} from '../src/moderation.js';
+import {TelegramBotApiModerationGateway} from '../src/telegram-moderation-gateway.js';
+import {GROUP_PERMISSION_KEYS} from '../src/group-permission-model.js';
+import {TelegramUpdateApplication} from '../src/telegram-transport.js';
+import {EducationService} from '../src/education.js';
+import {EducationAdminFacade} from '../src/education-admin.js';
+import {ApprovedAnswerService,ResourceLinkService} from '../src/education-interactions.js';
+import {CaptchaRuleGate} from '../src/captcha-rules.js';
+import {TelegramGroupRules} from '../src/telegram-group-rules.js';
+import {TelegramReplyDispatcher} from '../src/telegram-replies.js';
+import {SubscriptionGate,FakeMembershipGateway} from '../src/subscription.js';
+import {recordSubscriptionEnforcementConsent} from '../src/subscription-enforcement-policy.js';
+const NOW=1700000000000,G='-100123',TOKEN='123456789:ABCDEFGHIJKLMNOPQRSTUVWXYZabcde';
+const pick=(view:OwnerInlineScreen|null,label:string)=>{assert.ok(view);const b=view.keyboard.inline_keyboard.flat().find(b=>b.text.includes(label));assert.ok(b,label);return b.callback_data;};
+for(const engine of ['json','sqlite'] as const){
+ async function fixture(withSubscription=false,withJoinNotices=false){
+  const dir=await mkdtemp(join(tmpdir(),'captcha-enforcement-')),store=new BotStore(join(dir,'state.'+engine),{engine});let now=NOW,running=true,rights=true,lost=false,groupType='supergroup';let hook:(()=>Promise<void>)|undefined,writeHook:(()=>Promise<void>)|undefined;
+  const members=new Map<string,Record<string,unknown>>(),writes:string[]=[];
+  const target=(id='300')=>members.get(id)??{status:'member',user:{id:Number(id),is_bot:false}};
+  const request=(async(url:unknown,init:RequestInit)=>{const method=String(url).split('/').at(-1)!,b=JSON.parse(String(init.body));let result:unknown;
+   if(method==='getChat')result={id:Number(G),type:groupType,permissions:{can_send_messages:true}};
+   else if(method==='getChatMember'){if(hook){const h=hook;hook=undefined;await h();}result=b.user_id===123456789?{status:'administrator',user:{id:123456789,is_bot:true},can_restrict_members:rights}:target(String(b.user_id));}
+   else{assert.equal(method,'restrictChatMember');writes.push(String(b.user_id));if(writeHook){const h=writeHook;writeHook=undefined;await h();}const clear=Object.values(b.permissions).every(v=>v===true);members.set(String(b.user_id),clear?{status:'member',user:{id:b.user_id,is_bot:false}}:{status:'restricted',user:{id:b.user_id,is_bot:false},is_member:true,until_date:0,...Object.fromEntries(GROUP_PERMISSION_KEYS.map(k=>[k,false]))});if(lost)throw Error('ACK_LOST');result=true;}
+   return Response.json({ok:true,result});}) as typeof fetch;
+  const policy=new Policy(store,'100',()=>now);await policy.approveChat('100',G,['moderation','verification','navigation']);const gateway=new TelegramBotApiModerationGateway(TOKEN,request,async()=>running,()=>now),moderation=new ModerationService(store,policy,gateway,()=>now),membership=async(_chat:string,actor:string)=>['member','restricted'].includes(String(target(actor).status))?'VERIFIED' as const:'NOT_MEMBER' as const,captcha=new CaptchaService(store,policy,membership,()=>now),probe={gateway,safety:async()=>running},enforcer=new CaptchaEnforcement(store,policy,captcha,moderation,probe,()=>now),ui=new TelegramCaptchaOwner(store,policy,captcha,()=>now,enforcer);
+  await captcha.configure('100',G,{enabled:true,timeout:60,attempts:3},captchaSource(await store.snapshot()));
+  const preview=async()=>{const root=await ui.handle('100','mi:1:i:04:07'),edit=await ui.handle('100',pick(root,G));return ui.handle('100',pick(edit,'تفعيل إنفاذ'));};
+  const enable=async()=>{const view=await preview();assert.ok(await ui.handle('100',pick(view,'تأكيد الإنفاذ')));};
+  const channelMembership=Object.assign(new FakeMembershipGateway(),{joinURL:async()=> 'https://t.me/RequiredChannel'}),subscription=withSubscription?new SubscriptionGate(store,policy,channelMembership,moderation,()=>now):undefined;
+  const sentJoin:TemporaryGroupNotice[]=[];
+  const joinNotices=withJoinNotices?new CaptchaJoinNotices(store,policy,captcha,{
+   send:async(input,verify)=>{if(!await verify())return {status:'NOT_SENT'} as const;sentJoin.push(input);return {status:'CONFIRMED',messageId:456} as const;},
+   delete:async()=> 'ACKNOWLEDGED' as const
+  },'ManaratakBot',()=>now,async()=>running):undefined;
+  const education=new EducationService(store,policy,()=>now),app=new TelegramUpdateApplication({store,policy,education,admin:new EducationAdminFacade(store,policy,education,()=>now),faq:new ApprovedAnswerService(store,policy,()=>now),links:new ResourceLinkService(store,policy,()=>now),membership,clock:()=>now,botId:'captcha-enforce',botUsername:'ManaratakBot',moderation,moderationRights:probe,...(subscription?{subscription}:{}),...(joinNotices?{joinNotices}:{})});
+  return {store,policy,captcha,enforcer,moderation,membership,channelMembership,subscription,joinNotices,sentJoin,ui,app,writes,target,preview,enable,now:()=>now,advance:(n=1000)=>{now+=n;},stop:()=>{running=false;},run:()=>{running=true;},noRights:()=>{rights=false;},basicGroup:()=>{groupType='group';},lose:()=>{lost=true;},hook:(h:()=>Promise<void>)=>{hook=h;},onWrite:(h:()=>Promise<void>)=>{writeHook=h;},close:()=>rm(dir,{recursive:true,force:true})};
+ }
+ test(engine+' separate owner consent connects trusted joins and private CAPTCHA success to an owned restriction',async()=>{const f=await fixture();try{assert.equal(f.enforcer.consent(await f.store.snapshot(),G),null);await f.enable();f.advance();const at=f.now();await f.app.handle({update_id:1,message:{message_id:1,date:at/1000,from:{id:100,is_bot:false},chat:{id:Number(G),type:'supergroup'},new_chat_members:[{id:300,is_bot:false}]}});assert.equal(f.target().status,'restricted');assert.equal(f.writes.length,1);f.advance();const start=await f.app.handle({update_id:2,message:{message_id:2,from:{id:300,is_bot:false},chat:{id:300,type:'private'},text:'/start'}}),data=pick({text:start.plan!.text,keyboard:start.plan!.inlineMarkup!},'تحقق بديل');const passed=await f.app.handle({update_id:3,callback_query:{id:'pass',from:{id:300,is_bot:false},data,message:{message_id:3,from:{id:999,is_bot:true},chat:{id:300,type:'private'}}}});assert.equal(passed.status,'APPLIED');assert.equal(f.target().status,'member');assert.equal(f.writes.length,2);assert.equal((await f.store.snapshot()).moderationReasons[0]!.active,false);}finally{await f.close();}});
+ test(engine+' trial joins cannot become restrictions retroactively even at the same timestamp',async()=>{const f=await fixture();try{await f.captcha.observe(G,['300'],'b3-webhook:captcha-enforce:1',NOW);assert.notEqual((await f.enforcer.admit(G,'300','b3-webhook:captcha-enforce:1',NOW)).status,'APPLIED');await f.enable();assert.notEqual((await f.enforcer.admit(G,'300','b3-webhook:captcha-enforce:1',NOW)).status,'APPLIED');assert.equal(f.writes.length,0);}finally{await f.close();}});
+ test(engine+' consent preview, cancel, source drift and lost rights cannot arm enforcement',async()=>{for(const mode of ['cancel','rights','stale','stop','group','paused-change'] as const){const f=await fixture();try{const view=await f.preview(),confirm=pick(view,'تأكيد الإنفاذ');assert.equal(f.enforcer.consent(await f.store.snapshot(),G),null);if(mode==='cancel')await f.ui.cancel('100');if(mode==='rights')f.noRights();if(mode==='group')f.basicGroup();if(mode==='stop')f.stop();if(mode==='paused-change')f.hook(async()=>{await f.store.transaction(s=>{s.subscriptionRequirements.push({chatId:G,channelIds:[],mode:'ALL',version:1});});});if(mode==='stale')f.hook(async()=>{await f.captcha.configure('100',G,{enabled:true,timeout:120,attempts:1},captchaSource(await f.store.snapshot()));});assert.equal(await f.ui.handle('100',confirm),null);assert.equal(f.enforcer.consent(await f.store.snapshot(),G),null);assert.equal(f.writes.length,0);}finally{await f.close();}}});
+ test(engine+' uncertain restriction or release is never automatically retried',async()=>{for(const phase of ['restrict','release'] as const){const f=await fixture();try{await f.enable();f.advance();const key='b3-webhook:captcha-enforce:10';await f.captcha.observe(G,['300'],key,f.now());if(phase==='restrict')f.lose();const admitted=await f.enforcer.admit(G,'300',key,f.now());assert.equal(admitted.status,phase==='restrict'?'UNKNOWN_OUTCOME':'APPLIED');assert.notEqual((await f.enforcer.admit(G,'300',key,f.now())).status,'APPLIED');assert.equal(f.writes.length,1);f.advance();await f.captcha.view('300',pick(await f.captcha.view('300'),'تحقق بديل'));if(phase==='release')f.lose();assert.notEqual((await f.enforcer.release(G,'300')).status,'APPLIED');assert.notEqual((await f.enforcer.release(G,'300')).status,'APPLIED');assert.equal(f.writes.length,phase==='restrict'?1:2);assert.equal((await f.store.snapshot()).moderationReasons[0]!.active,true);}finally{await f.close();}}});
+ test(engine+' release requires intact ownership and current source while preserving unrelated reasons',async()=>{for(const mode of ['missing','modified','late-receipt','independent','stop','settings'] as const){const f=await fixture();try{await f.enable();f.advance();const key='b3-webhook:captcha-enforce:11';await f.captcha.observe(G,['300'],key,f.now());assert.equal((await f.enforcer.admit(G,'300',key,f.now())).status,'APPLIED');f.advance();await f.captcha.view('300',pick(await f.captcha.view('300'),'تحقق بديل'));if(mode==='missing')await f.store.transaction(s=>{s.audit=s.audit.filter(a=>!a.updateKey.startsWith('captcha:enforced:'));});if(mode==='modified')await f.store.transaction(s=>{s.audit.find(a=>a.updateKey.startsWith('captcha:enforced:'))!.actorId='200';});if(mode==='late-receipt')f.hook(async()=>{await f.store.transaction(s=>{s.audit.find(a=>a.updateKey.startsWith('captcha:enforced:'))!.reason='tampered';});});if(mode==='independent')await f.store.transaction(s=>{s.moderationReasons.push({chatId:G,memberId:'300',source:'MANUAL',reference:'independent',kind:'BAN',createdBy:'100',active:true});});if(mode==='stop')f.stop();if(mode==='settings')await f.captcha.configure('100',G,{enabled:true,timeout:120,attempts:1},captchaSource(await f.store.snapshot()));assert.notEqual((await f.enforcer.release(G,'300')).status,'APPLIED',mode);assert.equal(f.writes.length,1);assert.equal(f.target().status,'restricted');assert.ok((await f.store.snapshot()).moderationReasons.every(r=>r.active));}finally{await f.close();}}});
+ test(engine+' retry keeps the original owned restriction reference and can release after success',async()=>{const f=await fixture();try{await f.enable();f.advance();const key='b3-webhook:captcha-enforce:12';await f.captcha.observe(G,['300'],key,f.now());assert.equal((await f.enforcer.admit(G,'300',key,f.now())).status,'APPLIED');const original=f.captcha.challenge(await f.store.snapshot(),G,'300')!;f.advance(120000);assert.ok(await f.captcha.view('300','cp:1:r:'+original.nonce));assert.equal(f.captcha.challenge(await f.store.snapshot(),G,'300')!.reference,original.reference);await f.captcha.view('300',pick(await f.captcha.view('300'),'تحقق بديل'));assert.equal((await f.enforcer.release(G,'300')).status,'APPLIED');assert.equal(f.writes.length,2);assert.equal(f.target().status,'member');}finally{await f.close();}});
+ test(engine+' consent can be disabled under STOP and a queued approval can be cancelled during rights inspection',async()=>{for(const mode of ['disable','queued-cancel'] as const){const f=await fixture();try{if(mode==='disable'){await f.enable();f.stop();const root=await f.ui.handle('100','mi:1:i:04:07'),edit=await f.ui.handle('100',pick(root,G)),view=await f.ui.handle('100',pick(edit,'إيقاف إنفاذ'));assert.ok(await f.ui.handle('100',pick(view,'تأكيد الإنفاذ')));assert.equal(f.enforcer.consent(await f.store.snapshot(),G)?.enabled,false);}else{const view=await f.preview();f.hook(async()=>{await f.ui.cancel('100');});assert.equal(await f.ui.handle('100',pick(view,'تأكيد الإنفاذ')),null);assert.equal(f.enforcer.consent(await f.store.snapshot(),G),null);}assert.equal(f.writes.length,0);}finally{await f.close();}}});
+
+ test(engine+' a verified member can request settlement after STOP without reopening the challenge',async()=>{const f=await fixture();try{await f.enable();f.advance();const key='b3-webhook:captcha-enforce:13';await f.captcha.observe(G,['300'],key,f.now());assert.equal((await f.enforcer.admit(G,'300',key,f.now())).status,'APPLIED');f.advance();f.stop();const data=pick(await f.captcha.view('300'),'تحقق بديل'),passed=await f.app.handle({update_id:90,callback_query:{id:'settle-pass',from:{id:300,is_bot:false},data,message:{message_id:3,from:{id:999,is_bot:true},chat:{id:300,type:'private'}}}});assert.match(passed.plan!.text,/تعذر/u);assert.equal(f.writes.length,1);f.run();f.advance();const resumed=await f.app.handle({update_id:91,message:{message_id:4,from:{id:300,is_bot:false},chat:{id:300,type:'private'},text:'/start'}});assert.equal(resumed.status,'APPLIED');assert.match(resumed.plan!.text,/اكتملت/u);assert.equal(f.writes.length,2);assert.equal(f.target().status,'member');}finally{await f.close();}});
+
+ test(engine+' human approval settles the original CAPTCHA restriction after retries while rejection keeps it',async()=>{for(const decision of ['accept','reject'] as const){const f=await fixture();try{await f.enable();f.advance();const key='b3-webhook:captcha-enforce:14';await f.captcha.observe(G,['300'],key,f.now());assert.equal((await f.enforcer.admit(G,'300',key,f.now())).status,'APPLIED');for(let round=1;round<3;round++){f.advance(300000);const challenge=f.captcha.challenge(await f.store.snapshot(),G,'300')!;assert.ok(await f.captcha.view('300','cp:1:r:'+challenge.nonce));}f.advance(300000);const root=await f.ui.handle('100','mi:1:i:04:07'),queue=await f.ui.handle('100',pick(root,'مراجعة الحالات')),detail=await f.ui.handle('100',pick(queue,'300')),preview=await f.ui.handle('100',pick(detail,decision==='accept'?'قبول التحقق':'رفض التحقق'));assert.ok(await f.ui.handle('100',pick(preview,'تأكيد القرار')));const view=await f.app.handle({update_id:99,message:{message_id:8,from:{id:300,is_bot:false},chat:{id:300,type:'private'},text:'/start'}});assert.equal(view.status,'APPLIED');assert.equal(f.writes.length,decision==='accept'?2:1);assert.equal(f.target().status,decision==='accept'?'member':'restricted');}finally{await f.close();}}});
+
+ test(engine+' success or consent change during an in-flight restriction cannot produce an unsafe release or retry',async()=>{for(const mode of ['pass-before-send','disable-before-send','disable-during-send'] as const){const f=await fixture();try{await f.enable();f.advance();const key='b3-webhook:captcha-enforce:15';await f.captcha.observe(G,['300'],key,f.now());const disable=async()=>{const root=await f.ui.handle('100','mi:1:i:04:07'),edit=await f.ui.handle('100',pick(root,G)),preview=await f.ui.handle('100',pick(edit,'إيقاف إنفاذ'));assert.ok(await f.ui.handle('100',pick(preview,'تأكيد الإنفاذ')));};if(mode==='pass-before-send')f.hook(async()=>{await f.captcha.view('300',pick(await f.captcha.view('300'),'تحقق بديل'));});else if(mode==='disable-before-send')f.hook(disable);else f.onWrite(disable);const result=await f.enforcer.admit(G,'300',key,f.now());assert.notEqual(result.status,'APPLIED',mode);assert.equal(f.writes.length,mode==='disable-during-send'?1:0);const state=await f.store.snapshot();assert.equal(state.audit.filter(a=>a.updateKey.startsWith('captcha:enforced:')).length,0);if(mode==='disable-during-send'){assert.equal(state.moderationOperations.at(-1)!.status,'UNKNOWN_OUTCOME');assert.notEqual((await f.enforcer.release(G,'300')).status,'APPLIED');assert.equal(f.writes.length,1);}}finally{await f.close();}}});
+
+ test(engine+' unresolved groups do not starve later verified groups',async()=>{const f=await fixture();try{await f.store.transaction(s=>{for(let n=0;n<9;n++){const chat='-10020'+n;s.wizards.push({key:'fair-'+n,userId:'300',chatId:'300',topicId:'',flow:'captcha-member:'+JSON.stringify({group:chat}),step:0,version:1,policyVersion:1,expiresAt:NOW+60000,status:'ACTIVE'});s.moderationReasons.push({chatId:chat,memberId:'300',source:'MANUAL',reference:'captcha_fair',kind:'MUTE',createdBy:'100',active:true});}});f.captcha.status=()=> 'PASSED';f.captcha.challenge=()=>({reference:'captcha_fair',epoch:'test',issued:NOW,nonce:'x'});const seen:string[]=[];f.enforcer.release=async chat=>{seen.push(chat);return {status:'DENIED',reason:'TEST'};};const first=await f.enforcer.releaseMember('300');assert.equal(first.attempted,8);assert.equal(first.remaining,1);assert.ok(!seen.includes('-100208'));seen.length=0;const reopened=new CaptchaEnforcement(new BotStore(f.store.file,{engine}),f.policy,f.captcha,undefined,undefined,()=>NOW);reopened.release=async chat=>{seen.push(chat);return {status:'DENIED',reason:'TEST'};};const second=await reopened.releaseMember('300');assert.equal(second.attempted,8);assert.ok(seen.includes('-100208'));}finally{await f.close();}});
+
+ test(engine+' re-enabling consent can settle an already owned verified restriction without arming old trial joins',async()=>{const f=await fixture();try{await f.enable();f.advance();const key='b3-webhook:captcha-enforce:16';await f.captcha.observe(G,['300'],key,f.now());assert.equal((await f.enforcer.admit(G,'300',key,f.now())).status,'APPLIED');let root=await f.ui.handle('100','mi:1:i:04:07'),edit=await f.ui.handle('100',pick(root,G)),preview=await f.ui.handle('100',pick(edit,'إيقاف إنفاذ'));assert.ok(await f.ui.handle('100',pick(preview,'تأكيد الإنفاذ')));f.advance();await f.enable();f.advance();await f.captcha.view('300',pick(await f.captcha.view('300'),'تحقق بديل'));assert.equal((await f.enforcer.release(G,'300')).status,'APPLIED');assert.equal(f.writes.length,2);assert.equal(f.target().status,'member');}finally{await f.close();}});
+
+ test(engine+' loss of ownership binding after a confirmed restriction is surfaced for review',async()=>{const f=await fixture();try{await f.enable();f.advance();const key='b3-webhook:captcha-enforce:17';await f.captcha.observe(G,['300'],key,f.now());const original=f.moderation.addManualReason.bind(f.moderation);f.moderation.addManualReason=async(...args)=>{const result=await original(...args),root=await f.ui.handle('100','mi:1:i:04:07'),edit=await f.ui.handle('100',pick(root,G)),preview=await f.ui.handle('100',pick(edit,'إيقاف إنفاذ'));assert.ok(await f.ui.handle('100',pick(preview,'تأكيد الإنفاذ')));return result;};const result=await f.enforcer.admit(G,'300',key,f.now());assert.equal(result.status,'DENIED');assert.equal(result.reason,'CAPTCHA_OWNERSHIP_BINDING_UNAVAILABLE');assert.equal(f.writes.length,1);assert.equal(f.target().status,'restricted');const audit=(await f.store.snapshot()).audit;assert.equal(audit.filter(a=>a.updateKey.startsWith('captcha:enforced:')).length,0);assert.equal(audit.filter(a=>a.updateKey.startsWith('captcha:binding-failure:')).length,1);}finally{await f.close();}});
+
+ test(engine+' unrelated group approval does not invalidate consent for the configured group',async()=>{const f=await fixture();try{await f.enable();await f.policy.approveChat('100','-100456',['moderation']);assert.equal(f.enforcer.consent(await f.store.snapshot(),G)?.enabled,true);f.advance();const key='b3-webhook:captcha-enforce:18';await f.captcha.observe(G,['300'],key,f.now());assert.equal((await f.enforcer.admit(G,'300',key,f.now())).status,'APPLIED');assert.equal(f.target().status,'restricted');}finally{await f.close();}});
+
+ test(engine+' an active channel requirement prevents CAPTCHA enforcement activation and prevents stale releases',async()=>{for(const mode of ['before-activation','before-release','during-release'] as const){const f=await fixture();try{await f.policy.approveChat('100','-200',['verification']);const requireChannel=()=>f.store.transaction(s=>{s.subscriptionRequirements.push({chatId:G,channelIds:['-200'],mode:'ALL',version:1});});if(mode==='before-activation'){await requireChannel();const root=await f.ui.handle('100','mi:1:i:04:07'),edit=await f.ui.handle('100',pick(root,G));assert.ok(edit);assert.match(edit.text,/الاشتراك/u);assert.ok(!edit.keyboard.inline_keyboard.flat().some(b=>b.text.includes('تفعيل إنفاذ')));assert.equal(f.enforcer.consent(await f.store.snapshot(),G),null);assert.equal(f.writes.length,0);}else{await f.enable();f.advance();const key='b3-webhook:captcha-enforce:19';await f.captcha.observe(G,['300'],key,f.now());assert.equal((await f.enforcer.admit(G,'300',key,f.now())).status,'APPLIED');f.advance();await f.captcha.view('300',pick(await f.captcha.view('300'),'تحقق بديل'));if(mode==='before-release')await requireChannel();else f.hook(requireChannel);assert.notEqual((await f.enforcer.release(G,'300')).status,'APPLIED');assert.equal(f.writes.length,1);assert.equal(f.target().status,'restricted');}}finally{await f.close();}}});
+
+ test(engine+' rejoining after a day preserves the challenge that owns an unresolved restriction',async()=>{const f=await fixture();try{await f.enable();f.advance();const key='b3-webhook:captcha-enforce:31';await f.captcha.observe(G,['300'],key,f.now());assert.equal((await f.enforcer.admit(G,'300',key,f.now())).status,'APPLIED');const original=f.captcha.challenge(await f.store.snapshot(),G,'300');assert.ok(original);f.advance(86400001);assert.equal(await f.captcha.observe(G,['300'],'b3-webhook:captcha-enforce:32',f.now()),0);assert.equal(f.captcha.challenge(await f.store.snapshot(),G,'300')?.nonce,original.nonce);assert.equal(f.writes.length,1);assert.equal(f.target().status,'restricted');const expired=await f.captcha.view('300');await f.captcha.view('300',pick(expired,'إعادة المحاولة'));await f.captcha.view('300',pick(await f.captcha.view('300'),'تحقق بديل'));assert.equal((await f.enforcer.release(G,'300')).status,'APPLIED');assert.equal(f.writes.length,2);assert.equal(f.target().status,'member');}finally{await f.close();}});
+ test(engine+' CAPTCHA restriction waits for the current rules agreement and rechecks it during release',async()=>{for(const drift of [false,true]){const f=await fixture();try{
+  const clock=()=>f.now(),rules=new TelegramGroupRules(f.store,f.policy,clock),gate=new CaptchaRuleGate(f.store,f.policy,f.captcha,f.membership,clock),publish=async(text:string)=>{const preview=await rules.preview('100','/setrules '+G+'\n'+text);assert.ok(await rules.handle('100',pick(preview,'اعتماد الإصدار')));};await publish('احترام الجميع');
+  const before=await f.store.snapshot(),epoch=gate.epoch(before,G),ref='captcha-owner:abcdefghijklmnopqrstuvwx';await f.store.transaction(s=>{s.callbacks.push({ref,actorId:'100',chatId:'private',policyVersion:0,oneShot:true,used:true,revoked:false,expiresAt:f.now()+120000,action:JSON.stringify([{kind:'rules-on-confirm',group:G,page:0,settings:{enabled:true,timeout:60,attempts:3}},captchaSource(s),epoch])});});assert.equal(await gate.configure('100',G,true,epoch,ref),true);
+  await f.enable();f.advance();const key='b3-webhook:captcha-enforce:40';await f.captcha.observe(G,['300'],key,f.now());assert.equal((await f.enforcer.admit(G,'300',key,f.now())).status,'APPLIED');f.advance();await f.captcha.view('300',pick(await f.captcha.view('300'),'تحقق بديل'));
+  assert.notEqual((await f.enforcer.release(G,'300')).status,'APPLIED');assert.equal(f.target().status,'restricted');const view=await gate.open('300',G);assert.equal(await gate.accept('300',pick(view,'أوافق')),true);
+  if(drift)f.hook(async()=>publish('قانون جديد'));const result=await f.enforcer.release(G,'300');assert.equal(result.status,drift?'DENIED':'APPLIED');assert.equal(f.writes.length,drift?1:2);assert.equal(f.target().status,drift?'restricted':'member');
+ }finally{await f.close();}}});
+ test(engine+' the member sees and accepts rules after CAPTCHA before the owned mute is lifted',async()=>{const f=await fixture();try{
+  const rules=new TelegramGroupRules(f.store,f.policy,()=>f.now()),p=await rules.preview('100','/setrules '+G+'\nاحترام الجميع');assert.ok(await rules.handle('100',pick(p,'اعتماد الإصدار')));
+  const root=await f.ui.handle('100','mi:1:i:04:07'),edit=await f.ui.handle('100',pick(root,G)),review=await f.ui.handle('100',pick(edit,'تفعيل موافقة القوانين'));assert.ok(await f.ui.handle('100',pick(review,'تأكيد')));await f.enable();f.advance();const at=f.now();
+  await f.app.handle({update_id:41,message:{message_id:41,date:at/1000,from:{id:100,is_bot:false},chat:{id:Number(G),type:'supergroup'},new_chat_members:[{id:300,is_bot:false}]}});f.advance();
+  const start=await f.app.handle({update_id:42,message:{message_id:42,from:{id:300,is_bot:false},chat:{id:300,type:'private'},text:'/start'}}),answer=pick({text:start.plan!.text,keyboard:start.plan!.inlineMarkup!},'تحقق بديل');
+  const passed=await f.app.handle({update_id:43,callback_query:{id:'captcha-rules-pass',from:{id:300,is_bot:false},data:answer,message:{message_id:43,from:{id:999,is_bot:true},chat:{id:300,type:'private'}}}});assert.match(passed.plan!.text,/احترام الجميع/u);assert.equal(f.target().status,'restricted');const accept=pick({text:passed.plan!.text,keyboard:passed.plan!.inlineMarkup!},'أوافق');
+  const forged=await f.app.handle({update_id:44,callback_query:{id:'captcha-rules-other',from:{id:301,is_bot:false},data:accept,message:{message_id:44,from:{id:999,is_bot:true},chat:{id:301,type:'private'}}}});assert.equal(forged.status,'DENIED');
+  const accepted=await f.app.handle({update_id:45,callback_query:{id:'captcha-rules-accept',from:{id:300,is_bot:false},data:accept,message:{message_id:45,from:{id:999,is_bot:true},chat:{id:300,type:'private'}}}});assert.equal(accepted.status,'APPLIED');assert.equal(f.target().status,'member');assert.equal(f.writes.length,2);
+ }finally{await f.close();}});
+ test(engine+' queued rules screens recheck membership, rules, policy and the acceptance button at delivery',async()=>{for(const change of ['none','law','membership','membership-race','policy','button','navigation','expiry'] as const){const f=await fixture();try{
+  const rules=new TelegramGroupRules(f.store,f.policy,()=>f.now()),publish=async(text:string)=>{const p=await rules.preview('100','/setrules '+G+'\n'+text);assert.ok(await rules.handle('100',pick(p,'اعتماد الإصدار')));};await publish('احترام الجميع');
+  const root=await f.ui.handle('100','mi:1:i:04:07'),edit=await f.ui.handle('100',pick(root,G)),review=await f.ui.handle('100',pick(edit,'تفعيل موافقة القوانين'));assert.ok(await f.ui.handle('100',pick(review,'تأكيد')));await f.enable();f.advance();const at=f.now();
+  await f.app.handle({update_id:51,message:{message_id:51,date:at/1000,from:{id:100,is_bot:false},chat:{id:Number(G),type:'supergroup'},new_chat_members:[{id:300,is_bot:false}]}});f.advance();const start=await f.app.handle({update_id:52,message:{message_id:52,from:{id:300,is_bot:false},chat:{id:300,type:'private'},text:'/start'}}),answer=pick({text:start.plan!.text,keyboard:start.plan!.inlineMarkup!},'تحقق بديل');
+  const passed=await f.app.handle({update_id:53,callback_query:{id:'queued-rules',from:{id:300,is_bot:false},data:answer,message:{message_id:53,from:{id:999,is_bot:true},chat:{id:300,type:'private'}}}});assert.ok(passed.deliveryKey);assert.match(passed.plan!.text,/احترام الجميع/u);
+  if(change==='law')await publish('قانون جديد');if(change==='policy'){const a=await f.ui.handle('100','mi:1:i:04:07'),b=await f.ui.handle('100',pick(a,G)),c=await f.ui.handle('100',pick(b,'إيقاف موافقة القوانين'));assert.ok(await f.ui.handle('100',pick(c,'تأكيد')));}if(change==='button')await f.store.transaction(s=>{s.callbacks.find(c=>c.ref.startsWith('captcha-rules:'))!.revoked=true;});if(change==='navigation')await f.app.handle({update_id:54,callback_query:{id:'rules-home',from:{id:300,is_bot:false},data:'pn:1:h',message:{message_id:53,from:{id:999,is_bot:true},chat:{id:300,type:'private'}}}});if(change==='expiry')f.advance(120000);
+  let sent=0;const dispatcher=new TelegramReplyDispatcher(f.store,f.policy,{send:async()=>{sent++;return {status:'CONFIRMED',messageId:90};}},()=>f.now(),async()=>true,undefined,async(chat,actor)=>{if(change==='membership-race')await f.store.transaction(s=>{s.callbacks.find(c=>c.ref.startsWith('captcha-rules:'))!.revoked=true;});return change==='membership'?'NOT_MEMBER':f.membership(chat,actor);});const result=await dispatcher.dispatch(passed.deliveryKey!);
+  assert.equal(result.status,change==='none'?'CONFIRMED':'FAILED_CONFIRMED',change);assert.equal(sent,change==='none'?1:0,change);assert.equal(f.target().status,'restricted');
+ }finally{await f.close();}}});
+ test(engine+' completed CAPTCHA and optional rules lead to the channel check without repeating the challenge',async()=>{for(const withRules of [false,true]){const f=await fixture(true);try{
+  await f.policy.approveChat('100','-200',['verification']);await f.store.transaction(s=>{s.subscriptionRequirements.push({chatId:G,channelIds:['-200'],mode:'ALL',version:1});});f.channelMembership.set('-200','300','NOT_MEMBER');
+  if(withRules){const rules=new TelegramGroupRules(f.store,f.policy,()=>f.now()),p=await rules.preview('100','/setrules '+G+'\nاحترام الجميع');await rules.handle('100',pick(p,'اعتماد الإصدار'));const root=await f.ui.handle('100','mi:1:i:04:07'),edit=await f.ui.handle('100',pick(root,G)),review=await f.ui.handle('100',pick(edit,'تفعيل موافقة القوانين'));assert.ok(await f.ui.handle('100',pick(review,'تأكيد')));}
+  f.advance();const at=f.now();await f.app.handle({update_id:61,message:{message_id:61,date:at/1000,from:{id:100,is_bot:false},chat:{id:Number(G),type:'supergroup'},new_chat_members:[{id:300,is_bot:false}]}});f.advance();const start=await f.app.handle({update_id:62,message:{message_id:62,from:{id:300,is_bot:false},chat:{id:300,type:'private'},text:'/start'}}),answer=pick({text:start.plan!.text,keyboard:start.plan!.inlineMarkup!},'تحقق بديل');let view=await f.app.handle({update_id:63,callback_query:{id:'step-pass',from:{id:300,is_bot:false},data:answer,message:{message_id:63,from:{id:999,is_bot:true},chat:{id:300,type:'private'}}}});
+  if(withRules){const accept=pick({text:view.plan!.text,keyboard:view.plan!.inlineMarkup!},'أوافق');view=await f.app.handle({update_id:64,callback_query:{id:'step-rules',from:{id:300,is_bot:false},data:accept,message:{message_id:64,from:{id:999,is_bot:true},chat:{id:300,type:'private'}}}});}
+  assert.equal(view.reason,'SUBSCRIPTION_VERIFICATION_VIEW');assert.match(view.plan!.text,/لم يكتمل شرط الاشتراك/u);const retry=view.plan!.studioMarkup!.inline_keyboard.flat().find(b=>'callback_data' in b&&b.callback_data.startsWith('sv:1:'));assert.ok(retry&&'callback_data' in retry);f.channelMembership.set('-200','300','MEMBER');
+  const done=await f.app.handle({update_id:65,callback_query:{id:'step-channel',from:{id:300,is_bot:false},data:retry.callback_data,message:{message_id:65,from:{id:999,is_bot:true},chat:{id:300,type:'private'}}}});assert.equal(done.reason,'SUBSCRIPTION_VERIFICATION_VIEW');assert.match(done.plan!.text,/اكتمل شرط الاشتراك/u);assert.equal(f.captcha.status(await f.store.snapshot(),G,'300'),'PASSED');assert.equal(f.writes.length,0);
+ }finally{await f.close();}}});
+ test(engine+' changing CAPTCHA during channel membership lookup discards the old journey',async()=>{const f=await fixture(true);try{
+  await f.policy.approveChat('100','-200',['verification']);await f.store.transaction(s=>{s.subscriptionRequirements.push({chatId:G,channelIds:['-200'],mode:'ALL',version:1});});f.channelMembership.set('-200','300','MEMBER');
+  f.advance();const at=f.now();await f.app.handle({update_id:71,message:{message_id:71,date:at/1000,from:{id:100,is_bot:false},chat:{id:Number(G),type:'supergroup'},new_chat_members:[{id:300,is_bot:false}]}});f.advance();const start=await f.app.handle({update_id:72,message:{message_id:72,from:{id:300,is_bot:false},chat:{id:300,type:'private'},text:'/start'}}),answer=pick({text:start.plan!.text,keyboard:start.plan!.inlineMarkup!},'تحقق بديل');
+  let calls=0;const lookup=f.channelMembership.getMember.bind(f.channelMembership);f.channelMembership.getMember=async(channel,member)=>{if(++calls===1)await f.captcha.configure('100',G,{enabled:true,timeout:120,attempts:3},captchaSource(await f.store.snapshot()));return lookup(channel,member);};
+  const result=await f.app.handle({update_id:73,callback_query:{id:'stale-pass',from:{id:300,is_bot:false},data:answer,message:{message_id:73,from:{id:999,is_bot:true},chat:{id:300,type:'private'}}}});assert.equal(result.reason,'SUBSCRIPTION_VERIFICATION_STALE');assert.equal(f.writes.length,0);
+ }finally{await f.close();}});
+
+ test(engine+' channel retry still reports a CAPTCHA restriction requiring review',async()=>{const f=await fixture(true);try{
+  await f.enable();f.advance();const at=f.now();await f.app.handle({update_id:81,message:{message_id:81,date:at/1000,from:{id:100,is_bot:false},chat:{id:Number(G),type:'supergroup'},new_chat_members:[{id:300,is_bot:false}]}});assert.equal(f.target().status,'restricted');
+  await f.policy.approveChat('100','-200',['verification']);await f.store.transaction(s=>{s.subscriptionRequirements.push({chatId:G,channelIds:['-200'],mode:'ALL',version:1});});f.channelMembership.set('-200','300','NOT_MEMBER');f.advance();const start=await f.app.handle({update_id:82,message:{message_id:82,from:{id:300,is_bot:false},chat:{id:300,type:'private'},text:'/start'}}),answer=pick({text:start.plan!.text,keyboard:start.plan!.inlineMarkup!},'تحقق بديل');
+  const first=await f.app.handle({update_id:83,callback_query:{id:'pending-pass',from:{id:300,is_bot:false},data:answer,message:{message_id:83,from:{id:999,is_bot:true},chat:{id:300,type:'private'}}}});assert.match(first.plan!.text,/تعذر إكمال رفع قيد التحقق/u);const retry=first.plan!.studioMarkup!.inline_keyboard.flat().find(b=>'callback_data' in b&&b.callback_data.startsWith('sv:1:'));assert.ok(retry&&'callback_data' in retry);f.channelMembership.set('-200','300','MEMBER');
+  const next=await f.app.handle({update_id:84,callback_query:{id:'pending-retry',from:{id:300,is_bot:false},data:retry.callback_data,message:{message_id:84,from:{id:999,is_bot:true},chat:{id:300,type:'private'}}}});assert.match(next.plan!.text,/تعذر إكمال رفع قيد التحقق/u);assert.equal(f.target().status,'restricted');assert.equal(f.writes.length,1);
+ }finally{await f.close();}});
+
+ test(engine+' queued channel screen is withdrawn when CAPTCHA settings change',async()=>{const f=await fixture(true);try{
+  await f.policy.approveChat('100','-200',['verification']);await f.store.transaction(s=>{s.subscriptionRequirements.push({chatId:G,channelIds:['-200'],mode:'ALL',version:1});});f.channelMembership.set('-200','300','NOT_MEMBER');f.advance();const at=f.now();await f.app.handle({update_id:91,message:{message_id:91,date:at/1000,from:{id:100,is_bot:false},chat:{id:Number(G),type:'supergroup'},new_chat_members:[{id:300,is_bot:false}]}});f.advance();const start=await f.app.handle({update_id:92,message:{message_id:92,from:{id:300,is_bot:false},chat:{id:300,type:'private'},text:'/start'}}),answer=pick({text:start.plan!.text,keyboard:start.plan!.inlineMarkup!},'تحقق بديل');
+  const view=await f.app.handle({update_id:93,callback_query:{id:'queued-channel',from:{id:300,is_bot:false},data:answer,message:{message_id:93,from:{id:999,is_bot:true},chat:{id:300,type:'private'}}}});assert.ok(view.deliveryKey);await f.captcha.configure('100',G,{enabled:true,timeout:120,attempts:3},captchaSource(await f.store.snapshot()));let sent=0;const dispatcher=new TelegramReplyDispatcher(f.store,f.policy,{send:async()=>{sent++;return {status:'CONFIRMED',messageId:90};}},()=>f.now(),async()=>true,undefined,f.membership);const result=await dispatcher.dispatch(view.deliveryKey!);assert.equal(result.status,'FAILED_CONFIRMED');assert.equal(sent,0);
+ }finally{await f.close();}});
+
+
+
+ test(engine+' joint owner consents enforce CAPTCHA then current rules then channel verification before release',async()=>{const f=await fixture(true);try{
+  await f.policy.approveChat('100','-200',['verification']);
+  await f.store.transaction(s=>{s.subscriptionRequirements.push({chatId:G,channelIds:['-200'],mode:'ALL',version:1});assert.equal(recordSubscriptionEnforcementConsent(s,f.policy,'100',G,true,f.now()),true);});
+  const rules=new TelegramGroupRules(f.store,f.policy,()=>f.now()),published=await rules.preview('100','/setrules '+G+'\nاحترام الجميع');assert.ok(await rules.handle('100',pick(published,'اعتماد الإصدار')));
+  const root=await f.ui.handle('100','mi:1:i:04:07'),edit=await f.ui.handle('100',pick(root,G)),preview=await f.ui.handle('100',pick(edit,'تفعيل موافقة القوانين'));assert.ok(await f.ui.handle('100',pick(preview,'تأكيد')));
+  await f.enable();f.channelMembership.set('-200','300','NOT_MEMBER');f.advance();const at=f.now();
+  await f.app.handle({update_id:180,message:{message_id:180,date:at/1000,from:{id:100,is_bot:false},chat:{id:Number(G),type:'supergroup'},new_chat_members:[{id:300,is_bot:false}]}});
+  assert.equal(f.target().status,'restricted');assert.equal(f.writes.length,1);
+  f.advance();const start=await f.app.handle({update_id:181,message:{message_id:181,from:{id:300,is_bot:false},chat:{id:300,type:'private'},text:'/start'}}),answer=pick({text:start.plan!.text,keyboard:start.plan!.inlineMarkup!},'تحقق بديل');
+  const passed=await f.app.handle({update_id:182,callback_query:{id:'joint-answer',from:{id:300,is_bot:false},data:answer,message:{message_id:182,from:{id:999,is_bot:true},chat:{id:300,type:'private'}}}});
+  assert.match(passed.plan!.text,/احترام الجميع/u);assert.equal(f.target().status,'restricted');
+  const accept=pick({text:passed.plan!.text,keyboard:passed.plan!.inlineMarkup!},'أوافق');
+  const accepted=await f.app.handle({update_id:183,callback_query:{id:'joint-rules',from:{id:300,is_bot:false},data:accept,message:{message_id:183,from:{id:999,is_bot:true},chat:{id:300,type:'private'}}}});
+  assert.equal(accepted.reason,'SUBSCRIPTION_VERIFICATION_VIEW');assert.match(accepted.plan!.text,/لم يكتمل شرط الاشتراك/u);assert.doesNotMatch(accepted.plan!.text,/مرحبًا بك بعد إكمال التحقق/u);
+  assert.equal(f.target().status,'restricted');assert.equal(f.writes.length,1);
+  const retry=accepted.plan!.studioMarkup!.inline_keyboard.flat().find(b=>'callback_data' in b&&b.callback_data.startsWith('sv:1:'));assert.ok(retry&&'callback_data' in retry);
+  f.channelMembership.set('-200','300','MEMBER');
+  const verified=await f.app.handle({update_id:184,callback_query:{id:'joint-channel',from:{id:300,is_bot:false},data:retry.callback_data,message:{message_id:184,from:{id:999,is_bot:true},chat:{id:300,type:'private'}}}});
+  assert.equal(verified.reason,'SUBSCRIPTION_VERIFICATION_VIEW');assert.match(verified.plan!.text,/اكتمل شرط الاشتراك/u);assert.match(verified.plan!.text,/مرحبًا بك بعد إكمال التحقق/u);assert.match(verified.plan!.text,/سُوّي سبب CAPTCHA المملوك/u);
+  assert.equal(f.target().status,'member');assert.equal(f.writes.length,2);
+  assert.ok((await f.store.snapshot()).moderationReasons.every(r=>r.memberId!=='300'||!r.active));
+ }finally{await f.close();}});
+
+ test(engine+' subscription confirmation cannot lift an owned onboarding restriction while CAPTCHA is pending',async()=>{const f=await fixture(true);try{
+  await f.policy.approveChat('100','-200',['verification']);
+  await f.store.transaction(s=>{s.subscriptionRequirements.push({chatId:G,channelIds:['-200'],mode:'ALL',version:1});assert.equal(recordSubscriptionEnforcementConsent(s,f.policy,'100',G,true,f.now()),true);});
+  await f.enable();f.channelMembership.set('-200','300','MEMBER');f.advance();const at=f.now();
+  await f.app.handle({update_id:188,message:{message_id:188,date:at/1000,from:{id:100,is_bot:false},chat:{id:Number(G),type:'supergroup'},new_chat_members:[{id:300,is_bot:false}]}});
+  assert.equal(f.target().status,'restricted');
+  const outcome=await f.subscription!.synchronizeAutomatic(G,'300');
+  assert.equal(outcome.decision.status,'MEMBER');assert.equal(f.target().status,'restricted');assert.equal(f.writes.length,1);
+  f.advance();const start=await f.app.handle({update_id:189,message:{message_id:189,from:{id:300,is_bot:false},chat:{id:300,type:'private'},text:'/start'}}),data=pick({text:start.plan!.text,keyboard:start.plan!.inlineMarkup!},'تحقق بديل');
+  const result=await f.app.handle({update_id:190,callback_query:{id:'joint-verified',from:{id:300,is_bot:false},data,message:{message_id:190,from:{id:999,is_bot:true},chat:{id:300,type:'private'}}}});
+  assert.equal(result.reason,'SUBSCRIPTION_VERIFICATION_VIEW');assert.equal(f.target().status,'member');assert.equal(f.writes.length,2);
+ }finally{await f.close();}});
+
+
+ test(engine+' an existing subscription-owned mute stays until CAPTCHA and current channels are both verified',async()=>{const f=await fixture(true);try{
+  await f.policy.approveChat('100','-200',['verification']);
+  await f.store.transaction(s=>{s.subscriptionRequirements.push({chatId:G,channelIds:['-200'],mode:'ALL',version:1});assert.equal(recordSubscriptionEnforcementConsent(s,f.policy,'100',G,true,f.now()),true);});
+  f.channelMembership.set('-200','300','NOT_MEMBER');
+  assert.equal((await f.subscription!.synchronizeAutomatic(G,'300')).decision.status,'NOT_MEMBER');
+  assert.equal(f.target().status,'restricted');assert.equal(f.writes.length,1);
+  await f.enable();f.advance();const at=f.now();
+  await f.app.handle({update_id:191,message:{message_id:191,date:at/1000,from:{id:100,is_bot:false},chat:{id:Number(G),type:'supergroup'},new_chat_members:[{id:300,is_bot:false}]}});
+  assert.equal(f.writes.length,1);
+  f.channelMembership.set('-200','300','MEMBER');
+  const pending=await f.subscription!.synchronizeAutomatic(G,'300');
+  assert.equal(pending.decision.status,'MEMBER');assert.equal(f.target().status,'restricted');
+  assert.ok((await f.store.snapshot()).moderationReasons.some(r=>r.source==='SUBSCRIPTION'&&r.active));
+  f.advance();const start=await f.app.handle({update_id:192,message:{message_id:192,from:{id:300,is_bot:false},chat:{id:300,type:'private'},text:'/start'}}),answer=pick({text:start.plan!.text,keyboard:start.plan!.inlineMarkup!},'تحقق بديل');
+  const done=await f.app.handle({update_id:193,callback_query:{id:'existing-sub-pass',from:{id:300,is_bot:false},data:answer,message:{message_id:193,from:{id:999,is_bot:true},chat:{id:300,type:'private'}}}});
+  assert.equal(done.reason,'SUBSCRIPTION_VERIFICATION_VIEW');assert.equal(f.target().status,'member');assert.equal(f.writes.length,2);
+  assert.ok((await f.store.snapshot()).moderationReasons.every(r=>r.memberId!=='300'||!r.active));
+ }finally{await f.close();}});
+
+ test(engine+' joined restrictions never lift while the channel API result is unknown',async()=>{const f=await fixture(true);try{
+  await f.policy.approveChat('100','-200',['verification']);
+  await f.store.transaction(s=>{s.subscriptionRequirements.push({chatId:G,channelIds:['-200'],mode:'ALL',version:1});assert.equal(recordSubscriptionEnforcementConsent(s,f.policy,'100',G,true,f.now()),true);});
+  await f.enable();f.advance();const at=f.now();
+  await f.app.handle({update_id:195,message:{message_id:195,date:at/1000,from:{id:100,is_bot:false},chat:{id:Number(G),type:'supergroup'},new_chat_members:[{id:300,is_bot:false}]}});
+  assert.equal(f.target().status,'restricted');f.advance();
+  const start=await f.app.handle({update_id:196,message:{message_id:196,from:{id:300,is_bot:false},chat:{id:300,type:'private'},text:'/start'}}),answer=pick({text:start.plan!.text,keyboard:start.plan!.inlineMarkup!},'تحقق بديل');
+  const result=await f.app.handle({update_id:197,callback_query:{id:'unknown-channel-pass',from:{id:300,is_bot:false},data:answer,message:{message_id:197,from:{id:999,is_bot:true},chat:{id:300,type:'private'}}}});
+  assert.equal(result.reason,'SUBSCRIPTION_VERIFICATION_VIEW');assert.match(result.plan!.text,/تعذر إكمال الفحص/u);
+  assert.equal(f.target().status,'restricted');assert.equal(f.writes.length,1);
+  assert.ok((await f.store.snapshot()).moderationReasons.some(r=>r.source==='MANUAL'&&r.active));
+ }finally{await f.close();}});
+
+ test(engine+' private start resumes an unfinished joined channel gate without repeating passed CAPTCHA',async()=>{const f=await fixture(true);try{
+  await f.policy.approveChat('100','-200',['verification']);
+  await f.store.transaction(s=>{s.subscriptionRequirements.push({chatId:G,channelIds:['-200'],mode:'ALL',version:1});assert.equal(recordSubscriptionEnforcementConsent(s,f.policy,'100',G,true,f.now()),true);});
+  await f.enable();f.channelMembership.set('-200','300','NOT_MEMBER');f.advance();const at=f.now();
+  await f.app.handle({update_id:199,message:{message_id:199,date:at/1000,from:{id:100,is_bot:false},chat:{id:Number(G),type:'supergroup'},new_chat_members:[{id:300,is_bot:false}]}});
+  f.advance();const start=await f.app.handle({update_id:200,message:{message_id:200,from:{id:300,is_bot:false},chat:{id:300,type:'private'},text:'/start'}}),answer=pick({text:start.plan!.text,keyboard:start.plan!.inlineMarkup!},'تحقق بديل');
+  const passed=await f.app.handle({update_id:201,callback_query:{id:'resume-first-pass',from:{id:300,is_bot:false},data:answer,message:{message_id:201,from:{id:999,is_bot:true},chat:{id:300,type:'private'}}}});
+  assert.equal(passed.reason,'SUBSCRIPTION_VERIFICATION_VIEW');assert.equal(f.target().status,'restricted');
+  const resumed=await f.app.handle({update_id:202,message:{message_id:202,from:{id:300,is_bot:false},chat:{id:300,type:'private'},text:'/start'}});
+  assert.equal(resumed.reason,'SUBSCRIPTION_VERIFICATION_VIEW');
+  assert.match(resumed.plan!.text,/لم يكتمل شرط الاشتراك/u);
+  assert.equal(f.captcha.status(await f.store.snapshot(),G,'300'),'PASSED');assert.equal(f.writes.length,1);
+  f.channelMembership.set('-200','300','MEMBER');const button=resumed.plan!.studioMarkup!.inline_keyboard.flat().find(b=>'callback_data' in b&&b.callback_data.startsWith('sv:1:'));assert.ok(button&&'callback_data' in button);
+  const done=await f.app.handle({update_id:203,callback_query:{id:'resume-channel',from:{id:300,is_bot:false},data:button.callback_data,message:{message_id:203,from:{id:999,is_bot:true},chat:{id:300,type:'private'}}}});
+  assert.equal(done.reason,'SUBSCRIPTION_VERIFICATION_VIEW');assert.equal(f.target().status,'member');assert.equal(f.writes.length,2);
+ }finally{await f.close();}});
+
+ test(engine+' welcome appears once after all gates finish and is never sent before channels pass',async()=>{const f=await fixture(true);try{
+  await f.policy.approveChat('100','-200',['verification']);
+  await f.store.transaction(s=>{s.subscriptionRequirements.push({chatId:G,channelIds:['-200'],mode:'ALL',version:1});assert.equal(recordSubscriptionEnforcementConsent(s,f.policy,'100',G,true,f.now()),true);});
+  await f.enable();f.channelMembership.set('-200','300','NOT_MEMBER');f.advance();const at=f.now();
+  await f.app.handle({update_id:220,message:{message_id:220,date:at/1000,from:{id:100,is_bot:false},chat:{id:Number(G),type:'supergroup'},new_chat_members:[{id:300,is_bot:false}]}});
+  f.advance();const initial=await f.app.handle({update_id:221,message:{message_id:221,from:{id:300,is_bot:false},chat:{id:300,type:'private'},text:'/start'}}),answer=pick({text:initial.plan!.text,keyboard:initial.plan!.inlineMarkup!},'تحقق بديل');
+  const before=await f.app.handle({update_id:222,callback_query:{id:'welcome-captcha',from:{id:300,is_bot:false},data:answer,message:{message_id:222,from:{id:999,is_bot:true},chat:{id:300,type:'private'}}}});
+  assert.doesNotMatch(before.plan!.text,/مرحبًا بك بعد إكمال التحقق/u);
+  assert.equal((await f.store.snapshot()).audit.filter(a=>a.updateKey.startsWith('onboarding:welcome:')).length,0);
+  f.channelMembership.set('-200','300','MEMBER');
+  const retry=before.plan!.studioMarkup!.inline_keyboard.flat().find(b=>'callback_data' in b&&b.callback_data.startsWith('sv:1:'));assert.ok(retry&&'callback_data' in retry);
+  const complete=await f.app.handle({update_id:223,callback_query:{id:'welcome-channel',from:{id:300,is_bot:false},data:retry.callback_data,message:{message_id:223,from:{id:999,is_bot:true},chat:{id:300,type:'private'}}}});
+  assert.match(complete.plan!.text,/مرحبًا بك بعد إكمال التحقق/u);
+  assert.equal(f.target().status,'member');
+  assert.equal((await f.store.snapshot()).audit.filter(a=>a.updateKey.startsWith('onboarding:welcome:')).length,1);
+  const repeated=await f.app.handle({update_id:224,callback_query:{id:'welcome-repeat',from:{id:300,is_bot:false},data:retry.callback_data,message:{message_id:224,from:{id:999,is_bot:true},chat:{id:300,type:'private'}}}});
+  assert.doesNotMatch(repeated.plan!.text,/مرحبًا بك بعد إكمال التحقق/u);
+  assert.equal((await f.store.snapshot()).audit.filter(a=>a.updateKey.startsWith('onboarding:welcome:')).length,1);
+ }finally{await f.close();}});
+
+ test(engine+' standalone CAPTCHA shows one welcome only after restriction is safely released',async()=>{const f=await fixture();try{
+  await f.enable();f.advance();const at=f.now();
+  await f.app.handle({update_id:230,message:{message_id:230,date:at/1000,from:{id:100,is_bot:false},chat:{id:Number(G),type:'supergroup'},new_chat_members:[{id:300,is_bot:false}]}});
+  f.advance();const initial=await f.app.handle({update_id:231,message:{message_id:231,from:{id:300,is_bot:false},chat:{id:300,type:'private'},text:'/start'}}),answer=pick({text:initial.plan!.text,keyboard:initial.plan!.inlineMarkup!},'تحقق بديل');
+  assert.doesNotMatch(initial.plan!.text,/مرحبًا بك بعد إكمال التحقق/u);
+  const result=await f.app.handle({update_id:232,callback_query:{id:'standalone-welcome',from:{id:300,is_bot:false},data:answer,message:{message_id:232,from:{id:999,is_bot:true},chat:{id:300,type:'private'}}}});
+  assert.equal(result.reason,'CAPTCHA_CHALLENGE_VIEW');
+  assert.match(result.plan!.text,/مرحبًا بك بعد إكمال التحقق/u);
+  assert.equal(f.target().status,'member');
+  assert.equal((await f.store.snapshot()).audit.filter(a=>a.updateKey.startsWith('onboarding:welcome:')).length,1);
+  const repeated=await f.app.handle({update_id:233,message:{message_id:233,from:{id:300,is_bot:false},chat:{id:300,type:'private'},text:'/start'}});
+  assert.doesNotMatch(repeated.plan?.text??'',/مرحبًا بك بعد إكمال التحقق/u);
+  assert.equal((await f.store.snapshot()).audit.filter(a=>a.updateKey.startsWith('onboarding:welcome:')).length,1);
+ }finally{await f.close();}});
+ test(engine+' an unrelated active sanction prevents a standalone welcome after CAPTCHA',async()=>{const f=await fixture();try{
+  await f.enable();f.advance();const at=f.now();
+  await f.app.handle({update_id:234,message:{message_id:234,date:at/1000,from:{id:100,is_bot:false},chat:{id:Number(G),type:'supergroup'},new_chat_members:[{id:300,is_bot:false}]}});
+  await f.store.transaction(s=>{s.moderationReasons.push({chatId:G,memberId:'300',source:'MANUAL',reference:'independent',kind:'BAN',createdBy:'100',active:true});});
+  f.advance();const initial=await f.app.handle({update_id:235,message:{message_id:235,from:{id:300,is_bot:false},chat:{id:300,type:'private'},text:'/start'}}),answer=pick({text:initial.plan!.text,keyboard:initial.plan!.inlineMarkup!},'تحقق بديل');
+  const result=await f.app.handle({update_id:236,callback_query:{id:'independent-welcome-block',from:{id:300,is_bot:false},data:answer,message:{message_id:236,from:{id:999,is_bot:true},chat:{id:300,type:'private'}}}});
+  assert.doesNotMatch(result.plan!.text,/مرحبًا بك بعد إكمال التحقق/u);
+  assert.equal((await f.store.snapshot()).audit.filter(a=>a.updateKey.startsWith('onboarding:welcome:')).length,0);
+ }finally{await f.close();}});
+
+ test(engine+' owner CAPTCHA settings explain missing channel enforcement consent without claiming integration is unavailable',async()=>{const f=await fixture(true);try{
+  await f.policy.approveChat('100','-200',['verification']);
+  await f.store.transaction(s=>{s.subscriptionRequirements.push({chatId:G,channelIds:['-200'],mode:'ALL',version:1});});
+  let root=await f.ui.handle('100','mi:1:i:04:07'),edit=await f.ui.handle('100',pick(root,G));
+  assert.match(edit!.text,/تفعيل إنفاذ الاشتراك أولًا/u);
+  assert.doesNotMatch(edit!.text,/يلزم استكمال الربط بين المسارين/u);
+  assert.equal(edit!.keyboard.inline_keyboard.flat().filter(b=>b.text.includes('تفعيل إنفاذ CAPTCHA')).length,0);
+  await f.store.transaction(s=>{assert.equal(recordSubscriptionEnforcementConsent(s,f.policy,'100',G,true,f.now()),true);});
+  root=await f.ui.handle('100','mi:1:i:04:07');edit=await f.ui.handle('100',pick(root,G));
+  assert.equal(edit!.keyboard.inline_keyboard.flat().filter(b=>b.text.includes('تفعيل إنفاذ CAPTCHA')).length,1);
+ }finally{await f.close();}});
+
+ test(engine+' authenticated Telegram join routes once into optional CAPTCHA public notice with original topic',async()=>{const f=await fixture(false,true);try{
+  assert.ok(f.joinNotices);assert.equal(await f.joinNotices.configure('100',G,true,f.joinNotices.epoch(await f.store.snapshot(),G)),true);
+  f.advance();const at=f.now(),join={update_id:248,message:{message_id:248,date:at/1000,from:{id:100,is_bot:false},
+   chat:{id:Number(G),type:'supergroup'},message_thread_id:42,new_chat_members:[{id:300,is_bot:false}]}};
+  const first=await f.app.handle(join);assert.equal(first.status,'IGNORED');
+  assert.equal((await f.store.snapshot()).audit.filter(a=>/^captcha:join-notice-job:[a-f0-9]{64}$/u.test(a.updateKey)).length,1);
+  assert.equal((await f.joinNotices.drain()).sent,1);
+  assert.deepEqual(f.sentJoin,[{chatId:G,botUsername:'ManaratakBot',kind:'CAPTCHA',topicId:42}]);
+  await f.app.handle(join);
+  assert.equal(f.sentJoin.length,1);
+  assert.equal((await f.store.snapshot()).audit.filter(a=>/^captcha:join-notice-job:[a-f0-9]{64}$/u.test(a.updateKey)).length,1);
+ }finally{await f.close();}});
+ test(engine+' malformed Telegram join service message cannot create CAPTCHA public notice',async()=>{const f=await fixture(false,true);try{
+  assert.ok(f.joinNotices);assert.equal(await f.joinNotices.configure('100',G,true,f.joinNotices.epoch(await f.store.snapshot(),G)),true);
+  f.advance();const at=f.now();
+  const forged=await f.app.handle({update_id:249,message:{message_id:249,date:at/1000,from:{id:100,is_bot:false},chat:{id:Number(G),type:'supergroup'},
+   new_chat_members:[{id:300,is_bot:false}],text:'fake join'}});
+  assert.equal(forged.status,'DENIED');assert.equal((await f.joinNotices.drain()).sent,0);assert.equal(f.sentJoin.length,0);
+ }finally{await f.close();}});
+}

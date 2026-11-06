@@ -31,7 +31,7 @@ export async function previewReplyDelete(store:BotStore,policy:Policy,purge:Mode
   if(matches.length!==1)return deny('DELETE_MESSAGE_NOT_OBSERVED');
   const meta=matches[0]!;
   if(meta.senderKind!=='USER'||meta.senderId!==String(reply.from.id)||meta.sentAt!==reply.date*1000||
-   meta.pinned||meta.linkedChannel||meta.adminLog||meta.approvedAnnouncement)return deny('DELETE_MESSAGE_PROTECTED_OR_STALE');
+   meta.pinned||meta.linkedChannel||meta.adminLog||meta.approvedAnnouncement||meta.protectionUnverified!==undefined)return deny('DELETE_MESSAGE_PROTECTED_OR_STALE');
   const preview=await purge.preview(actor,chat,{limit:1,senderId:meta.senderId,beforeMessageId:meta.messageId+1});
   if(preview.items.length!==1||preview.items[0]!.messageId!==meta.messageId){
    await purge.cancel(actor,preview.id);return deny('DELETE_PREVIEW_CHANGED');

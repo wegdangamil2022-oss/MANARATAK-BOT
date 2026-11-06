@@ -1,5 +1,15 @@
+import {moderationEvidenceMatches,validReasonRetirement,retirementOperationDigest,REASON_RETIREMENT} from './moderation-reason-retirement.js';
+import {exemptFromRule} from './group-rule-exemption-model.js';
+import {warningActive,ruleWarningPolicy,paragraphWarningCount} from './group-rule-warning-policy.js';
+import {enqueueAdminRoomWarningNotice,enqueueAdminRoomOperationNotice,enqueueAdminRoomRightsFailure} from './admin-room-notices.js';
+import {groupRuleDescription} from './telegram-group-rules.js';
 import {subscriptionEnforcementConsent} from './subscription-enforcement-policy.js';
-import { randomUUID } from 'node:crypto';
+import { randomUUID,randomBytes } from 'node:crypto';
+import {enqueueReportNotices} from './moderation-report-notices.js';
+import {enqueueAdminRoomReportNotice} from './admin-room-notices.js';
+import {ruleReviewReports} from './moderation-report-model.js';
+import {RULE_NOTICE,ruleNotices} from './group-rule-notices.js';
+import {ruleActionAllowed} from './group-rule-warning-policy.js';
 import { BotStore, type BotState, type ModerationReason, type ModerationOperation, type RestrictionKind, type ModerationDispatchGateway } from './store.js';
 import { Policy } from './policy.js';
 import {moderationRateFuse,moderationRateDenial} from './moderation-rate-fuse.js';
@@ -40,6 +50,9 @@ export class FakeModerationGateway implements ModerationGateway {
   }
 }
 const byTarget = (r: {chatId: string; memberId: string}, chatId: string, memberId: string): boolean => r.chatId === chatId && r.memberId === memberId;
+export function authorizedModerationTarget(s:BotState,policy:Policy,actorId:string,chatId:string,memberId:string,now:number):boolean{
+ return !ambiguousModerationChatIds(s).has(chatId)&&actorId!==memberId&&memberId!==policy.ownerId&&/^\d+$/.test(memberId)&&memberId!=='0'&&!policy.has(s,memberId,'chat.manage',chatId,now)&&policy.canUseChat(s,chatId,'moderation')&&policy.has(s,actorId,'chat.manage',chatId,now);
+}
 export const moderationReasonFingerprint = (s: BotState, chatId: string, memberId: string): string =>
   JSON.stringify(s.moderationReasons.filter(x => byTarget(x, chatId, memberId) && x.active)
     .map(x => [x.source, x.reference, x.kind,...(x.expiresAt===undefined?[]:[{expiresAt:x.expiresAt}])]).sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b))));
@@ -141,10 +154,7 @@ export class ModerationService {
     // Duplicated restored approval rows cannot authorize an operation.
     // This guard is reused at the initial gate, each atomic mutation,
     // and the awaited gateway's last-mile authority callback.
-    return !ambiguousModerationChatIds(s).has(chatId) &&
-      actorId !== memberId && memberId !== this.policy.ownerId && /^\d+$/.test(memberId) && memberId !== '0' &&
-      !this.policy.has(s, memberId, 'chat.manage', chatId, this.clock()) &&
-      this.policy.canUseChat(s, chatId, 'moderation') && this.policy.has(s, actorId, 'chat.manage', chatId, this.clock());
+    return authorizedModerationTarget(s,this.policy,actorId,chatId,memberId,this.clock());
   }
   /** A pending/ambiguous sanction must be immutable until separately reviewed.
    * Never query Telegram or edit even local reason rows while another sanction
@@ -193,8 +203,9 @@ export class ModerationService {
     });
   }
   private async check(actorId: string, chatId: string, memberId: string): Promise<boolean> {
-    return this.authorized(await this.store.snapshot(), actorId, chatId, memberId) &&
-      await this.gateway.canRestrict(chatId, memberId) && !await this.gateway.isProtected(chatId, memberId);
+    if(!this.authorized(await this.store.snapshot(),actorId,chatId,memberId))return false;
+    if(!await this.gateway.canRestrict(chatId,memberId)){if(TelegramBotApiModerationGateway.usesOfficialDispatch(this.gateway))await this.store.transaction(s=>{if(this.authorized(s,actorId,chatId,memberId))enqueueAdminRoomRightsFailure(s,this.policy,chatId,this.clock());});return false;}
+    return !await this.gateway.isProtected(chatId, memberId);
   }
   private releaseSource(s:BotState,actor:string,chat:string,member:string,reference:string,kind:'BAN'|'MUTE',reasonSource:'MANUAL'|'SUBSCRIPTION'='MANUAL'):ModerationOperation|null{
     if(!this.policy.isOwner(actor)||!this.policy.privateFeature(s,'owner.dashboard',actor)||!TelegramBotApiModerationGateway.usesOfficialDispatch(this.gateway)||!this.authorized(s,actor,chat,member)||this.unresolved(s,chat,member))return null;
@@ -203,14 +214,14 @@ export class ModerationService {
     if(reasons.length!==1||reasons[0]!.source!==reasonSource||reasons[0]!.reference!==reference||reasons[0]!.kind!==kind)return null;
     const ops=s.moderationOperations.filter(o=>byTarget(o,chat,member)&&o.status==='CONFIRMED');
     const at=ops.reduce((n,o)=>Math.max(n,o.createdAt),0),latest=ops.filter(o=>o.createdAt===at),op=latest[0];
-    return latest.length===1&&op?.kind===kind&&op.attemptGateway==='TELEGRAM_API'&&op.baselineMode==='INHERIT_GROUP_DEFAULTS'&&op.policyVersion===this.policy.chatRevision(s,chat)&&op.reasonFingerprint===fingerprint(s,chat,member)?structuredClone(op):null;
+    return latest.length===1&&op?.kind===kind&&op.attemptGateway==='TELEGRAM_API'&&op.baselineMode==='INHERIT_GROUP_DEFAULTS'&&op.policyVersion===this.policy.chatRevision(s,chat)&&moderationEvidenceMatches(s,op,fingerprint(s,chat,member),this.policy.ownerId,this.clock())?structuredClone(op):null;
   }
   private releaseCurrent(s:BotState,actor:string,chat:string,member:string,context:ReviewedReleaseContext):boolean{
     const now=this.clock(),original=s.moderationOperations.filter(o=>o.id===context.original.id),confirmed=s.moderationOperations.filter(o=>byTarget(o,chat,member)&&o.status==='CONFIRMED');
     const at=confirmed.reduce((n,o)=>Math.max(n,o.createdAt),0),latest=confirmed.filter(o=>o.createdAt===at);
     const reasons=s.moderationReasons.filter(r=>byTarget(r,chat,member)&&r.active);
     return Number.isSafeInteger(now)&&now>=context.reviewedAt&&now<context.expiresAt&&this.policy.isOwner(actor)&&this.policy.privateFeature(s,'owner.dashboard',actor)&&TelegramBotApiModerationGateway.usesOfficialDispatch(this.gateway)&&
-      this.authorized(s,actor,chat,member)&&reasons.length===1&&reasons[0]!.source===(context.source??'MANUAL')&&(context.source!=='SUBSCRIPTION'||subscriptionEnforcementConsent(s,this.policy,chat)!==null)&&reasons[0]!.reference===context.reference&&reasons[0]!.kind===context.original.kind&&fingerprint(s,chat,member)===context.original.reasonFingerprint&&original.length===1&&original[0]!.status==='CONFIRMED'&&sameModerationAttempt(original[0]!,context.original)&&
+      this.authorized(s,actor,chat,member)&&reasons.length===1&&reasons[0]!.source===(context.source??'MANUAL')&&(context.source!=='SUBSCRIPTION'||subscriptionEnforcementConsent(s,this.policy,chat)!==null)&&reasons[0]!.reference===context.reference&&reasons[0]!.kind===context.original.kind&&moderationEvidenceMatches(s,context.original,fingerprint(s,chat,member),this.policy.ownerId,now)&&original.length===1&&original[0]!.status==='CONFIRMED'&&sameModerationAttempt(original[0]!,context.original)&&
       original[0]!.baselineMode==='INHERIT_GROUP_DEFAULTS'&&original[0]!.attemptGateway==='TELEGRAM_API'&&original[0]!.policyVersion===this.policy.chatRevision(s,chat)&&latest.length===1&&latest[0]!.id===context.original.id;
   }
   supportsSubscriptionEnforcement():boolean{return TelegramBotApiModerationGateway.usesOfficialDispatch(this.gateway);}
@@ -230,8 +241,20 @@ export class ModerationService {
     const current=(s:BotState)=>{const at=this.clock();return Number.isSafeInteger(at)&&at>=now&&at<expiresAt&&source(s)===epoch&&this.effective(s,chat,member)==='NONE'&&(!this.policy.isOwner(actor)||this.policy.privateFeature(s,'owner.dashboard',actor));};
     return this.reconcileInternal(actor,chat,member,current,undefined,{reference,initialReview});
   }
-  async addManualReason(actorId: string, chatId: string, memberId: string, reference: string, kind: 'MUTE' | 'BAN',stillCurrent?:(s:BotState)=>boolean,durationSeconds?:number,dispatchCurrent?:(s:BotState)=>boolean): Promise<ModerationResult> {
+  async addManualReason(actorId: string, chatId: string, memberId: string, reference: string, kind: 'MUTE' | 'BAN',stillCurrent?:(s:BotState)=>boolean,durationSeconds?:number,dispatchCurrent?:(s:BotState)=>boolean,reviewedUntil?:number): Promise<ModerationResult> {
     if (!reference || reference.length > 80 || !['MUTE', 'BAN'].includes(kind)) throw new Error('Invalid reason');
+    if(reviewedUntil!==undefined){
+      const started=this.clock(),prior=stillCurrent,dispatch=dispatchCurrent;
+      if(!Number.isSafeInteger(started)||started<0||!Number.isSafeInteger(reviewedUntil)||reviewedUntil<=started||reviewedUntil>8640000000000000)return {status:'DENIED',reason:'MODERATION_REVIEW_EXPIRED'};
+      const timely=()=>{const at=this.clock();return Number.isSafeInteger(at)&&at>=started&&at<reviewedUntil;};
+      stillCurrent=s=>(!prior||prior(s))&&timely();dispatchCurrent=s=>(!dispatch||dispatch(s))&&timely();
+    }
+    if(reference.startsWith('law_')){
+      if(kind!=='MUTE'||durationSeconds===undefined||durationSeconds>86400)return {status:'DENIED',reason:'RULE_RESTRICTION_REQUIRES_TIMED_MUTE'};
+      const prior=stillCurrent,dispatch=dispatchCurrent;
+      const lawCurrent=(s:BotState)=>{const at=this.clock();return Number.isSafeInteger(at)&&at>=0&&at<=8640000000000000&&ruleActionAllowed(s,chatId,reference,'mute',at,durationSeconds)&&!!groupRuleDescription(s,chatId,reference,true)&&!exemptFromRule(s,chatId,memberId,reference,at);};
+      stillCurrent=s=>(!prior||prior(s))&&lawCurrent(s);dispatchCurrent=s=>(!dispatch||dispatch(s))&&lawCurrent(s);
+    }
     if(durationSeconds!==undefined&&(!Number.isSafeInteger(durationSeconds)||durationSeconds<60||durationSeconds>2592000))return {status:'DENIED',reason:'INVALID_DURATION'};
     // An unbranded custom adapter might ignore the optional deadline argument.
     // Never silently turn a timed request into a permanent Telegram sanction.
@@ -248,6 +271,7 @@ export class ModerationService {
       const pending=this.unresolved(s,chatId,memberId);
       if(pending)return pending.status;
       const existing = s.moderationReasons.find(x => byTarget(x, chatId, memberId) && x.source === 'MANUAL' && x.reference === reference);
+      if(existing&&reference.startsWith('law_'))return false;
       if (existing?.active) { if (existing.kind !== kind) throw new Error('REASON_CONFLICT'); return false; }
       const limit=moderationRateFuse(s,actorId,chatId,this.clock());
       if(limit)return limit;
@@ -287,6 +311,30 @@ export class ModerationService {
     if(changed==='KIND_MISMATCH')return {status:'DENIED',reason:'REASON_KIND_MISMATCH'};
     return changed ? this.reconcile(actorId, chatId, memberId) : { status: 'NO_CHANGE', reason: 'NOT_ACTIVE' };
   }
+  /** Retire a satisfied MANUAL reason only when another reason keeps precisely
+   * the same remote restriction. No remote mutation or CONFIRMED op is added. */
+  async retireManualReasonPreservingRestriction(actor:string,chat:string,member:string,reference:string,kind:'MUTE'|'BAN',stillCurrent:(s:BotState)=>boolean,expiresAt:number):Promise<ModerationResult>{
+    const started=this.clock();if(typeof stillCurrent!=='function'||!Number.isSafeInteger(started)||started<0||!Number.isSafeInteger(expiresAt)||expiresAt<=started||expiresAt>started+120000||!reference||reference.length>80||!['MUTE','BAN'].includes(kind)||!TelegramBotApiModerationGateway.usesOfficialDispatch(this.gateway))return {status:'DENIED',reason:'RETIREMENT_REQUIRES_CURRENT_REVIEW'};
+    const prior=await this.priorPending(actor,chat,member);if(prior)return prior;
+    const source=(s:BotState)=>{
+      const now=this.clock();if(!Number.isSafeInteger(now)||now<started||now>=expiresAt||!this.policy.isOwner(actor)||!this.policy.privateFeature(s,'owner.dashboard',actor)||!this.authorized(s,actor,chat,member)||this.unresolved(s,chat,member)||!stillCurrent(s))return null;
+      const reasons=s.moderationReasons.filter(r=>byTarget(r,chat,member)&&r.active),found=reasons.filter(r=>r.source==='MANUAL'&&r.reference===reference&&r.kind===kind);
+      if(reasons.length<2||found.length!==1)return null;
+      const confirmed=s.moderationOperations.filter(o=>byTarget(o,chat,member)&&o.status==='CONFIRMED'),latestAt=confirmed.reduce((at,o)=>Math.max(at,o.createdAt),0),latest=confirmed.filter(o=>o.createdAt===latestAt),op=latest[0];
+      if(latest.length!==1||!op||op.kind==='NONE'||op.attemptGateway!=='TELEGRAM_API'||op.baselineMode!=='INHERIT_GROUP_DEFAULTS'||op.policyVersion!==this.policy.chatRevision(s,chat))return null;
+      const before=fingerprint(s,chat,member),after=fingerprint({...s,moderationReasons:s.moderationReasons.map(r=>r===found[0]?{...r,active:false}:r)},chat,member);
+      if(!moderationEvidenceMatches(s,op,before,this.policy.ownerId,now)||!validReasonRetirement(before,after,op))return null;
+      return {op:structuredClone(op),before,after,reasons:JSON.stringify(s.moderationReasons.filter(r=>byTarget(r,chat,member))),operations:targetOperationHistory(s,chat,member,'')};
+    };
+    const original=source(await this.store.snapshot());if(!original)return {status:'DENIED',reason:'RETIREMENT_SOURCE_UNAVAILABLE'};
+    const current=(s:BotState)=>{const fresh=source(s);return fresh!==null&&JSON.stringify(fresh)===JSON.stringify(original);};
+    const matched=await (this.gateway as TelegramBotApiModerationGateway).confirmPreservedRestriction(chat,member,{kind:original.op.kind as 'MUTE'|'BAN',...(original.op.untilDate===undefined?{}:{untilDate:original.op.untilDate})},async()=>current(await this.store.snapshot()));
+    if(!matched)return {status:'DENIED',reason:'RETIREMENT_REMOTE_NOT_MATCHED'};
+    return this.store.transaction(s=>{if(!current(s))return {status:'DENIED' as const,reason:'RETIREMENT_EVIDENCE_CHANGED'};const found=s.moderationReasons.find(r=>byTarget(r,chat,member)&&r.active&&r.source==='MANUAL'&&r.reference===reference&&r.kind===kind)!;
+      found.active=false;s.audit.push({actorId:actor,updateKey:REASON_RETIREMENT+randomUUID(),decision:'ALLOW',reason:JSON.stringify({operationId:original.op.id,digest:retirementOperationDigest(original.op),before:original.before,after:original.after}),policyVersion:original.op.policyVersion,at:this.clock()});
+      return {status:'APPLIED' as const,reason:'LOCAL_REASON_RETIRED_RESTRICTION_PRESERVED'};
+    });
+  }
   private async releaseReviewed(actor:string,chat:string,member:string,reference:string,kind:'BAN'|'MUTE',stillCurrent:(s:BotState)=>boolean,expiresAt:number,reasonSource:'MANUAL'|'SUBSCRIPTION'='MANUAL'):Promise<ModerationResult>{
     const now=this.clock();if(!Number.isSafeInteger(expiresAt)||expiresAt<=now||expiresAt>now+120000)return {status:'DENIED',reason:'RELEASE_REVIEW_EXPIRED'};
     const original=this.releaseSource(await this.store.snapshot(),actor,chat,member,reference,kind,reasonSource);
@@ -303,6 +351,21 @@ export class ModerationService {
   }
   async expireManualReasons(actorId:string,chatId:string,memberId:string):Promise<ModerationResult>{
     const pending=await this.priorPending(actorId,chatId,memberId);if(pending)return pending;
+    if(TelegramBotApiModerationGateway.usesOfficialDispatch(this.gateway)){
+      const initial=await this.store.snapshot(),now=this.clock(),reasons=initial.moderationReasons.filter(r=>byTarget(r,chatId,memberId)&&r.active),r=reasons[0];
+      if(reasons.length&&r&&reasons.every(r=>r.source==='MANUAL'&&r.expiresAt!==undefined&&r.expiresAt<=now)){
+        const source=(s:BotState)=>{if(!this.policy.isOwner(actorId)||!TelegramBotApiModerationGateway.usesOfficialDispatch(this.gateway)||!this.authorized(s,actorId,chatId,memberId)||this.unresolved(s,chatId,memberId))return null;const ops=s.moderationOperations.filter(o=>byTarget(o,chatId,memberId)&&o.status==='CONFIRMED'),at=ops.reduce((n,o)=>Math.max(n,o.createdAt),0),latest=ops.filter(o=>o.createdAt===at),o=latest[0];return latest.length===1&&o&&o.kind!=='NONE'&&o.attemptGateway==='TELEGRAM_API'&&o.baselineMode==='INHERIT_GROUP_DEFAULTS'&&o.policyVersion===this.policy.chatRevision(s,chatId)&&moderationEvidenceMatches(s,o,fingerprint(s,chatId,memberId),this.policy.ownerId,this.clock())?o:null;};
+        const original=source(initial),deadline=now+120000;
+        if(original?.untilDate!==undefined&&original.untilDate*1000<=now){
+          const current=(s:BotState)=>{const at=this.clock(),fresh=source(s);return Number.isSafeInteger(at)&&at>=now&&at<deadline&&!!fresh&&sameModerationAttempt(fresh,original)&&JSON.stringify(s.moderationReasons.filter(x=>byTarget(x,chatId,memberId)&&x.active))===JSON.stringify(reasons);};
+          const clear=await (this.gateway as TelegramBotApiModerationGateway).confirmExpiredRestriction(chatId,memberId,{kind:original.kind as 'BAN'|'MUTE',untilDate:original.untilDate},async()=>current(await this.store.snapshot()));
+          if(!clear)return {status:'DENIED',reason:'EXPIRY_REMOTE_NOT_CLEAR'};
+          return this.store.transaction(s=>{if(!current(s))return {status:'DENIED' as const,reason:'EXPIRY_EVIDENCE_CHANGED'};for(const reason of s.moderationReasons)if(byTarget(reason,chatId,memberId)&&reason.active)reason.active=false;
+            const op:ModerationOperation={id:randomUUID(),chatId,memberId,actorId,kind:'NONE',reasonFingerprint:fingerprint(s,chatId,memberId),policyVersion:this.policy.chatRevision(s,chatId),status:'CONFIRMED',createdAt:this.clock(),attemptGateway:'TELEGRAM_API',reverses:original.id};s.moderationOperations.push(op);
+            s.audit.push({actorId,updateKey:'moderation-expiry:'+op.id,decision:'ALLOW',reason:'MODERATION_EXPIRY_OBSERVED_CLEAR',policyVersion:op.policyVersion,at:op.createdAt});enqueueAdminRoomOperationNotice(s,this.policy,op,op.createdAt);return {status:'APPLIED' as const,reason:'EXPIRY_OBSERVED_CLEAR'};});
+        }
+      }
+    }
     if(!await this.check(actorId,chatId,memberId))return {status:'DENIED',reason:'NOT_AUTHORIZED_OR_BOT_RIGHTS'};
     const changed=await this.store.transaction(s=>{
       const now=this.clock();if(!Number.isSafeInteger(now)||now<0||!this.authorized(s,actorId,chatId,memberId))return 'DENIED' as const;
@@ -320,10 +383,13 @@ export class ModerationService {
     stillCurrent?: (state:BotState)=>boolean): Promise<ModerationResult> {
     if (!reference || reference.length > 80)return {status:'DENIED',reason:'NOT_AUTHORIZED_OR_BOT_RIGHTS'};
     if(TelegramBotApiModerationGateway.usesOfficialDispatch(this.gateway)){const consent=subscriptionEnforcementConsent(await this.store.snapshot(),this.policy,chatId,this.clock());if(!consent||active&&!consent.enabled||!stillCurrent)return {status:'DENIED',reason:'SUBSCRIPTION_ENFORCEMENT_NOT_APPROVED'};const upstream=stillCurrent;stillCurrent=s=>JSON.stringify(subscriptionEnforcementConsent(s,this.policy,chatId,this.clock()))===JSON.stringify(consent)&&upstream(s);}
+    const uniqueReason=(s:BotState)=>s.moderationReasons.filter(x=>byTarget(x,chatId,memberId)&&x.source==='SUBSCRIPTION'&&x.reference===reference).length<=1;
+    if(!uniqueReason(await this.store.snapshot()))return {status:'DENIED',reason:'SUBSCRIPTION_REASON_AMBIGUOUS'};
+    const upstream=stillCurrent;stillCurrent=s=>uniqueReason(s)&&(!upstream||upstream(s));
     const preflight=await this.priorPending(this.policy.ownerId,chatId,memberId);
     if(preflight)return preflight;
     if(!await this.check(this.policy.ownerId, chatId, memberId))
-      return !active&&stillCurrent&&TelegramBotApiModerationGateway.usesOfficialDispatch(this.gateway)?this.releaseReviewed(this.policy.ownerId,chatId,memberId,reference,'MUTE',stillCurrent,this.clock()+5000,'SUBSCRIPTION'):{status:'DENIED',reason:'NOT_AUTHORIZED_OR_BOT_RIGHTS'};
+      return !active&&TelegramBotApiModerationGateway.usesOfficialDispatch(this.gateway)?this.releaseReviewed(this.policy.ownerId,chatId,memberId,reference,'MUTE',stillCurrent,this.clock()+5000,'SUBSCRIPTION'):{status:'DENIED',reason:'NOT_AUTHORIZED_OR_BOT_RIGHTS'};
     const change = await this.store.transaction(s => {
       if (!this.authorized(s, this.policy.ownerId, chatId, memberId) ||
           (stillCurrent && !stillCurrent(s)))return 'STALE' as const;
@@ -345,6 +411,34 @@ export class ModerationService {
       ?this.reconcile(this.policy.ownerId,chatId,memberId,stillCurrent)
       :{status:'NO_CHANGE',reason:'REASON_UNCHANGED'};
   }
+  async issueRuleNotice(actor:string,chat:string,member:string,reference:string,stillCurrent?:(s:BotState)=>boolean):Promise<'ADDED'|'NO_CHANGE'|'DENIED'>{
+    if(!await this.check(actor,chat,member))return 'DENIED';
+    return this.store.transaction(s=>{
+      const now=this.clock(),settings=ruleWarningPolicy(s,chat,reference,now),seconds=settings.status==='CONFIGURED'?settings.policy.seconds:86400;
+      if(!Number.isSafeInteger(now)||now<0||now>8640000000000000-seconds*1000||!this.authorized(s,actor,chat,member)||stillCurrent&&!stillCurrent(s)||!groupRuleDescription(s,chat,reference,true)||exemptFromRule(s,chat,member,reference,now)||!ruleActionAllowed(s,chat,reference,'notice',now))return 'DENIED';
+      const all=ruleNotices(s,now),candidates=s.audit.filter(a=>/^moderation:rule-notice:[A-Za-z0-9_-]{24}$/u.test(a.updateKey));if(all.length!==candidates.length)return 'DENIED';
+      const ref=reference.match(/^law_v([0-9]+)_p([0-9]+)_/u)![0],own=all.filter(n=>n.chat===chat&&n.member===member);
+      if(own.some(n=>n.reference===reference||n.reference.startsWith(ref)&&n.expiresAt>now&&['PENDING','CONFIRMED','UNKNOWN_OUTCOME'].includes(n.delivery)))return 'NO_CHANGE';
+      if(all.filter(n=>n.delivery==='PENDING').length>=1000)return 'DENIED';
+      s.audit.push({actorId:actor,updateKey:RULE_NOTICE+randomBytes(18).toString('base64url'),decision:'ALLOW',reason:'RULE_NOTICE:'+JSON.stringify({chat,member,reference,expiresAt:now+seconds*1000,policyRevision:settings.status==='CONFIGURED'?settings.policy.revision:0}),policyVersion:this.policy.chatRevision(s,chat),at:now});return 'ADDED';
+    });
+  }
+  async requestRuleReview(actor:string,chat:string,member:string,reference:string,stillCurrent?:(s:BotState)=>boolean):Promise<'RECORDED'|'DUPLICATE'|'DENIED'>{
+    if(!await this.check(actor,chat,member))return 'DENIED';
+    return this.store.transaction(s=>{
+      const now=this.clock(),message=Number(/_m([1-9][0-9]{0,15})$/u.exec(reference)?.[1]);
+      if(!Number.isSafeInteger(now)||now<0||now>8640000000000000-120000||!Number.isSafeInteger(message)||!this.policy.privateFeature(s,'support.use',actor)||!this.authorized(s,actor,chat,member)||stillCurrent&&!stillCurrent(s)||!groupRuleDescription(s,chat,reference,true)||exemptFromRule(s,chat,member,reference,now))return 'DENIED';
+      if(!ruleActionAllowed(s,chat,reference,'review',now))return 'DENIED';
+      const existing=ruleReviewReports(s,now).filter(r=>r.chat===chat);
+      if(existing.some(r=>r.member===member&&r.reference===reference))return 'DUPLICATE';
+      // A corrupt candidate must not disappear from the duplicate/cap checks.
+      const candidates=s.audit.filter(a=>a.updateKey.startsWith('moderation:report:')&&a.reason.startsWith('MODERATION_REPORT:'));
+      for(const a of candidates){try{const r=JSON.parse(Buffer.from(a.reason.slice('MODERATION_REPORT:'.length),'base64url').toString('utf8'));if(r?.chat===chat&&Object.hasOwn(r,'reference')&&!existing.some(e=>'moderation:report:'+e.id===a.updateKey))return 'DENIED';}catch{return 'DENIED';}}
+      if(existing.some(r=>r.at>now)||existing.filter(r=>!r.closed).length>=200)return 'DENIED';
+      const id=randomBytes(18).toString('base64url');s.audit.push({actorId:actor,updateKey:'moderation:report:'+id,decision:'ALLOW',reason:'MODERATION_REPORT:'+Buffer.from(JSON.stringify({chat,member,message,reference})).toString('base64url'),policyVersion:this.policy.chatRevision(s,chat),at:now});
+      enqueueReportNotices(s,this.policy,chat,id,now);enqueueAdminRoomReportNotice(s,this.policy,chat,id,now);return 'RECORDED';
+    });
+  }
   async issueWarning(actorId: string, chatId: string, memberId: string, reference: string,stillCurrent?:(s:BotState)=>boolean): Promise<{ status: 'ADDED' | 'NO_CHANGE'; count: number } | { status: 'DENIED'; count: null }> {
     if (!reference || reference.length > 80) throw new Error('Invalid warning reference');
     // A local warning must not target a Telegram administrator or bypass
@@ -353,18 +447,22 @@ export class ModerationService {
     if (!await this.check(actorId,chatId,memberId))return {status:'DENIED',count:null};
     return this.store.transaction(s => {
       if(stillCurrent&&!stillCurrent(s))return {status:'DENIED' as const,count:null};
-      const count = () => s.warnings.filter(w => byTarget(w, chatId, memberId) && w.active).length;
+      const count = () => s.warnings.filter(w => byTarget(w, chatId, memberId) && warningActive(w,this.clock())).length;
       if (!this.authorized(s, actorId, chatId, memberId)) return { status: 'DENIED' as const, count: null };
+      if(reference.startsWith('law_')){const at=this.clock();if(!Number.isSafeInteger(at)||at<0||at>8640000000000000||!groupRuleDescription(s,chatId,reference,true)||exemptFromRule(s,chatId,memberId,reference,at))return {status:'DENIED' as const,count:null};}
+      if(reference.startsWith('law_')&&!ruleActionAllowed(s,chatId,reference,'warn',this.clock()))return {status:'DENIED' as const,count:null};
       const existing = s.warnings.find(w => byTarget(w, chatId, memberId) && w.reference === reference);
       if (existing) return { status: 'NO_CHANGE' as const, count: count() }; // immutable reference; cannot replay revoked warning
-      s.warnings.push({ actorId, chatId, memberId, reference, at: this.clock(), active: true });
+      const at=this.clock(),settings=reference.startsWith('law_')?ruleWarningPolicy(s,chatId,reference,at):{status:'NONE' as const};
+      if(settings.status==='INVALID'||settings.status==='CONFIGURED'&&(paragraphWarningCount(s,chatId,memberId,reference,at)>=settings.policy.cap||at>8640000000000000-settings.policy.seconds*1000))return {status:'DENIED' as const,count:null};
+      const warning={actorId,chatId,memberId,reference,at,active:true,...(settings.status==='CONFIGURED'?{expiresAt:at+settings.policy.seconds*1000}:{})};s.warnings.push(warning);enqueueAdminRoomWarningNotice(s,this.policy,warning,warning.at);
       return { status: 'ADDED' as const, count: count() };
     });
   }
   async removeWarning(actorId: string, chatId: string, memberId: string, reference: string,stillCurrent?:(s:BotState)=>boolean): Promise<{ status: 'REVOKED' | 'NO_CHANGE'; count: number } | { status: 'DENIED'; count: null }> {
     return this.store.transaction(s => {
       if(stillCurrent&&!stillCurrent(s))return {status:'DENIED' as const,count:null};
-      const count = () => s.warnings.filter(w => byTarget(w, chatId, memberId) && w.active).length;
+      const count = () => s.warnings.filter(w => byTarget(w, chatId, memberId) && warningActive(w,this.clock())).length;
       if (!this.authorized(s, actorId, chatId, memberId)) return { status: 'DENIED' as const, count: null };
       const existing = s.warnings.find(w => byTarget(w, chatId, memberId) && w.reference === reference && w.active);
       if (!existing) return { status: 'NO_CHANGE' as const, count: count() };
@@ -556,6 +654,8 @@ export class ModerationService {
         reason.active=false;
       }
       op.status=outcome;
+      s.audit.push({updateKey:'moderation-outcome:'+op.id,actorId,decision:outcome==='CONFIRMED'?'ALLOW':'NOOP',reason:'MODERATION_OUTCOME:'+outcome,policyVersion:op.policyVersion,at:this.clock()});
+      enqueueAdminRoomOperationNotice(s,this.policy,op,this.clock());
       return outcome;
     });
     if(final==='BLOCKED_UNKNOWN')

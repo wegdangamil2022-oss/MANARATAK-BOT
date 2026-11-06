@@ -19,7 +19,7 @@ const callback=(i:number,data:string,actor=100,inGroup=false)=>({
 });
 const textMsg=(i:number,text:string,actor=100)=>({update_id:i,message:{message_id:i,from:{id:actor,is_bot:false},chat:{id:actor,type:'private'},date:1700000000,text}});
 type Handled=Awaited<ReturnType<TelegramUpdateApplication['handle']>>;
-const buttons=(r:Handled)=>{if(r.status==='APPLIED')assert.equal(isValidTelegramInlineKeyboard(r.plan?.inlineMarkup),true);return r.plan?.inlineMarkup?.inline_keyboard.flat()??[];};
+const buttons=(r:Handled)=>{if(r.status==='APPLIED')assert.equal(isValidTelegramInlineKeyboard(r.plan?.inlineMarkup),true,JSON.stringify(r.plan?.inlineMarkup?.inline_keyboard.flat().map(b=>b.callback_data)));return r.plan?.inlineMarkup?.inline_keyboard.flat()??[];};
 const find=(r:Handled,label:string)=>{const b=buttons(r).find(x=>x.text.includes(label));assert.ok(b,'no '+label+' in '+r.plan?.text);return b.callback_data;};
 async function setup(engine:'json'|'sqlite'){
  const dir=await mkdtemp(join(tmpdir(),'network-editor-'));let now=NOW;

@@ -13,6 +13,7 @@ import {SubscriptionGate,FakeMembershipGateway} from '../src/subscription.js';
 import {ModerationService,FakeModerationGateway} from '../src/moderation.js';
 import {TelegramReplyDispatcher} from '../src/telegram-replies.js';
 import {subscriptionConfigEpoch} from '../src/subscription-config-epoch.js';
+import {summarizeChannelUnavailability} from '../src/subscription-channel-unavailable.js';
 const NOW=1700000000000,GROUP='-100100';
 for(const engine of ['json','sqlite'] as const){
  async function fixture(){
@@ -26,6 +27,42 @@ for(const engine of ['json','sqlite'] as const){
  }
  type Result=Awaited<ReturnType<Awaited<ReturnType<typeof fixture>>['click']>>;
  const choose=(r:Result,label:string)=>{const b=r.plan?.inlineMarkup?.inline_keyboard.flat().find(b=>b.text.startsWith(label));assert.ok(b,label+' '+r.reason);return b.callback_data;};
+ test(engine+' private channel rights check reports explicit loss separately from unknown and fences stale scope',async()=>{
+  const f=await fixture();try{
+   await f.gate.configure('100',GROUP,['-100200','-100201'],'ALL');
+   const epoch=subscriptionConfigEpoch(await f.store.snapshot());assert.deepEqual(await f.gate.channelRightsHealth('100',GROUP,epoch),[{id:'-100200',status:'UNKNOWN'},{id:'-100201',status:'UNKNOWN'}]);assert.equal(await f.gate.channelRightsHealth('101',GROUP,epoch),null);
+   assert.equal(summarizeChannelUnavailability(await f.store.snapshot(),NOW,'MANUAL').count,0);
+   const fake=f.membership as FakeMembershipGateway&{inspectChannelRights:(channel:string)=>Promise<'ADMIN'|'NOT_ADMIN'|'UNKNOWN'>};
+   fake.inspectChannelRights=async channel=>channel==='-100200'?'NOT_ADMIN':'UNKNOWN';
+   let home=await f.click('sc:1:h'),editor=await f.click(choose(home,'👥 '+GROUP)),healthButton=choose(editor,'🔎 فحص صلاحية القنوات');
+   assert.equal((await f.click(healthButton,101)).status,'DENIED');assert.equal((await f.click(healthButton,100,true)).status,'DENIED');
+   const health=await f.click(healthButton);assert.equal(health.status,'APPLIED');assert.match(health.plan!.text,/-100200.*ليس مشرفًا/u);assert.match(health.plan!.text,/-100201.*تعذر التحقق/u);assert.equal((await f.store.snapshot()).moderationReasons.length,0);
+   let snapshot=await f.store.snapshot();assert.equal(summarizeChannelUnavailability(snapshot,NOW,'MANUAL').count,1);assert.equal(summarizeChannelUnavailability(snapshot,NOW).count,0);assert.doesNotMatch(JSON.stringify(snapshot.subscriptionChannelManualHealth),/100100|100200|100201/u);
+   editor=await f.click(choose(health,'↩️ إعداد القنوات'));healthButton=choose(editor,'🔎 فحص صلاحية القنوات');let revoked=false;fake.inspectChannelRights=async()=>{if(!revoked){revoked=true;await f.policy.revokeChat('100',GROUP);}return 'UNKNOWN';};
+   assert.equal((await f.click(healthButton)).status,'DENIED');
+   snapshot=await f.store.snapshot();assert.equal(summarizeChannelUnavailability(snapshot,NOW,'MANUAL').count,1);
+  }finally{await f.close();}
+ });
+ test(engine+' manual rights telemetry records provider failures but corrupt counters never block the health view',async()=>{
+  const f=await fixture();try{await f.gate.configure('100',GROUP,['-100200','-100201'],'ALL');const fake=f.membership as FakeMembershipGateway&{inspectChannelRights:(channel:string)=>Promise<'ADMIN'|'NOT_ADMIN'|'UNKNOWN'>};fake.inspectChannelRights=async()=>{throw Error('PROVIDER_UNAVAILABLE');};const epoch=subscriptionConfigEpoch(await f.store.snapshot());
+   assert.deepEqual(await f.gate.channelRightsHealth('100',GROUP,epoch),[{id:'-100200',status:'UNKNOWN'},{id:'-100201',status:'UNKNOWN'}]);assert.equal(summarizeChannelUnavailability(await f.store.snapshot(),NOW,'MANUAL').count,2);
+   await f.store.transaction(s=>{s.subscriptionChannelManualHealth={broken:true};});assert.deepEqual(await f.gate.channelRightsHealth('100',GROUP,epoch),[{id:'-100200',status:'UNKNOWN'},{id:'-100201',status:'UNKNOWN'}]);const state=await f.store.snapshot();assert.equal(summarizeChannelUnavailability(state,NOW,'MANUAL').available,false);assert.equal(summarizeChannelUnavailability(state,NOW).available,true);
+  }finally{await f.close();}
+ });
+ test(engine+' removal receipt is withheld if the saved rule changes before the private result',async()=>{
+  const f=await fixture();try{
+   await f.gate.configure('100',GROUP,['-100200'],'ALL');let r=await f.click('sc:1:h');r=await f.click(choose(r,'👥 '+GROUP));r=await f.click(choose(r,'⏸️ معاينة تعطيل'));const confirm=choose(r,'✅ حفظ');
+   const original=f.gate.configure.bind(f.gate);f.gate.configure=async(...args)=>{await original(...args);await f.store.transaction(s=>{const rule=s.subscriptionRequirements.find(x=>x.chatId===GROUP)!;rule.channelIds=['-100201'];rule.version++;});};
+   const result=await f.click(confirm);assert.equal(result.status,'DENIED');assert.doesNotMatch(result.plan?.text??'',/أزيلت من الشرط/u);
+  }finally{await f.close();}
+ });
+ test(engine+' replacing a required channel shows both old and new IDs before and after confirmation',async()=>{
+  const f=await fixture();try{
+   await f.gate.configure('100',GROUP,['-100200'],'ALL');let r=await f.click('sc:1:h');r=await f.click(choose(r,'👥 '+GROUP));r=await f.click(choose(r,'✅ -100200'));r=await f.click(choose(r,'▫️ -100201'));r=await f.click(choose(r,'👁️ معاينة'));
+   assert.match(r.plan!.text,/ستزال من الشرط: -100200/u);assert.match(r.plan!.text,/ستضاف إلى الشرط: -100201/u);assert.deepEqual((await f.store.snapshot()).subscriptionRequirements[0]!.channelIds,['-100200']);
+   r=await f.click(choose(r,'✅ حفظ'));assert.match(r.plan!.text,/أزيلت من الشرط: -100200/u);assert.match(r.plan!.text,/أضيفت إلى الشرط: -100201/u);assert.deepEqual((await f.store.snapshot()).subscriptionRequirements[0]!.channelIds,['-100201']);
+  }finally{await f.close();}
+ });
  test(engine+' subscription picker preserves selected channels across pages and separately confirms ANY rule',async()=>{
   const f=await fixture();try{
    let r=await f.click('mi:1:i:04:02');r=await f.click(choose(r,'👥 '+GROUP));assert.equal(r.plan!.editMessageId,55);r=await f.click(choose(r,'▫️ -100200'));r=await f.click(choose(r,'➡️ التالي'));r=await f.click(choose(r,'▫️ -100211'));r=await f.click(choose(r,'🔘 قناة واحدة'));r=await f.click(choose(r,'👁️ معاينة'));assert.equal((await f.store.snapshot()).subscriptionRequirements.length,0);
@@ -50,7 +87,7 @@ for(const engine of ['json','sqlite'] as const){
  test(engine+' disabling an existing requirement is a separate confirmed local action and does not require provider calls',async()=>{
   const f=await fixture();try{
    await f.store.transaction(s=>{s.subscriptionRequirements.push({chatId:GROUP,channelIds:['-100200'],mode:'ALL',version:1});});f.membership.canVerifyChannel=async()=>{throw Error('SHOULD_NOT_CALL_PROVIDER');};
-   let r=await f.click('sc:1:h');r=await f.click(choose(r,'👥 '+GROUP));r=await f.click(choose(r,'⏸️ معاينة تعطيل'));assert.equal((await f.store.snapshot()).subscriptionRequirements[0]!.channelIds.length,1);r=await f.click(choose(r,'✅ حفظ'));assert.ok(r.plan!.text.includes('حُفظ'));const rule=(await f.store.snapshot()).subscriptionRequirements[0]!;assert.equal(rule.version,2);assert.deepEqual(rule.channelIds,[]);assert.equal((await f.store.snapshot()).audit.filter(a=>a.reason==='SUBSCRIPTION_CONFIG_CONFIRMED').length,1);
+   let r=await f.click('sc:1:h');r=await f.click(choose(r,'👥 '+GROUP));r=await f.click(choose(r,'⏸️ معاينة تعطيل'));assert.match(r.plan!.text,/ستزال من الشرط: -100200/u);assert.equal((await f.store.snapshot()).subscriptionRequirements[0]!.channelIds.length,1);r=await f.click(choose(r,'✅ حفظ'));assert.ok(r.plan!.text.includes('حُفظ'));assert.match(r.plan!.text,/أزيلت من الشرط: -100200/u);const rule=(await f.store.snapshot()).subscriptionRequirements[0]!;assert.equal(rule.version,2);assert.deepEqual(rule.channelIds,[]);assert.equal((await f.store.snapshot()).audit.filter(a=>a.reason==='SUBSCRIPTION_CONFIG_CONFIRMED').length,1);
   }finally{await f.close();}
  });
  test(engine+' independent channel rights checks run together before a single guarded save',async()=>{

@@ -10,12 +10,14 @@ export interface ProtectionDelivery{messageId:number;sentAt:number;}
 /** Trusted composition port. The evaluator itself never authorizes a sanction. */
 export interface ProtectionEnforcer {
  supports(action:ProtectionAction):boolean;
+ supportsMuteDuration?:(seconds:number)=>boolean;
  supportsRaid?:()=>boolean;
  executeRaid?:(actor:string,chat:string,seconds:number,current:(s:BotState)=>boolean)=>Promise<string>;
- execute(actor:string,chat:string,member:string,action:ProtectionAction,key:string,current:(s:BotState)=>boolean,delivery?:ProtectionDelivery):Promise<string>;
+ execute(actor:string,chat:string,member:string,action:ProtectionAction,key:string,current:(s:BotState)=>boolean,delivery?:ProtectionDelivery,muteSeconds?:number):Promise<string>;
 }
 export function moderationProtectionEnforcer(service:ModerationService,groupPermissions?:GroupPermissionLockService,deletion?:{store:BotStore;purge:ModerationPurgeService}):ProtectionEnforcer {
  return Object.freeze({
+  supportsMuteDuration:(seconds:number)=>Number.isSafeInteger(seconds)&&seconds>=60&&seconds<=86400,
   supportsRaid:()=>Boolean(groupPermissions),
   async executeRaid(actor:string,chat:string,seconds:number,current:(s:BotState)=>boolean){
    if(!groupPermissions)return 'DENIED';
@@ -23,7 +25,8 @@ export function moderationProtectionEnforcer(service:ModerationService,groupPerm
    if(!job)return 'DENIED';return groupPermissions.confirm(actor,job.id,current);
   },
   supports:(action:ProtectionAction)=>action==='REVIEW'||action==='WARN'||action==='MUTE'||action==='DELETE'&&Boolean(deletion),
-  async execute(actor:string,chat:string,member:string,action:ProtectionAction,key:string,current:(s:BotState)=>boolean,delivery?:ProtectionDelivery){
+  async execute(actor:string,chat:string,member:string,action:ProtectionAction,key:string,current:(s:BotState)=>boolean,delivery?:ProtectionDelivery,muteSeconds=60){
+   if(!Number.isSafeInteger(muteSeconds)||muteSeconds<60||muteSeconds>86400||action!=='MUTE'&&muteSeconds!==60)return 'DENIED';
    const reference='protection_'+createHash('sha256').update(key).digest('hex').slice(0,48);
    delivery=delivery?{messageId:delivery.messageId,sentAt:delivery.sentAt}:undefined;
    if(action==='DELETE'){
@@ -31,7 +34,7 @@ export function moderationProtectionEnforcer(service:ModerationService,groupPerm
     const {store,purge}=deletion;const target=delivery;
     const verified=(s:BotState)=>{
      const rows=s.rollingMessageMeta.filter(m=>m.chatId===chat&&m.messageId===target.messageId),m=rows[0];
-     return current(s)&&rows.length===1&&!!m&&m.senderKind==='USER'&&m.senderId===member&&m.sentAt===target.sentAt&&!m.pinned&&!m.linkedChannel&&!m.adminLog&&!m.approvedAnnouncement;
+     return current(s)&&rows.length===1&&!!m&&m.senderKind==='USER'&&m.senderId===member&&m.sentAt===target.sentAt&&!m.pinned&&!m.linkedChannel&&!m.adminLog&&!m.approvedAnnouncement&&m.protectionUnverified===undefined;
     };
     if(!verified(await store.snapshot()))return 'DENIED';
     let job;try{
@@ -43,7 +46,7 @@ export function moderationProtectionEnforcer(service:ModerationService,groupPerm
    }
    if(action==='REVIEW')return 'REVIEW';
    if(action==='WARN')return (await service.issueWarning(actor,chat,member,reference,current)).status;
-   if(action==='MUTE')return (await service.addManualReason(actor,chat,member,reference,'MUTE',current,60,current)).status;
+   if(action==='MUTE')return (await service.addManualReason(actor,chat,member,reference,'MUTE',current,muteSeconds,current)).status;
    return 'DENIED';
   }
  });

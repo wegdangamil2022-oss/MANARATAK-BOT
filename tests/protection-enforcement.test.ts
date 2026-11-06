@@ -9,7 +9,7 @@ import {ModerationService,FakeModerationGateway} from '../src/moderation.js';
 import {GroupProtectionPolicyService} from '../src/group-protection-policy.js';
 import {moderationProtectionEnforcer} from '../src/protection-enforcement.js';
 import {TelegramProtectionEditor} from '../src/telegram-protection-editor.js';
-import type {ProtectionPolicy,ProtectionAction} from '../src/protection-rules.js';
+import {protectionRuleFingerprint,type ProtectionPolicy,type ProtectionAction} from '../src/protection-rules.js';
 import {TelegramUpdateApplication} from '../src/telegram-transport.js';
 import {EducationService} from '../src/education.js';
 import {EducationAdminFacade} from '../src/education-admin.js';
@@ -61,6 +61,13 @@ for(const engine of ['json','sqlite'] as const){
     assert.equal(await f.observe(),'ENFORCEMENT_ATTEMPTED');assert.equal((await f.store.snapshot()).warnings.length,0);assert.equal(f.gateway.calls.length,0);
    }finally{await f.close();}
   }
+ });
+ test(engine+' adding a rule exception during authority lookup prevents the old enforcement attempt',async()=>{
+  const f=await fixture();try{
+   const original=f.config();assert.equal((await f.service.save('100',original,f.epoch,0)).status,'SAVED');
+   f.gateway.canRestrict=async()=>{const current=(await f.store.snapshot()).protectionPolicies![0]!.policy;const result=await f.service.save('100',{...current,revision:current.revision+1,ruleExemptions:[{memberId:'300',ruleId:'spam',ruleDigest:protectionRuleFingerprint(current.rules[0]!),createdAt:f.clock(),expiresAt:f.clock()+60000,grantedBy:'100'}]},f.epoch,current.revision);assert.equal(result.status,'SAVED');return true;};
+   assert.equal(await f.observe(),'ENFORCEMENT_ATTEMPTED');assert.equal((await f.store.snapshot()).warnings.length,0);assert.equal(f.gateway.calls.length,0);
+  }finally{await f.close();}
  });
  test(engine+' enforcement requires separate UI confirmation and stale confirmations cannot reactivate old policies',async()=>{
   const f=await fixture();try{

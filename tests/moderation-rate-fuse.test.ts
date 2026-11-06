@@ -36,6 +36,15 @@ test('rate fuse has explicit conservative bounds and fails closed on invalid clo
  assert.equal(moderationRateFuse({moderationOperations:[]} as never,STAFF,GROUP,-1),'INVALID_CLOCK');
  assert.equal(moderationRateFuse({moderationOperations:[]} as never,STAFF,GROUP,NaN),'INVALID_CLOCK');
 });
+test('configured limits govern each scope and malformed limits fail closed',()=>{
+ const config={actorChatTenMinutes:3,groupTenMinutes:6,actorAllChatsDay:5,revision:1};
+ const state=(operations:ModerationOperation[],override:unknown=config)=>({moderationOperations:operations,moderationRateConfig:override}) as never;
+ assert.equal(moderationRateFuse(state(Array.from({length:3},(_,i)=>record(i))),STAFF,GROUP,BASE),'ACTOR_CHAT_TEN_MINUTES');
+ assert.equal(moderationRateFuse(state(Array.from({length:6},(_,i)=>record(i,{actorId:String(800+i)}))),STAFF,GROUP,BASE),'GROUP_TEN_MINUTES');
+ assert.equal(moderationRateFuse(state(Array.from({length:5},(_,i)=>record(i,{chatId:'-100'+(5000+i),createdAt:BASE-3_600_000}))),STAFF,GROUP,BASE),'ACTOR_ALL_CHATS_DAY');
+ for(const invalid of [{...config,groupTenMinutes:0},{...config,actorAllChatsDay:51},{...config,revision:0},{...config,unexpected:true}])
+  assert.equal(moderationRateFuse(state([],invalid),STAFF,GROUP,BASE),'INVALID_CONFIG');
+});
 for(const engine of ['json','sqlite'] as const){
  test('sixth punishment within ten minutes denied without new reason or outbound call ('+engine+')',async()=>{
   const f=await fixture(engine);try{

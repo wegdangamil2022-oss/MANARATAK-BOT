@@ -17,6 +17,13 @@ test('duration grammar is canonical, bounded and limited to ban/mute',()=>{
  for(const text of ['/mute case 0m','/mute case 01m','/mute case 59s','/ban case 31d','/mute case 1w','/warn case 1m','/unban case 1m','/mute case 1.5h','/mute case 60s\n'])assert.equal(parse(text).status,'INVALID',text);
 });
 for(const engine of ['json','sqlite'] as const){
+ test(engine+' expiry rotation does not let an unresolved target starve other due members',async()=>{
+  const dir=await mkdtemp(join(tmpdir(),'expiry-rotation-'));try{
+   const store=new BotStore(join(dir,'state.'+engine),{engine}),policy=new Policy(store,'100',()=>NOW);await policy.approveChat('100',CHAT,['moderation']);await store.transaction(s=>{for(const memberId of ['300','301','302'])s.moderationReasons.push({chatId:CHAT,memberId,source:'MANUAL',reference:'due',kind:'MUTE',active:true,createdBy:'100',expiresAt:NOW});});
+   const visited:string[]=[],service={expireManualReasons:async(_actor:string,_chat:string,member:string)=>{visited.push(member);return {status:'DENIED',reason:'KEEP_INDEPENDENT_RESTRICTION'};}} as unknown as ModerationService;
+   for(let i=0;i<3;i++)assert.equal((await tickModerationExpiry(store,policy,service,NOW,true,1)).unresolved,1);assert.equal(new Set(visited).size,3);assert.equal((await store.snapshot()).moderationReasons.every(r=>r.active),true);
+  }finally{await rm(dir,{recursive:true,force:true});}
+ });
  async function fixture(){const dir=await mkdtemp(join(tmpdir(),'moderation-duration-')),store=new BotStore(join(dir,'state.'+engine),{engine});let now=NOW;const policy=new Policy(store,'100',()=>now),gateway=new FakeModerationGateway(),service=new ModerationService(store,policy,gateway,()=>now);await policy.approveChat('100',CHAT,['moderation']);return {dir,store,policy,gateway,service,time:(v:number)=>{now=v;},close:()=>rm(dir,{recursive:true,force:true})};}
  test(engine+' deadline persists, duplicate cannot renew, expiry respects overlapping reasons and does not repeat',async()=>{
   const f=await fixture();try{

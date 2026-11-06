@@ -2,7 +2,7 @@ import type {MembershipGateway,Membership} from './subscription.js';
 import type {MembershipStatus} from './education-interactions.js';
 
 const id=(text:string):boolean=>{
- if(!/^[1-9][0-9]*$/.test(text))return false;
+ if(/^[1-9][0-9]*$/u.exec(text)?.[0]!==text)return false;
  const numeric=Number(text);
  return Number.isSafeInteger(numeric)&&numeric>0;
 };
@@ -71,7 +71,37 @@ export class TelegramBotApiMembershipGateway implements MembershipGateway {
  }
  async canVerifyChannel(channelId:string):Promise<boolean>{
   const record=await this.query(channelId,String(this.botId));
-  return record!==null&&['administrator','creator'].includes(record.status);
+  return record!==null&&record.user.is_bot===true&&['administrator','creator'].includes(record.status);
+ }
+ /** A username is compared only after getChat proves the same numeric channel. */
+ async inspectChannelUsername(channelId:string):Promise<{username:string|null;activeUsernames?:string[]}|null>{
+  if(!channel(channelId))return null;
+  try{
+   const response=await this.request('https://api.telegram.org/bot'+this.token+'/getChat',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({chat_id:channelId}),redirect:'error',signal:AbortSignal.timeout(8000)});
+   if(!response.ok||response.status!==200)return null;const type=response.headers.get('content-type');if(type!==null&&!/^application\/json(?:\s*;.*)?$/iu.test(type))return null;
+   const length=response.headers.get('content-length');if(length!==null&&(!/^[0-9]+$/u.test(length)||Number(length)>16384))return null;const body=await response.text();if(Buffer.byteLength(body)>16384)return null;
+   const raw:unknown=JSON.parse(body);if(!raw||typeof raw!=='object'||Array.isArray(raw))return null;const envelope=raw as Record<string,unknown>,value=envelope.result;
+   if(envelope.ok!==true||!value||typeof value!=='object'||Array.isArray(value))return null;const chat=value as Record<string,unknown>;
+   if(chat.id!==Number(channelId)||chat.type!=='channel'||'migrated_to_chat_id' in chat)return null;
+   const validName=(value:unknown):value is string=>typeof value==='string'&&/^[A-Za-z][A-Za-z0-9_]{4,31}$/u.test(value);
+   if(chat.username!==undefined&&!validName(chat.username))return null;
+   const username=typeof chat.username==='string'?chat.username.toLowerCase():null;
+   if(chat.active_usernames===undefined)return {username};
+   const rawNames=chat.active_usernames;
+   if(!Array.isArray(rawNames)||rawNames.length>100||!rawNames.every(validName))return null;
+   const names=(rawNames as string[]).map(n=>n.toLowerCase());
+   if(new Set(names).size!==names.length||username!==null&&names.length>0&&!names.includes(username))return null;
+   return {username,activeUsernames:names};
+  }catch{return null;}
+ }
+ /** This evidence distinguishes an explicit bot membership result from an
+  * unavailable API. A transport/API error can never prove loss of rights. */
+ async inspectChannelRights(channelId:string):Promise<'ADMIN'|'NOT_ADMIN'|'UNKNOWN'>{
+  const record=await this.query(channelId,String(this.botId));
+  if(!record||record.user.is_bot!==true)return 'UNKNOWN';
+  if(record.status==='administrator'||record.status==='creator')return 'ADMIN';
+  if(['member','restricted','left','kicked'].includes(record.status))return 'NOT_ADMIN';
+  return 'UNKNOWN';
  }
  async getMember(channelId:string,userId:string):Promise<Membership>{
   const record=await this.query(channelId,userId);

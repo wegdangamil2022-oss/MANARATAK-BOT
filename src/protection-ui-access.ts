@@ -17,15 +17,31 @@ export function protectionUIEpoch(state:BotState,policy:Policy,actor:string,now:
  if(policy.isOwner(actor)&&!policy.privateFeature(state,'owner.dashboard',actor))return null;
  const chats=state.chats.filter(c=>policy.canUseChat(state,c.id,'moderation')&&policy.has(state,actor,'chat.manage',c.id,now)).sort((a,b)=>a.id.localeCompare(b.id));
  if(!chats.length&&!policy.isOwner(actor))return null;
- const sessions=state.wizards.filter(w=>w.userId===actor&&w.chatId===actor&&w.status==='ACTIVE'&&typeof w.flow==='string'&&(w.flow.startsWith('protection-enforce:')||w.flow.startsWith('moderation-command:')||w.flow.startsWith('protection-ui:')||w.flow.startsWith('group-setup:')||w.flow.startsWith('owner-upload:')||w.flow.startsWith('subscription-editor:')||w.flow.startsWith('folder-owner:')||w.flow.startsWith('purge-editor:')))
+ const sessions=state.wizards.filter(w=>w.userId===actor&&w.chatId===actor&&w.status==='ACTIVE'&&typeof w.flow==='string'&&(w.flow.startsWith('protection-enforce:')||w.flow.startsWith('moderation-command:')||w.flow.startsWith('protection-ui:')||w.flow.startsWith('group-setup:')||w.flow.startsWith('owner-upload:')||w.flow.startsWith('subscription-editor:')||w.flow.startsWith('folder-owner:')||w.flow.startsWith('purge-editor:')||w.flow.startsWith('admin-role-review:')||w.flow.startsWith('admin-role:')||w.flow.startsWith('owner-rights:')||w.flow.startsWith('moderation-rate:')||w.flow.startsWith('admin-room-check:')))
   .map(w=>[w.key,w.flow,w.version,w.expiresAt]);
  return createHash('sha256').update('MANARATAK:PROTECTION-UI:V1:').update(JSON.stringify([
-  actor,policy.ownerId,chats.map(c=>[c,state.protectionPolicies?.find(r=>r.policy.chatId===c.id)??null]),sessions,
+  actor,policy.ownerId,...(policy.isOwner(actor)?[state.audit.filter(a=>(a.updateKey.startsWith('captcha:policy:')||a.updateKey.startsWith('captcha:review:')||a.updateKey.startsWith('captcha:enforcement:')||a.updateKey.startsWith('captcha:rules-policy:'))),state.wizards.filter(w=>typeof w.flow==='string'&&w.flow.startsWith('captcha-member:')),state.callbacks.filter(c=>c.actorId===actor&&c.ref.startsWith('captcha-owner:')&&!c.used&&!c.revoked)]:[]),state.audit.filter(a=>a.updateKey.startsWith('moderation:rule-notice:')),state.callbacks.filter(c=>c.actorId===actor&&c.ref.startsWith('rule-action-choice:')&&!c.used&&!c.revoked),chats.map(c=>[c,state.protectionPolicies?.find(r=>r.policy.chatId===c.id)??null]),sessions,
+  ...(state.callbacks.some(c=>c.actorId===actor&&c.ref.startsWith('moderation:appeal-warning:')&&!c.used&&!c.revoked)?[state.callbacks.filter(c=>c.actorId===actor&&c.ref.startsWith('moderation:appeal-warning:')&&!c.used&&!c.revoked)]:[]),
+  ...(state.callbacks.some(c=>c.actorId===actor&&c.ref.startsWith('rule-exemption-preview:')&&!c.used&&!c.revoked)?[state.callbacks.filter(c=>c.actorId===actor&&c.ref.startsWith('rule-exemption-preview:')&&!c.used&&!c.revoked)]:[]),
+  ...(state.callbacks.some(c=>c.actorId===actor&&c.ref.startsWith('rule-exemption-revoke:')&&!c.used&&!c.revoked)?[state.callbacks.filter(c=>c.actorId===actor&&c.ref.startsWith('rule-exemption-revoke:')&&!c.used&&!c.revoked)]:[]),
+  ...(state.callbacks.some(c=>c.actorId===actor&&c.ref.startsWith('room-action:')&&!c.used&&!c.revoked)?[state.callbacks.filter(c=>c.actorId===actor&&c.ref.startsWith('room-action:')&&!c.used&&!c.revoked)]:[]),
+  ...(state.callbacks.some(c=>c.actorId===actor&&c.ref.startsWith('oncall-preview:')&&!c.used&&!c.revoked)?[state.callbacks.filter(c=>c.actorId===actor&&c.ref.startsWith('oncall-preview:')&&!c.used&&!c.revoked)]:[]),
+  ...(state.audit.some(a=>a.updateKey.startsWith('admin-room:oncall:'))?[state.audit.filter(a=>a.updateKey.startsWith('admin-room:oncall:'))]:[]),
+  ...(state.callbacks.some(c=>c.actorId===actor&&c.ref.startsWith('admin-room:revoke-preview:')&&!c.used&&!c.revoked)?[state.callbacks.filter(c=>c.actorId===actor&&c.ref.startsWith('admin-room:revoke-preview:')&&!c.used&&!c.revoked)]:[]),
+  ...(state.callbacks.some(c=>c.actorId===actor&&c.ref.startsWith('admin-room:quiet-preview:')&&!c.used&&!c.revoked)?[state.callbacks.filter(c=>c.actorId===actor&&c.ref.startsWith('admin-room:quiet-preview:')&&!c.used&&!c.revoked)]:[]),
+  ...(state.callbacks.some(c=>c.actorId===actor&&c.ref.startsWith('admin-room:daily-preview:')&&!c.used&&!c.revoked)?[state.callbacks.filter(c=>c.actorId===actor&&c.ref.startsWith('admin-room:daily-preview:')&&!c.used&&!c.revoked)]:[]),
   state.warnings.filter(w=>chats.some(c=>c.id===w.chatId)),state.moderationReasons.filter(r=>chats.some(c=>c.id===r.chatId)),state.moderationOperations.filter(o=>chats.some(c=>c.id===o.chatId)),
   ...(state.audit.some(a=>a.updateKey.startsWith('moderation:appeal:'))?[state.audit.filter(a=>a.updateKey.startsWith('moderation:appeal:')),state.privateFeatures['support.use']]:[]),
   ...(state.audit.some(a=>a.updateKey.startsWith('moderation:report:'))?[state.audit.filter(a=>a.updateKey.startsWith('moderation:report:')),state.privateFeatures['support.use']]:[]),
+  ...(state.callbacks.some(c=>c.actorId===actor&&c.ref.startsWith('rule-warning-policy-preview:')&&!c.used&&!c.revoked)?[state.callbacks.filter(c=>c.actorId===actor&&c.ref.startsWith('rule-warning-policy-preview:')&&!c.used&&!c.revoked)]:[]),
+  ...(state.audit.some(a=>a.updateKey.startsWith('moderation:rule-warning-policy:'))?[state.audit.filter(a=>a.updateKey.startsWith('moderation:rule-warning-policy:'))]:[]),
   ...(state.audit.some(a=>a.updateKey.startsWith('moderation:rules:'))?[state.audit.filter(a=>a.updateKey.startsWith('moderation:rules:'))]:[]),
+  ...(state.audit.some(a=>a.updateKey.startsWith('moderation:rule-exemption:'))?[state.audit.filter(a=>a.updateKey.startsWith('moderation:rule-exemption:'))]:[]),
+  ...(state.audit.some(a=>a.updateKey.startsWith('admin-room:request:'))?[state.audit.filter(a=>a.updateKey.startsWith('admin-room:request:')),state.warnings]:[]),
+  ...(state.audit.some(a=>a.updateKey.startsWith('admin-room:quiet:'))?[state.audit.filter(a=>a.updateKey.startsWith('admin-room:quiet:'))]:[]),
+  ...(state.audit.some(a=>a.updateKey.startsWith('admin-room:daily:'))?[state.audit.filter(a=>a.updateKey.startsWith('admin-room:daily:'))]:[]),
   ...(state.groupPermissionJobs===undefined?[]:[state.groupPermissionJobs]),
+  ...(state.moderationRateConfig===undefined?[]:[state.moderationRateConfig]),
   ...(policy.isOwner(actor)&&state.privateSettingsRevision!==undefined?[state.privateSettingsRevision]:[]),
   ...(policy.isOwner(actor)?[state.importRuns,state.educationCategories,state.educationResources,subscriptionConfigEpoch(state),...(state.communityFolders!==undefined?[state.communityFolders]:[])]:[])
  ])).digest('hex');
