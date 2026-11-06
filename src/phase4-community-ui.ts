@@ -280,7 +280,7 @@ export async function phase4CommunityScreen(service:Phase4CommunityService,actor
     [btn('❌ إلغاء','p4c:1:x:'+draft.id)],
     [btn('↩️ إعدادات المجموعة','p4c:1:g:'+draft.chatId)]])};
  }
- if(['mi:1:i:09:01','mi:1:i:09:04','mi:1:i:09:05','mi:1:i:09:15','mi:1:i:09:16','mi:1:i:07:10','p4c:1:l:0'].includes(data)||
+ if(['mi:1:i:09:01','mi:1:i:09:04','mi:1:i:09:05','mi:1:i:09:15','mi:1:i:07:10','p4c:1:l:0'].includes(data)||
    /^p4c:1:l:(?:0|[1-9]\d{0,2})$/u.test(data)){
   const page=data.startsWith('p4c:1:l:')?Number(data.slice(8)):0;
   const groups=await service.listGroups(actorId);

@@ -72,6 +72,7 @@ import {Phase4LectureService} from './phase4-lectures.js';
 import {lectureOwnerScreen} from './phase4-lecture-owner.js';
 import {Phase4EngagementReportsService} from './phase4-engagement-reports.js';
 import {engagementOwnerScreen} from './phase4-engagement-owner.js';
+import {phase4SettingsOwnerScreen} from './phase4-settings-owner.js';
 import {OwnerInlineGroupControls} from './telegram-inline-group-controls.js';
 import {renderOwnerInlineDelegations,delegationOwnerEntry} from './telegram-inline-delegations.js';
 import {renderStaffInline} from './telegram-inline-staff.js';
@@ -986,9 +987,24 @@ export class TelegramUpdateApplication {
      return {status:'APPLIED',reason:'PHASE4_ENGAGEMENT_OWNER',
       plan:this.plan(chatId,screen.text,undefined,screen.keyboard,event.callbackMessageId)};
     }
+    // 09:16 — dedicated settings dashboard. Authorization is private and owner-only.
+    const phase4SettingsInput=kind==='private'&&(
+     event.callbackData==='mi:1:i:09:16'||
+     event.callbackData?.startsWith('p4s:1:')||
+     text==='/communitysettings'||text.startsWith('/communitysettings '));
+    if(phase4SettingsInput){
+     if(!this.opts.policy.isOwner(actorId)||actorId!==chatId||
+      event.edited||event.forwarded||!this.opts.community)
+      return {status:'DENIED',reason:'PHASE4_SETTINGS_OWNER_PRIVATE_ONLY'};
+     const screen=await phase4SettingsOwnerScreen(this.opts.community,actorId,
+      event.callbackData??text);
+     if(!screen)return {status:'DENIED',reason:'PHASE4_SETTINGS_STALE_OR_DENIED'};
+     return {status:'APPLIED',reason:'PHASE4_SETTINGS_OWNER',
+      plan:this.plan(chatId,screen.text,undefined,screen.keyboard,event.callbackMessageId)};
+    }
     const communityCommand=kind==='private'?parsePhase4CommunityCommand(text):null;
     if(kind==='private'&&(communityCommand||event.callbackData?.startsWith('p4c:1:')||
-      (this.opts.community&&['mi:1:i:09:01','mi:1:i:09:04','mi:1:i:09:05','mi:1:i:09:15','mi:1:i:09:16','mi:1:i:07:10'].includes(event.callbackData??'')))){
+      (this.opts.community&&['mi:1:i:09:01','mi:1:i:09:04','mi:1:i:09:05','mi:1:i:09:15','mi:1:i:07:10'].includes(event.callbackData??'')))){
      if(!this.opts.policy.isOwner(actorId)||!this.opts.community)
       return {status:'DENIED',reason:'COMMUNITY_EDITOR_DISABLED'};
      const screen=await phase4CommunityScreen(this.opts.community,actorId,
