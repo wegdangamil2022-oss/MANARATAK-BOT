@@ -104,4 +104,13 @@ for(const engine of ['json','sqlite'] as const){
    assert.equal(await f.owner.handle(OWNER,'nw:1:a:BAD'),null);
   }finally{await f.close();}
  });
+ test(engine+' NETWORK-003 switching from network name input to watchlist cancels old draft',async()=>{
+  const f=await fixture();try{
+   assert.ok(await f.owner.handle(OWNER,'nw:1:n'));
+   assert.ok(await f.owner.handle(OWNER,'nw:1:w:'+NET+':0'));
+   assert.equal(await f.owner.previewName(OWNER,'شبكة يجب إلغاؤها'),null);
+   assert.equal((await f.store.snapshot()).groupNetworks?.length,1);
+  }finally{await f.close();}
+ });
+
 }
