@@ -12,6 +12,7 @@ import {validBadgeState,type BadgeState} from './phase4-badge-model.js';
 import {validReactionState,type ReactionState} from './phase4-reaction-model.js';
 import {validLectureState,type LectureState} from './phase4-lecture-model.js';
 import {validQuizState,type QuizState} from './phase4-quiz-model.js';
+import {validGameCatalogState,type GameCatalogState} from './phase4-game-catalog-model.js';
 import {validCommunityPhotoId,validCommunityLinkKeyboard} from './phase4-community-rich.js';
 import {validCommunityMessageMetadata,type CommunityMessageReceipt} from './community-message-receipt.js';
 import {validAdminUIAccess,type AdminUIAccess} from './protection-ui-access.js';
@@ -197,6 +198,8 @@ export interface BotState {
   phase4Lectures?:LectureState;
   /** Phase 4 / 08:03 verified-member educational multiple choice quizzes. */
   phase4Quizzes?:QuizState;
+  /** Phase 4 / 08:01 per-approved-group opt-in game library settings. */
+  phase4GameCatalog?:GameCatalogState;
   communityFolders?:CommunityFolder[];
   buttonStudio?:StudioState;
   /** Local owner network folders; never evidence of Telegram rights. */
@@ -295,6 +298,7 @@ export class BotStore {
       (previous.phase4Reactions!==undefined&&!validReactionState(previous.phase4Reactions))||
       (previous.phase4Lectures!==undefined&&!validLectureState(previous.phase4Lectures))||
       (previous.phase4Quizzes!==undefined&&!validQuizState(previous.phase4Quizzes))||
+      (previous.phase4GameCatalog!==undefined&&!validGameCatalogState(previous.phase4GameCatalog))||
       (previous.groupNetworks!==undefined&&!validGroupNetworks(previous.groupNetworks))||
       (previous.communityFolders!==undefined&&!validCommunityFolders(previous.communityFolders))||
       (previous.privateSettingsRevision!==undefined&&(typeof previous.privateSettingsRevision!=='number'||!Number.isSafeInteger(previous.privateSettingsRevision)||previous.privateSettingsRevision<0||previous.privateSettingsRevision>=Number.MAX_SAFE_INTEGER))||
