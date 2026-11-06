@@ -130,8 +130,10 @@ for(const engine of ['json','sqlite'] as const){
    const later=await f.quiz.draft(OWNER,GROUP,{...question,title:'تمرين ثان للبحث'});
    assert.equal(await f.quiz.open(OWNER,later.id,1),false);
    assert.equal(gameCatalogAllowsQuiz(await f.store.snapshot(),GROUP,f.now(),'ANSWER'),true);
-   f.advance(86_400_000); // policy same; day cap resets, but first session still open
-   assert.equal(await f.quiz.open(OWNER,later.id,1),true);
+   f.advance(86_400_000); // daily cap resets; old drafts must still expire after 15 min
+   assert.equal(await f.quiz.open(OWNER,later.id,1),false);
+   const tomorrow=await f.quiz.draft(OWNER,GROUP,{...question,title:'تمرين جديد لليوم التالي'});
+   assert.equal(await f.quiz.open(OWNER,tomorrow.id,1),true);
   }finally{await f.close();}
  });
  test('GAME-001 '+engine+': owner review, versioned confirmation, and students forbidden from catalog callback',async()=>{
