@@ -30,11 +30,11 @@ async function fixture(engine:'json'|'sqlite'){
   membership:async()=>membership,botId:'bot-main',botUsername:'ManaratakBot',
   ownerMenuMode:'inline',clock:()=>now});
  const incoming=(id:number,chatId:string,actor:string,text:string,opts?:{callback?:string;forwarded?:boolean})=>({
-  update_id:id,message:opts?.callback===undefined?{
+  update_id:id,...(opts?.callback===undefined?{message:{
    message_id:id,chat:{id:Number(chatId),type:chatId===GROUP?'supergroup':'private'},
    from:{id:Number(actor),is_bot:false,first_name:'Student'},text,
    ...(opts?.forwarded?{forward_origin:{type:'user',sender_user:{id:900,is_bot:false}}}:{})
-  }:undefined,
+  }}:{}),
   ...(opts?.callback!==undefined?{callback_query:{
    id:'callback-'+id,from:{id:Number(actor),is_bot:false,first_name:'Admin'},
    message:{message_id:10,chat:{id:Number(chatId),type:'private'}},
