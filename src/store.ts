@@ -1,5 +1,6 @@
 import {isValidFloodWindow,type FloodWindow} from './protection-flood.js';
 import {validGroupNetworks,type GroupNetwork} from './group-network-model.js';
+import {isValidNetworkPolicySnapshots,type NetworkPolicySnapshot} from './network-policy-snapshots.js';
 import {validNetworkInheritanceLinks,type NetworkInheritanceLink} from './network-inheritance-model.js';
 import {validNetworkEmergencyControls,networkEmergencyStopped,
  type NetworkEmergencyControl} from './network-emergency-stop.js';
@@ -195,6 +196,8 @@ export interface BotState {
   networkWatchCases?:NetworkWatchCase[];
   /** Per-group proposed moderation review, never an automatic sanction grant. */
   networkSanctionReviews?:NetworkSanctionReview[];
+  /** Bounded immutable owner-reviewed local history; no policy restore authority. */
+  networkPolicySnapshots?:NetworkPolicySnapshot[];
   schemaVersion: 8;
   /** Optional additive per-group monitor policy, validated on every read/write. */
   protectionPolicies?:GroupProtectionRecord[];
@@ -289,6 +292,7 @@ export class BotStore {
       (previous.subscriptionObservedMembers!==undefined&&!validSubscriptionObservedMembers(previous.subscriptionObservedMembers))||
       (previous.subscriptionGraceMembers!==undefined&&(!Array.isArray(previous.subscriptionGraceMembers)||previous.subscriptionGraceMembers.length>1000||previous.subscriptionGraceMembers.some(row=>!validSubscriptionGraceMember(row))||new Set(previous.subscriptionGraceMembers.map((row:SubscriptionGraceMember)=>JSON.stringify([row.chatId,row.memberId]))).size!==previous.subscriptionGraceMembers.length))||
       (previous.groupNetworks!==undefined&&!validGroupNetworks(previous.groupNetworks))||
+      (previous.networkPolicySnapshots!==undefined&&!isValidNetworkPolicySnapshots(previous.networkPolicySnapshots))||
       (previous.networkInheritance!==undefined&&!validNetworkInheritanceLinks(previous.networkInheritance))||
       (previous.networkEmergencyControls!==undefined&&!validNetworkEmergencyControls(previous.networkEmergencyControls))||
       (previous.networkInheritance!==undefined&&Array.isArray(previous.networkInheritance)&&
