@@ -7,6 +7,8 @@ export interface Phase4Event{
  title:string;link:string;startsAt:number;endsAt:number;capacity:number;
  status:EventStatus;revision:number;createdAt:number;
  openedAt?:number;cancelledAt?:number;finishedAt?:number;
+ /** One-time reviewed links to existing same-group, private question/survey windows. */
+ questionSessionId?:string;pollId?:string;
 }
 export interface EventRegistration{
  id:string;eventId:string;memberId:string;
@@ -73,13 +75,15 @@ export function validEventSummaryInput(text:unknown,urls:unknown):boolean{
 export function validEventRow(raw:unknown):raw is Phase4Event{
  if(!obj(raw)||!exact(raw,['id','chatId','chatVersion','ownerId','title','link',
   'startsAt','endsAt','capacity','status','revision','createdAt'],
-  ['openedAt','cancelledAt','finishedAt']))return false;
+  ['openedAt','cancelledAt','finishedAt','questionSessionId','pollId']))return false;
  if(!eventId(raw.id)||!eventGroup(raw.chatId)||!eventUser(raw.ownerId)||
   !revision(raw.chatVersion)||!time(raw.createdAt)||!time(raw.startsAt)||
   !time(raw.endsAt)||!validEventInput({
    title:raw.title,startsAt:raw.startsAt,capacity:raw.capacity,
    link:raw.link,durationMinutes:(Number(raw.endsAt)-Number(raw.startsAt))/60_000
   })||Number(raw.startsAt)-Number(raw.createdAt)<600_000)return false;
+ if((raw.questionSessionId!==undefined&&(!eventId(raw.questionSessionId)||raw.openedAt===undefined))||
+  (raw.pollId!==undefined&&(!eventId(raw.pollId)||raw.openedAt===undefined)))return false;
  if(raw.status==='DRAFT')return raw.revision===1&&
   raw.openedAt===undefined&&raw.cancelledAt===undefined&&raw.finishedAt===undefined;
  if(raw.status==='OPEN')return raw.revision===2&&
