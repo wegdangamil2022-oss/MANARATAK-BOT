@@ -551,10 +551,10 @@ export class OwnerNetworkEditor{
   if(p+1<pages)nav.push(btn('➡️ التالي','nw:1:ev:'+id+':'+(p+1)));
   const buttons=nav.length?[nav]:[];
   buttons.push([btn('↩️ بطاقة الشبكة','nw:1:d:'+id)]);
-  return ui('<b>🔔 الأحداث الإدارية للشبكة</b>\\n'+
-   'الشبكة: '+escape(n.name)+' · صفحة '+(p+1)+'/'+pages+'\\n'+
-   'سجل محلي للقراءة فقط؛ لا يُرسل إشعارات ولا يمنح أي صلاحيات.\\n'+
-   (rows.join('\\n')||'لا توجد أحداث إدارية متاحة للمراجعة.')+'\\n'+
+  return ui('<b>🔔 الأحداث الإدارية للشبكة</b>\n'+
+   'الشبكة: '+escape(n.name)+' · صفحة '+(p+1)+'/'+pages+'\n'+
+   'سجل محلي للقراءة فقط؛ لا يُرسل إشعارات ولا يمنح أي صلاحيات.\n'+
+   (rows.join('\n')||'لا توجد أحداث إدارية متاحة للمراجعة.')+'\n'+
    'لا تُعرض بيانات الطلاب أو تفاصيل البلاغات الحساسة.',buttons);
  }
  private members(s:BotState,actor:string,now:number,id:string,p:number):OwnerInlineScreen|null{
