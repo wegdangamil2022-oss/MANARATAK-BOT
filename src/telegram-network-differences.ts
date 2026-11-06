@@ -96,7 +96,7 @@ export class OwnerNetworkPolicyDiffEditor{
   if(p)nav.push(btn('⬅️ السابق','nw:1:cs:'+id+':'+source+':'+(p-1)));
   if(p+1<pages)nav.push(btn('➡️ التالي','nw:1:cs:'+id+':'+source+':'+(p+1)));
   if(nav.length)rows.push(nav);
-  rows.push([btn('↩️ اختيار مرجع آخر','nw:1:cp:'+id+':0)]);
+  rows.push([btn('↩️ اختيار مرجع آخر','nw:1:cp:'+id+':0')]);
   return ui('<b>🧩 اختر مجموعة للمقارنة</b>\n'+
    'المجموعة المرجعية: <code>'+source+'</code>\n'+
    'الشبكة: '+escape(data.networkName)+' · صفحة '+(p+1)+'/'+pages+'\n'+
