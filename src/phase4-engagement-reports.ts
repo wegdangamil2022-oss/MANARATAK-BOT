@@ -101,8 +101,9 @@ export class Phase4EngagementReportsService{
    questions.filter(x=>within(x.createdAt)).length,'LOCAL_RECORD',
    'الأسئلة التي ما زالت محفوظة، بما فيها المعلقة وغير المعتمدة');
   add('questionsReviewed','الأسئلة التي جرت مراجعتها',
-   questions.filter(x=>within(x.reviewedAt)).length,'LOCAL_RECORD',
-   'قرارات مراجعة محفوظة؛ لا تعني أن السؤال نُشر أو أُجيب عنه');
+   questions.filter(x=>within(x.reviewedAt)&&
+    ['APPROVED','REJECTED','ANSWERED'].includes(x.status)).length,'LOCAL_RECORD',
+   'مراجعة بشرية محفوظة؛ إغلاق السؤال آليًا وأرشفته ليسا مراجعة بشرية ولا يعنيان نشره');
   const polls=(s.phase4Polls?.polls??[]).filter(x=>
    local(x.chatId,x.chatVersion));
   const pollIds=new Set(polls.map(x=>x.id));
