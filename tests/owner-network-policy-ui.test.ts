@@ -32,6 +32,11 @@ for(const engine of ['json','sqlite'] as const){
   const sources=await f.owner.handle(OWNER,button(card,'سياسات الشبكة'));
   const preview=await f.owner.handle(OWNER,button(sources,SOURCE));
   assert.match(preview?.text??'',/معاينة/u);
+  // Telegram renders an actual newline; literal backslash-n is a UI defect.
+  assert.ok(sources?.text.includes('\n'));
+  assert.ok(preview?.text.includes('\n'));
+  assert.equal(sources?.text.includes(String.raw`\n`),false);
+  assert.equal(preview?.text.includes(String.raw`\n`),false);
   const yes=button(preview,'تأكيد');
   assert.equal(validOwnerNetworkRoute(yes),true);
   assert.equal((await f.store.snapshot()).networkInheritance,undefined);
