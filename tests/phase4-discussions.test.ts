@@ -199,7 +199,7 @@ for(const engine of ['json','sqlite'] as const){
    const approved=await f.app().handle(f.incoming(112,OWNER,OWNER,'',{callback:'dq:1:a:'+q.id+':1'}));
    assert.equal(approved.status,'APPLIED');
    assert.equal((await f.store.snapshot()).phase4Discussions?.questions[0]?.status,'APPROVED');
-   assert.equal((await f.store.snapshot()).telegramReplyJobs?.some(j=>j.plan.chatId===GROUP),false);
+   assert.equal((await f.store.snapshot()).telegramReplyJobs?.some(j=>j.plan?.chatId===GROUP),false);
   }finally{await f.close();}
  });
 }
