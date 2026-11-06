@@ -928,7 +928,8 @@ export class OwnerNetworkEditor{
  }[]{
   const reasons=new Set(['OWNER_NETWORK_CREATED','OWNER_NETWORK_RENAMED',
    'OWNER_NETWORK_DELETED','OWNER_NETWORK_MEMBER_ADDED','OWNER_NETWORK_MEMBER_REMOVED',
-   'OWNER_NETWORK_STALE_MEMBER_REMOVED','OWNER_NETWORK_STALE_MEMBERS_PRUNED']);
+   'OWNER_NETWORK_STALE_MEMBER_REMOVED','OWNER_NETWORK_STALE_MEMBERS_PRUNED',
+   'OWNER_NETWORK_SELECTED_POLICY_FOLLOWS_STOPPED']);
   const entries:{nonce:string;reason:string;at:number;description:string}[]=[];
   for(const a of s.audit){
    if(!reasons.has(a.reason))continue;
@@ -949,6 +950,7 @@ export class OwnerNetworkEditor{
    else if(c.action.startsWith(PREFIX+'toggle:'))prefix=PREFIX+'toggle:';
    else if(c.action.startsWith(PREFIX+'clean:'))prefix=PREFIX+'clean:';
    else if(c.action.startsWith(PREFIX+'clean-batch:'))prefix=PREFIX+'clean-batch:';
+   else if(c.action.startsWith(PREFIX+'policy-bulk-stop:'))prefix=PREFIX+'policy-bulk-stop:';
    else continue;
    try{values=JSON.parse(c.action.slice(prefix.length));}catch{continue;}
    if(!Array.isArray(values))continue;
@@ -1005,6 +1007,24 @@ export class OwnerNetworkEditor{
     description='الشبكة: '+values[0]+' · العدد: '+values[3].length+
      ' · الارتباطات القديمة: '+values[3].map((row:[string,number])=>row[0]).join('، ');
    }
+   if(description===null&&prefix===PREFIX+'policy-bulk-stop:'&&
+    a.reason==='OWNER_NETWORK_SELECTED_POLICY_FOLLOWS_STOPPED'&&
+    values.length===5&&typeof values[0]==='string'&&/^[a-f0-9]{12}$/u.test(values[0])&&
+    Number.isSafeInteger(values[1])&&values[1]>=1&&
+    a.policyVersion===values[1]&&Number.isSafeInteger(values[2])&&
+    values[2]>=0&&values[2]<=999&&Array.isArray(values[3])&&
+    values[3].length>0&&values[3].length<=SIZE&&
+    values[3].every((id:unknown)=>typeof id==='string'&&/^[a-f0-9]{12}$/u.test(id))&&
+    new Set(values[3]).size===values[3].length&&
+    typeof values[4]==='string'&&/^[a-f0-9]{64}$/u.test(values[4])){
+    const links=(values[3] as string[]).map(id=>(s.networkInheritance??[])
+     .filter(row=>row.id===id&&row.networkId===values[0]&&
+      row.status==='PAUSED'&&row.pausedReason==='OWNER_PAUSED'));
+    if(links.every(rows=>rows.length===1)){
+     description='الشبكة: '+values[0]+' · المجموعات المتوقفة: '+
+      links.length+' · المجموعات: '+links.map(rows=>rows[0]!.targetChatId).join('، ');
+    }
+   }
    if(description!==null)entries.push({nonce:matched[1]!,reason:a.reason,at:a.at,description});
   }
   entries.sort((a,b)=>b.at-a.at||b.nonce.localeCompare(a.nonce));
@@ -1021,7 +1041,8 @@ export class OwnerNetworkEditor{
     e.reason==='OWNER_NETWORK_DELETED'?'حذف':
     e.reason==='OWNER_NETWORK_MEMBER_ADDED'?'ربط مجموعة':
     e.reason==='OWNER_NETWORK_STALE_MEMBER_REMOVED'?'تنظيف ارتباط قديم':
-    e.reason==='OWNER_NETWORK_STALE_MEMBERS_PRUNED'?'تنظيف جماعي':'فصل مجموعة')+
+    e.reason==='OWNER_NETWORK_STALE_MEMBERS_PRUNED'?'تنظيف جماعي':
+    e.reason==='OWNER_NETWORK_SELECTED_POLICY_FOLLOWS_STOPPED'?'إيقاف متابعات مختارة':'فصل مجموعة')+
     ' · '+new Date(e.at).toISOString().slice(0,16).replace('T',' '),
     'nw:1:r:v:'+e.nonce)]);
   const nav:{text:string;callback_data:string}[]=[];
