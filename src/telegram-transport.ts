@@ -908,7 +908,7 @@ export class TelegramUpdateApplication {
     const quizOwnerInput=kind==='private'&&(
      event.callbackData==='mi:1:i:08:03'||
      event.callbackData?.startsWith('qz:1:')||
-     /^\\/quizzes(?:$|\\s)|^\\/quiznew(?:$|\\s)/u.test(text));
+     text==='/quizzes'||text.startsWith('/quiznew '));
     if(quizOwnerInput){
      if(!this.opts.policy.isOwner(actorId)||actorId!==chatId||
       event.edited||event.forwarded)
