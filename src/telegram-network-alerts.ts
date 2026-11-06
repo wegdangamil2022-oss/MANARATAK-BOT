@@ -246,8 +246,11 @@ export class TelegramNetworkAlertEditor{
     '🔔 مفعّلة · ':'🔕 متوقفة · ')+names[kind],
     'na:1:p:'+network+':'+chat+':'+kind)]);
   rows.push([btn('↩️ مجموعات الشبكة','na:1:g:'+network+':0')]);
+  const statuses=(Object.keys(names) as NetworkAlertKind[]).map(kind=>
+   names[kind]+': '+(networkAlertEnabled(s,this.policy,actor,network,chat,kind,now)?
+    'مفعّلة':'متوقفة')).join('\n');
   return ui('<b>🔔 تفضيلات إشعارات الشبكة</b>\n'+
-   'المجموعة: <code>'+escape(chat)+'</code>\n'+
+   'المجموعة: <code>'+escape(chat)+'</code>\n'+statuses+'\n'+
    'استلام الرسائل اختياري وشخصي، ولا يُرسل نص البلاغ أو هوية الطالب.\n'+
    'أوقف النوع الذي لا تريد استلامه في أي وقت. لا تُرسل أحداث سابقة لتفعيلك.',rows);
  }
