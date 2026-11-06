@@ -9,6 +9,7 @@ import {TelegramNetworkAlertEditor,validNetworkAlertRoute} from '../src/telegram
 import {NetworkEventAlertDispatcher,setNetworkAlertPreference} from '../src/network-event-alerts.js';
 import {networkAlertSilenceUntil,networkAlertEventSilenced,setNetworkAlertSilence}
  from '../src/network-alert-silence.js';
+import {isValidTelegramInlineKeyboard} from '../src/telegram-inline-owner.js';
 import type {OwnerInlineScreen} from '../src/telegram-inline-owner.js';
 import type {TelegramReplyPlan} from '../src/telegram-transport.js';
 
@@ -48,6 +49,7 @@ for(const engine of ['json','sqlite'] as const){
    assert.equal(networkAlertSilenceUntil(await f.store.snapshot(),f.policy,ADMIN,N,A,f.now),0);
    const confirm=button(preview,'تأكيد');
    assert.equal(validNetworkAlertRoute(confirm),true);
+   assert.equal(isValidTelegramInlineKeyboard({inline_keyboard:[[{text:'تأكيد الصمت',callback_data:confirm}]]}),true);
    assert.match((await f.ui.handle(ADMIN,confirm))?.text??'',/مفعّل حتى/u);
    assert.equal(await f.ui.handle(ADMIN,confirm),null,'one-shot silence confirmation cannot replay');
    assert.equal(networkAlertSilenceUntil(await f.store.snapshot(),f.policy,ADMIN,N,A,f.now),f.now+3_600_000);
