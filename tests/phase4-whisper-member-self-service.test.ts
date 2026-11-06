@@ -140,6 +140,21 @@ for(const engine of ['json','sqlite'] as const){
    assert.equal(rows?.[0]?.revision,2);
   }finally{await f.close();}
  });
+ test('WHISPER-019 group membership alone cannot bypass configured required channels ('+engine+')',async()=>{
+  const f=await fixture(engine);try{
+   const channel='-100999';
+   await f.policy.approveChat(OWNER,GROUP,['navigation','verification']);
+   await f.policy.approveChat(OWNER,channel,['verification']);
+   await f.store.transaction(s=>{
+    s.subscriptionRequirements.push({chatId:GROUP,channelIds:[channel],
+     mode:'ALL',version:1});
+   });
+   const result=await f.app().handle(f.incoming(83,USER,USER,'/whisperon '+GROUP));
+   assert.equal(result.status,'APPLIED');
+   assert.match(result.plan?.text??'',/تعذّر/);
+   assert.equal((await f.store.snapshot()).phase4Whispers?.consents.length??0,0);
+  }finally{await f.close();}
+ });
  test('WHISPER-004 old consent can be revoked after loss of group approval ('+engine+')',async()=>{
   const f=await fixture(engine);try{
    assert.equal(await f.service.consent(USER,GROUP,true),true);
