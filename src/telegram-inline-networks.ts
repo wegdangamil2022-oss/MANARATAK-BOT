@@ -146,9 +146,9 @@ export class OwnerNetworkEditor{
   if(p>0)rows.push([btn('⬅️ السابق','nw:1:y:'+id+':'+(p-1))]);
   if(p+1<pages)rows.push([btn('➡️ التالي','nw:1:y:'+id+':'+(p+1))]);
   rows.push([btn('↩️ بطاقة الشبكة','nw:1:d:'+id)]);
-  return ui('<b>📑 سياسات شبكة '+escape(n.name)+'</b>\\nاختر مصدر مراقبة معتمدًا؛ لا تنقل هذه الميزة عقوبات ولا تفعّل ENFORCE.\\n'+
+  return ui('<b>📑 سياسات شبكة '+escape(n.name)+'</b>\nاختر مصدر مراقبة معتمدًا؛ لا تنقل هذه الميزة عقوبات ولا تفعّل ENFORCE.\n'+
    (sources.length?'اختر مجموعة لمعاينة النسخ إلى المجموعات بلا سياسة محلية.':'لا توجد مصادر سياسات مؤهلة بعد.')+
-   '\\nالمصادر: '+sources.length+' · صفحة '+(p+1)+'/'+pages,rows);
+   '\nالمصادر: '+sources.length+' · صفحة '+(p+1)+'/'+pages,rows);
  }
  private async previewPolicy(actor:string,networkId:string,sourceId:string,p:number):Promise<OwnerInlineScreen|null>{
   return this.store.transaction(s=>{
@@ -166,10 +166,10 @@ export class OwnerNetworkEditor{
     networkId,n.revision,sourceId,source.policy.revision,targets.map(t=>t.id),proof]),
     actorId:actor,chatId:'private',policyVersion:0,oneShot:true,used:false,
     revoked:false,expiresAt:now+TTL});
-   return ui('<b>🔎 معاينة متابعة سياسة شبكة</b>\\nالمصدر: <code>'+sourceId+'</code>'+
-    '\\nالمجموعات المستهدفة: '+targets.length+
-    '\\nالنمط: مراقبة محلية فقط، دون عقوبات Telegram أو نسخ الاستثناءات والقوائم الخاصة.\\n'+
-    'أي تعديل للمجموعة المستهدفة أو تغير اعتماد الشبكة يوقف متابعتها.\\n'+
+   return ui('<b>🔎 معاينة متابعة سياسة شبكة</b>\nالمصدر: <code>'+sourceId+'</code>'+
+    '\nالمجموعات المستهدفة: '+targets.length+
+    '\nالنمط: مراقبة محلية فقط، دون عقوبات Telegram أو نسخ الاستثناءات والقوائم الخاصة.\n'+
+    'أي تعديل للمجموعة المستهدفة أو تغير اعتماد الشبكة يوقف متابعتها.\n'+
     'المتابعة تبدأ فقط بعد التأكيد، ولا تفعّل إنفاذ أي عقوبة.',
     [[btn('✅ تأكيد متابعة المصدر','nw:1:c:'+ref.slice(2))],
      [btn('✖ إلغاء المعاينة','nw:1:k:'+ref.slice(2))]]);
@@ -520,9 +520,9 @@ export class OwnerNetworkEditor{
     receipt.used=true;
     s.audit.push({actorId:actor,updateKey:'owner-network:'+nonce,decision:'ALLOW',
      reason:'OWNER_NETWORK_POLICY_FOLLOW_ENABLED',policyVersion:n.revision,at:now});
-    return ui('<b>✅ فُعّلت متابعة سياسة الشبكة محليًا</b>\\n'+
-     'المصدر: '+sourceId+'\\nالمستهدفات: '+targets.length+
-     '\\nأي تعديل محلي بالمستهدف يوقف المتابعة دون تغيير Telegram.',
+    return ui('<b>✅ فُعّلت متابعة سياسة الشبكة محليًا</b>\n'+
+     'المصدر: '+sourceId+'\nالمستهدفات: '+targets.length+
+     '\nأي تعديل محلي بالمستهدف يوقف المتابعة دون تغيير Telegram.',
      [[btn('📑 سياسات الشبكة','nw:1:y:'+n.id+':0')],
       [btn('🌐 بطاقة الشبكة','nw:1:d:'+n.id)]]);
    }
