@@ -839,6 +839,10 @@ export class TelegramUpdateApplication {
      }
      if(!this.opts.policy.isOwner(actorId))return {status:'DENIED',reason:'OWNER_ONLY'};
      if(event.callbackData==='mi:1:i:01:03'||event.callbackData.startsWith('nw:1:')){
+      // New NETWORK-004 service controls must never expose owner selections
+      // or approval links in a group message; only a private owner callback.
+      if(/^nw:1:s(?:h|l|t|v|c|k|a|d):/u.test(event.callbackData)&&
+       event.kind!=='private')return {status:'DENIED',reason:'OWNER_NETWORK_PRIVATE_ONLY'};
       const view=await new OwnerNetworkEditor(this.opts.store,this.opts.policy,this.clock,
        event.kind==='private'?this.opts.moderationRights:undefined)
        .handle(actorId,event.callbackData);
