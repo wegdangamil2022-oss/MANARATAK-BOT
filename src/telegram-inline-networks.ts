@@ -2,7 +2,7 @@ import {createHash,randomBytes} from 'node:crypto';
 import type {BotStore,BotState,Chat} from './store.js';
 import type {GroupNetwork} from './group-network-model.js';
 import {validNetworkName} from './group-network-model.js';
-import {prepareNetworkInheritance} from './network-inheritance.js';
+import {prepareNetworkInheritance,pauseNetworkInheritanceByOwner} from './network-inheritance.js';
 import {isValidProtectionPolicy,type ProtectionPolicy} from './protection-rules.js';
 import type {Policy} from './policy.js';
 import type {OwnerInlineScreen} from './telegram-inline-owner.js';
@@ -17,6 +17,8 @@ const list=new RegExp('^nw:1:p:'+page+'$','u');
 const detail=new RegExp('^nw:1:d:'+net+'$','u');
 const policySources=new RegExp('^nw:1:y:'+net+':'+page+'$','u');
 const policyPreview=new RegExp('^nw:1:z:'+net+':'+group+':'+page+'$','u');
+const followList=new RegExp('^nw:1:f:'+net+':'+page+'$','u');
+const followStop=/^nw:1:j:([a-f0-9]{12})$/u;
 const rename=new RegExp('^nw:1:e:'+net+'$','u');
 const remove=new RegExp('^nw:1:x:'+net+'$','u');
 const pick=new RegExp('^nw:1:g:'+net+':'+page+'$','u');
@@ -37,7 +39,7 @@ const validClock=(value:number)=>Number.isSafeInteger(value)&&value>=0&&value<=8
 export function validOwnerNetworkRoute(data:unknown):boolean{
  if(typeof data!=='string'||Buffer.byteLength(data,'utf8')>64)return false;
  return data==='mi:1:i:01:03'||home.test(data)||begin.test(data)||
-  [list,detail,policySources,policyPreview,rename,remove,pick,toggle,stalePage,stalePick,staleBatch,confirm,cancel,historyPage,historyView].some(re=>re.test(data));
+  [list,detail,policySources,policyPreview,followList,followStop,rename,remove,pick,toggle,stalePage,stalePick,staleBatch,confirm,cancel,historyPage,historyView].some(re=>re.test(data));
 }
 function approved(s:BotState,policy:Policy,actor:string,now:number):Chat[]{
  const counts=new Map<string,number>();
@@ -173,6 +175,49 @@ export class OwnerNetworkEditor{
      [btn('✖ إلغاء المعاينة','nw:1:k:'+ref.slice(2))]]);
   });
  }
+ /** No grant or enforcement. Proof binds network and exact follow record. */
+ private followStopProof(s:BotState,n:GroupNetwork,id:string):string{
+  const rows=(s.networkInheritance??[]).filter(x=>x.id===id);
+  return createHash('sha256').update(JSON.stringify([
+   n,rows,s.chats,s.grants,s.privateFeatures,s.privateSettingsRevision??null
+  ])).digest('hex');
+ }
+ private followPage(s:BotState,networkId:string,p:number):OwnerInlineScreen|null{
+  const n=this.find(s,networkId);if(!n||!Number.isSafeInteger(p)||p<0||p>999)return null;
+  const entries=(s.networkInheritance??[]).filter(x=>x.kind==='POLICY'&&x.networkId===networkId)
+   .sort((a,b)=>a.id.localeCompare(b.id));
+  const pages=Math.max(1,Math.ceil(entries.length/SIZE));if(p>=pages)return null;
+  const rows=entries.slice(p*SIZE,(p+1)*SIZE).map(x=>[
+   btn((x.status==='ACTIVE'?'⏸️ إيقاف متابعة ':'🔒 متوقفة: ')+x.targetChatId,
+    x.status==='ACTIVE'?'nw:1:j:'+x.id:'nw:1:f:'+networkId+':'+p)]);
+  if(p>0)rows.push([btn('⬅️ السابق','nw:1:f:'+networkId+':'+(p-1))]);
+  if(p+1<pages)rows.push([btn('➡️ التالي','nw:1:f:'+networkId+':'+(p+1))]);
+  rows.push([btn('📑 إضافة متابعة جديدة','nw:1:y:'+networkId+':0')]);
+  rows.push([btn('↩️ بطاقة الشبكة','nw:1:d:'+networkId)]);
+  return ui('<b>📑 المتابعة المحلية لسياسات الشبكة</b>\n'+
+   'الشبكة: '+escape(n.name)+' · الارتباطات: '+entries.length+
+   ' · صفحة '+(p+1)+'/'+pages+'\n'+
+   'الإيقاف يمنع النقل اللاحق فقط ولا يحذف سياسة المجموعة ولا يغيّر Telegram.',rows);
+ }
+ private async previewFollowStop(actor:string,id:string):Promise<OwnerInlineScreen|null>{
+  return this.store.transaction(s=>{
+   const now=this.clock(),rows=(s.networkInheritance??[]).filter(x=>x.id===id),link=rows[0];
+   if(!this.auth(s,actor,now)||rows.length!==1||!link||link.kind!=='POLICY'||
+      link.status!=='ACTIVE')return null;
+   const n=this.find(s,link.networkId);if(!n)return null;
+   const proof=this.followStopProof(s,n,id),ref='c_'+randomBytes(18).toString('base64url');
+   if(s.callbacks.some(x=>x.ref===ref))return null;
+   s.callbacks.push({ref,action:PREFIX+'policy-stop:'+JSON.stringify([id,proof]),
+    actorId:actor,chatId:'private',policyVersion:0,oneShot:true,used:false,
+    revoked:false,expiresAt:now+TTL});
+   return ui('<b>🔎 معاينة إيقاف المتابعة</b>\n'+
+    'الشبكة: '+escape(n.name)+'\nالمجموعة: <code>'+link.targetChatId+'</code>'+
+    '\nسيوقف البوت متابعة هذا الهدف وحده ولن يحذف سياسته المحلية.'+
+    '\nالتأكيد ينتهي بعد دقيقتين ويبطل إذا تغيرت الشبكة أو حالة الاعتماد.',
+    [[btn('✅ تأكيد إيقاف المتابعة','nw:1:c:'+ref.slice(2))],
+     [btn('✖ إلغاء المعاينة','nw:1:k:'+ref.slice(2))]]);
+  });
+ }
  private networkCard(s:BotState,actor:string,now:number,id:string):OwnerInlineScreen|null{
   const n=this.find(s,id);if(!n)return null;
   const current=approved(s,this.policy,actor,now);
@@ -184,6 +229,7 @@ export class OwnerNetworkEditor{
    'المجموعات الفعالة هي المعتمدة بنفس إصدار ارتباطها فقط؛ لا تُنقل إليها حقوق البوت.',
    [[btn('👥 إدارة المجموعات','nw:1:g:'+n.id+':0')],
     [btn('📑 سياسات الشبكة المشتركة','nw:1:y:'+n.id+':0')],
+    [btn('⏸️ إدارة المتابعة','nw:1:f:'+n.id+':0')],
     ...(stale>0?[[btn('🧹 مراجعة الارتباطات القديمة','nw:1:s:'+n.id+':0')]]:[]),
     [btn('✏️ إعادة تسمية الشبكة','nw:1:e:'+n.id)],
     ...(n.members.length===0?[[btn('🗑️ حذف الشبكة','nw:1:x:'+n.id)]]:[]),
@@ -416,6 +462,25 @@ export class OwnerNetworkEditor{
     receipt.revoked!==false||!Number.isSafeInteger(receipt.expiresAt)||
     receipt.expiresAt<=now||receipt.expiresAt>now+TTL)return null;
    let data:unknown;
+   if(receipt.action.startsWith(PREFIX+'policy-stop:')){
+    try{data=JSON.parse(receipt.action.slice((PREFIX+'policy-stop:').length));}catch{return null;}
+    if(!Array.isArray(data)||data.length!==2||
+       typeof data[0]!=='string'||!/^[a-f0-9]{12}$/u.test(data[0])||
+       typeof data[1]!=='string'||!/^[a-f0-9]{64}$/u.test(data[1]))return null;
+    const [id,proof]=data as [string,string];
+    const rows=(s.networkInheritance??[]).filter(x=>x.id===id),link=rows[0];
+    if(rows.length!==1||!link||link.kind!=='POLICY'||link.status!=='ACTIVE')return null;
+    const n=this.find(s,link.networkId);
+    if(!n||this.followStopProof(s,n,id)!==proof||!pauseNetworkInheritanceByOwner(s,id))return null;
+    receipt.used=true;
+    s.audit.push({actorId:actor,updateKey:'owner-network:'+nonce,decision:'ALLOW',
+     reason:'OWNER_NETWORK_POLICY_FOLLOW_STOPPED',policyVersion:n.revision,at:now});
+    return ui('<b>✅ أوقفت متابعة السياسة محليًا</b>\n'+
+     'المجموعة: '+link.targetChatId+'\nبقية المجموعات تستمر باستقلالية.\n'+
+     'لم تُحذف سياسة ولا تُنفذ عقوبة Telegram.',
+     [[btn('⏸️ إدارة المتابعة','nw:1:f:'+n.id+':0)],
+      [btn('🌐 بطاقة الشبكة','nw:1:d:'+n.id)]]);
+   }
    if(receipt.action.startsWith(PREFIX+'policy-follow:')){
     try{data=JSON.parse(receipt.action.slice((PREFIX+'policy-follow:').length));}catch{return null;}
     if(!Array.isArray(data)||data.length!==6||typeof data[0]!=='string'||!/^[a-f0-9]{12}$/u.test(data[0])||
@@ -787,6 +852,8 @@ export class OwnerNetworkEditor{
   const d=detail.exec(data);if(d)return this.networkCard(state,actor,now,d[1]!);
   const ps=policySources.exec(data);if(ps)return this.policySourcePage(state,actor,now,ps[1]!,Number(ps[2]));
   const pp=policyPreview.exec(data);if(pp)return this.previewPolicy(actor,pp[1]!,pp[2]!,Number(pp[3]));
+  const fl=followList.exec(data);if(fl)return this.followPage(state,fl[1]!,Number(fl[2]));
+  const fs=followStop.exec(data);if(fs)return this.previewFollowStop(actor,fs[1]!);
   const p=pick.exec(data);if(p)return this.members(state,actor,now,p[1]!,Number(p[2]));
   const sp=stalePage.exec(data);
   if(sp)return this.staleMembersPage(state,actor,now,sp[1]!,Number(sp[2]));
