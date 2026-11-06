@@ -70,6 +70,8 @@ import {reactionOwnerScreen} from './phase4-reaction-owner.js';
 import {parseReactionMemberCommand,reactionMemberScreen} from './phase4-reaction-member.js';
 import {Phase4LectureService} from './phase4-lectures.js';
 import {lectureOwnerScreen} from './phase4-lecture-owner.js';
+import {Phase4EngagementReportsService} from './phase4-engagement-reports.js';
+import {engagementOwnerScreen} from './phase4-engagement-owner.js';
 import {OwnerInlineGroupControls} from './telegram-inline-group-controls.js';
 import {renderOwnerInlineDelegations,delegationOwnerEntry} from './telegram-inline-delegations.js';
 import {renderStaffInline} from './telegram-inline-staff.js';
@@ -965,6 +967,23 @@ export class TelegramUpdateApplication {
       this.opts.store,this.opts.policy,this.clock),actorId,event.callbackData??text);
      if(!screen)return {status:'DENIED',reason:'LECTURE_OWNER_STALE_OR_DENIED'};
      return {status:'APPLIED',reason:'PHASE4_LECTURE_OWNER',
+      plan:this.plan(chatId,screen.text,undefined,screen.keyboard,event.callbackMessageId)};
+    }
+    // Phase 4 / 09:15 — on-demand, read-only and group-scoped engagement.
+    // Owner's private identity is required; never return records to a group.
+    const engagementInput=kind==='private'&&(
+     event.callbackData==='mi:1:i:09:15'||
+     event.callbackData?.startsWith('er:1:')||
+     /^\/engagement(?:$|\s)/u.test(text));
+    if(engagementInput){
+     if(!this.opts.policy.isOwner(actorId)||actorId!==chatId||
+      event.edited||event.forwarded)
+      return {status:'DENIED',reason:'ENGAGEMENT_OWNER_PRIVATE_ONLY'};
+     const screen=await engagementOwnerScreen(
+      new Phase4EngagementReportsService(this.opts.store,this.opts.policy,this.clock),
+      actorId,event.callbackData??text);
+     if(!screen)return {status:'DENIED',reason:'ENGAGEMENT_STALE_OR_DENIED'};
+     return {status:'APPLIED',reason:'PHASE4_ENGAGEMENT_OWNER',
       plan:this.plan(chatId,screen.text,undefined,screen.keyboard,event.callbackMessageId)};
     }
     const communityCommand=kind==='private'?parsePhase4CommunityCommand(text):null;
