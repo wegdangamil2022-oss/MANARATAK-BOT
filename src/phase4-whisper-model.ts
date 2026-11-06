@@ -1,0 +1,101 @@
+/** Phase 4 / 09:06 — OFFLINE whisper reservation evidence.
+ * A reservation never proves a Telegram private delivery or a read receipt.
+ * This schema intentionally contains no outbound jobs, share tokens or URLs.
+ */
+export type WhisperKind='FIRST_N'|'DIRECT';
+export interface WhisperMessage{
+ id:string;chatId:string;chatVersion:number;creatorId:string;
+ kind:WhisperKind;seats:number;recipientId?:string;text?:string;
+ status:'DRAFT'|'OPEN'|'CLOSED';revision:number;
+ createdAt:number;expiresAt:number;approvedAt?:number;closedAt?:number;
+}
+export interface WhisperReservation{
+ id:string;messageId:string;memberId:string;at:number;status:'HELD';
+}
+export interface WhisperConsent{
+ chatId:string;chatVersion:number;memberId:string;enabled:boolean;updatedAt:number;
+}
+export interface WhisperState{
+ messages:WhisperMessage[];reservations:WhisperReservation[];consents:WhisperConsent[];
+}
+export const emptyWhisperState=():WhisperState=>({
+ messages:[],reservations:[],consents:[]
+});
+const record=(x:unknown):x is Record<string,unknown>=>
+ x!==null&&typeof x==='object'&&!Array.isArray(x);
+const exact=(v:Record<string,unknown>,required:readonly string[],optional:readonly string[]=[]) =>
+ required.every(k=>Object.hasOwn(v,k))&&
+ Object.keys(v).every(k=>required.includes(k)||optional.includes(k));
+const validId=(x:unknown)=>typeof x==='string'&&/^[a-f0-9]{24}$/u.test(x);
+const validUser=(x:unknown)=>typeof x==='string'&&/^[1-9][0-9]{0,15}$/u.test(x)&&
+ Number.isSafeInteger(Number(x));
+const validChat=(x:unknown)=>typeof x==='string'&&/^-[1-9][0-9]{0,15}$/u.test(x)&&
+ Number.isSafeInteger(Number(x));
+const validRevision=(x:unknown)=>typeof x==='number'&&Number.isSafeInteger(x)&&
+ x>=1&&x<=9_999_999_999;
+const validTime=(x:unknown)=>typeof x==='number'&&Number.isSafeInteger(x)&&
+ x>=0&&x<=8_640_000_000_000_000-600_000;
+const validText=(x:unknown)=>typeof x==='string'&&
+ x.length>=1&&x.length<=800&&x.trim()===x&&
+ !/[\u0000-\u001f\u007f\u202a-\u202e\u2066-\u2069]/u.test(x);
+export function validWhisperMessage(raw:unknown):raw is WhisperMessage{
+ if(!record(raw)||!exact(raw,
+  ['id','chatId','chatVersion','creatorId','kind','seats','status',
+   'revision','createdAt','expiresAt'],
+  ['recipientId','text','approvedAt','closedAt']))return false;
+ const x=raw;
+ if(!validId(x.id)||!validChat(x.chatId)||!validRevision(x.chatVersion)||
+  !validUser(x.creatorId)||!['FIRST_N','DIRECT'].includes(String(x.kind))||
+  !Number.isSafeInteger(x.seats)||!(Number(x.seats)>=1&&Number(x.seats)<=20)||
+  !validTime(x.createdAt)||!validTime(x.expiresAt)||
+  Number(x.expiresAt)<=Number(x.createdAt)||
+  Number(x.expiresAt)>Number(x.createdAt)+3_600_000||
+  !['DRAFT','OPEN','CLOSED'].includes(String(x.status)))return false;
+ if(x.kind==='DIRECT'){
+  if(x.seats!==1||!validUser(x.recipientId)||
+    x.recipientId===x.creatorId)return false;
+ }else if(x.recipientId!==undefined)return false;
+ if(x.status==='DRAFT')
+  return x.revision===1&&validText(x.text)&&
+   x.approvedAt===undefined&&x.closedAt===undefined;
+ if(x.status==='OPEN')
+  return x.revision===2&&validText(x.text)&&validTime(x.approvedAt)&&
+   Number(x.approvedAt)>=Number(x.createdAt)&&
+   Number(x.approvedAt)<Number(x.expiresAt)&&x.closedAt===undefined;
+ if(x.text!==undefined||!validTime(x.closedAt)||
+  Number(x.closedAt)<Number(x.createdAt))return false;
+ if(x.approvedAt===undefined)return x.revision===2;
+ return x.revision===3&&validTime(x.approvedAt)&&
+  Number(x.approvedAt)>=Number(x.createdAt)&&
+  Number(x.approvedAt)<Number(x.expiresAt)&&
+  Number(x.closedAt)>=Number(x.approvedAt);
+}
+export function validWhisperState(raw:unknown):raw is WhisperState{
+ if(!record(raw)||!exact(raw,['messages','reservations','consents'])||
+  !Array.isArray(raw.messages)||raw.messages.length>200||
+  !Array.isArray(raw.reservations)||raw.reservations.length>2000||
+  !Array.isArray(raw.consents)||raw.consents.length>2000)return false;
+ if(raw.messages.some(m=>!validWhisperMessage(m)))return false;
+ const messages=raw.messages as WhisperMessage[];
+ if(new Set(messages.map(m=>m.id)).size!==messages.length)return false;
+ if(raw.reservations.some(c=>!record(c)||!exact(c,['id','messageId','memberId','at','status'])||
+  !validId(c.id)||!validId(c.messageId)||!validUser(c.memberId)||
+  !validTime(c.at)||c.status!=='HELD'))return false;
+ const reservations=raw.reservations as WhisperReservation[];
+ if(new Set(reservations.map(c=>c.id)).size!==reservations.length||
+  new Set(reservations.map(c=>c.messageId+':'+c.memberId)).size!==reservations.length)return false;
+ for(const m of messages){
+  const claims=reservations.filter(c=>c.messageId===m.id);
+  if(claims.length>m.seats||m.status==='DRAFT'&&claims.length||
+   claims.some(c=>m.approvedAt===undefined||c.at<m.approvedAt||c.at>m.expiresAt||
+    m.status==='CLOSED'&&m.closedAt!==undefined&&c.at>m.closedAt||
+    m.kind==='DIRECT'&&c.memberId!==m.recipientId))return false;
+ }
+ if(reservations.some(c=>!messages.some(m=>m.id===c.messageId)))return false;
+ if(raw.consents.some(c=>!record(c)||!exact(c,
+  ['chatId','chatVersion','memberId','enabled','updatedAt'])||
+  !validChat(c.chatId)||!validRevision(c.chatVersion)||
+  !validUser(c.memberId)||typeof c.enabled!=='boolean'||!validTime(c.updatedAt)))return false;
+ const consents=raw.consents as WhisperConsent[];
+ return new Set(consents.map(c=>c.chatId+':'+c.memberId)).size===consents.length;
+}
