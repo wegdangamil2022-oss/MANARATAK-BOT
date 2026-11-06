@@ -205,6 +205,18 @@ export class Phase4DiscussionService{
    this.scope(s,actor,row.chatId)!==row.chatVersion)return null;
   return structuredClone(row);
  }
+ /** One redacted owner-private question lookup for callback review. */
+ async ownerQuestion(actor:string,id:string):Promise<(DiscussionQuestionView&{sessionId:string})|null>{
+  const s=await this.store.snapshot(),d=state(s),rows=d.questions.filter(x=>x.id===id);
+  const q=rows[0];
+  if(rows.length!==1||!q)return null;
+  const sessions=d.sessions.filter(x=>x.id===q.sessionId),session=sessions[0];
+  if(sessions.length!==1||!session||session.ownerId!==actor||
+   this.scope(s,actor,session.chatId)!==session.chatVersion)return null;
+  return {id:q.id,sessionId:q.sessionId,status:q.status,
+   ...(q.text!==undefined?{text:q.text}:{}),createdAt:q.createdAt,
+   revision:q.revision,...(q.reviewedAt!==undefined?{reviewedAt:q.reviewedAt}:{})};
+ }
  /** Deliberately omit student identifiers even from the private owner screen. */
  async ownerQuestions(actor:string,sessionId:string):Promise<DiscussionQuestionView[]|null>{
   const s=await this.store.snapshot(),d=state(s);
