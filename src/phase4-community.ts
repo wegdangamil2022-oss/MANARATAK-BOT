@@ -7,7 +7,7 @@ import {lectureBlocksAutomation} from './phase4-lectures.js';
 import {validCommunityPhotoId,validCommunityLinkButtons,communityLinkKeyboard,
  type CommunityLinkKeyboard} from './phase4-community-rich.js';
 import {defaultCommunityConfig,emptyCommunityState,validCommunityConfig,
- matchCommunityRule,renderCommunityTemplate,selectCommunityRule,selectCommunityGreeting,normalizeCommunityMatch,validCommunityRulesUrl,inCommunityQuietHours,validCommunityTimeZone,validCommunityJoinKind,validCommunityLeaveKind,validCommunityFAQId,validCommunityProfileTitle,
+ matchCommunityRule,validCommunityGuideText,renderCommunityTemplate,selectCommunityRule,selectCommunityGreeting,normalizeCommunityMatch,validCommunityRulesUrl,inCommunityQuietHours,validCommunityTimeZone,validCommunityJoinKind,validCommunityLeaveKind,validCommunityFAQId,validCommunityProfileTitle,
  type CommunityConfig,type CommunityInput,type CommunityDraft,type CommunityDraftKind,
  type ReplyMatch,type CommunityReplySource,type CommunityAutomationState,type CommunityEventKind,type CommunityServiceKind,
  type CommunityServiceChange,type CommunityLanguage,type CommunityCalendar,type CommunityClockFormat,type CommunityJoinKind,type CommunityLeaveKind,
@@ -81,7 +81,8 @@ export class Phase4CommunityService{
    const kind=request.kind;
    // High-impact group profile changes are owner-only, even if a delegated
    // moderator has general chat.manage permission for templates and replies.
-   if(['GROUP_PROFILE_ON','GROUP_PROFILE_OFF','GROUP_TITLE_SET','GROUP_PHOTO_SET','GROUP_PHOTO_REMOVE'].includes(kind)&&
+   if(['GROUP_PROFILE_ON','GROUP_PROFILE_OFF','GROUP_TITLE_SET','GROUP_PHOTO_SET','GROUP_PHOTO_REMOVE',
+     'GUIDE_INTRO_SET','GUIDE_INTRO_CLEAR','GUIDE_TOPICS_SET','GUIDE_TOPICS_CLEAR'].includes(kind)&&
       !this.policy.isOwner(actorId))throw Error('COMMUNITY_OWNER_DENIED');
    if(kind==='GROUP_TITLE_SET'||kind==='GROUP_PHOTO_SET'||kind==='GROUP_PHOTO_REMOVE'){
     if(current.profileEditingEnabled!==true)throw Error('COMMUNITY_PROFILE_DISABLED');
@@ -161,6 +162,13 @@ export class Phase4CommunityService{
    if((kind==='SERVICE_CLEANUP_DELAY'||kind==='REPLY_CLEANUP_DELAY')&&(!Number.isInteger(request.delayMs)||
       request.delayMs===undefined||request.delayMs<30000||request.delayMs>3600000))
     throw Error('COMMUNITY_SERVICE_DELAY_INVALID');
+   if((kind==='GUIDE_INTRO_SET'||kind==='GUIDE_TOPICS_SET')&&
+      !validCommunityGuideText(request.text,kind==='GUIDE_INTRO_SET'?320:240))
+    throw Error('COMMUNITY_GUIDE_TEXT_INVALID');
+   if((kind==='GUIDE_INTRO_CLEAR'||kind==='GUIDE_TOPICS_CLEAR')&&
+      (request.text!==undefined||
+       (kind==='GUIDE_INTRO_CLEAR'?current.guideIntro:current.guideTopics)===undefined))
+    throw Error('COMMUNITY_GUIDE_CLEAR_INVALID');
    if(kind==='RULES_LINK_SET'&&!validCommunityRulesUrl(request.text))
     throw Error('COMMUNITY_RULES_URL_INVALID');
    if((kind==='WELCOME_LOCALIZED'||kind==='FAREWELL_LOCALIZED'||kind==='GROUP_LANGUAGE')&&
@@ -240,7 +248,8 @@ export class Phase4CommunityService{
    if(drafts.length!==1||drafts[0]!.actorId!==actorId)
     throw Error('COMMUNITY_DRAFT_NOT_FOUND');
    const draft=drafts[0]!;
-   if(['GROUP_PROFILE_ON','GROUP_PROFILE_OFF','GROUP_TITLE_SET','GROUP_PHOTO_SET','GROUP_PHOTO_REMOVE'].includes(draft.kind)&&
+   if(['GROUP_PROFILE_ON','GROUP_PROFILE_OFF','GROUP_TITLE_SET','GROUP_PHOTO_SET','GROUP_PHOTO_REMOVE',
+     'GUIDE_INTRO_SET','GUIDE_INTRO_CLEAR','GUIDE_TOPICS_SET','GUIDE_TOPICS_CLEAR'].includes(draft.kind)&&
       !this.policy.isOwner(actorId))throw Error('COMMUNITY_OWNER_DENIED');
    // A stale/expired/unauthorized draft never changes a running policy.
    if(now<draft.createdAt||now>=draft.expiresAt||
@@ -281,6 +290,10 @@ export class Phase4CommunityService{
      config.utcOffsetMinutes=draft.utcOffsetMinutes!;
      config.clockFormat=draft.clockFormat!;
      config.calendar=draft.calendar!;break;
+    case 'GUIDE_INTRO_SET':config.guideIntro=draft.text!;break;
+    case 'GUIDE_INTRO_CLEAR':delete config.guideIntro;break;
+    case 'GUIDE_TOPICS_SET':config.guideTopics=draft.text!;break;
+    case 'GUIDE_TOPICS_CLEAR':delete config.guideTopics;break;
     case 'RULES_LINK_SET':config.rulesUrl=draft.text!;break;
     case 'RULES_LINK_CLEAR':delete config.rulesUrl;break;
     case 'WELCOME_TEXT':config.welcome.text=draft.text!;break;
@@ -705,6 +718,13 @@ export class Phase4CommunityService{
  /** Preview never calls the Telegram gateway, writes a send or records a vote. */
  preview(draft:CommunityDraft):string{
   const clean=(x:string)=>safe(x.slice(0,250));
+  if(draft.kind==='GUIDE_INTRO_SET'||draft.kind==='GUIDE_TOPICS_SET')
+   return '<b>معاينة '+(draft.kind==='GUIDE_INTRO_SET'?'تعريف المجموعة':'مجالات الدراسة')+
+    ' — دليل العضو الجديد</b>\n'+safe(draft.text??'')+
+    '\n\nهذا النص لن يظهر للطلاب حتى اعتماد المالك. لا ينشر تلقائيًا.';
+  if(draft.kind==='GUIDE_INTRO_CLEAR'||draft.kind==='GUIDE_TOPICS_CLEAR')
+   return '<b>مسح '+(draft.kind==='GUIDE_INTRO_CLEAR'?'تعريف المجموعة':'مجالات الدراسة')+
+    '</b>\nسيعود الدليل إلى محتواه الافتراضي بعد الاعتماد.';
   if(draft.kind==='WELCOME_PHOTO_SET'||draft.kind==='FAREWELL_PHOTO_SET')
    return '<b>معاينة صورة '+(draft.kind==='WELCOME_PHOTO_SET'?'الترحيب':'الوداع')+
     '</b>\nمعرّف صورة تيليجرام محفوظ بصورة خاصة بالمالك؛ لن تُرسل قبل التفعيل.'+

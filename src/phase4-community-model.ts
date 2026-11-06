@@ -63,6 +63,8 @@ export interface CommunityConfig{
  language?:CommunityLanguage;
  clockFormat?:CommunityClockFormat;
  calendar?:CommunityCalendar;
+ /** Group-specific approved guide paragraphs; independent of welcome automation. */
+ guideIntro?:string;guideTopics?:string;
  /** Explicitly owner-approved Telegram rules page, never inferred from names. */
  rulesUrl?:string;
  /** Missing in old snapshots means disabled. */
@@ -89,6 +91,7 @@ export type CommunityDraftKind='WELCOME_TEXT'|'FAREWELL_TEXT'|'REPLY_ADD'|'REPLY
  'SERVICE_PROFILE_ON'|'SERVICE_PROFILE_OFF'|
  'REPLY_CLEANUP_ON'|'REPLY_CLEANUP_OFF'|'REPLY_CLEANUP_DELAY'|
  'RULES_LINK_SET'|'RULES_LINK_CLEAR'|
+ 'GUIDE_INTRO_SET'|'GUIDE_INTRO_CLEAR'|'GUIDE_TOPICS_SET'|'GUIDE_TOPICS_CLEAR'|
  'WELCOME_VARIANT_SET'|'WELCOME_VARIANT_CLEAR'|
  'FAREWELL_VARIANT_SET'|'FAREWELL_VARIANT_CLEAR'|'FAREWELL_REMOVED_ON'|'FAREWELL_REMOVED_OFF'|
  'WELCOME_LOCALIZED'|'FAREWELL_LOCALIZED'|'GROUP_LANGUAGE'|'GROUP_CLOCK'|'GROUP_TIMEZONE'|'GROUP_TIMEZONE_CLEAR'|
@@ -175,6 +178,10 @@ const validActor=(s:unknown):s is string=>typeof s==='string'&&/^[1-9]\d{0,15}$/
 const validClock=(n:unknown):n is number=>typeof n==='number'&&Number.isSafeInteger(n)&&n>=0&&n<=8_640_000_000_000_000;
 const validText=(s:unknown,max:number):s is string=>typeof s==='string'&&
  s.trim().length>0&&Array.from(s).length<=max&&!/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f\u202a-\u202e\u2066-\u2069]/u.test(s);
+/** Single-line, reviewed guide content: no implicit template interpolation. */
+export const validCommunityGuideText=(s:unknown,max=320):s is string=>
+ validText(s,max)&&s.trim()===s&&!/[\r\n{}]/u.test(s)&&
+ Buffer.byteLength(s,'utf8')<=900;
 const validTemplate=(t:unknown):t is string=>validText(t,800)&&
  !/\{(?!العضو\}|اسم_المجموعة\}|التاريخ\}|الوقت\}|رابط_القوانين\})[^{}]*\}/u.test(t);
 /** No redirects, credentials, fragments, queries or look-alike domains.
@@ -233,6 +240,7 @@ const kinds=new Set<CommunityDraftKind>(['WELCOME_TEXT','FAREWELL_TEXT','REPLY_A
  'SERVICE_PROFILE_ON','SERVICE_PROFILE_OFF',
  'REPLY_CLEANUP_ON','REPLY_CLEANUP_OFF','REPLY_CLEANUP_DELAY',
  'RULES_LINK_SET','RULES_LINK_CLEAR',
+ 'GUIDE_INTRO_SET','GUIDE_INTRO_CLEAR','GUIDE_TOPICS_SET','GUIDE_TOPICS_CLEAR',
  'WELCOME_VARIANT_SET','WELCOME_VARIANT_CLEAR',
  'FAREWELL_VARIANT_SET','FAREWELL_VARIANT_CLEAR','FAREWELL_REMOVED_ON','FAREWELL_REMOVED_OFF',
  'WELCOME_LOCALIZED','FAREWELL_LOCALIZED','GROUP_LANGUAGE','GROUP_CLOCK','GROUP_TIMEZONE','GROUP_TIMEZONE_CLEAR',
@@ -274,6 +282,8 @@ export function validCommunityConfig(value:unknown):value is CommunityConfig{
     Object.keys(x.welcomeByJoin).some(kind=>!validCommunityJoinKind(kind))||
     Object.values(x.welcomeByJoin).some(text=>!validTemplate(text))))||
   (x.rulesUrl!==undefined&&!validCommunityRulesUrl(x.rulesUrl))||
+  (x.guideIntro!==undefined&&!validCommunityGuideText(x.guideIntro,320))||
+  (x.guideTopics!==undefined&&!validCommunityGuideText(x.guideTopics,240))||
    (x.timeZone!==undefined&&!validCommunityTimeZone(x.timeZone))||
   (x.language!==undefined&&x.language!=='ar'&&x.language!=='en')||
   (x.clockFormat!==undefined&&x.clockFormat!=='12'&&x.clockFormat!=='24')||
@@ -443,7 +453,11 @@ export function validCommunityState(value:unknown):value is CommunityAutomationS
    !Number.isSafeInteger(d.configVersion)||d.configVersion<0||
    !kinds.has(d.kind)||!validClock(d.createdAt)||!validClock(d.expiresAt)||
    d.expiresAt<=d.createdAt||d.expiresAt-d.createdAt>120000||
-   (d.text!==undefined&&(d.kind==='GROUP_TITLE_SET'?!validCommunityProfileTitle(d.text):!validTemplate(d.text)))||
+   (d.text!==undefined&&(
+    d.kind==='GROUP_TITLE_SET'?!validCommunityProfileTitle(d.text):
+    d.kind==='GUIDE_INTRO_SET'?!validCommunityGuideText(d.text,320):
+    d.kind==='GUIDE_TOPICS_SET'?!validCommunityGuideText(d.text,240):
+    !validTemplate(d.text)))||
    (d.profileEpoch!==undefined&&(!Number.isSafeInteger(d.profileEpoch)||d.profileEpoch<0||d.profileEpoch>2_000_000_000))||
    (d.trigger!==undefined&&!validText(d.trigger,80))||
    (d.match!==undefined&&!matches.has(d.match))||
@@ -486,6 +500,10 @@ export function validCommunityState(value:unknown):value is CommunityAutomationS
    d.kind==='TOPIC_COOLDOWN_SET'&&(!Number.isInteger(d.cooldownMs)||d.cooldownMs===undefined||d.cooldownMs<1000||d.cooldownMs>600000)||
    (d.kind==='SERVICE_CLEANUP_DELAY'||d.kind==='REPLY_CLEANUP_DELAY')&&d.delayMs===undefined||
    d.kind==='RULES_LINK_SET'&&!validCommunityRulesUrl(d.text)||
+   d.kind==='GUIDE_INTRO_SET'&&!validCommunityGuideText(d.text,320)||
+   d.kind==='GUIDE_TOPICS_SET'&&!validCommunityGuideText(d.text,240)||
+   (d.kind==='GUIDE_INTRO_CLEAR'||d.kind==='GUIDE_TOPICS_CLEAR')&&
+    d.text!==undefined||
    (d.kind==='WELCOME_LOCALIZED'||d.kind==='FAREWELL_LOCALIZED')&&
       (!d.language||!validTemplate(d.text))||
    (d.kind==='WELCOME_VARIANT_SET'||d.kind==='WELCOME_VARIANT_CLEAR')&&
