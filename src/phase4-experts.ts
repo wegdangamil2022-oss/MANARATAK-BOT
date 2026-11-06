@@ -208,7 +208,7 @@ export class Phase4ExpertService{
   });
  }
  async reportQuestion(actor:string,sessionId:string,questionId:string,
-  reason:ExpertReportReason):Promise<{
+  reason:string):Promise<{
    status:'REPORTED'|'ALREADY_REPORTED'|'NOT_APPROVED'|'CLOSED'|
     'STALE'|'VERIFICATION_REQUIRED'|'CAPACITY'|'INVALID'
   }>{
