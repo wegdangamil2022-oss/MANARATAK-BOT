@@ -177,6 +177,10 @@ for(const engine of ['json','sqlite'] as const){
    const pre=await f3.editor.handle(OWNER,'nw:1:rr:'+ID);
    await f3.store.transaction(s=>{
     s.networkEmergencyControls=[{networkId:N,revision:1,status:'STOPPED',changedAt:NOW,changedBy:OWNER}];
+    for(const link of s.networkInheritance??[])
+     if(link.networkId===N&&link.status==='ACTIVE'){
+      link.status='PAUSED';link.pausedReason='NETWORK_EMERGENCY';
+     }
    });
    assert.equal(await f3.editor.handle(OWNER,click(pre,'تأكيد')),null);
    assert.equal((await f3.store.snapshot()).protectionPolicies![0]!.policy.revision,2);
