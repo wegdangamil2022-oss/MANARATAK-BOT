@@ -93,6 +93,10 @@ export class Phase4PollService{
   if(poll.status!=='OPEN')return deny('CLOSED');
   if(start<poll.createdAt||start>=poll.expiresAt)return deny('EXPIRED');
   if(option>=poll.options.length||poll.ownerId===memberId)return deny('INVALID');
+  // Mandatory-channel configuration may change while Telegram is answering.
+  // Membership evidence for the OLD rule can never authorize the NEW rule.
+  const subscriptionFence=JSON.stringify(initial.subscriptionRequirements.filter(
+   x=>x.chatId===poll.chatId));
   const chat=approved(initial,this.policy,poll.chatId);
   if(!chat||chat.version!==poll.chatVersion)return deny('STALE');
   if(d.ballots.some(b=>b.pollId===pollId&&b.memberId===memberId))
@@ -108,6 +112,8 @@ export class Phase4PollService{
    const now=this.clock();
    if(!validClock(now)||now<start)return deny('STALE');
    if(now>=row.expiresAt)return deny('EXPIRED');
+   if(JSON.stringify(s.subscriptionRequirements.filter(x=>x.chatId===row.chatId))!==
+    subscriptionFence)return deny('STALE');
    const group=approved(s,this.policy,row.chatId);
    if(!group||group.version!==row.chatVersion||row.chatVersion!==poll.chatVersion||
     row.revision!==poll.revision||row.expiresAt!==poll.expiresAt)
