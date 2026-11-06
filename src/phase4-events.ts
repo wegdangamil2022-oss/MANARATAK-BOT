@@ -189,9 +189,71 @@ export class Phase4EventService{
    .sort((a,b)=>a.startsAt-b.startsAt||a.id.localeCompare(b.id))
    .slice(0,50).map(e=>structuredClone(e));
  }
+ /** Inspect the proposed link in the CURRENT approval epoch.
+  * No participant questions or ballot identities are exposed by preview. */
+ async previewQuestionLink(actor:string,eventIdValue:string,sessionId:string):
+ Promise<{eventTitle:string;sessionTitle:string;expiresAt:number}|null>{
+  const now=this.clock();if(!time(now))return null;
+  const s=await this.store.snapshot(),events=state(s).events.filter(e=>e.id===eventIdValue),e=events[0];
+  const found=s.phase4Discussions?.sessions.filter(x=>x.id===sessionId)??[],q=found[0];
+  if(events.length!==1||!e||e.status!=='OPEN'||e.revision!==2||
+   e.questionSessionId!==undefined||now>=e.startsAt||e.ownerId!==actor||
+   this.owner(s,actor,e.chatId)!==e.chatVersion||
+   found.length!==1||!q||q.status!=='OPEN'||q.revision!==2||
+   q.chatId!==e.chatId||q.chatVersion!==e.chatVersion||
+   q.ownerId!==actor||now>=q.expiresAt||q.expiresAt>e.startsAt)return null;
+  return {eventTitle:e.title,sessionTitle:q.title,expiresAt:q.expiresAt};
+ }
+ async previewPollLink(actor:string,eventIdValue:string,pollId:string):
+ Promise<{eventTitle:string;pollQuestion:string;expiresAt:number}|null>{
+  const now=this.clock();if(!time(now))return null;
+  const s=await this.store.snapshot(),events=state(s).events.filter(e=>e.id===eventIdValue),e=events[0];
+  const found=s.phase4Polls?.polls.filter(x=>x.id===pollId)??[],poll=found[0];
+  if(events.length!==1||!e||e.status!=='OPEN'||e.revision!==2||
+   e.pollId!==undefined||now>=e.startsAt||e.ownerId!==actor||
+   this.owner(s,actor,e.chatId)!==e.chatVersion||
+   found.length!==1||!poll||poll.status!=='OPEN'||poll.revision!==2||
+   poll.chatId!==e.chatId||poll.chatVersion!==e.chatVersion||
+   poll.ownerId!==actor||now>=poll.expiresAt||poll.expiresAt>e.startsAt)return null;
+  return {eventTitle:e.title,pollQuestion:poll.question,expiresAt:poll.expiresAt};
+ }
+ /** One-time atomic binding: callback ID + current owner + group approval +
+  * both source revisions are checked again. No publication is performed. */
+ async bindQuestionSession(actor:string,eventIdValue:string,sessionId:string,
+  expectedRevision:number):Promise<boolean>{
+  const now=this.clock();if(!time(now)||expectedRevision!==2)return false;
+  return this.store.transaction(s=>{
+   const d=state(s),events=d.events.filter(e=>e.id===eventIdValue),e=events[0];
+   const found=s.phase4Discussions?.sessions.filter(x=>x.id===sessionId)??[],q=found[0];
+   if(events.length!==1||!e||e.status!=='OPEN'||e.revision!==expectedRevision||
+    e.questionSessionId!==undefined||e.ownerId!==actor||now>=e.startsAt||
+    this.owner(s,actor,e.chatId)!==e.chatVersion||
+    found.length!==1||!q||q.status!=='OPEN'||q.revision!==2||
+    q.chatId!==e.chatId||q.chatVersion!==e.chatVersion||
+    q.ownerId!==actor||now>=q.expiresAt||q.expiresAt>e.startsAt)return false;
+   e.questionSessionId=sessionId;s.phase4Events=d;return true;
+  });
+ }
+ async bindPoll(actor:string,eventIdValue:string,pollId:string,
+  expectedRevision:number):Promise<boolean>{
+  const now=this.clock();if(!time(now)||expectedRevision!==2)return false;
+  return this.store.transaction(s=>{
+   const d=state(s),events=d.events.filter(e=>e.id===eventIdValue),e=events[0];
+   const found=s.phase4Polls?.polls.filter(x=>x.id===pollId)??[],poll=found[0];
+   if(events.length!==1||!e||e.status!=='OPEN'||e.revision!==expectedRevision||
+    e.pollId!==undefined||e.ownerId!==actor||now>=e.startsAt||
+    this.owner(s,actor,e.chatId)!==e.chatVersion||
+    found.length!==1||!poll||poll.status!=='OPEN'||poll.revision!==2||
+    poll.chatId!==e.chatId||poll.chatVersion!==e.chatVersion||
+    poll.ownerId!==actor||now>=poll.expiresAt||poll.expiresAt>e.startsAt)return false;
+   e.pollId=pollId;s.phase4Events=d;return true;
+  });
+ }
  /** Viewable schedule: no attendee list or registration metadata. */
- async eventInfo(memberId:string,id:string):Promise<Pick<Phase4Event,
-  'title'|'link'|'startsAt'|'endsAt'|'status'|'capacity'>|null>{
+ async eventInfo(memberId:string,id:string):Promise<
+  Pick<Phase4Event,'title'|'link'|'startsAt'|'endsAt'|'status'|'capacity'> & {
+   questionSessionId?:string;pollId?:string
+  }|null>{
   if(!eventUser(memberId))return null;
   const s=await this.store.snapshot(),rows=state(s).events.filter(e=>e.id===id),e=rows[0];
   if(rows.length!==1||!e||!['OPEN','FINISHED'].includes(e.status)||
@@ -207,8 +269,23 @@ export class Phase4EventService{
    row.chatVersion!==e.chatVersion||row.revision!==e.revision||
    currentChat(fresh,this.policy,row.chatId)?.version!==row.chatVersion||
    witness(fresh,row.chatId)!==rule)return null;
+  const now=this.clock();
+  // A linked window is advertised only while it is open, current and
+  // authorized; saved IDs never revive expired or cancelled content.
+  const question=row.status==='OPEN'&&now<row.startsAt&&row.questionSessionId?
+   fresh.phase4Discussions?.sessions.find(x=>x.id===row.questionSessionId):undefined;
+  const poll=row.status==='OPEN'&&now<row.startsAt&&row.pollId?
+   fresh.phase4Polls?.polls.find(x=>x.id===row.pollId):undefined;
   return {title:row.title,link:row.link,startsAt:row.startsAt,endsAt:row.endsAt,
-   status:row.status,capacity:row.capacity};
+   status:row.status,capacity:row.capacity,
+   ...(question&&question.status==='OPEN'&&question.revision===2&&
+     question.chatId===row.chatId&&question.chatVersion===row.chatVersion&&
+     question.expiresAt<=row.startsAt&&now<question.expiresAt?
+     {questionSessionId:question.id}:{}),
+   ...(poll&&poll.status==='OPEN'&&poll.revision===2&&
+     poll.chatId===row.chatId&&poll.chatVersion===row.chatVersion&&
+     poll.expiresAt<=row.startsAt&&now<poll.expiresAt?
+     {pollId:poll.id}:{})};
  }
  /** Draft after event ended, then distinct revision-fenced owner approval.
   * Approved links are owner-reviewed HTTPS references, not link crawling.
