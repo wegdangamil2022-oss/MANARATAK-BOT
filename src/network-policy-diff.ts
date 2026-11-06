@@ -1,7 +1,7 @@
 import type {BotState,Chat} from './store.js';
 import type {Policy} from './policy.js';
 import {isValidGroupNetwork} from './group-network-model.js';
-import {isValidGroupProtectionRecord,type GroupProtectionRecord,type ProtectionPolicy}
+import {isValidGroupProtectionRecord,type GroupProtectionRecord}
  from './protection-rules.js';
 import {networkEmergencyStopped} from './network-emergency-stop.js';
 
