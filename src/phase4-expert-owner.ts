@@ -4,7 +4,7 @@ import {validEventSummaryInput,validEventURL} from './phase4-event-model.js';
 import {expertName,expertSpecialty} from './phase4-expert-model.js';
 
 const HEX='[a-f0-9]{24}';
-const ROUTE=new RegExp('^xa:1:(?:h|[ps]:'+HEX+'|[rocka]:'+HEX+':[123])$','u');
+const ROUTE=new RegExp('^xa:1:(?:h|[pstv]:'+HEX+'|[rocka]:'+HEX+':[123])$','u');
 export const validExpertOwnerRoute=(v:unknown):v is string=>
  typeof v==='string'&&Buffer.byteLength(v,'utf8')<=64&&ROUTE.test(v);
 const esc=(s:string)=>s.replace(/&/gu,'&amp;').replace(/</gu,'&lt;')
@@ -20,6 +20,7 @@ export type ExpertOwnerCommand=
  |{kind:'PROFILE';chatId:string;name:string;specialty:string;url:string}
  |{kind:'SESSION';profileId:string;discussionId:string}
  |{kind:'DEFER';sessionId:string;questionId:string}
+ |{kind:'RANK'|'REPORTS';sessionId:string}
  |{kind:'SUMMARY';sessionId:string;text:string;urls:string[]};
 export function parseExpertOwnerCommand(value:string):ExpertOwnerCommand|null{
  if(typeof value!=='string'||value.length>1400||/[\r\n]/u.test(value))return null;
@@ -33,6 +34,8 @@ export function parseExpertOwnerCommand(value:string):ExpertOwnerCommand|null{
  }
  const session=/^\/amanew ([a-f0-9]{24}) ([a-f0-9]{24})$/u.exec(value);
  if(session)return {kind:'SESSION',profileId:session[1]!,discussionId:session[2]!};
+ const review=/^\/ama(rank|reports) ([a-f0-9]{24})$/u.exec(value);
+ if(review)return {kind:review[1]==='rank'?'RANK':'REPORTS',sessionId:review[2]!};
  const defer=/^\/amadefer ([a-f0-9]{24}) ([a-f0-9]{24})$/u.exec(value);
  if(defer)return {kind:'DEFER',sessionId:defer[1]!,questionId:defer[2]!};
  const summary=/^\/amasummarynew ([a-f0-9]{24}) (.{20,1100})$/u.exec(value);
@@ -66,7 +69,10 @@ async function sessionDetail(service:Phase4ExpertService,actor:string,id:string)
  const counts=await service.ownerStats(actor,id);
  const actions:{text:string;callback_data:string}[][]=[];
  if(session.status==='DRAFT')actions.push([btn('✅ فتح إدارة الجلسة','xa:1:o:'+id+':1')]);
- if(session.status==='OPEN')actions.push([btn('🔒 مراجعة إغلاق الجلسة','xa:1:k:'+id+':2')]);
+ if(session.status==='OPEN')actions.push(
+  [btn('📊 ترتيب الأسئلة (للمالك)','xa:1:t:'+id)],
+  [btn('🚩 بلاغات الأسئلة (للمالك)','xa:1:v:'+id)],
+  [btn('🔒 مراجعة إغلاق الجلسة','xa:1:k:'+id+':2')]);
  if(session.status==='CLOSED'&&summary?.status==='DRAFT')
   actions.push([btn('✅ اعتماد الملخص بعد مراجعته','xa:1:a:'+id+':1')]);
  actions.push([home],[back]);
@@ -80,7 +86,9 @@ async function sessionDetail(service:Phase4ExpertService,actor:string,id:string)
   (counts?'الأسئلة: '+counts.total+' | تنتظر: '+counts.pending+
    ' | معتمدة: '+counts.approved+' | مؤجلة: '+counts.deferred+
    ' | مميزة كمجابة: '+counts.answered+'\n':'')+
-  (session.status==='OPEN'?'لتأجيل سؤال معتمد: <code>/amadefer '+id+' QUESTION_ID</code>\n':'')+
+  (session.status==='OPEN'?'لتأجيل سؤال معتمد: <code>/amadefer '+id+' QUESTION_ID</code>\n'+
+   'للمشاركة بعد اعتماد السؤال: <code>/amavote '+id+' QUESTION_ID</code>\n'+
+   'للبلاغات: <code>/amareport '+id+' QUESTION_ID CONTACT_DETAILS</code>\n':'')+
   (session.status==='CLOSED'&&!summary?'لإعداد ملخص: <code>/amasummarynew '+id+
    ' خلاصة مراجعة اللجنة ومصادر المعلومات ... | https://university.example.edu/resource</code>\n':'')+
   (summary?'الملخص: '+summary.status+'\n'+
@@ -107,6 +115,31 @@ async function listing(service:Phase4ExpertService,actor:string):
   'النشر وإرسال الإجابات التلقائي غير مفعّلين.\n'+
   'الجلسات: '+sessions.length+' · بطاقات المتحدثين: '+profiles.length,rows);
 }
+async function ranking(service:Phase4ExpertService,actor:string,id:string):
+ Promise<OwnerInlineScreen|null>{
+ const rows=await service.ownerRanking(actor,id);
+ if(!rows)return null;
+ const items=rows.slice(0,15).map((x,i)=>(i+1)+'. <code>'+x.questionId+
+  '</code> — '+x.votes+' تأييد');
+ return ui('<b>📊 ترتيب إشارات الاهتمام — للمالك فقط</b>\n'+
+  (items.length?items.join('\n'):'لا توجد أسئلة معتمدة بعد.')+
+  '\n⚠️ الترتيب مؤشر يساعد المراجع، ولا ينشر السؤال ولا يحدد الأولوية تلقائيًا ولا يكشف أصحاب الأصوات.',
+  [[btn('↩️ تفاصيل الجلسة','xa:1:s:'+id)],[home]]);
+}
+async function reports(service:Phase4ExpertService,actor:string,id:string):
+ Promise<OwnerInlineScreen|null>{
+ const rows=await service.ownerReports(actor,id);
+ if(!rows)return null;
+ const items=rows.slice(0,12).map(x=>
+  '<code>'+x.questionId+'</code> — '+x.count+' بلاغ'+
+  ' | بيانات اتصال: '+x.reasons.CONTACT_DETAILS+
+  ' | ادعاء استشارة مهنية: '+x.reasons.UNLICENSED_ADVICE+
+  ' | إساءة: '+x.reasons.HARASSMENT);
+ return ui('<b>🚩 بلاغات خاصة بمراجعة المالك</b>\n'+
+  (items.length?items.join('\n'):'لا توجد بلاغات.')+
+  '\nلا يكشف النظام أسماء المبلّغين ولا ينشر نصوص أسئلتهم. البلاغ ليس إثباتًا لوقوع مخالفة.',
+  [[btn('↩️ تفاصيل الجلسة','xa:1:s:'+id)],[home]]);
+}
 export async function expertOwnerScreen(
  service:Phase4ExpertService,actor:string,input:string
 ):Promise<OwnerInlineScreen|null>{
@@ -130,6 +163,8 @@ export async function expertOwnerScreen(
    await service.draftSummary(actor,parsed.sessionId,parsed.text,parsed.urls);
    return sessionDetail(service,actor,parsed.sessionId);
   }
+  if(parsed?.kind==='RANK')return ranking(service,actor,parsed.sessionId);
+  if(parsed?.kind==='REPORTS')return reports(service,actor,parsed.sessionId);
   if(parsed?.kind==='LIST'||input==='mi:1:i:09:10'||input==='xa:1:h')
    return listing(service,actor);
   if(!validExpertOwnerRoute(input))return null;
@@ -137,6 +172,10 @@ export async function expertOwnerScreen(
   if(p)return profileDetail(service,actor,p[1]!);
   const session=/^xa:1:s:([a-f0-9]{24})$/u.exec(input);
   if(session)return sessionDetail(service,actor,session[1]!);
+  const ranked=/^xa:1:t:([a-f0-9]{24})$/u.exec(input);
+  if(ranked)return ranking(service,actor,ranked[1]!);
+  const flagged=/^xa:1:v:([a-f0-9]{24})$/u.exec(input);
+  if(flagged)return reports(service,actor,flagged[1]!);
   const reviewed=/^xa:1:r:([a-f0-9]{24}):([123])$/u.exec(input);
   if(reviewed){
    if(!await service.reviewProfile(actor,reviewed[1]!,Number(reviewed[2])))return null;
