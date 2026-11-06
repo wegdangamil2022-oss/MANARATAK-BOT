@@ -62,6 +62,9 @@ import {parseExpertMemberCommand,expertMemberScreen} from './phase4-expert-membe
 import {Phase4StudyPeersService} from './phase4-study-peers.js';
 import {studyPeerOwnerScreen} from './phase4-study-peer-owner.js';
 import {parseStudyPeerMemberCommand,studyPeerMemberScreen} from './phase4-study-peer-member.js';
+import {Phase4BadgesService} from './phase4-badges.js';
+import {badgeOwnerScreen} from './phase4-badge-owner.js';
+import {parseBadgeMemberCommand,badgeMemberScreen} from './phase4-badge-member.js';
 import {OwnerInlineGroupControls} from './telegram-inline-group-controls.js';
 import {renderOwnerInlineDelegations,delegationOwnerEntry} from './telegram-inline-delegations.js';
 import {renderStaffInline} from './telegram-inline-staff.js';
@@ -859,6 +862,47 @@ export class TelegramUpdateApplication {
       this.opts.store,this.opts.policy,this.clock),actorId,event.callbackData??text);
      if(!screen)return {status:'DENIED',reason:'STUDY_OWNER_STALE_OR_DENIED'};
      return {status:'APPLIED',reason:'PHASE4_STUDY_OWNER',
+      plan:this.plan(chatId,screen.text,undefined,screen.keyboard,event.callbackMessageId)};
+    }
+    // Phase 4 / 09:12 — student-controlled opt-in or private badge lookup.
+    // No group broadcast, social ranking or new Telegram privileges.
+    if(kind==='private'&&parseBadgeMemberCommand(text)!==null){
+     if(actorId!==chatId||event.edited||event.forwarded||
+      event.callbackData!==undefined)
+      return {status:'DENIED',reason:'BADGE_PRIVATE_ORIGIN_REQUIRED'};
+     const verify=async(groupId:string,memberId:string):Promise<'VERIFIED'|'NOT_MEMBER'|'UNKNOWN'>=>{
+      let membership:'VERIFIED'|'NOT_MEMBER'|'UNKNOWN'='UNKNOWN';
+      try{membership=await this.opts.membership(groupId,memberId);}
+      catch{return 'UNKNOWN';}
+      if(membership!=='VERIFIED')return membership;
+      const snapshot=await this.opts.store.snapshot();
+      const mode=subscriptionRequirementMode(snapshot,groupId);
+      if(mode==='INVALID')return 'UNKNOWN';
+      if(mode==='NONE')return 'VERIFIED';
+      if(!this.opts.subscription)return 'UNKNOWN';
+      try{
+       const result=await this.opts.subscription.verify(groupId,memberId);
+       return result.status==='MEMBER'||result.status==='NOT_REQUIRED'?
+        'VERIFIED':'UNKNOWN';
+      }catch{return 'UNKNOWN';}
+     };
+     const screen=await badgeMemberScreen(new Phase4BadgesService(
+      this.opts.store,this.opts.policy,this.clock,verify),actorId,text);
+     if(!screen)return {status:'DENIED',reason:'BADGE_MEMBER_INVALID'};
+     return {status:'APPLIED',reason:'PHASE4_BADGE_MEMBER',
+      plan:this.plan(chatId,screen.text)};
+    }
+    const badgeInput=kind==='private'&&(
+     event.callbackData==='mi:1:i:09:12'||
+     event.callbackData?.startsWith('bg:1:')||
+     /^\/badges(?:$|\s)|^\/badgedraft(?:$|\s)/u.test(text));
+    if(badgeInput){
+     if(!this.opts.policy.isOwner(actorId)||actorId!==chatId)
+      return {status:'DENIED',reason:'BADGE_OWNER_ONLY'};
+     const screen=await badgeOwnerScreen(new Phase4BadgesService(
+      this.opts.store,this.opts.policy,this.clock),actorId,event.callbackData??text);
+     if(!screen)return {status:'DENIED',reason:'BADGE_OWNER_STALE_OR_DENIED'};
+     return {status:'APPLIED',reason:'PHASE4_BADGE_OWNER',
       plan:this.plan(chatId,screen.text,undefined,screen.keyboard,event.callbackMessageId)};
     }
     const communityCommand=kind==='private'?parsePhase4CommunityCommand(text):null;
