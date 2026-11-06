@@ -26,6 +26,9 @@ for(const engine of ['json','sqlite'] as const){
     trigger:'منحة',match:'WORD',text:'راجع صفحة المنح الرسمية'},GROUP);
    await community.approve(OWNER,add.id);
    await community.approve(OWNER,(await community.pending(OWNER,{kind:'REPLIES_ON'},GROUP)).id);
+   // An existing quiet-hours schedule must not overwrite an active lecture pause.
+   await community.approve(OWNER,(await community.pending(OWNER,
+    {kind:'QUIET_HOURS_SET',startMinute:300,endMinute:360},GROUP)).id);
    const education=new EducationService(store,policy,()=>now);
    const admin=new EducationAdminFacade(store,policy,education);
    const faq=new ApprovedAnswerService(store,policy),links=new ResourceLinkService(store,policy);
