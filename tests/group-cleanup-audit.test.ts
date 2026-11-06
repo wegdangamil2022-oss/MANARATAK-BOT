@@ -164,7 +164,7 @@ for(const engine of ['json','sqlite'] as const){
   const ui=new TelegramCaptchaOwner(f.store,f.policy,captcha,()=>f.now(),undefined,undefined,f.service,undefined,f.audit);
   const root=await ui.handle(OWNER,'mi:1:i:09:04');
   const group=await ui.handle(OWNER,button(root,G));
-  assert.match(group?.text??'',/غرفة إدارة|الإشعارات/u);
+  assert.match(group?.text??'',/غرفة إشعارات إدارة معتمدة/u);
   assert.equal(group?.keyboard.inline_keyboard.flat().some(b=>b.text.includes('تفعيل تدقيق الحذف')),false);
   assert.equal(f.audit.policy(await f.store.snapshot(),G)?.enabled,false);
  }finally{await f.close();}});
