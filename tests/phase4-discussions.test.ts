@@ -37,7 +37,8 @@ async function fixture(engine:'json'|'sqlite'){
   }}:{}),
   ...(opts?.callback!==undefined?{callback_query:{
    id:'callback-'+id,from:{id:Number(actor),is_bot:false,first_name:'Admin'},
-   message:{message_id:10,chat:{id:Number(chatId),type:'private'}},
+   message:{message_id:10,chat:{id:Number(chatId),type:'private'},
+    from:{id:900,is_bot:true}},
    data:opts.callback}}:{})
  });
  return {dir,store,policy,service,app,incoming,setMembership:(x:typeof membership)=>{membership=x;},
