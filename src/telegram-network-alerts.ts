@@ -74,7 +74,7 @@ export class TelegramNetworkAlertEditor{
    'عدد الشبكات المخوّلة: '+networks.length+' · صفحة '+(p+1)+'/'+pages,rows);
  }
  private groups(s:BotState,actor:string,now:number,id:string,p:number):OwnerInlineScreen|null{
-  const groups=this.groupIds(s,actor,now,id);if(!groups)return null;
+  const groups=this.groupIds(s,actor,now,id);if(!groups||groups.length===0)return null;
   const pages=Math.max(1,Math.ceil(groups.length/SIZE));
   if(p>=pages)return null;
   const rows=groups.slice(p*SIZE,(p+1)*SIZE)
