@@ -5,6 +5,7 @@ const HEX='[a-f0-9]{24}';
 const ROUTE=new RegExp('^qz:1:(?:h|p:[0-3]|[vr]:'+HEX+'|[okc]:'+HEX+':[123])$','u');
 const safeRoute=(s:unknown):s is string=>typeof s==='string'&&
  Buffer.byteLength(s,'utf8')<=64&&ROUTE.test(s);
+export {safeRoute as validQuizOwnerRoute};
 const esc=(s:string)=>s.replace(/&/gu,'&amp;').replace(/</gu,'&lt;')
  .replace(/>/gu,'&gt;').replace(/"/gu,'&quot;').replace(/'/gu,'&#39;');
 const btn=(text:string,callback_data:string)=>({text,callback_data});
