@@ -7,6 +7,7 @@ import {isValidTelegramReplyKeyboard} from './telegram-menu.js';
 import {isValidTelegramInlineKeyboard} from './telegram-inline-owner.js';
 import {validCommunityPhotoId,validCommunityLinkKeyboard} from './phase4-community-rich.js';
 import {inCommunityQuietHours,validCommunityConfig} from './phase4-community-model.js';
+import {lectureBlocksAutomation} from './phase4-lectures.js';
 import {validStudioNativeKeyboard} from './telegram-studio-rich.js';
 import {groupQuestionEpochDigest,groupMenuEpochDigest,privateGroupEpochDigest} from './telegram-group-access.js';
 import {privateLibraryEpoch} from './private-library-access.js';
@@ -362,6 +363,9 @@ export class TelegramReplyDispatcher {
    const automation=job.communityAutomation;
    let automationDenied=false;
    if(automation){
+    // Recheck after queue delay at the durable SEND claim boundary.
+    // Only voluntary group automation is suppressed; not protection.
+    if(lectureBlocksAutomation(s,plan.chatId,now))automationDenied=true;
     const configs=s.phase4Community?.configs.filter(c=>c.chatId===plan.chatId)??[];
     const config=configs.length===1?configs[0]:undefined;
     if(!config||!validCommunityConfig(config)||
