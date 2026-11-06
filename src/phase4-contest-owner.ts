@@ -60,7 +60,8 @@ async function detail(svc:Phase4ContestService,owner:string,id:string):
  }
  if(c.status==='REGISTRATION')rows.push([btn('🚀 مراجعة بدء المسابقة',a('s'))]);
  if(c.status==='RUNNING')rows.push([btn('⏭️ مراجعة الجولة التالية/الإغلاق',a('n'))]);
- if(c.status==='RUNNING')rows.push([btn('⛔ مراجعة إلغاء المسابقة',a('x'))]);
+ if(['DRAFT','REGISTRATION','RUNNING'].includes(c.status))
+  rows.push([btn('⛔ مراجعة إلغاء المسابقة',a('x'))]);
  rows.push([home],[back]);
  const rounds=c.rounds.map((r,i)=>(
   (i+1)+'. '+esc(r.title.slice(0,75))+' — '+esc(r.question.slice(0,100))+
