@@ -115,7 +115,7 @@ export interface CommunityReceipt{
 export type CommunityDecisionReason=
  'RESERVED'|'WELCOME_DISABLED'|'FAREWELL_DISABLED'|'REPLIES_DISABLED'|'QUIET_HOURS'|
  'NO_MATCH'|'CLOCK_SKEW'|'GROUP_LIMIT'|'TOPIC_COOLDOWN'|'GROUP_COOLDOWN'|'REMOVAL_SUPPRESSED'|
- 'ACTOR_COOLDOWN'|'TEMPLATE_INVALID'|'CAPTION_LIMIT'|'SOURCE_UNAVAILABLE';
+ 'ACTOR_COOLDOWN'|'TEMPLATE_INVALID'|'CAPTION_LIMIT'|'SOURCE_UNAVAILABLE'|'LECTURE_MODE';
 export interface CommunityDecision {
  key:string;chatId:string;at:number;kind:CommunityEventKind;configVersion:number;
  reason:CommunityDecisionReason;ruleId?:string;
