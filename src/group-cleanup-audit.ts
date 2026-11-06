@@ -84,7 +84,7 @@ export class GroupCleanupAudit{
  channelEpoch(s:BotState,chat:string):string{
   return digest([this.channelStamp(s,chat),s.audit.filter(a=>a.updateKey===CHANNEL+chat)]);
  }
- channel(s:BotState,chat:string):{channel:string;revision:number}|null{
+ channel(s:BotState,chat:string):{channel?:string;revision:number}|null{
   if(!group(chat)||!this.policyAccess.canUseChat(s,chat,'moderation')||
      s.chats.filter(c=>c.id===chat).length!==1)return null;
   const rows=s.audit.filter(a=>a.updateKey===CHANNEL+chat),row=rows[0];
@@ -98,7 +98,7 @@ export class GroupCleanupAudit{
       !Number.isSafeInteger(v.revision)||Number(v.revision)<1||
       !validDigest(v.stamp)||v.stamp!==this.channelStamp(s,chat)||
       v.channel!==null&&(!group(v.channel)||v.channel===chat))return null;
-   return v.channel===null?{channel:'',revision:Number(v.revision)}:
+   return v.channel===null?{revision:Number(v.revision)}:
     {channel:v.channel as string,revision:Number(v.revision)};
   }catch{return null;}
  }
