@@ -7,7 +7,7 @@ import {BotStore} from '../src/store.js';
 import {Policy} from '../src/policy.js';
 import {Phase4GameCatalogService,gameCatalogAllowsQuiz} from '../src/phase4-game-catalog.js';
 import {validGameCatalogState} from '../src/phase4-game-catalog-model.js';
-import {gameCatalogOwnerScreen,validGameCatalogOwnerRoute} from '../src/phase4-game-catalog-owner.js';
+import {gameCatalogOwnerScreen,validGameCatalogOwnerRoute,parseGameCatalogOwnerCommand} from '../src/phase4-game-catalog-owner.js';
 import {ownerInlineConnection,isValidTelegramInlineKeyboard} from '../src/telegram-inline-owner.js';
 import {Phase4QuizService} from '../src/phase4-quizzes.js';
 import type {QuizInput} from '../src/phase4-quiz-model.js';
@@ -58,6 +58,9 @@ test('GAME-001 strict catalog schema and callbacks never register unimplemented 
  assert.equal(validGameCatalogOwnerRoute('gc:1:g:'+GROUP),true);
  assert.equal(validGameCatalogOwnerRoute('gc:1:c:'+GROUP+':1:off'),true);
  assert.equal(validGameCatalogOwnerRoute('gc:1:c:'+GROUP+':1:ban'),false);
+ assert.deepEqual(parseGameCatalogOwnerCommand('/gamequiet '+GROUP+' 21:00-07:00'),
+  {kind:'PREVIEW',chatId:GROUP,revision:-1,action:'q1260.420'});
+ assert.equal(parseGameCatalogOwnerCommand('/gamequiet '+GROUP+' 25:00-07:00'),null);
  assert.equal(isValidTelegramInlineKeyboard({inline_keyboard:[[
   {text:'وقف الألعاب',callback_data:'gc:1:p:'+GROUP+':0:off'}]]}),true);
  for(const bad of [null,{},[],{groups:[],extra:true},{groups:[{chatId:GROUP}]},
@@ -154,6 +157,12 @@ for(const engine of ['json','sqlite'] as const){
    assert.equal(confirm!==null,true);
    assert.equal((await f.catalog.view(OWNER,GROUP))?.quizEnabled,false);
    assert.equal(await gameCatalogOwnerScreen(f.catalog,OWNER,'gc:1:c:'+GROUP+':0:off'),null);
+   const quiet=await gameCatalogOwnerScreen(f.catalog,OWNER,'/gamequiet '+GROUP+' 21:00-07:00');
+   assert.match(quiet?.text??'',/21:00/);
+   assert.equal(await gameCatalogOwnerScreen(f.catalog,OWNER,'gc:1:c:'+GROUP+':1:q1260.420')!==null,true);
+   const config=await f.catalog.view(OWNER,GROUP);
+   assert.equal(config?.quietStartUtcMinute,1260);
+   assert.equal(config?.quietEndUtcMinute,420);
   }finally{await f.close();}
  });
 }
