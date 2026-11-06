@@ -136,8 +136,8 @@ export function validExpertState(v:unknown):v is ExpertState{
   v.sessions.some(x=>!validExpertSession(x))||
   v.decisions.some(x=>!validDecision(x))||
   v.summaries.some(x=>!validSummary(x))||
-  (v.votes??[]).some(x=>!validVote(x))||
-  (v.reports??[]).some(x=>!validReport(x)))return false;
+  ((v.votes??[]) as unknown[]).some(x=>!validVote(x))||
+  ((v.reports??[]) as unknown[]).some(x=>!validReport(x)))return false;
  const profiles=v.profiles as ExpertProfile[],sessions=v.sessions as ExpertSession[];
  const decisions=v.decisions as ExpertDecision[],summaries=v.summaries as ExpertSummary[];
  const votes=(v.votes??[]) as ExpertVote[],reports=(v.reports??[]) as ExpertReport[];
