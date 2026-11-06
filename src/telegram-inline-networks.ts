@@ -449,6 +449,7 @@ export class OwnerNetworkEditor{
      if(!link)return null;
      proposal.networkInheritance??=[];proposal.networkInheritance.push(link);
     }
+    if(!proposal.protectionPolicies||!proposal.networkInheritance)return null;
     s.protectionPolicies=proposal.protectionPolicies;
     s.networkInheritance=proposal.networkInheritance;
     receipt.used=true;
