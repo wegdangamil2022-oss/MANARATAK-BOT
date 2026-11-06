@@ -112,7 +112,8 @@ for(const engine of ['json','sqlite'] as const){
    release();
    assert.equal((await pending).status,'STALE');
    assert.equal((await store.snapshot()).phase4Experts?.votes?.length??0,0);
-   assert.match((await expertMemberScreen(service,'202','/amavote '+ama.id+' '+question))?.text??'',/تعذّر|لم يُسجّل/);
+   const unavailable=new Phase4ExpertService(store,policy,()=>NOW,async()=> 'UNKNOWN');
+   assert.match((await expertMemberScreen(unavailable,'202','/amavote '+ama.id+' '+question))?.text??'',/تعذّر|لم يُسجّل/);
   }finally{await rm(dir,{recursive:true,force:true});}
  });
  test('AMA-010 '+engine+': session closing and expiry scrub votes and reporter identifiers after 24 hours',async()=>{
