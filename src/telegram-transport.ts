@@ -807,7 +807,7 @@ export class TelegramUpdateApplication {
     const expertInput=kind==='private'&&(
       event.callbackData==='mi:1:i:09:10'||
       event.callbackData?.startsWith('xa:1:')||
-      /^\/experts(?:$|\s)|^\/expertnew(?:$|\s)|^\/ama(?:new|defer|summarynew)(?:$|\s)/u.test(text));
+      /^\/experts(?:$|\s)|^\/expertnew(?:$|\s)|^\/ama(?:new|defer|summarynew|rank|reports)(?:$|\s)/u.test(text));
     if(expertInput){
      if(!this.opts.policy.isOwner(actorId)||actorId!==chatId)
       return {status:'DENIED',reason:'EXPERT_OWNER_ONLY'};
