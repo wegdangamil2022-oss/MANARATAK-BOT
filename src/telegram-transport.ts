@@ -764,7 +764,7 @@ export class TelegramUpdateApplication {
     const eventInput=kind==='private'&&(
      event.callbackData==='mi:1:i:09:09'||
      event.callbackData?.startsWith('ev:1:')||
-     /^\/events(?:$|\s)|^\/event(?:new|summarynew)(?:$|\s)/u.test(text));
+     /^\/events(?:$|\s)|^\/event(?:new|summarynew|questions|poll)(?:$|\s)/u.test(text));
     if(eventInput){
      if(!this.opts.policy.isOwner(actorId)||actorId!==chatId)
       return {status:'DENIED',reason:'EVENT_OWNER_ONLY'};
