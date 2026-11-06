@@ -2,7 +2,7 @@ import {randomBytes} from 'node:crypto';
 import {BotStore,type BotState} from './store.js';
 import {Policy} from './policy.js';
 import {emptyExpertState,type ExpertProfile,type ExpertSession,type ExpertSummary,
- expertName,expertSpecialty,expertHex} from './phase4-expert-model.js';
+ type ExpertReportReason,expertName,expertSpecialty,expertHex} from './phase4-expert-model.js';
 import {validEventURL,validEventSummaryInput} from './phase4-event-model.js';
 
 type VerifyMember=(groupId:string,userId:string)=>Promise<
@@ -144,6 +144,150 @@ export class Phase4ExpertService{
    s.phase4Experts=d;return true;
   });
  }
+ /** Peer priority signal only — never auto-publish or promote a student
+  * question. Verified Telegram identity remains private to the store.
+  * One active vote per user per question; withdrawal is irreversible. */
+ async voteQuestion(actor:string,sessionId:string,questionId:string):Promise<{
+  status:'CAST'|'ALREADY_VOTED'|'SELF_VOTE'|'NOT_APPROVED'|'CLOSED'|
+   'STALE'|'VERIFICATION_REQUIRED'|'CAPACITY'|'INVALID';
+ }>{
+  const deny=(status:'CAST'|'ALREADY_VOTED'|'SELF_VOTE'|'NOT_APPROVED'|'CLOSED'|
+   'STALE'|'VERIFICATION_REQUIRED'|'CAPACITY'|'INVALID')=>({status});
+  const start=this.clock();
+  if(!user(actor)||!time(start)||!expertHex(sessionId)||!expertHex(questionId))
+   return deny('INVALID');
+  const s=await this.store.snapshot(),d=state(s);
+  const sessions=d.sessions.filter(x=>x.id===sessionId),session=sessions[0];
+  if(sessions.length!==1||!session||session.status!=='OPEN'||start>=session.expiresAt)
+   return deny('CLOSED');
+  const qs=s.phase4Discussions?.questions.filter(x=>x.id===questionId)??[],q=qs[0];
+  if(qs.length!==1||!q||q.sessionId!==session.questionSessionId||
+   !['APPROVED','ANSWERED'].includes(q.status))return deny('NOT_APPROVED');
+  if(q.memberId===actor)return deny('SELF_VOTE');
+  if(!group(s,this.policy,session.chatId)||
+   group(s,this.policy,session.chatId)?.version!==session.chatVersion)return deny('STALE');
+  if(d.votes?.some(x=>x.sessionId===sessionId&&x.questionId===questionId&&x.memberId===actor))
+   return deny('ALREADY_VOTED');
+  const fence=requirement(s,session.chatId);
+  let membership:'VERIFIED'|'NOT_MEMBER'|'UNKNOWN'='UNKNOWN';
+  try{membership=await this.verifyMember(session.chatId,actor);}
+  catch{return deny('VERIFICATION_REQUIRED');}
+  if(membership!=='VERIFIED')return deny('VERIFICATION_REQUIRED');
+  return this.store.transaction(stateValue=>{
+   const data=state(stateValue),rows=data.sessions.filter(x=>x.id===sessionId),live=rows[0];
+   const questions=stateValue.phase4Discussions?.questions.filter(x=>x.id===questionId)??[],question=questions[0];
+   const now=this.clock();
+   if(rows.length!==1||!live||live.status!=='OPEN'||now<start||now>=live.expiresAt)
+    return deny('CLOSED');
+   if(live.chatVersion!==session.chatVersion||live.revision!==session.revision||
+    group(stateValue,this.policy,live.chatId)?.version!==live.chatVersion||
+    requirement(stateValue,live.chatId)!==fence)return deny('STALE');
+   if(questions.length!==1||!question||question.sessionId!==live.questionSessionId||
+    !['APPROVED','ANSWERED'].includes(question.status))return deny('NOT_APPROVED');
+   if(question.memberId===actor)return deny('SELF_VOTE');
+   const votes=(data.votes??=[]);
+   if(votes.some(x=>x.sessionId===sessionId&&x.questionId===questionId&&x.memberId===actor))
+    return deny('ALREADY_VOTED');
+   if(votes.length>=5000)return deny('CAPACITY');
+   votes.push({id:id(votes),sessionId,questionId,memberId:actor,
+    status:'CAST',revision:1,createdAt:now});
+   stateValue.phase4Experts=data;return deny('CAST');
+  });
+ }
+ /** A departing user can withdraw without Telegram/member verification;
+  * keep the redacted seat tombstone until the session retention cutoff. */
+ async withdrawVote(actor:string,sessionId:string,questionId:string):Promise<boolean>{
+  const now=this.clock();
+  if(!user(actor)||!time(now)||!expertHex(sessionId)||!expertHex(questionId))return false;
+  return this.store.transaction(s=>{
+   const d=state(s),rows=d.votes?.filter(x=>x.sessionId===sessionId&&
+    x.questionId===questionId&&x.memberId===actor)??[],vote=rows[0];
+   if(rows.length!==1||!vote||vote.status!=='CAST'||now<vote.createdAt)return false;
+   vote.status='WITHDRAWN';vote.revision=2;vote.withdrawnAt=now;
+   s.phase4Experts=d;return true;
+  });
+ }
+ async reportQuestion(actor:string,sessionId:string,questionId:string,
+  reason:ExpertReportReason):Promise<{
+   status:'REPORTED'|'ALREADY_REPORTED'|'NOT_APPROVED'|'CLOSED'|
+    'STALE'|'VERIFICATION_REQUIRED'|'CAPACITY'|'INVALID'
+  }>{
+  const deny=(status:'REPORTED'|'ALREADY_REPORTED'|'NOT_APPROVED'|'CLOSED'|
+   'STALE'|'VERIFICATION_REQUIRED'|'CAPACITY'|'INVALID')=>({status});
+  const start=this.clock();
+  if(!user(actor)||!time(start)||!expertHex(sessionId)||!expertHex(questionId)||
+   !['CONTACT_DETAILS','UNLICENSED_ADVICE','HARASSMENT'].includes(reason))
+   return deny('INVALID');
+  const s=await this.store.snapshot(),d=state(s),ss=d.sessions.filter(x=>x.id===sessionId),session=ss[0];
+  if(ss.length!==1||!session||session.status!=='OPEN'||start>=session.expiresAt)
+   return deny('CLOSED');
+  const qs=s.phase4Discussions?.questions.filter(x=>x.id===questionId)??[],question=qs[0];
+  if(qs.length!==1||!question||question.sessionId!==session.questionSessionId||
+   !['APPROVED','ANSWERED'].includes(question.status))return deny('NOT_APPROVED');
+  if(group(s,this.policy,session.chatId)?.version!==session.chatVersion)return deny('STALE');
+  if(d.reports?.some(x=>x.sessionId===sessionId&&x.questionId===questionId&&x.reporterId===actor))
+   return deny('ALREADY_REPORTED');
+  const fence=requirement(s,session.chatId);
+  let verified=false;try{verified=await this.verifyMember(session.chatId,actor)==='VERIFIED';}
+  catch{return deny('VERIFICATION_REQUIRED');}
+  if(!verified)return deny('VERIFICATION_REQUIRED');
+  return this.store.transaction(st=>{
+   const data=state(st),found=data.sessions.filter(x=>x.id===sessionId),live=found[0];
+   const questions=st.phase4Discussions?.questions.filter(x=>x.id===questionId)??[],q=questions[0];
+   const now=this.clock();
+   if(found.length!==1||!live||live.status!=='OPEN'||now<start||now>=live.expiresAt)
+    return deny('CLOSED');
+   if(live.chatVersion!==session.chatVersion||live.revision!==session.revision||
+    group(st,this.policy,live.chatId)?.version!==live.chatVersion||
+    requirement(st,live.chatId)!==fence)return deny('STALE');
+   if(questions.length!==1||!q||q.sessionId!==live.questionSessionId||
+    !['APPROVED','ANSWERED'].includes(q.status))return deny('NOT_APPROVED');
+   const reports=(data.reports??=[]);
+   if(reports.some(x=>x.sessionId===sessionId&&x.questionId===questionId&&x.reporterId===actor))
+    return deny('ALREADY_REPORTED');
+   if(reports.length>=1000)return deny('CAPACITY');
+   reports.push({id:id(reports),sessionId,questionId,reporterId:actor,reason,createdAt:now});
+   st.phase4Experts=data;return deny('REPORTED');
+  });
+ }
+ /** Owner-only anonymized priority queue and reason aggregates. Neither
+  * count is an expert answer, an attendance claim or a publication event. */
+ async ownerRanking(actor:string,sessionId:string):
+ Promise<{questionId:string;votes:number}[]|null>{
+  const s=await this.store.snapshot(),d=state(s),ss=d.sessions.filter(x=>x.id===sessionId),session=ss[0];
+  if(ss.length!==1||!session||session.ownerId!==actor||
+   this.scope(s,actor,session.chatId)!==session.chatVersion)return null;
+  const questions=s.phase4Discussions?.questions.filter(x=>x.sessionId===session.questionSessionId&&
+   ['APPROVED','ANSWERED'].includes(x.status))??[];
+  return questions.map(q=>({questionId:q.id,
+   votes:(d.votes??[]).filter(x=>x.sessionId===sessionId&&x.questionId===q.id&&x.status==='CAST').length
+  })).sort((a,b)=>b.votes-a.votes||a.questionId.localeCompare(b.questionId));
+ }
+ async ownerReports(actor:string,sessionId:string):Promise<{
+  questionId:string;count:number;reasons:{
+   CONTACT_DETAILS:number;UNLICENSED_ADVICE:number;HARASSMENT:number;
+  }
+ }[]|null>{
+  const s=await this.store.snapshot(),d=state(s),ss=d.sessions.filter(x=>x.id===sessionId),session=ss[0];
+  if(ss.length!==1||!session||session.ownerId!==actor||
+   this.scope(s,actor,session.chatId)!==session.chatVersion)return null;
+  const ids=new Set(s.phase4Discussions?.questions.filter(x=>
+   x.sessionId===session.questionSessionId).map(x=>x.id)??[]);
+  const counts=new Map<string,{questionId:string;count:number;reasons:{
+   CONTACT_DETAILS:number;UNLICENSED_ADVICE:number;HARASSMENT:number;
+  }}>();
+  for(const report of d.reports??[]){
+   if(report.sessionId!==sessionId||!ids.has(report.questionId))continue;
+   let row=counts.get(report.questionId);
+   if(!row){
+    row={questionId:report.questionId,count:0,
+     reasons:{CONTACT_DETAILS:0,UNLICENSED_ADVICE:0,HARASSMENT:0}};
+    counts.set(report.questionId,row);
+   }
+   row.count++;row.reasons[report.reason]++;
+  }
+  return [...counts.values()].sort((a,b)=>b.count-a.count||a.questionId.localeCompare(b.questionId));
+ }
  async ownerStats(actor:string,sessionId:string):Promise<AmaStats|null>{
   const s=await this.store.snapshot(),d=state(s),
    found=d.sessions.filter(x=>x.id===sessionId),session=found[0];
@@ -269,6 +413,19 @@ export class Phase4ExpertService{
      ama.chatId,ama.chatVersion,ama.ownerId))continue;
     ama.status='CLOSED';ama.revision=3;ama.closedAt=now;closed++;
    }
+   const initialVotes=d.votes?.length??0,initialReports=d.reports?.length??0;
+   // Private voter/reporter identifiers expire 24h after closure; summary
+   // and aggregate notices do not retain individual participant identifiers.
+   if(d.votes!==undefined)d.votes=d.votes.filter(x=>{
+    const ama=d.sessions.find(q=>q.id===x.sessionId);
+    return Boolean(ama&&ama.status!=='CLOSED'||
+     ama?.closedAt!==undefined&&now-ama.closedAt<=86_400_000);
+   });
+   if(d.reports!==undefined)d.reports=d.reports.filter(x=>{
+    const ama=d.sessions.find(q=>q.id===x.sessionId);
+    return Boolean(ama&&ama.status!=='CLOSED'||
+     ama?.closedAt!==undefined&&now-ama.closedAt<=86_400_000);
+   });
    const before=d.decisions.length;
    d.decisions=d.decisions.filter(x=>{
     const ama=d.sessions.find(q=>q.id===x.sessionId);
@@ -286,7 +443,9 @@ export class Phase4ExpertService{
    d.profiles=d.profiles.filter(p=>activeProfiles.has(p.id)||
     now-p.createdAt<=30*86_400_000);
    if(closed||before!==d.decisions.length||past!==d.sessions.length||
-    summaries!==d.summaries.length||profiles!==d.profiles.length)
+    summaries!==d.summaries.length||profiles!==d.profiles.length||
+    (d.votes!==undefined&&d.votes.length!==initialVotes)||
+    (d.reports!==undefined&&d.reports.length!==initialReports))
     s.phase4Experts=d;
    return closed;
   });
