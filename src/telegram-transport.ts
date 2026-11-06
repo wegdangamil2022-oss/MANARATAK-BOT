@@ -6,6 +6,7 @@ import {TelegramAdminCommandCleanupOwner} from './telegram-admin-command-cleanup
 import {TelegramWelcomeOwner} from './telegram-welcome-owner.js';
 import type {GroupServiceMessageCleanup} from './group-service-message-cleanup.js';
 import type {GroupCleanupAudit} from './group-cleanup-audit.js';
+import {TelegramCleanupAuditChannelOwner} from './telegram-cleanup-audit-channel-owner.js';
 import {ancillaryServiceFieldPresent,decodeAncillaryServiceNotice,type AncillaryServiceKind} from './telegram-ancillary-service-notices.js';
 import type {CaptchaEscalationPolicy} from './captcha-escalation-policy.js';
 import {VerifiedOnboardingWelcome} from './onboarding-welcome.js';
@@ -514,6 +515,17 @@ export class TelegramUpdateApplication {
     const captcha=new CaptchaService(this.opts.store,this.opts.policy,this.opts.membership,this.clock),captchaEnforcement=new CaptchaEnforcement(this.opts.store,this.opts.policy,captcha,this.opts.moderation,this.opts.moderationRights,this.clock,this.opts.subscription),captchaRules=new CaptchaRuleGate(this.opts.store,this.opts.policy,captcha,this.opts.membership,this.clock);
     if(event.kind==='private'&&!event.callbackData?.startsWith('cr:1:')&&!event.callbackData?.startsWith('cp:1:')&&(event.callbackData!==undefined||!['/start','/captcha'].includes(event.text)))await captchaRules.cancel(event.actorId);
     if(event.kind==='private'&&this.opts.policy.isOwner(event.actorId)){
+     if(this.opts.cleanupAudit&&
+        (event.callbackData?.startsWith('cu:1:')===true||
+        event.callbackData===undefined&&event.text.startsWith('/auditchannel'))){
+      if(event.edited||event.forwarded||event.document||event.topicId!==undefined)
+       return {status:'DENIED',reason:'AUDIT_CHANNEL_INPUT_UNTRUSTED'};
+      const view=await new TelegramCleanupAuditChannelOwner(this.opts.store,this.opts.policy,
+       this.opts.cleanupAudit,this.clock).handle(event.actorId,event.callbackData??event.text);
+      return view?{status:'APPLIED',reason:'AUDIT_CHANNEL_OWNER_VIEW',adminUIAccess:view.access,
+       plan:this.plan(event.actorId,view.text,undefined,view.keyboard,event.callbackMessageId)}:
+       {status:'DENIED',reason:'AUDIT_CHANNEL_UNAVAILABLE'};
+     }
      if(this.opts.adminCommandCleanup&&event.callbackData?.startsWith('ac:1:')){
       const view=await new TelegramAdminCommandCleanupOwner(this.opts.store,this.opts.policy,this.opts.adminCommandCleanup,this.clock).handle(event.actorId,event.callbackData);
       return view?{status:'APPLIED',reason:'ADMIN_COMMAND_CLEANUP_OWNER_VIEW',
