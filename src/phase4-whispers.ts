@@ -120,6 +120,9 @@ export class Phase4WhisperService{
   if(!isUser(memberId)||!isGroup(chatId)||typeof enabled!=='boolean'||!validClock(now))
    return false;
   const before=await this.store.snapshot();
+  const earlierConsents=clone(before).consents.filter(c=>
+   c.chatId===chatId&&c.memberId===memberId);
+  if(earlierConsents.length>1)return false;
   // A member must remain free to WITHDRAW permission after leaving or
   // losing group authorization. Opt-out is self-service and never requires
   // a potentially unavailable external membership lookup.
@@ -144,6 +147,16 @@ export class Phase4WhisperService{
    }
    const chat=approvedChat(s,this.policy,chatId);
    if(!chat||chat.version!==getChat(before,chatId)?.version)return false;
+   // An earlier opt-in verification can finish AFTER the member presses
+   // opt-out. Its old provider result must never reactivate permission.
+   // Compare monotonically increasing revisions, not just enabled flags:
+   // off -> on -> off with equal clock timestamps remains detectable.
+   if(earlierConsents.length!==existing.length||
+    (existing.length===1&&(
+      existing[0]!.revision!==earlierConsents[0]!.revision||
+      existing[0]!.enabled!==earlierConsents[0]!.enabled||
+      existing[0]!.chatVersion!==earlierConsents[0]!.chatVersion)))
+    return false;
    if(existing.length){
     const row=existing[0]!;
     if(this.clock()<row.updatedAt||row.revision>=9_999_999_999)return false;
