@@ -135,7 +135,7 @@ export class GroupCleanupAudit{
    const slot=Math.floor(event.at/60000),end=(slot+1)*60000;
    if(now<end||now>=end+TTL||!group(event.chat))continue;
    const consent=this.policy(s,event.chat);
-   if(!consent?.enabled||consent.at>event.at||
+   if(!consent?.enabled||consent.at>=event.at||
       this.policyAccess.chatRevision(s,event.chat)!==event.version)continue;
    const key=event.chat+':'+slot,items=grouped.get(key)??[];
    items.push(event);grouped.set(key,items);
