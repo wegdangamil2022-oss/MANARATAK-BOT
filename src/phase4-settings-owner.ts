@@ -5,7 +5,7 @@ import type {CommunityConfig,CommunityDraftKind} from './phase4-community-model.
 /** 09:16: owner-private, group-scoped settings over the existing reviewed config. */
 const ID='-[1-9][0-9]{0,15}';
 const ROUTE=new RegExp('^p4s:1:(?:h|p:[0-9]{1,3}|g:'+ID+
- '|v:'+ID+':[apl]|t:'+ID+':[0-9]{1,10}:[wfrpdscb]:[01])$','u');
+ '|v:'+ID+':[aplesm]|t:'+ID+':[0-9]{1,10}:[wfrpdscbjktgn]:[01])$','u');
 export const validPhase4SettingsRoute=(v:unknown):v is string=>
  typeof v==='string'&&Buffer.byteLength(v,'utf8')<=64&&ROUTE.test(v);
 const safeId=(v:string)=>new RegExp('^'+ID+'$','u').test(v)&&Number.isSafeInteger(Number(v));
@@ -26,7 +26,7 @@ const back=b('↩️ التفاعل والترحيب','mi:1:s:09:1');
 const status=(x:boolean)=>x?'✅ مفعّل':'⛔ متوقف';
 const fmt=(n:number)=>String(Math.floor(n/60)).padStart(2,'0')+':'+
  String(n%60).padStart(2,'0');
-type Flag={code:string;name:string;panel:'a'|'p';
+type Flag={code:string;name:string;panel:'a'|'p'|'s'|'e';
  on:CommunityDraftKind;off:CommunityDraftKind;get:(x:CommunityConfig)=>boolean};
 const flags:Flag[]=[
  {code:'w',name:'الترحيب',panel:'a',on:'WELCOME_ON',off:'WELCOME_OFF',get:x=>x.welcome.enabled},
@@ -41,7 +41,17 @@ const flags:Flag[]=[
  {code:'b',name:'حذف الردود المؤقتة',panel:'p',
   on:'REPLY_CLEANUP_ON',off:'REPLY_CLEANUP_OFF',get:x=>x.replyCleanup?.enabled===true},
  {code:'c',name:'سجل تغييرات المجموعة',panel:'p',
-  on:'CHANGE_LOG_ON',off:'CHANGE_LOG_OFF',get:x=>x.changeLogEnabled===true}
+  on:'CHANGE_LOG_ON',off:'CHANGE_LOG_OFF',get:x=>x.changeLogEnabled===true},
+ {code:'j',name:'رسائل الانضمام (ضمن التنظيف)',panel:'s',
+  on:'SERVICE_JOIN_ON',off:'SERVICE_JOIN_OFF',get:x=>x.serviceCleanup?.joinEnabled!==false},
+ {code:'k',name:'رسائل المغادرة (ضمن التنظيف)',panel:'s',
+  on:'SERVICE_LEAVE_ON',off:'SERVICE_LEAVE_OFF',get:x=>x.serviceCleanup?.leaveEnabled!==false},
+ {code:'t',name:'رسائل تغيير الاسم والصورة (ضمن التنظيف)',panel:'s',
+  on:'SERVICE_PROFILE_ON',off:'SERVICE_PROFILE_OFF',get:x=>x.serviceCleanup?.profileEnabled!==false},
+ {code:'g',name:'السماح بتعديل اسم وصورة المجموعة',panel:'e',
+  on:'GROUP_PROFILE_ON',off:'GROUP_PROFILE_OFF',get:x=>x.profileEditingEnabled===true},
+ {code:'n',name:'رسالة وداع للعضو المحذوف',panel:'e',
+  on:'FAREWELL_REMOVED_ON',off:'FAREWELL_REMOVED_OFF',get:x=>x.farewellOnRemoval===true}
 ];
 const group=(x:string)=>'p4s:1:g:'+x;
 const panelLink=(x:string,p:string)=>'p4s:1:v:'+x+':'+p;
@@ -55,18 +65,38 @@ function overview(c:CommunityConfig):OwnerInlineScreen{
   'اللغة: '+(c.language??'ar')+'\n'+
   'الحد الأعلى: '+(c.autoMessagesPerMinute??8)+' رسائل في الدقيقة\n'+
   'ساعات الهدوء: '+(c.quietHours?fmt(c.quietHours.startMinute)+'–'+fmt(c.quietHours.endMinute):'غير محددة')+'\n'+
-  'سجل القرارات: '+status(c.decisionLogEnabled===true)+'\n\n'+
+  'سجل القرارات: '+status(c.decisionLogEnabled===true)+'\n'+
+  'تنظيف رسائل الخدمة: '+status(c.serviceCleanup?.enabled===true)+'\n'+
+  'تعديل الاسم والصورة: '+status(c.profileEditingEnabled===true)+'\n'+
+  'وداع الأعضاء المحذوفين: '+status(c.farewellOnRemoval===true)+'\n\n'+
   'كل تعديل يمر بمعاينة وتأكيد مستقل. الفعاليات والنقاشات والاستطلاعات تُدار في أقسامها ولا تُفعّل عالميًا هنا.',
   [[b('👋 تشغيل الميزات',panelLink(c.chatId,'a'))],
    [b('🔒 الخصوصية والتنظيف',panelLink(c.chatId,'p'))],
+   [b('🧹 أنواع رسائل الخدمة والاستثناءات',panelLink(c.chatId,'s'))],
+   [b('🛡️ إشعارات المغادرة وصلاحيات التعديل',panelLink(c.chatId,'e'))],
    [b('🌍 اللغة والتوقيت والحدود',panelLink(c.chatId,'l'))],
+   [b('🗂️ أقسام المرحلة الرابعة المستقلة',panelLink(c.chatId,'m'))],
    [b('📋 محرر الترحيب التفصيلي','p4c:1:g:'+c.chatId)],[home,back]]);
 }
-function panel(c:CommunityConfig,k:'a'|'p'|'l'):OwnerInlineScreen{
+function panel(c:CommunityConfig,k:'a'|'p'|'l'|'s'|'e'|'m'):OwnerInlineScreen{
  const rows:Btn[][]=[];
  let body='';
- if(k!=='l'){
-  body=k==='a'?'الميزات الأساسية (كل واحدة مستقلة):':'خيارات الخصوصية والتنظيف الاختيارية:';
+ if(k==='m'){
+  body='انتقال إلى محركات التفاعل المستقلة. الإعدادات التالية ليست مفاتيح تشغيل شاملة للمجموعة؛ كل محرك يدير موافقاته وسجلاته بنفسه. إذا لم يفعّل مسؤول النظام محركًا فستبقى صفحته غير متاحة.';
+  rows.push(
+   [b('💌 الهمسات','wh:1:h'),b('💬 النقاشات','dq:1:h')],
+   [b('📊 الاستطلاعات','po:1:h'),b('🗓️ الفعاليات','ev:1:h')],
+   [b('🎤 جلسات الخبير','xa:1:h'),b('👥 زملاء الدراسة','sp:1:h')],
+   [b('🏅 الشارات','bg:1:h'),b('❤️ التفاعلات','rc:1:h')],
+   [b('🌙 المحاضرة','lc:1:h'),b('📈 التقارير','er:1:h')]
+  );
+ }else if(k!=='l'){
+  body=k==='a'?'الميزات الأساسية (كل واحدة مستقلة):':
+   k==='p'?'خيارات الخصوصية والتنظيف الاختيارية:':
+   k==='s'?'السماح بتنظيف أنواع رسائل الخدمة:':
+   'استثناءات حساسة واختيارات المالك:';
+  if(k==='s')body+='\n⚠️ هذه السماحات لا تحذف أي رسالة إذا كان تنظيف رسائل الخدمة العام متوقفًا. حالة النوع غير المحدد محفوظة من الإصدارات القديمة وتعني السماح به عند تفعيل التنظيف.';
+  if(k==='e')body+='\n⚠️ تعديل المجموعة لا يمنح البوت صلاحيات Telegram جديدة؛ يتطلب كل تغيير فعلي مراجعة خاصة. رسائل وداع الأعضاء المحذوفين تتطلب تشغيل الوداع العام.';
   for(const f of flags.filter(f=>f.panel===k)){
    const on=f.get(c);
    body+='\n• '+f.name+': '+status(on);
@@ -128,9 +158,9 @@ export async function phase4SettingsOwnerScreen(
   if(page)return groups(service,actor,Number(page[1]));
   const g=/^p4s:1:g:(-[1-9][0-9]{0,15})$/u.exec(input);
   if(g&&safeId(g[1]!))return overview(await service.view(actor,g[1]!));
-  const v=/^p4s:1:v:(-[1-9][0-9]{0,15}):([apl])$/u.exec(input);
-  if(v&&safeId(v[1]!))return panel(await service.view(actor,v[1]!),v[2]! as 'a'|'p'|'l');
-  const t=/^p4s:1:t:(-[1-9][0-9]{0,15}):([0-9]{1,10}):([wfrpdscb]):([01])$/u.exec(input);
+  const v=/^p4s:1:v:(-[1-9][0-9]{0,15}):([aplesm])$/u.exec(input);
+  if(v&&safeId(v[1]!))return panel(await service.view(actor,v[1]!),v[2]! as 'a'|'p'|'l'|'s'|'e'|'m');
+  const t=/^p4s:1:t:(-[1-9][0-9]{0,15}):([0-9]{1,10}):([wfrpdscbjktgn]):([01])$/u.exec(input);
   if(!t||!safeId(t[1]!))return null;
   const c=await service.view(actor,t[1]!);
   if(String(c.version)!==t[2])return null;
