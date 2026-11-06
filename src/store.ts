@@ -1,6 +1,8 @@
 import {isValidFloodWindow,type FloodWindow} from './protection-flood.js';
 import {validGroupNetworks,type GroupNetwork} from './group-network-model.js';
 import {validNetworkInheritanceLinks,type NetworkInheritanceLink} from './network-inheritance-model.js';
+import {validNetworkEmergencyControls,networkEmergencyStopped,
+ type NetworkEmergencyControl} from './network-emergency-stop.js';
 import {validNetworkWatchCases,type NetworkWatchCase} from './network-watchlist-model.js';
 import {validNetworkSanctionReviews,validNetworkSanctionReviewReferences,
  type NetworkSanctionReview} from './network-sanction-review-model.js';
@@ -187,6 +189,8 @@ export interface BotState {
   groupNetworks?:GroupNetwork[];
   /** Owner-reviewed network POLICY-only inheritance links, never automatic Telegram enforcement. */
   networkInheritance?:NetworkInheritanceLink[];
+  /** Fail-closed, durable NETWORK-004 pause gate for local inherited policies. */
+  networkEmergencyControls?:NetworkEmergencyControl[];
   /** Owner-reviewed, information-only network risk reports. Never dispatches bans. */
   networkWatchCases?:NetworkWatchCase[];
   /** Per-group proposed moderation review, never an automatic sanction grant. */
@@ -286,6 +290,10 @@ export class BotStore {
       (previous.subscriptionGraceMembers!==undefined&&(!Array.isArray(previous.subscriptionGraceMembers)||previous.subscriptionGraceMembers.length>1000||previous.subscriptionGraceMembers.some(row=>!validSubscriptionGraceMember(row))||new Set(previous.subscriptionGraceMembers.map((row:SubscriptionGraceMember)=>JSON.stringify([row.chatId,row.memberId]))).size!==previous.subscriptionGraceMembers.length))||
       (previous.groupNetworks!==undefined&&!validGroupNetworks(previous.groupNetworks))||
       (previous.networkInheritance!==undefined&&!validNetworkInheritanceLinks(previous.networkInheritance))||
+      (previous.networkEmergencyControls!==undefined&&!validNetworkEmergencyControls(previous.networkEmergencyControls))||
+      (previous.networkInheritance!==undefined&&Array.isArray(previous.networkInheritance)&&
+       previous.networkInheritance.some((row:NetworkInheritanceLink)=>row.status==='ACTIVE'&&
+        networkEmergencyStopped(previous as BotState,row.networkId)))||
       (previous.networkWatchCases!==undefined&&!validNetworkWatchCases(previous.networkWatchCases))||
       (previous.networkSanctionReviews!==undefined&&(!validNetworkSanctionReviews(previous.networkSanctionReviews)||
        !validNetworkSanctionReviewReferences(previous.networkSanctionReviews,
