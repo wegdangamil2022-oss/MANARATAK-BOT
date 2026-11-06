@@ -57,7 +57,8 @@ for(const engine of ['json','sqlite'] as const){
    assert.equal(lectureBlocksAutomation(await f.store.snapshot(),OTHER,f.now()),false);
    const after=await f.store.snapshot();
    assert.deepEqual(after.phase4Community,before.phase4Community);
-   assert.deepEqual(after.groupProtection,before.groupProtection);
+   assert.deepEqual(after.chats,before.chats);
+   assert.deepEqual(after.subscriptionRequirements,before.subscriptionRequirements);
    assert.equal((after.telegramReplyJobs??[]).length,0);
   }finally{await f.close();}
  });
