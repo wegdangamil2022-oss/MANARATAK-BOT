@@ -154,3 +154,55 @@ for(const engine of ['json','sqlite'] as const){
   }finally{await f.close();}
  });
 }
+
+for(const engine of ['json','sqlite'] as const){
+ test('WHISPER-004 '+engine+': opt-out and opt-back-in during awaited verification cannot authorize a stale seat',async()=>{
+  const f=await fixture(engine);try{
+   const d=await f.service.draft(OWNER,GROUP,{kind:'FIRST_N',seats:1,
+    durationMinutes:10,text:'reviewed private content'});
+   await f.service.approve(OWNER,d.id);
+   await f.service.consent(USER,GROUP,true);
+   let entered!:()=>void,finish!:(result:'VERIFIED')=>void;
+   const began=new Promise<void>(resolve=>{entered=resolve;});
+   const gate=new Promise<'VERIFIED'>(resolve=>{finish=resolve;});
+   const delayed=new Phase4WhisperService(f.store,f.policy,f.now,async()=>{
+    entered();return gate;
+   });
+   const pending=delayed.reserve(USER,d.id);
+   await began;
+   await f.service.consent(USER,GROUP,false);
+   await f.service.consent(USER,GROUP,true);
+   finish('VERIFIED');
+   const outcome=await pending;
+   assert.equal(outcome.status,'CONSENT_CHANGED');
+   assert.equal((await f.store.snapshot()).phase4Whispers?.reservations.length,0);
+  }finally{await f.close();}
+ });
+ test('WHISPER-006 '+engine+': cleanup redacts expired content and prunes old history and held seats',async()=>{
+  const f=await fixture(engine);try{
+   const d=await f.service.draft(OWNER,GROUP,{kind:'FIRST_N',seats:1,
+    durationMinutes:1,text:'short lived SECRET'});
+   await f.service.approve(OWNER,d.id);
+   await f.service.consent(USER,GROUP,true);
+   assert.equal((await f.service.reserve(USER,d.id)).status,'HELD');
+   f.advance(60_001);
+   assert.equal(await f.service.expire(),1);
+   assert.equal((await f.store.snapshot()).phase4Whispers?.messages[0]?.text,undefined);
+   f.advance(86_400_001);
+   await f.service.expire();
+   const s=await f.store.snapshot();
+   assert.equal(s.phase4Whispers?.messages.length,0);
+   assert.equal(s.phase4Whispers?.reservations.length,0);
+  }finally{await f.close();}
+ });
+ test('WHISPER-018 '+engine+': sender cannot occupy a first-N recipient seat',async()=>{
+  const f=await fixture(engine);try{
+   const d=await f.service.draft(OWNER,GROUP,{kind:'FIRST_N',seats:1,
+    durationMinutes:10,text:'not for sender'});
+   await f.service.approve(OWNER,d.id);
+   await f.service.consent(OWNER,GROUP,true);
+   assert.equal((await f.service.reserve(OWNER,d.id)).status,'DENIED');
+   assert.equal((await f.store.snapshot()).phase4Whispers?.reservations.length,0);
+  }finally{await f.close();}
+ });
+}
