@@ -120,6 +120,26 @@ for(const engine of ['json','sqlite'] as const){
    assert.equal((await f.store.snapshot()).phase4Whispers?.consents[0]?.enabled,true);
   }finally{await f.close();}
  });
+ test('WHISPER-004 opt-in already in flight cannot reverse a later opt-out ('+engine+')',async()=>{
+  const f=await fixture(engine);try{
+   assert.equal(await f.service.consent(USER,GROUP,true),true);
+   let ready!:()=>void,release!:(value:'VERIFIED')=>void;
+   const entered=new Promise<void>(r=>{ready=r;});
+   const pendingCheck=new Promise<'VERIFIED'>(r=>{release=r;});
+   const delayed=new Phase4WhisperService(f.store,f.policy,f.clock,async()=>{
+    ready();return pendingCheck;
+   });
+   const pending=delayed.consent(USER,GROUP,true);
+   await entered;
+   assert.equal(await f.service.consent(USER,GROUP,false),true);
+   release('VERIFIED');
+   assert.equal(await pending,false);
+   const rows=(await f.store.snapshot()).phase4Whispers?.consents;
+   assert.equal(rows?.length,1);
+   assert.equal(rows?.[0]?.enabled,false);
+   assert.equal(rows?.[0]?.revision,2);
+  }finally{await f.close();}
+ });
  test('WHISPER-004 old consent can be revoked after loss of group approval ('+engine+')',async()=>{
   const f=await fixture(engine);try{
    assert.equal(await f.service.consent(USER,GROUP,true),true);
