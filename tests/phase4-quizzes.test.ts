@@ -8,6 +8,7 @@ import {Policy} from '../src/policy.js';
 import {Phase4QuizService} from '../src/phase4-quizzes.js';
 import {validQuizState,type QuizInput} from '../src/phase4-quiz-model.js';
 import {parseQuizOwnerCommand,quizOwnerScreen} from '../src/phase4-quiz-owner.js';
+import {ownerInlineConnection,isValidTelegramInlineKeyboard} from '../src/telegram-inline-owner.js';
 import {parseQuizMemberCommand,quizMemberScreen} from '../src/phase4-quiz-member.js';
 import {EducationService} from '../src/education.js';
 import {EducationAdminFacade} from '../src/education-admin.js';
@@ -48,6 +49,9 @@ async function fixture(engine:'json'|'sqlite'){
   clock:()=>now,advance:(n:number)=>{now+=n;},close:()=>rm(dir,{force:true,recursive:true})};
 }
 test('GAME-002 strict schema and command parsing reject malformed answers and forged callbacks',()=>{
+ assert.equal(ownerInlineConnection('mi:1:i:08:03'),'EDITOR');
+ assert.equal(isValidTelegramInlineKeyboard({inline_keyboard:[[{text:'إغلاق',callback_data:'qz:1:c:'+'a'.repeat(24)+':2'}]]}),true);
+ assert.equal(isValidTelegramInlineKeyboard({inline_keyboard:[[{text:'غير صالح',callback_data:'qz:1:c:INVALID:2'}]]}),false);
  assert.equal(validQuizState({quizzes:[],answers:[]}),true);
  for(const bad of [null,{},[],{quizzes:[],answers:[],extra:true},
   {quizzes:[{id:'fake'}],answers:[]},{quizzes:[],answers:[{id:'fake'}]}])
@@ -156,6 +160,7 @@ for(const engine of ['json','sqlite'] as const){
     input.title+' | '+input.question+' | '+input.options.join(' | ')+' | 2 | '+input.explanation;
    const owner=await quizOwnerScreen(f.svc,OWNER,create);
    assert.match(owner?.text??'',/تأكيد/);
+   assert.equal(owner!==null&&isValidTelegramInlineKeyboard(owner.keyboard),true);
    const q=(await f.svc.list(OWNER))[0]!;
    assert.equal((await quizMemberScreen(f.svc,USER,'/quizinfo '+q.id))?.text.includes(input.question),false);
    await f.svc.open(OWNER,q.id,1);
