@@ -4,6 +4,7 @@ import type {GroupNetwork} from './group-network-model.js';
 import {validNetworkName} from './group-network-model.js';
 import {prepareNetworkInheritance,pauseNetworkInheritanceByOwner} from './network-inheritance.js';
 import {decideNetworkEmergency,networkEmergencyStopped} from './network-emergency-stop.js';
+import {pauseSelectedNetworkPolicyLinks} from './network-bulk-policy-pause.js';
 import {OwnerNetworkWatchEditor,validOwnerNetworkWatchRoute} from './telegram-network-watch-owner.js';
 import {OwnerNetworkSanctionEditor,validOwnerNetworkSanctionRoute,
  type NetworkSanctionRemoteRead} from './telegram-network-sanction-owner.js';
@@ -23,6 +24,9 @@ const policySources=new RegExp('^nw:1:y:'+net+':'+page+'$','u');
 const policyPreview=new RegExp('^nw:1:z:'+net+':'+group+':'+page+'$','u');
 const followList=new RegExp('^nw:1:f:'+net+':'+page+'$','u');
 const followStop=/^nw:1:j:([a-f0-9]{12})$/u;
+const bulkList=new RegExp('^nw:1:bl:'+net+':'+page+'$','u');
+const bulkToggle=new RegExp('^nw:1:bt:'+net+':'+page+':([a-f0-9]{2}):([0-7]):([a-f0-9]{12})$','u');
+const bulkPreview=new RegExp('^nw:1:bv:'+net+':'+page+':([a-f0-9]{2}):([a-f0-9]{12})$','u');
 const emergencyHome=new RegExp('^nw:1:eh:'+net+'$','u');
 const emergencyStop=new RegExp('^nw:1:es:'+net+'$','u');
 const emergencyResume=new RegExp('^nw:1:er:'+net+'$','u');
@@ -48,6 +52,7 @@ export function validOwnerNetworkRoute(data:unknown):boolean{
  return data==='mi:1:i:01:03'||home.test(data)||begin.test(data)||validOwnerNetworkWatchRoute(data)||
    validOwnerNetworkSanctionRoute(data)||
   [list,detail,policySources,policyPreview,followList,followStop,
+   bulkList,bulkToggle,bulkPreview,
    emergencyHome,emergencyStop,emergencyResume,rename,remove,pick,toggle,
    stalePage,stalePick,staleBatch,confirm,cancel,historyPage,historyView].some(re=>re.test(data));
 }
@@ -249,6 +254,76 @@ export class OwnerNetworkEditor{
    n,rows,s.chats,s.grants,s.privateFeatures,s.privateSettingsRevision??null
   ])).digest('hex');
  }
+ /** Selected-group bulk pause wizard (8 links per page). All selection
+  * state is in short, snapshot-bound callback data, not a shared user slot. */
+ private bulkProof(s:BotState,networkId:string):string{
+  const n=this.find(s,networkId);
+  return createHash('sha256').update(JSON.stringify([
+   n,s.networkInheritance??[],s.networkEmergencyControls??[],
+   s.chats,s.grants,s.privateFeatures,s.privateSettingsRevision??null
+  ])).digest('hex');
+ }
+ private bulkActive(s:BotState,networkId:string){
+  return (s.networkInheritance??[]).filter(x=>x.networkId===networkId&&
+   x.kind==='POLICY'&&x.status==='ACTIVE').sort((a,b)=>a.id.localeCompare(b.id));
+ }
+ private bulkPage(s:BotState,actor:string,now:number,networkId:string,p:number,
+  mask:number,expectedProof?:string):OwnerInlineScreen|null{
+  if(!this.auth(s,actor,now)||!this.find(s,networkId)||
+   networkEmergencyStopped(s,networkId)||!Number.isSafeInteger(p)||
+   p<0||p>999||!Number.isSafeInteger(mask)||mask<0||mask>255)return null;
+  const digest=this.bulkProof(s,networkId).slice(0,12);
+  if(expectedProof!==undefined&&digest!==expectedProof)return null;
+  const active=this.bulkActive(s,networkId),pages=Math.max(1,Math.ceil(active.length/SIZE));
+  if(!active.length||p>=pages)return null;
+  const pageRows=active.slice(p*SIZE,(p+1)*SIZE);
+  if(mask>>>pageRows.length)return null;
+  const maskStr=mask.toString(16).padStart(2,'0');
+  const chosen=pageRows.filter((_,i)=>(mask&(1<<i))!==0);
+  const rows=pageRows.map((x,i)=>[
+   btn((mask&(1<<i)?'✅ ':'▫️ ')+x.targetChatId,
+    'nw:1:bt:'+networkId+':'+p+':'+maskStr+':'+i+':'+digest)
+  ]);
+  if(chosen.length)rows.push([
+   btn('🔎 معاينة إيقاف '+chosen.length+' مجموعة','nw:1:bv:'+
+    networkId+':'+p+':'+maskStr+':'+digest)]);
+  const nav:{text:string;callback_data:string}[]=[];
+  if(p>0)nav.push(btn('⬅️ السابق','nw:1:bl:'+networkId+':'+(p-1)));
+  if(p+1<pages)nav.push(btn('➡️ التالي','nw:1:bl:'+networkId+':'+(p+1)));
+  if(nav.length)rows.push(nav);
+  rows.push([btn('↩️ إدارة المتابعات','nw:1:f:'+networkId+':0')]);
+  return ui('<b>👥 اختيار المجموعات لإيقاف المتابعة</b>\n'+
+   'اختر أهدافًا محددة بعلامة ✅. المختارة: '+chosen.length+
+   ' · صفحة '+(p+1)+'/'+pages+'\n'+
+   'يُختار حتى 8 مجموعات من الصفحة الحالية فقط. الانتقال لصفحة أخرى يبدأ اختيارًا منفصلًا. '+
+   'لن تُحذف أي سياسة محلية ولا تُنفذ عقوبة Telegram.',rows);
+ }
+ private async previewBulkStop(actor:string,networkId:string,p:number,
+  mask:number,expectedProof:string):Promise<OwnerInlineScreen|null>{
+  return this.store.transaction(s=>{
+   const now=this.clock(),page=this.bulkPage(s,actor,now,networkId,p,mask,expectedProof);
+   const n=this.find(s,networkId);
+   if(!page||!n||!mask)return null;
+   const selected=this.bulkActive(s,networkId).slice(p*SIZE,(p+1)*SIZE)
+    .filter((_,i)=>Boolean(mask&(1<<i)));
+   if(!selected.length||selected.length>SIZE)return null;
+   const ids=selected.map(x=>x.id),proof=this.bulkProof(s,networkId);
+   const ref='c_'+randomBytes(18).toString('base64url');
+   if(s.callbacks.some(c=>c.ref===ref))return null;
+   s.callbacks.push({ref,action:PREFIX+'policy-bulk-stop:'+JSON.stringify([
+    networkId,n.revision,p,ids,proof]),actorId:actor,chatId:'private',
+    policyVersion:0,oneShot:true,used:false,revoked:false,expiresAt:now+TTL});
+   return ui('<b>🔎 معاينة إيقاف المتابعات المحددة</b>\n'+
+    'الشبكة: '+escape(n.name)+'\n'+
+    'عدد المجموعات: '+selected.length+'\n'+
+    selected.map(x=>'• <code>'+x.targetChatId+'</code>').join('\n')+
+    '\nسيُوقف التوريث المحلي إلى هذه المجموعات فقط. بقية الشبكة ستستمر. '+
+    'لا تغيير في سياسات المجموعات أو Telegram. التأكيد صالح لدقيقتين.',[
+    [btn('✅ تأكيد إيقاف المجموعات المحددة','nw:1:c:'+ref.slice(2))],
+    [btn('✖ إلغاء المعاينة','nw:1:k:'+ref.slice(2))]
+   ]);
+  });
+ }
  private followPage(s:BotState,networkId:string,p:number):OwnerInlineScreen|null{
   const n=this.find(s,networkId);if(!n||!Number.isSafeInteger(p)||p<0||p>999)return null;
   const entries=(s.networkInheritance??[]).filter(x=>x.kind==='POLICY'&&x.networkId===networkId)
@@ -259,6 +334,8 @@ export class OwnerNetworkEditor{
     x.status==='ACTIVE'?'nw:1:j:'+x.id:'nw:1:f:'+networkId+':'+p)]);
   if(p>0)rows.push([btn('⬅️ السابق','nw:1:f:'+networkId+':'+(p-1))]);
   if(p+1<pages)rows.push([btn('➡️ التالي','nw:1:f:'+networkId+':'+(p+1))]);
+  if(entries.some(x=>x.status==='ACTIVE')&&!networkEmergencyStopped(s,networkId))
+   rows.push([btn('👥 إيقاف مجموعات مختارة','nw:1:bl:'+networkId+':0')]);
   rows.push([btn('📑 إضافة متابعة جديدة','nw:1:y:'+networkId+':0')]);
   rows.push([btn('↩️ بطاقة الشبكة','nw:1:d:'+networkId)]);
   return ui('<b>📑 المتابعة المحلية لسياسات الشبكة</b>\n'+
@@ -558,6 +635,41 @@ export class OwnerNetworkEditor{
      '\nالقرار محفوظ في قاعدة البيانات، ويظل نافذًا بعد إعادة التشغيل. لا تغيير في عقوبات Telegram ولا إعادة تشغيل تلقائية للمتابعات.',[
       [btn('🚨 حالة الطوارئ','nw:1:eh:'+networkId)],
       [btn('↩️ بطاقة الشبكة','nw:1:d:'+networkId)]
+     ]);
+   }
+   if(receipt.action.startsWith(PREFIX+'policy-bulk-stop:')){
+    try{data=JSON.parse(receipt.action.slice((PREFIX+'policy-bulk-stop:').length));}
+    catch{return null;}
+    if(!Array.isArray(data)||data.length!==5||
+     typeof data[0]!=='string'||!/^[a-f0-9]{12}$/u.test(data[0])||
+     !Number.isSafeInteger(data[1])||data[1]<1||
+     !Number.isSafeInteger(data[2])||data[2]<0||data[2]>999||
+     !Array.isArray(data[3])||!data[3].length||data[3].length>SIZE||
+     data[3].some((x:unknown)=>typeof x!=='string'||!/^[a-f0-9]{12}$/u.test(x))||
+     new Set(data[3]).size!==data[3].length||
+     typeof data[4]!=='string'||!/^[a-f0-9]{64}$/u.test(data[4]))return null;
+    const [networkId,networkRevision,p,ids,proof]=data as
+     [string,number,number,string[],string];
+    const n=this.find(s,networkId);
+    if(!n||n.revision!==networkRevision||this.bulkProof(s,networkId)!==proof||
+     networkEmergencyStopped(s,networkId))return null;
+    const active=this.bulkActive(s,networkId),pages=Math.max(1,Math.ceil(active.length/SIZE));
+    if(p>=pages)return null;
+    const pageRows=active.slice(p*SIZE,(p+1)*SIZE);
+    if(!ids.every(id=>pageRows.some(row=>row.id===id))||
+     JSON.stringify(pageRows.filter(row=>ids.includes(row.id)).map(row=>row.id))!==
+      JSON.stringify(ids))return null;
+    const outcome=pauseSelectedNetworkPolicyLinks(s,this.policy,actor,now,networkId,ids);
+    if(!outcome)return null;
+    receipt.used=true;
+    s.audit.push({actorId:actor,updateKey:'owner-network:'+nonce,decision:'ALLOW',
+     reason:'OWNER_NETWORK_SELECTED_POLICY_FOLLOWS_STOPPED',policyVersion:n.revision,at:now});
+    return ui('<b>✅ أُوقفت متابعات المجموعات المحددة</b>\n'+
+     'الشبكة: '+escape(n.name)+'\nالمجموعات: '+outcome.paused+'\n'+
+     outcome.targetChatIds.map(id=>'• <code>'+id+'</code>').join('\n')+
+     '\nلم تُحذف سياسة، ولم تُنفذ عقوبة Telegram.',[
+      [btn('⏸️ بقية متابعات الشبكة','nw:1:f:'+networkId+':0')],
+      [btn('🌐 بطاقة الشبكة','nw:1:d:'+networkId)]
      ]);
    }
    if(receipt.action.startsWith(PREFIX+'policy-stop:')){
@@ -978,6 +1090,19 @@ export class OwnerNetworkEditor{
   const d=detail.exec(data);if(d)return this.networkCard(state,actor,now,d[1]!);
   const ps=policySources.exec(data);if(ps)return this.policySourcePage(state,actor,now,ps[1]!,Number(ps[2]));
   const pp=policyPreview.exec(data);if(pp)return this.previewPolicy(actor,pp[1]!,pp[2]!,Number(pp[3]));
+  const bl=bulkList.exec(data);
+  if(bl)return this.bulkPage(state,actor,now,bl[1]!,Number(bl[2]),0);
+  const bt=bulkToggle.exec(data);
+  if(bt){
+   const mask=Number.parseInt(bt[3]!,16),i=Number(bt[4]);
+   if(!Number.isInteger(i)||i<0||i>=SIZE)return null;
+   // First require the old selection to match the same immutable snapshot.
+   if(!this.bulkPage(state,actor,now,bt[1]!,Number(bt[2]),mask,bt[5]!))return null;
+   return this.bulkPage(state,actor,now,bt[1]!,Number(bt[2]),mask^(1<<i),bt[5]!);
+  }
+  const bv=bulkPreview.exec(data);
+  if(bv)return this.previewBulkStop(actor,bv[1]!,Number(bv[2]),
+   Number.parseInt(bv[3]!,16),bv[4]!);
   const fl=followList.exec(data);if(fl)return this.followPage(state,fl[1]!,Number(fl[2]));
   const fs=followStop.exec(data);if(fs)return this.previewFollowStop(actor,fs[1]!);
   const eh=emergencyHome.exec(data);
