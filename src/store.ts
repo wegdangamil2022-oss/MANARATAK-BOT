@@ -294,7 +294,7 @@ export class BotStore {
       (previous.networkInheritance!==undefined&&Array.isArray(previous.networkInheritance)&&
        previous.networkInheritance.some((row:NetworkInheritanceLink)=>row.status==='ACTIVE'&&
         networkEmergencyStopped({networkEmergencyControls:
-         previous.networkEmergencyControls as NetworkEmergencyControl[]|undefined},row.networkId)))||
+         (previous.networkEmergencyControls??[]) as NetworkEmergencyControl[]},row.networkId)))||
       (previous.networkWatchCases!==undefined&&!validNetworkWatchCases(previous.networkWatchCases))||
       (previous.networkSanctionReviews!==undefined&&(!validNetworkSanctionReviews(previous.networkSanctionReviews)||
        !validNetworkSanctionReviewReferences(previous.networkSanctionReviews,
