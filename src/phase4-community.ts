@@ -24,7 +24,7 @@ export interface CommunitySendProposal{
  readonly photoFileId?:string;readonly communityLinks?:CommunityLinkKeyboard;
 }
 /** Read-only administrative explanation, never stored with student text. */
-export type CommunityDiagnostic={status:'REPLIES_DISABLED'|'NO_MATCH'|'QUIET_HOURS'|'SOURCE_UNAVAILABLE'}|
+export type CommunityDiagnostic={status:'REPLIES_DISABLED'|'NO_MATCH'|'QUIET_HOURS'|'SOURCE_UNAVAILABLE'|'LECTURE_MODE'}|
  {status:'RULE_DISABLED'|'TOPIC_MISMATCH';ruleId:string}|
  {status:'MATCH';ruleId:string;preview:string};
 const isGroup=(s:string):boolean=>/^-[1-9]\d{0,15}$/u.test(s)&&Number.isSafeInteger(Number(s));
