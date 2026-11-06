@@ -14,7 +14,7 @@ import type {OwnerInlineScreen} from './telegram-inline-owner.js';
 
 /** Local network folders for approved groups. Membership is an organization
  * hint only; it NEVER issues Telegram rights, grants, moderation or delivery. */
-const TTL=120_000,INPUT_TTL=600_000,PREFIX='owner-network-',SIZE=8;
+const TTL=120_000,INPUT_TTL=600_000,MULTI_TTL=600_000,PREFIX='owner-network-',SIZE=8;
 const net='([a-f0-9]{12})',page='(0|[1-9][0-9]{0,2})',
  group='(-[1-9][0-9]{0,15})',revision='([1-9][0-9]{0,9})';
 const home=/^nw:1:h$/u,begin=/^nw:1:n$/u;
@@ -25,6 +25,11 @@ const policyPreview=new RegExp('^nw:1:z:'+net+':'+group+':'+page+'$','u');
 const followList=new RegExp('^nw:1:f:'+net+':'+page+'$','u');
 const followStop=/^nw:1:j:([a-f0-9]{12})$/u;
 const bulkList=new RegExp('^nw:1:bl:'+net+':'+page+'$','u');
+const multiStart=new RegExp('^nw:1:ms:'+net+'$','u');
+const multiMove=/^nw:1:mp:([A-Za-z0-9_-]{24}):(0|[1-9][0-9]{0,2}):(0|[1-9][0-9]{0,2})$/u;
+const multiToggle=/^nw:1:mt:([A-Za-z0-9_-]{24}):(0|[1-9][0-9]{0,2}):([0-7])$/u;
+const multiPreview=/^nw:1:mv:([A-Za-z0-9_-]{24}):(0|[1-9][0-9]{0,2})$/u;
+const multiCancel=/^nw:1:mx:([A-Za-z0-9_-]{24}):(0|[1-9][0-9]{0,2})$/u;
 const bulkToggle=new RegExp('^nw:1:bt:'+net+':'+page+':([a-f0-9]{2}):([0-7]):([a-f0-9]{12})$','u');
 const bulkPreview=new RegExp('^nw:1:bv:'+net+':'+page+':([a-f0-9]{2}):([a-f0-9]{12})$','u');
 const emergencyHome=new RegExp('^nw:1:eh:'+net+'$','u');
@@ -52,7 +57,7 @@ export function validOwnerNetworkRoute(data:unknown):boolean{
  return data==='mi:1:i:01:03'||home.test(data)||begin.test(data)||validOwnerNetworkWatchRoute(data)||
    validOwnerNetworkSanctionRoute(data)||
   [list,detail,policySources,policyPreview,followList,followStop,
-   bulkList,bulkToggle,bulkPreview,
+   bulkList,bulkToggle,bulkPreview,multiStart,multiMove,multiToggle,multiPreview,multiCancel,
    emergencyHome,emergencyStop,emergencyResume,rename,remove,pick,toggle,
    stalePage,stalePick,staleBatch,confirm,cancel,historyPage,historyView].some(re=>re.test(data));
 }
@@ -324,6 +329,143 @@ export class OwnerNetworkEditor{
    ]);
   });
  }
+ /** Owner-bound multi-page selection persists as a private, expiring callback
+  * record. All buttons contain a revision to reject old Telegram keyboards.
+  * Snapshot fingerprints bind every group and link, not only the current page. */
+ private readMultiSession(s:BotState,actor:string,now:number,nonce:string):
+  {record:BotState['callbacks'][number];networkId:string;selected:string[];
+   version:number;page:number}|null{
+  if(!this.auth(s,actor,now)||!/^[A-Za-z0-9_-]{24}$/u.test(nonce))return null;
+  const rows=s.callbacks.filter(x=>x.ref==='b_'+nonce),record=rows[0];
+  if(rows.length!==1||!record||record.actorId!==actor||record.chatId!=='private'||
+   record.policyVersion!==0||record.oneShot!==false||record.used!==false||
+   record.revoked!==false||!Number.isSafeInteger(record.expiresAt)||
+   record.expiresAt<=now||record.expiresAt>now+MULTI_TTL||
+   !record.action.startsWith(PREFIX+'multi-select:'))return null;
+  let payload:unknown;
+  try{payload=JSON.parse(record.action.slice((PREFIX+'multi-select:').length));}
+  catch{return null;}
+  if(!Array.isArray(payload)||payload.length!==5||
+   typeof payload[0]!=='string'||!/^[a-f0-9]{12}$/u.test(payload[0])||
+   typeof payload[1]!=='string'||!/^[a-f0-9]{64}$/u.test(payload[1])||
+   !Array.isArray(payload[2])||payload[2].length>SIZE||
+   payload[2].some((x:unknown)=>typeof x!=='string'||!/^[a-f0-9]{12}$/u.test(x))||
+   new Set(payload[2]).size!==payload[2].length||
+   !Number.isSafeInteger(payload[3])||payload[3]<0||payload[3]>999||
+   !Number.isSafeInteger(payload[4])||payload[4]<0||payload[4]>999)return null;
+  const [networkId,proof,selected,version,page]=payload as
+   [string,string,string[],number,number];
+  if(!this.find(s,networkId)||networkEmergencyStopped(s,networkId)||
+   this.bulkProof(s,networkId)!==proof)return null;
+  const active=this.bulkActive(s,networkId),pages=Math.max(1,Math.ceil(active.length/SIZE));
+  if(!active.length||page>=pages||
+   selected.some(id=>!active.some(row=>row.id===id)))return null;
+  return {record,networkId,selected,version,page};
+ }
+ private multiPage(s:BotState,actor:string,now:number,nonce:string,
+  expectedVersion?:number,capHit=false):OwnerInlineScreen|null{
+  const session=this.readMultiSession(s,actor,now,nonce);
+  if(!session||(expectedVersion!==undefined&&session.version!==expectedVersion))return null;
+  const active=this.bulkActive(s,session.networkId);
+  const pages=Math.ceil(active.length/SIZE),records=active.slice(session.page*SIZE,
+   (session.page+1)*SIZE);
+  const rows=records.map((record,i)=>[
+   btn((session.selected.includes(record.id)?'✅ ':'▫️ ')+record.targetChatId,
+    'nw:1:mt:'+nonce+':'+session.version+':'+i)
+  ]);
+  if(session.selected.length)rows.push([
+   btn('🔎 معاينة '+session.selected.length+' مجموعة مختارة',
+    'nw:1:mv:'+nonce+':'+session.version)]);
+  const nav:{text:string;callback_data:string}[]=[];
+  if(session.page)nav.push(btn('⬅️ السابق','nw:1:mp:'+nonce+':'+
+   session.version+':'+(session.page-1)));
+  if(session.page+1<pages)nav.push(btn('➡️ التالي','nw:1:mp:'+nonce+':'+
+   session.version+':'+(session.page+1)));
+  if(nav.length)rows.push(nav);
+  rows.push([btn('✖ إلغاء الاختيار','nw:1:mx:'+nonce+':'+session.version)]);
+  rows.push([btn('↩️ إدارة المتابعات','nw:1:f:'+session.networkId+':0')]);
+  return ui('<b>👥 اختيار مجموعات من صفحات متعددة</b>\n'+
+   'الشبكة: '+escape(this.find(s,session.networkId)!.name)+
+   '\nالمختارة: '+session.selected.length+' من '+SIZE+
+   ' · صفحة '+(session.page+1)+'/'+pages+'\n'+
+   (capHit?'⚠️ وصلت إلى الحد الأقصى (8 مجموعات). ألغِ اختيارًا للمتابعة.\n':'')+
+   'تبقى الاختيارات محفوظة عند التنقل بين الصفحات. لن تتغير سياسات المجموعات أو عقوبات Telegram.',
+   rows);
+ }
+ private async beginMulti(actor:string,networkId:string):Promise<OwnerInlineScreen|null>{
+  return this.store.transaction(s=>{
+   const now=this.clock(),n=this.find(s,networkId);
+   if(!this.auth(s,actor,now)||!n||networkEmergencyStopped(s,networkId)||
+    !this.bulkActive(s,networkId).length)return null;
+   const ref='b_'+randomBytes(18).toString('base64url');
+   if(s.callbacks.some(x=>x.ref===ref))return null;
+   // Starting a fresh wizard invalidates older unfinished selections of
+   // this owner; other owners and all confirmation receipts are untouched.
+   for(const x of s.callbacks)if(x.actorId===actor&&x.chatId==='private'&&
+    x.action.startsWith(PREFIX+'multi-select:')&&!x.used&&!x.revoked)
+    x.revoked=true;
+   s.callbacks.push({ref,action:PREFIX+'multi-select:'+JSON.stringify([
+    networkId,this.bulkProof(s,networkId),[],0,0]),actorId:actor,chatId:'private',
+    policyVersion:0,oneShot:false,used:false,revoked:false,
+    expiresAt:now+MULTI_TTL});
+   return this.multiPage(s,actor,now,ref.slice(2));
+  });
+ }
+ private async actMulti(actor:string,nonce:string,revision:number,
+  action:'TOGGLE'|'MOVE'|'PREVIEW'|'CANCEL',arg?:number):Promise<OwnerInlineScreen|null>{
+  return this.store.transaction(s=>{
+   const now=this.clock(),session=this.readMultiSession(s,actor,now,nonce);
+   if(!session||session.version!==revision)return null;
+   if(action==='CANCEL'){
+    session.record.revoked=true;
+    return ui('<b>✖ أُلغي اختيار مجموعات الشبكة</b>\nلم تتغير المتابعات أو السياسات.',[
+     [btn('⏸️ إدارة المتابعات','nw:1:f:'+session.networkId+':0)]]);
+   }
+   const active=this.bulkActive(s,session.networkId);
+   const pages=Math.ceil(active.length/SIZE),pageRows=active.slice(
+    session.page*SIZE,(session.page+1)*SIZE);
+   if(action==='MOVE'){
+    if(arg===undefined||!Number.isSafeInteger(arg)||arg<0||arg>=pages||
+     Math.abs(arg-session.page)!==1||session.version>=999)return null;
+    session.page=arg;
+   }else if(action==='TOGGLE'){
+    if(arg===undefined||!Number.isSafeInteger(arg)||arg<0||arg>=pageRows.length||
+     session.version>=999)return null;
+    const target=pageRows[arg]!.id;
+    if(session.selected.includes(target)){
+     session.selected=session.selected.filter(id=>id!==target);
+    }else{
+     if(session.selected.length===SIZE)
+      return this.multiPage(s,actor,now,nonce,revision,true);
+     session.selected.push(target);
+    }
+   }else if(action==='PREVIEW'){
+    if(!session.selected.length)return null;
+    const sorted=active.filter(x=>session.selected.includes(x.id));
+    if(sorted.length!==session.selected.length)return null;
+    const ids=sorted.map(x=>x.id),n=this.find(s,session.networkId)!;
+    const ref='c_'+randomBytes(18).toString('base64url');
+    if(s.callbacks.some(x=>x.ref===ref))return null;
+    s.callbacks.push({ref,action:PREFIX+'policy-bulk-stop:'+JSON.stringify([
+     n.id,n.revision,999,ids,this.bulkProof(s,n.id)]),
+     actorId:actor,chatId:'private',policyVersion:0,oneShot:true,used:false,
+     revoked:false,expiresAt:now+TTL});
+    session.record.revoked=true;
+    return ui('<b>🔎 معاينة إيقاف متابعات مجموعات متعددة الصفحات</b>\n'+
+     'الشبكة: '+escape(n.name)+'\nالمجموعات المختارة: '+sorted.length+'\n'+
+     sorted.map(x=>'• <code>'+x.targetChatId+'</code>').join('\n')+
+     '\nسيُوقف التوريث المحلي للمجموعات المدرجة فقط. لن تُحذف سياسة ولن تُرسل عقوبة Telegram. التأكيد صالح لدقيقتين.',[
+     [btn('✅ تأكيد إيقاف المتابعات المحددة','nw:1:c:'+ref.slice(2))],
+     [btn('✖ إلغاء المعاينة','nw:1:k:'+ref.slice(2))]
+    ]);
+   }else return null;
+   session.version++;
+   session.record.action=PREFIX+'multi-select:'+JSON.stringify([
+    session.networkId,this.bulkProof(s,session.networkId),
+    session.selected,session.version,session.page]);
+   return this.multiPage(s,actor,now,nonce,session.version);
+  });
+ }
  private followPage(s:BotState,networkId:string,p:number):OwnerInlineScreen|null{
   const n=this.find(s,networkId);if(!n||!Number.isSafeInteger(p)||p<0||p>999)return null;
   const entries=(s.networkInheritance??[]).filter(x=>x.kind==='POLICY'&&x.networkId===networkId)
@@ -335,7 +477,7 @@ export class OwnerNetworkEditor{
   if(p>0)rows.push([btn('⬅️ السابق','nw:1:f:'+networkId+':'+(p-1))]);
   if(p+1<pages)rows.push([btn('➡️ التالي','nw:1:f:'+networkId+':'+(p+1))]);
   if(entries.some(x=>x.status==='ACTIVE')&&!networkEmergencyStopped(s,networkId))
-   rows.push([btn('👥 إيقاف مجموعات مختارة','nw:1:bl:'+networkId+':0')]);
+   rows.push([btn('👥 إيقاف مجموعات من صفحات متعددة','nw:1:ms:'+networkId)]);
   rows.push([btn('📑 إضافة متابعة جديدة','nw:1:y:'+networkId+':0')]);
   rows.push([btn('↩️ بطاقة الشبكة','nw:1:d:'+networkId)]);
   return ui('<b>📑 المتابعة المحلية لسياسات الشبكة</b>\n'+
@@ -654,8 +796,8 @@ export class OwnerNetworkEditor{
     if(!n||n.revision!==networkRevision||this.bulkProof(s,networkId)!==proof||
      networkEmergencyStopped(s,networkId))return null;
     const active=this.bulkActive(s,networkId),pages=Math.max(1,Math.ceil(active.length/SIZE));
-    if(p>=pages)return null;
-    const pageRows=active.slice(p*SIZE,(p+1)*SIZE);
+    if(p>=pages&&p!==999)return null;
+    const pageRows=p===999?active:active.slice(p*SIZE,(p+1)*SIZE);
     if(!ids.every(id=>pageRows.some(row=>row.id===id))||
      JSON.stringify(pageRows.filter(row=>ids.includes(row.id)).map(row=>row.id))!==
       JSON.stringify(ids))return null;
@@ -1111,6 +1253,16 @@ export class OwnerNetworkEditor{
   const d=detail.exec(data);if(d)return this.networkCard(state,actor,now,d[1]!);
   const ps=policySources.exec(data);if(ps)return this.policySourcePage(state,actor,now,ps[1]!,Number(ps[2]));
   const pp=policyPreview.exec(data);if(pp)return this.previewPolicy(actor,pp[1]!,pp[2]!,Number(pp[3]));
+  const ms=multiStart.exec(data);
+  if(ms)return this.beginMulti(actor,ms[1]!);
+  const mp=multiMove.exec(data);
+  if(mp)return this.actMulti(actor,mp[1]!,Number(mp[2]),'MOVE',Number(mp[3]));
+  const mt=multiToggle.exec(data);
+  if(mt)return this.actMulti(actor,mt[1]!,Number(mt[2]),'TOGGLE',Number(mt[3]));
+  const mv=multiPreview.exec(data);
+  if(mv)return this.actMulti(actor,mv[1]!,Number(mv[2]),'PREVIEW');
+  const mx=multiCancel.exec(data);
+  if(mx)return this.actMulti(actor,mx[1]!,Number(mx[2]),'CANCEL');
   const bl=bulkList.exec(data);
   if(bl)return this.bulkPage(state,actor,now,bl[1]!,Number(bl[2]),0);
   const bt=bulkToggle.exec(data);
