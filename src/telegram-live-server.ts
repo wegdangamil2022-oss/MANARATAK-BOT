@@ -20,6 +20,8 @@ import {Phase4LectureService} from './phase4-lectures.js';
 import {startPhase4LectureMaintenance} from './phase4-lecture-maintenance.js';
 import {Phase4QuizService} from './phase4-quizzes.js';
 import {startPhase4QuizMaintenance} from './phase4-quiz-maintenance.js';
+import {Phase4ContestService} from './phase4-contests.js';
+import {startPhase4ContestMaintenance} from './phase4-contest-maintenance.js';
 import {Phase4ServiceCleanupDispatcher,TelegramBotApiServiceCleanupGateway} from './phase4-service-cleanup.js';
 import {Phase4GroupProfileDispatcher,TelegramBotApiGroupProfileGateway} from './phase4-group-profile.js';
 import {startProtectionMaintenance} from './protection-maintenance.js';
@@ -246,6 +248,9 @@ export async function createLiveTelegramServer(config:LiveTelegramConfig,
   const quizPrivacy=startPhase4QuizMaintenance(
    new Phase4QuizService(store,policy),undefined,
    ()=>process.stderr.write('QUIZ_PRIVACY_MAINTENANCE_FAILED\n'));
+  const contestPrivacy=startPhase4ContestMaintenance(
+   new Phase4ContestService(store,policy),undefined,
+   ()=>process.stderr.write('CONTEST_PRIVACY_MAINTENANCE_FAILED\n'));
   const protection=new GroupProtectionPolicyService(store,policy);
   const serviceCleaner=new Phase4ServiceCleanupDispatcher(store,policy,
    new TelegramBotApiServiceCleanupGateway(check.token,request),Date.now,safetyGate);
@@ -262,7 +267,7 @@ export async function createLiveTelegramServer(config:LiveTelegramConfig,
    if(profileEditor)await profileEditor.runDue(2);
   },undefined,()=>process.stderr.write('PROTECTION_OR_SERVICE_MAINTENANCE_FAILED\n'));
   protectionMaintenanceStops.set(server,async()=>{
-   await Promise.all([whisperPrivacy.stop(),discussionPrivacy.stop(),pollPrivacy.stop(),eventPrivacy.stop(),expertPrivacy.stop(),studyPrivacy.stop(),badgePrivacy.stop(),reactionPrivacy.stop(),lecturePrivacy.stop(),quizPrivacy.stop(),cleanup.stop()]);
+   await Promise.all([whisperPrivacy.stop(),discussionPrivacy.stop(),pollPrivacy.stop(),eventPrivacy.stop(),expertPrivacy.stop(),studyPrivacy.stop(),badgePrivacy.stop(),reactionPrivacy.stop(),lecturePrivacy.stop(),quizPrivacy.stop(),contestPrivacy.stop(),cleanup.stop()]);
   });
   server.once('close',()=>{void protectionMaintenanceStops.get(server)?.();});
  });
