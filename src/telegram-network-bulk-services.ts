@@ -20,7 +20,7 @@ const history=new RegExp('^nw:1:sa:'+net+':'+page+'$','u');
 const detail=/^nw:1:sd:([A-Za-z0-9_-]{24})$/u;
 type Mode='a'|'m';
 const kind=(m:Mode):NetworkServiceControl=>m==='a'?'AI_OFF':'MONITOR_OFF';
-const label=(m:Mode):string=>m==='a'?'إيقاف المساعد الذكي':'إيقاف مراقبة الحماية';
+const label=(m:Mode):string=>m==='a'?'إيقاف المساعد الذكي':'إيقاف المراقبة';
 const auditReason=(m:Mode):string=>m==='a'?'OWNER_NETWORK_GROUP_AI_DISABLED':'OWNER_NETWORK_GROUP_MONITOR_DISABLED';
 const btn=(text:string,callback_data:string)=>({text,callback_data});
 const ui=(text:string,rows:{text:string;callback_data:string}[][]):OwnerInlineScreen=>
