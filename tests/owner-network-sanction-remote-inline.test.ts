@@ -77,7 +77,7 @@ for(const engine of ['json','sqlite'] as const){
    const detail=await f.owner.handle(OWNER,'nw:1:sd:'+REVIEW);
    const preview=await f.owner.handle(OWNER,button(detail,'فحص Telegram'));
    assert.match(preview?.text??'',/معاينة/u);
-   assert.deepEqual(f.calls,[],'preview must not invoke Telegram');
+   assert.equal(f.calls.length,0,'preview must not invoke Telegram');
    const confirm=button(preview,'تأكيد');
    assert.equal(await f.owner.handle('200',confirm),null);
    assert.equal(f.calls.length,0);
