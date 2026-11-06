@@ -98,11 +98,12 @@ export class Phase4WhisperService{
  }
  /** Immediate close scrubs content even if there were reservations. A held
   * reservation is not a delivery and cannot be reused as a resend ticket. */
- async close(actor:string,id:string):Promise<boolean>{
+ async close(actor:string,id:string,expectedRevision?:number):Promise<boolean>{
   const now=this.clock();if(!validClock(now))throw Error('WHISPER_CLOCK_INVALID');
   return this.store.transaction(s=>{
    const data=clone(s),matches=data.messages.filter(x=>x.id===id),row=matches[0];
-   if(matches.length!==1||!row||row.status==='CLOSED')return false;
+   if(matches.length!==1||!row||row.status==='CLOSED'||
+    expectedRevision!==undefined&&row.revision!==expectedRevision)return false;
    if(this.scope(s,actor,row.chatId)!==row.chatVersion||
     row.creatorId!==actor)throw Error('WHISPER_DENIED');
    row.closedAt=Math.max(row.createdAt,now);
