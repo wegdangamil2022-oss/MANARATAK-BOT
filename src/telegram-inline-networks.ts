@@ -4,7 +4,8 @@ import type {GroupNetwork} from './group-network-model.js';
 import {validNetworkName} from './group-network-model.js';
 import {prepareNetworkInheritance,pauseNetworkInheritanceByOwner} from './network-inheritance.js';
 import {OwnerNetworkWatchEditor,validOwnerNetworkWatchRoute} from './telegram-network-watch-owner.js';
-import {OwnerNetworkSanctionEditor,validOwnerNetworkSanctionRoute} from './telegram-network-sanction-owner.js';
+import {OwnerNetworkSanctionEditor,validOwnerNetworkSanctionRoute,
+ type NetworkSanctionRemoteRead} from './telegram-network-sanction-owner.js';
 import {isValidProtectionPolicy,type ProtectionPolicy} from './protection-rules.js';
 import type {Policy} from './policy.js';
 import type {OwnerInlineScreen} from './telegram-inline-owner.js';
@@ -77,7 +78,8 @@ const matchesName=(networks:readonly GroupNetwork[],name:string)=>networks.some(
 
 export class OwnerNetworkEditor{
  constructor(private readonly store:BotStore,private readonly policy:Policy,
-  private readonly clock:()=>number=Date.now){}
+  private readonly clock:()=>number=Date.now,
+  private readonly remoteRead?:NetworkSanctionRemoteRead){}
  private auth(s:BotState,actor:string,now:number):boolean{
   return this.policy.isOwner(actor)&&validClock(now)&&
    this.policy.privateFeature(s,'owner.dashboard',actor);
@@ -842,7 +844,7 @@ export class OwnerNetworkEditor{
  async handle(actor:string,data:string):Promise<OwnerInlineScreen|null>{
   if(!this.policy.isOwner(actor)||!validOwnerNetworkRoute(data))return null;
   const watchEditor=new OwnerNetworkWatchEditor(this.store,this.policy,this.clock);
-  const sanctionEditor=new OwnerNetworkSanctionEditor(this.store,this.policy,this.clock);
+  const sanctionEditor=new OwnerNetworkSanctionEditor(this.store,this.policy,this.clock,this.remoteRead);
   if(validOwnerNetworkSanctionRoute(data)){
    await this.cancelInput(actor);
    return sanctionEditor.handle(actor,data);
