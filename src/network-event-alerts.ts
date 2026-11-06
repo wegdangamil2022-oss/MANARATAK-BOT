@@ -4,6 +4,7 @@ import type {Policy} from './policy.js';
 import type {TelegramReplySender,TelegramSendResult} from './telegram-replies.js';
 import {validGroupNetwork} from './group-network-model.js';
 import {reportManager} from './moderation-report-notices.js';
+import {networkAlertEventSilenced} from './network-alert-silence.js';
 import {networkAdministrativeEvents,type NetworkAdministrativeEventKind}
  from './network-administrative-events.js';
 
@@ -128,7 +129,8 @@ function event(s:BotState,p:Policy,pref:Preference,now:number,eventId?:string){
   kind:EVENT_KIND[pref.kind],chatId:pref.chat});
  if(!matches)return null;
  return matches.find(e=>e.at>pref.at&&e.at<=now&&now-e.at<120_000&&
-  (eventId===undefined||e.id===eventId))??null;
+  (eventId===undefined||e.id===eventId)&&
+  !networkAlertEventSilenced(s,p,pref.actor,pref.network,pref.chat,now,e.at))??null;
 }
 function intact(s:BotState,job:Candidate,now:number):boolean{
  if(!time(now)||now<job.started||now-job.started>=120_000)return false;
