@@ -22,7 +22,7 @@
 | حجوزات الوداع | \`phase4Community.receipts.LEAVE\` | معالجة نية إرسال وداع | مغادرة بشرية موثقة أو تسليم Telegram |
 | حجوزات الردود التلقائية | \`phase4Community.receipts.TEXT\` | مطابقة رد وحجزه محليًا | نجاح إرسال الرد |
 | أسئلة النقاشات المسجلة | \`phase4Discussions.questions.createdAt\` | أسئلة ما زالت محفوظة | أسئلة منشورة أو مجابة بالكامل |
-| الأسئلة التي روجعت | \`questions.reviewedAt\` | مراجعات محلية ما زالت مسجلة | موافقة أو نشر في Telegram بالضرورة |
+| الأسئلة التي روجعت | \`questions.reviewedAt\` | حالات مراجعة بشرية محفوظة فقط (اعتماد/رفض/إجابة)، ولا تُحسب الأرشفة الآلية | موافقة أو نشر في Telegram بالضرورة |
 | الاستطلاعات المفتوحة | \`phase4Polls.polls.openedAt\` | فتح نافذة تصويت محلية | نشر \`sendPoll\` فعليًا |
 | الأصوات النشطة للاستطلاع | \`phase4Polls.ballots.CAST\` | أصوات محتفظ بها ولم تُسحب | تصويت مسابقة أو إنسان فريد |
 | الفعاليات المفتوحة | \`phase4Events.events.openedAt\` | فتح التسجيل للفعالية | انعقاد الفعالية أو حضور الطلاب |
@@ -59,7 +59,7 @@
 ## التنفيذ والفحوص
 
 الملفات الجديدة:
-\`src/phase4-engagement-reports.ts\`، \`src/phase4-engagement-owner.ts\`، \`tests/phase4-engagement-reports.test.ts\`، \`tests/phase4-engagement-privacy.test.ts\`.
+\`src/phase4-engagement-reports.ts\`، \`src/phase4-engagement-owner.ts\`، \`tests/phase4-engagement-reports.test.ts\`، \`tests/phase4-engagement-privacy.test.ts\`، \`tests/phase4-engagement-sources.test.ts\`.
 
 الربط:
 \`src/telegram-transport.ts\`، \`src/telegram-inline-owner.ts\`.
