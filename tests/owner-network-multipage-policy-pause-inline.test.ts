@@ -45,7 +45,7 @@ for(const engine of ['json','sqlite'] as const){
  test(engine+' NETWORK-004 multi-page owner workflow pauses only selected groups across two pages',async()=>{
   const f=await fixture();try{
    const list=await f.editor.handle(OWNER,'nw:1:f:'+NET+':0');
-   const startRoute=button(list,'متعددة الصفحات');
+   const startRoute=button(list,'صفحات متعددة');
    assert.equal(validOwnerNetworkRoute(startRoute),true);
    const first=await f.editor.handle(OWNER,startRoute);
    assert.match(first?.text??'',/صفحة 1\/2/u);
