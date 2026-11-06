@@ -44,6 +44,8 @@ import {OwnerGroupPolicyTemplates} from './telegram-inline-group-templates.js';
 import {OwnerGroupSettings} from './telegram-inline-group-settings.js';
 import {OwnerGroupBulkRestrict} from './telegram-inline-group-bulk-restrict.js';
 import {OwnerNetworkEditor} from './telegram-inline-networks.js';
+import {Phase4WhisperService} from './phase4-whispers.js';
+import {whisperOwnerScreen} from './phase4-whisper-owner.js';
 import {OwnerInlineGroupControls} from './telegram-inline-group-controls.js';
 import {renderOwnerInlineDelegations,delegationOwnerEntry} from './telegram-inline-delegations.js';
 import {renderStaffInline} from './telegram-inline-staff.js';
@@ -589,6 +591,24 @@ export class TelegramUpdateApplication {
     if(event.kind==='private'&&this.opts.policy.isOwner(event.actorId)&&folderNavigation)await cancelCommunityFolder(this.opts.store,event.actorId);
     if(event.document)return this.handleDocument(event);
     const {actorId,chatId,kind,text}=event;
+    // Stage 4 / 09:06 — private OWNER review of unpublished whisper drafts.
+    // Member consent/seat reservations are domain-only; do not create any
+    // group post, private DM or Telegram reveal before a separately audited
+    // delivery flow exists. Unknown/stale callbacks are denied.
+    const whisperInput=kind==='private'&&(
+      event.callbackData==='mi:1:i:09:06'||
+      event.callbackData?.startsWith('wh:1:')||
+      /^\/whispers(?:$|\s)|^\/whisper(?:first|direct)(?:$|\s)/u.test(text));
+    if(whisperInput){
+     if(!this.opts.policy.isOwner(actorId)||actorId!==chatId)
+      return {status:'DENIED',reason:'WHISPER_OWNER_ONLY'};
+     const screen=await whisperOwnerScreen(
+      new Phase4WhisperService(this.opts.store,this.opts.policy,this.clock),
+      actorId,event.callbackData??text);
+     if(!screen)return {status:'DENIED',reason:'WHISPER_STALE_OR_DENIED'};
+     return {status:'APPLIED',reason:'PHASE4_WHISPER_OWNER_REVIEW',
+      plan:this.plan(chatId,screen.text,undefined,screen.keyboard,event.callbackMessageId)};
+    }
     const communityCommand=kind==='private'?parsePhase4CommunityCommand(text):null;
     if(kind==='private'&&(communityCommand||event.callbackData?.startsWith('p4c:1:')||
       (this.opts.community&&['mi:1:i:09:01','mi:1:i:09:04','mi:1:i:09:05','mi:1:i:09:15','mi:1:i:09:16','mi:1:i:07:10'].includes(event.callbackData??'')))){
