@@ -108,9 +108,9 @@ export class Phase4QuizService{
   const g=approved(initial,this.policy,q.chatId);
   if(!g||g.version!==q.chatVersion||
    !gameCatalogAllowsQuiz(initial,q.chatId,start,'ANSWER'))return deny('STALE');
+  if(q.status==='CLOSED')return deny('CLOSED');
   if(q.contestId&&!contestMemberAllowed(initial,q.contestId,q.id,memberId))
    return deny('VERIFICATION_REQUIRED');
-  if(q.status==='CLOSED')return deny('CLOSED');
   if(q.status!=='OPEN')return deny('CLOSED');
   if(start>=q.expiresAt!)return deny('EXPIRED');
   if(start<q.openedAt!||memberId===q.ownerId)return deny('INVALID');
