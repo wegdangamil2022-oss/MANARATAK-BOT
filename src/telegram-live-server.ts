@@ -19,6 +19,7 @@ import {SubscriptionGate} from './subscription.js';
 import {ModerationService,FakeModerationGateway} from './moderation.js';
 import {readTelegramSafetySwitch,createTelegramSafetyGate} from './telegram-safety-switch.js';
 import {ModerationReportNoticeDispatcher} from './moderation-report-notices.js';
+import {NetworkEventAlertDispatcher} from './network-event-alerts.js';
 import {RuleNoticeDispatcher} from './group-rule-notices.js';
 import {SubscriptionChangeAlertDispatcher} from './subscription-change-alert.js';
 import {SubscriptionRightsMonitor} from './subscription-rights-monitor.js';
@@ -248,6 +249,8 @@ export async function createLiveTelegramServer(config:LiveTelegramConfig,
   (chatId,actorId)=>membership.verifyMembership(chatId,actorId),phase3?new TelegramEphemeralTextSender(check.token,request,safetyGate):undefined,!!phase3&&check.phase3TimersEnabled===true,
   phase3&&check.phase3TimersEnabled===true?{sender:new TelegramTemporaryGroupSender(check.token,request),botUsername:check.botUsername}:undefined);
  const notices=phase3?new ModerationReportNoticeDispatcher(store,policy,new TelegramBotApiTextSender(check.token,request),Date.now,safetyGate):undefined;
+ const networkAlerts=phase3&&check.phase3TimersEnabled===true?
+  new NetworkEventAlertDispatcher(store,policy,new TelegramBotApiTextSender(check.token,request),Date.now,safetyGate):undefined;
  const ruleNotices=phase3&&check.phase3TimersEnabled===true?new RuleNoticeDispatcher(store,policy,phase3.moderation,new TelegramBotApiTextSender(check.token,request),Date.now,safetyGate):undefined;
  const subscriptionChangeAlerts=phase3&&check.phase3TimersEnabled===true?new SubscriptionChangeAlertDispatcher(store,policy,new TelegramBotApiTextSender(check.token,request),Date.now,safetyGate):undefined;
  const subscriptionRightsMonitor=phase3&&check.phase3TimersEnabled===true?new SubscriptionRightsMonitor(store,policy,membership,Date.now,safetyGate):undefined;
@@ -268,6 +271,7 @@ export async function createLiveTelegramServer(config:LiveTelegramConfig,
    if(cleanupAudit)await cleanupAudit.drain();
    if(welcomeFarewell&&check.phase3TimersEnabled===true){await welcomeFarewell.drain();await welcomeFarewell.cleanup();}
    if(notices)await notices.drain();
+   if(networkAlerts)await networkAlerts.drain();
    if(ruleNotices)await ruleNotices.drain();
    if(subscriptionRightsMonitor)await subscriptionRightsMonitor.tick();
    if(subscriptionChangeAlerts)await subscriptionChangeAlerts.drain();
