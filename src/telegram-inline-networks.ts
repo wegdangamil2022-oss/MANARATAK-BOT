@@ -205,11 +205,11 @@ export class OwnerNetworkEditor{
   const active=links.filter(x=>x.status==='ACTIVE').length;
   const paused=links.filter(x=>x.status==='PAUSED').length;
   const record=(s.networkEmergencyControls??[]).find(x=>x.networkId===id);
-  return ui('<b>🚨 طوارئ الشبكة</b>\\nالشبكة: '+escape(n.name)+
-   '\\nالحالة: '+(stopped?'⛔ الإيقاف الطارئ مفعل':'✅ لا يوجد إيقاف طارئ')+
-   '\\nالمتابعات النشطة: '+active+' · المتوقفة: '+paused+
-   '\\nإصدار قرار الطوارئ: '+(record?.revision??0)+
-   '\\nالإيقاف يوقف مزامنة سياسات مراقبة الشبكة المحلية فقط، ولا يغير سياسات المجموعات الحالية أو عقوبات Telegram. رفع الإيقاف لا يعيد تشغيل أي متابعة سابقة تلقائيًا.',[
+  return ui('<b>🚨 طوارئ الشبكة</b>\nالشبكة: '+escape(n.name)+
+   '\nالحالة: '+(stopped?'⛔ الإيقاف الطارئ مفعل':'✅ لا يوجد إيقاف طارئ')+
+   '\nالمتابعات النشطة: '+active+' · المتوقفة: '+paused+
+   '\nإصدار قرار الطوارئ: '+(record?.revision??0)+
+   '\nالإيقاف يوقف مزامنة سياسات مراقبة الشبكة المحلية فقط، ولا يغير سياسات المجموعات الحالية أو عقوبات Telegram. رفع الإيقاف لا يعيد تشغيل أي متابعة سابقة تلقائيًا.',[
     [stopped?btn('🔓 رفع الإيقاف بموافقة','nw:1:er:'+id):
      btn('⛔ إيقاف طارئ للشبكة','nw:1:es:'+id)],
     [btn('⏸️ إدارة المتابعات','nw:1:f:'+id+':0')],
@@ -231,12 +231,12 @@ export class OwnerNetworkEditor{
    s.callbacks.push({ref,action:PREFIX+'emergency:'+JSON.stringify([id,revision,action,proof]),
     actorId:actor,chatId:'private',policyVersion:0,oneShot:true,used:false,
     revoked:false,expiresAt:now+TTL});
-   return ui('<b>🔎 معاينة '+(action==='STOP'?'الإيقاف الطارئ':'رفع الإيقاف')+'</b>\\n'+
-    'الشبكة: '+escape(n.name)+'\\nمتابعات ستتوقف: '+active+
-    '\\n'+(action==='STOP'?
+   return ui('<b>🔎 معاينة '+(action==='STOP'?'الإيقاف الطارئ':'رفع الإيقاف')+'</b>\n'+
+    'الشبكة: '+escape(n.name)+'\nمتابعات ستتوقف: '+active+
+    '\n'+(action==='STOP'?
      'سيتم وقف جميع متابعات سياسات الشبكة الآن وحظر أي متابعة جديدة حتى موافقة لاحقة.':
      'ستُتاح إعدادات المراقبة المستقبلية فقط؛ لا تُستأنف المتابعات المتوقفة.')+
-    '\\nلا تتغير عقوبات Telegram أو حقوق المجموعات. التأكيد صالح لدقيقتين فقط.',[
+    '\nلا تتغير عقوبات Telegram أو حقوق المجموعات. التأكيد صالح لدقيقتين فقط.',[
      [btn('✅ تأكيد '+(action==='STOP'?'الإيقاف':'رفع الإيقاف'),'nw:1:c:'+ref.slice(2))],
      [btn('✖ إلغاء المعاينة','nw:1:k:'+ref.slice(2))]
     ]);
@@ -533,6 +533,33 @@ export class OwnerNetworkEditor{
     receipt.revoked!==false||!Number.isSafeInteger(receipt.expiresAt)||
     receipt.expiresAt<=now||receipt.expiresAt>now+TTL)return null;
    let data:unknown;
+   if(receipt.action.startsWith(PREFIX+'emergency:')){
+    try{data=JSON.parse(receipt.action.slice((PREFIX+'emergency:').length));}
+    catch{return null;}
+    if(!Array.isArray(data)||data.length!==4||
+     typeof data[0]!=='string'||!/^[a-f0-9]{12}$/u.test(data[0])||
+     !Number.isSafeInteger(data[1])||data[1]<0||data[1]>9_999_999_999||
+     !['STOP','RESUME'].includes(String(data[2]))||
+     typeof data[3]!=='string'||!/^[a-f0-9]{64}$/u.test(data[3]))return null;
+    const [networkId,expectedRevision,action,proof]=data as
+     [string,number,'STOP'|'RESUME',string];
+    const n=this.find(s,networkId),record=(s.networkEmergencyControls??[])
+     .find(x=>x.networkId===networkId);
+    if(!n||(record?.revision??0)!==expectedRevision||
+     this.emergencyProof(s,networkId)!==proof)return null;
+    const outcome=decideNetworkEmergency(s,this.policy,actor,now,networkId,action);
+    if(!outcome)return null;
+    receipt.used=true;
+    s.audit.push({actorId:actor,updateKey:'owner-network:'+nonce,decision:'ALLOW',
+     reason:outcome.status==='STOPPED'?'OWNER_NETWORK_EMERGENCY_STOPPED':
+      'OWNER_NETWORK_EMERGENCY_RESUMED',policyVersion:n.revision,at:now});
+    return ui('<b>✅ '+(outcome.status==='STOPPED'?'أُوقف توريث الشبكة':'رُفع إيقاف الشبكة')+'</b>\n'+
+     'الشبكة: '+escape(n.name)+'\nالمتابعات التي توقفت: '+outcome.paused+
+     '\nالقرار محفوظ في قاعدة البيانات، ويظل نافذًا بعد إعادة التشغيل. لا تغيير في عقوبات Telegram ولا إعادة تشغيل تلقائية للمتابعات.',[
+      [btn('🚨 حالة الطوارئ','nw:1:eh:'+networkId)],
+      [btn('↩️ بطاقة الشبكة','nw:1:d:'+networkId)]
+     ]);
+   }
    if(receipt.action.startsWith(PREFIX+'policy-stop:')){
     try{data=JSON.parse(receipt.action.slice((PREFIX+'policy-stop:').length));}catch{return null;}
     if(!Array.isArray(data)||data.length!==2||
@@ -953,6 +980,12 @@ export class OwnerNetworkEditor{
   const pp=policyPreview.exec(data);if(pp)return this.previewPolicy(actor,pp[1]!,pp[2]!,Number(pp[3]));
   const fl=followList.exec(data);if(fl)return this.followPage(state,fl[1]!,Number(fl[2]));
   const fs=followStop.exec(data);if(fs)return this.previewFollowStop(actor,fs[1]!);
+  const eh=emergencyHome.exec(data);
+  if(eh)return this.emergencyPage(state,actor,now,eh[1]!);
+  const es=emergencyStop.exec(data);
+  if(es)return this.previewEmergency(actor,es[1]!,'STOP');
+  const er=emergencyResume.exec(data);
+  if(er)return this.previewEmergency(actor,er[1]!,'RESUME');
   const p=pick.exec(data);if(p)return this.members(state,actor,now,p[1]!,Number(p[2]));
   const sp=stalePage.exec(data);
   if(sp)return this.staleMembersPage(state,actor,now,sp[1]!,Number(sp[2]));
