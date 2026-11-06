@@ -59,6 +59,9 @@ import {parseEventMemberCommand,eventMemberScreen} from './phase4-event-member.j
 import {Phase4ExpertService} from './phase4-experts.js';
 import {expertOwnerScreen} from './phase4-expert-owner.js';
 import {parseExpertMemberCommand,expertMemberScreen} from './phase4-expert-member.js';
+import {Phase4StudyPeersService} from './phase4-study-peers.js';
+import {studyPeerOwnerScreen} from './phase4-study-peer-owner.js';
+import {parseStudyPeerMemberCommand,studyPeerMemberScreen} from './phase4-study-peer-member.js';
 import {OwnerInlineGroupControls} from './telegram-inline-group-controls.js';
 import {renderOwnerInlineDelegations,delegationOwnerEntry} from './telegram-inline-delegations.js';
 import {renderStaffInline} from './telegram-inline-staff.js';
@@ -815,6 +818,47 @@ export class TelegramUpdateApplication {
       this.opts.store,this.opts.policy,this.clock),actorId,event.callbackData??text);
      if(!screen)return {status:'DENIED',reason:'EXPERT_OWNER_STALE_OR_DENIED'};
      return {status:'APPLIED',reason:'PHASE4_EXPERT_OWNER',
+      plan:this.plan(chatId,screen.text,undefined,screen.keyboard,event.callbackMessageId)};
+    }
+    // Phase 4 / 09:11 — group-only study circles, no direct personal matching.
+    // Identity and membership proof are mandatory for opt-in and reporting.
+    if(kind==='private'&&parseStudyPeerMemberCommand(text)!==null){
+     if(actorId!==chatId||event.edited||event.forwarded||
+      event.callbackData!==undefined)
+      return {status:'DENIED',reason:'STUDY_PRIVATE_ORIGIN_REQUIRED'};
+     const verify=async(groupId:string,memberId:string):Promise<'VERIFIED'|'NOT_MEMBER'|'UNKNOWN'>=>{
+      let membership:'VERIFIED'|'NOT_MEMBER'|'UNKNOWN'='UNKNOWN';
+      try{membership=await this.opts.membership(groupId,memberId);}
+      catch{return 'UNKNOWN';}
+      if(membership!=='VERIFIED')return membership;
+      const snapshot=await this.opts.store.snapshot();
+      const mode=subscriptionRequirementMode(snapshot,groupId);
+      if(mode==='INVALID')return 'UNKNOWN';
+      if(mode==='NONE')return 'VERIFIED';
+      if(!this.opts.subscription)return 'UNKNOWN';
+      try{
+       const result=await this.opts.subscription.verify(groupId,memberId);
+       return result.status==='MEMBER'||result.status==='NOT_REQUIRED'?
+        'VERIFIED':'UNKNOWN';
+      }catch{return 'UNKNOWN';}
+     };
+     const screen=await studyPeerMemberScreen(new Phase4StudyPeersService(
+      this.opts.store,this.opts.policy,this.clock,verify),actorId,text);
+     if(!screen)return {status:'DENIED',reason:'STUDY_MEMBER_INVALID'};
+     return {status:'APPLIED',reason:'PHASE4_STUDY_MEMBER',
+      plan:this.plan(chatId,screen.text)};
+    }
+    const peerInput=kind==='private'&&(
+     event.callbackData==='mi:1:i:09:11'||
+     event.callbackData?.startsWith('sp:1:')||
+     /^\/studies(?:$|\s)|^\/studynew(?:$|\s)/u.test(text));
+    if(peerInput){
+     if(!this.opts.policy.isOwner(actorId)||actorId!==chatId)
+      return {status:'DENIED',reason:'STUDY_OWNER_ONLY'};
+     const screen=await studyPeerOwnerScreen(new Phase4StudyPeersService(
+      this.opts.store,this.opts.policy,this.clock),actorId,event.callbackData??text);
+     if(!screen)return {status:'DENIED',reason:'STUDY_OWNER_STALE_OR_DENIED'};
+     return {status:'APPLIED',reason:'PHASE4_STUDY_OWNER',
       plan:this.plan(chatId,screen.text,undefined,screen.keyboard,event.callbackMessageId)};
     }
     const communityCommand=kind==='private'?parsePhase4CommunityCommand(text):null;
