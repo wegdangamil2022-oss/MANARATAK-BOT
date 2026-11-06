@@ -4,6 +4,7 @@ import {advanceFloodWindow} from './protection-flood.js';
 import {protectionEntityLinks,protectionHasPhoneEntity,protectionMentionCount} from './protection-message-entities.js';
 import {BotStore,type BotState} from './store.js';
 import type {Policy} from './policy.js';
+import {pauseNetworkInheritanceForLocalEdit,synchronizeNetworkInheritance} from './network-inheritance.js';
 import type {ProtectionEnforcer,ProtectionDelivery} from './protection-enforcement.js';
 import type {ProtectionAction} from './protection-rules.js';
 import {normalizeProtectionText,isValidProtectionPolicy,protectionMemberExempt,evaluateProtectionRules,protectionRuleFingerprint,type GroupProtectionRecord,type ProtectionEvaluation,type ProtectionMessage} from './protection-rules.js';
@@ -53,6 +54,8 @@ export class GroupProtectionPolicyService{
    if(old)state.protectionPolicies[state.protectionPolicies.indexOf(old)]=record;
    else state.protectionPolicies.push(record);
    if(state.protectionFloodWindows)state.protectionFloodWindows=state.protectionFloodWindows.filter(w=>w.chatId!==candidate.chatId);
+   pauseNetworkInheritanceForLocalEdit(state,'POLICY',candidate.chatId);
+   synchronizeNetworkInheritance(state,this.policy,actor,now,'POLICY',candidate.chatId);
    state.audit.push({actorId:actor,updateKey:'protection:policy:'+candidate.chatId+':'+candidate.revision,
     decision:'ALLOW',reason:'PROTECTION_POLICY_SAVED_'+candidate.mode,policyVersion:expectedChatRevision,at:now});
    return {status:'SAVED' as const,revision:candidate.revision};
