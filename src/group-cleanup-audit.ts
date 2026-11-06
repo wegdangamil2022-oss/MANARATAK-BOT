@@ -108,8 +108,11 @@ export class GroupCleanupAudit{
  }
  async configureChannel(actor:string,chat:string,channel:string|null,expected:string,confirmationRef?:string):Promise<boolean>{
   if(!group(chat)||channel!==null&&(!group(channel)||channel===chat)||!validDigest(expected))return false;
+  // Keep network reads outside the persistence transaction: SQLite holds a
+  // cross-process write reservation for the lifetime of a transaction.
   if(channel!==null&&await this.channelStatus(channel)!=='GRANTED')return false;
-  return this.store.transaction(async s=>{
+  if(channel!==null&&await this.channelStatus(channel)!=='GRANTED')return false;
+  return this.store.transaction(s=>{
    const now=this.clock(),rows=s.audit.filter(a=>a.updateKey===CHANNEL+chat),previous=this.channel(s,chat);
    if(!stampTime(now)||!this.policyAccess.isOwner(actor)||!this.policyAccess.privateFeature(s,'owner.dashboard',actor)||
       !this.policyAccess.canUseChat(s,chat,'moderation')||s.chats.filter(c=>c.id===chat).length!==1||
@@ -122,8 +125,7 @@ export class GroupCleanupAudit{
        !stampTime(cb.expiresAt)||cb.expiresAt<=now||cb.expiresAt>now+120000)return false;
    }
    const revision=(previous?.revision??0)+1,version=this.policyAccess.chatRevision(s,chat);
-   if(!Number.isSafeInteger(revision)||revision>999999999||
-      channel!==null&&await this.channelStatus(channel)!=='GRANTED')return false;
+   if(!Number.isSafeInteger(revision)||revision>999999999)return false;
    const record={actorId:actor,updateKey:CHANNEL+chat,decision:'ALLOW' as const,
     reason:'CLEANUP_AUDIT_CHANNEL_V1:'+JSON.stringify({channel,revision,stamp:this.channelStamp(s,chat)}),
     policyVersion:version,at:now},change='group:cleanup-audit-channel-change:'+digest([record,now]);
