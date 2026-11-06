@@ -35,7 +35,8 @@ async function fixture(engine:'json'|'sqlite'){
  const admin=new EducationAdminFacade(store,policy,education);
  const faq=new ApprovedAnswerService(store,policy),links=new ResourceLinkService(store,policy);
  const app=new TelegramUpdateApplication({store,policy,education,admin,faq,links,
-  botId:'900',botUsername:'ManaratakBot',clock:()=>1_700_000_000_000});
+  botId:'900',botUsername:'ManaratakBot',membership:async()=> 'VERIFIED',
+  clock:()=>1_700_000_000_000});
  return {store,app,close:()=>rm(dir,{recursive:true,force:true})};
 }
 test('WHISPER-016 strict owner callback grammar and catalogue connection',()=>{
