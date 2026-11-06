@@ -9,6 +9,7 @@ import {validEventState,type EventState} from './phase4-event-model.js';
 import {validExpertState,type ExpertState} from './phase4-expert-model.js';
 import {validStudyPeerState,type StudyPeerState} from './phase4-study-peer-model.js';
 import {validBadgeState,type BadgeState} from './phase4-badge-model.js';
+import {validReactionState,type ReactionState} from './phase4-reaction-model.js';
 import {validCommunityPhotoId,validCommunityLinkKeyboard} from './phase4-community-rich.js';
 import {validCommunityMessageMetadata,type CommunityMessageReceipt} from './community-message-receipt.js';
 import {validAdminUIAccess,type AdminUIAccess} from './protection-ui-access.js';
@@ -188,6 +189,8 @@ export interface BotState {
   phase4StudyPeers?:StudyPeerState;
   /** Phase 4 / 09:12 opt-in, owner-reviewed social recognition. */
   phase4Badges?:BadgeState;
+  /** Phase 4 / 09:13 non-competition owner-catalogued local post likes. */
+  phase4Reactions?:ReactionState;
   communityFolders?:CommunityFolder[];
   buttonStudio?:StudioState;
   /** Local owner network folders; never evidence of Telegram rights. */
@@ -283,6 +286,7 @@ export class BotStore {
       (previous.phase4Experts!==undefined&&!validExpertState(previous.phase4Experts))||
       (previous.phase4StudyPeers!==undefined&&!validStudyPeerState(previous.phase4StudyPeers))||
       (previous.phase4Badges!==undefined&&!validBadgeState(previous.phase4Badges))||
+      (previous.phase4Reactions!==undefined&&!validReactionState(previous.phase4Reactions))||
       (previous.groupNetworks!==undefined&&!validGroupNetworks(previous.groupNetworks))||
       (previous.communityFolders!==undefined&&!validCommunityFolders(previous.communityFolders))||
       (previous.privateSettingsRevision!==undefined&&(typeof previous.privateSettingsRevision!=='number'||!Number.isSafeInteger(previous.privateSettingsRevision)||previous.privateSettingsRevision<0||previous.privateSettingsRevision>=Number.MAX_SAFE_INTEGER))||
