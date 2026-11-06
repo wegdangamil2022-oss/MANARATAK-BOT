@@ -56,6 +56,16 @@ for(const engine of ['json','sqlite'] as const){
   await new SubscriptionRightsMonitor(f.store,f.policy,gateway,f.clock,f.safe).tick();
   assert.equal(subscriptionChangeAlerts(await f.store.snapshot(),f.clock()).length,0);
  }finally{await f.close();}});
+ test(engine+' first complete alias list migrates old primary-only baseline without invented alert',async()=>{const f=await fixture();try{
+  await f.store.transaction(s=>assert.equal(recordChannelIdentity(s,'100',G,C,1,1,1,'mainchannel',NOW,NOW),true));
+  let identity={username:'mainchannel',activeUsernames:['mainchannel','alreadyalias']};
+  const gateway={inspectChannelRights:async()=> 'ADMIN' as const,inspectChannelUsername:async()=>identity};
+  await new SubscriptionRightsMonitor(f.store,f.policy,gateway,f.clock,f.safe).tick();
+  assert.equal(subscriptionChangeAlerts(await f.store.snapshot(),f.clock()).length,0);
+  f.advance(600000);identity={username:'mainchannel',activeUsernames:['mainchannel','alreadyalias','addedlater']};
+  await new SubscriptionRightsMonitor(f.store,f.policy,gateway,f.clock,f.safe).tick();
+  assert.equal(subscriptionChangeAlerts(await f.store.snapshot(),f.clock()).filter(a=>a.identityChannel).length,1);
+ }finally{await f.close();}});
  test(engine+' corrupted or contradictory alias observations do not erase valid baseline',async()=>{const f=await fixture();try{
   await f.store.transaction(s=>assert.equal(recordChannelIdentity(s,'100',G,C,1,1,1,'mainchannel',NOW,NOW),true));
   const before=JSON.stringify((await f.store.snapshot()).subscriptionChannelIdentities);
