@@ -389,7 +389,7 @@ export function validCommunityState(value:unknown):value is CommunityAutomationS
  }
  const validReasons=new Set<CommunityDecisionReason>(['RESERVED','WELCOME_DISABLED','FAREWELL_DISABLED',
   'REPLIES_DISABLED','QUIET_HOURS','NO_MATCH','CLOCK_SKEW','GROUP_LIMIT','TOPIC_COOLDOWN',
-  'GROUP_COOLDOWN','ACTOR_COOLDOWN','TEMPLATE_INVALID','CAPTION_LIMIT','REMOVAL_SUPPRESSED','SOURCE_UNAVAILABLE']);
+  'GROUP_COOLDOWN','ACTOR_COOLDOWN','TEMPLATE_INVALID','CAPTION_LIMIT','REMOVAL_SUPPRESSED','SOURCE_UNAVAILABLE','LECTURE_MODE']);
  if(v.decisionLog){
   const keys=new Set<string>();
   for(const entry of v.decisionLog){
