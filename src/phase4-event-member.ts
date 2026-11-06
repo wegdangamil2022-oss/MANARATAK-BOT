@@ -62,6 +62,8 @@ export async function eventMemberScreen(
     'موعد الانتهاء (UTC): '+new Date(info.endsAt).toISOString()+'\n'+
     'رابط الحضور الذي اعتمده المالك: '+escape(info.link)+'\n'+
     'الحالة: '+info.status+'\n'+
+    (info.questionSessionId?'لإرسال سؤال قبل اللقاء، عبر الخاص: <code>/discussask '+info.questionSessionId+' سؤالك هنا</code>\n':'')+
+    (info.pollId?'للتصويت قبل اللقاء، عبر الخاص: <code>/pollvote '+info.pollId+' 1</code> (غيّر الرقم حسب الخيار)\n':'')+
     'هذا رابط معلن من المنظم، وليس إثباتًا للحضور.':
     '🔒 تفاصيل اللقاء غير متاحة في عضويتك الحالية.'};
   }
