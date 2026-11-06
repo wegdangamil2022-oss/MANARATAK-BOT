@@ -31,6 +31,7 @@ import {TelegramTemporaryGroupSender} from './telegram-temporary-group-sender.js
 import {CaptchaJoinNotices} from './captcha-join-notices.js';
 import {GroupServiceMessageCleanup} from './group-service-message-cleanup.js';
 import {GroupCleanupAudit,TelegramGroupCleanupAuditSender} from './group-cleanup-audit.js';
+import {TelegramPrivateAuditChannelReader} from './telegram-private-audit-channel.js';
 import {GroupAdminCommandCleanup} from './group-admin-command-cleanup.js';
 import {CaptchaEscalationPolicy} from './captcha-escalation-policy.js';
 import {CaptchaService} from './captcha.js';
@@ -218,7 +219,8 @@ export async function createLiveTelegramServer(config:LiveTelegramConfig,
  const cleanupAudit=serviceCleanup&&adminCommandCleanup&&check.phase3TimersEnabled===true?
   new GroupCleanupAudit(store,policy,serviceCleanup,adminCommandCleanup,
    new TelegramBotApiModerationGateway(check.token,request,safetyGate),
-   new TelegramGroupCleanupAuditSender(check.token,request),Date.now,safetyGate):undefined;
+   new TelegramGroupCleanupAuditSender(check.token,request),Date.now,safetyGate,
+   new TelegramPrivateAuditChannelReader(check.token,request)):undefined;
  const captchaEscalation=phase3?new CaptchaEscalationPolicy(store,policy,
   new CaptchaService(store,policy,(chat,actor)=>membership.verifyMembership(chat,actor),Date.now),Date.now):undefined;
  const welcomeFarewell=phase3?new GroupWelcomeFarewell(store,policy,
