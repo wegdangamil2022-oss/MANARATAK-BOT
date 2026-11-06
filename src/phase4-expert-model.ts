@@ -23,9 +23,20 @@ export interface ExpertSummary{
  sessionId:string;text:string;urls:string[];
  status:'DRAFT'|'APPROVED';revision:number;createdAt:number;approvedAt?:number;
 }
+export interface ExpertVote{
+ id:string;sessionId:string;questionId:string;memberId:string;
+ status:'CAST'|'WITHDRAWN';revision:1|2;createdAt:number;withdrawnAt?:number;
+}
+export type ExpertReportReason='CONTACT_DETAILS'|'UNLICENSED_ADVICE'|'HARASSMENT';
+export interface ExpertReport{
+ id:string;sessionId:string;questionId:string;reporterId:string;
+ reason:ExpertReportReason;createdAt:number;
+}
 export interface ExpertState{
  profiles:ExpertProfile[];sessions:ExpertSession[];
  decisions:ExpertDecision[];summaries:ExpertSummary[];
+ /** Optional for backward compatibility with already-persisted 09:10 state. */
+ votes?:ExpertVote[];reports?:ExpertReport[];
 }
 export const emptyExpertState=():ExpertState=>({
  profiles:[],sessions:[],decisions:[],summaries:[]
@@ -90,6 +101,21 @@ function validDecision(v:unknown):v is ExpertDecision{
   expertHex(v.id)&&expertHex(v.sessionId)&&expertHex(v.questionId)&&
   v.status==='DEFERRED'&&v.revision===1&&time(v.createdAt);
 }
+function validVote(v:unknown):v is ExpertVote{
+ if(!obj(v)||!exact(v,['id','sessionId','questionId','memberId','status',
+  'revision','createdAt'],['withdrawnAt'])||!expertHex(v.id)||
+  !expertHex(v.sessionId)||!expertHex(v.questionId)||!user(v.memberId)||
+  !time(v.createdAt))return false;
+ if(v.status==='CAST')return v.revision===1&&v.withdrawnAt===undefined;
+ return v.status==='WITHDRAWN'&&v.revision===2&&time(v.withdrawnAt)&&
+  Number(v.withdrawnAt)>=v.createdAt;
+}
+function validReport(v:unknown):v is ExpertReport{
+ return obj(v)&&exact(v,['id','sessionId','questionId','reporterId','reason','createdAt'])&&
+  expertHex(v.id)&&expertHex(v.sessionId)&&expertHex(v.questionId)&&
+  user(v.reporterId)&&time(v.createdAt)&&
+  ['CONTACT_DETAILS','UNLICENSED_ADVICE','HARASSMENT'].includes(String(v.reason));
+}
 function validSummary(v:unknown):v is ExpertSummary{
  if(!obj(v)||!exact(v,['sessionId','text','urls','status','revision','createdAt'],
   ['approvedAt'])||!expertHex(v.sessionId)||
@@ -99,23 +125,32 @@ function validSummary(v:unknown):v is ExpertSummary{
   Number(v.approvedAt)>=v.createdAt;
 }
 export function validExpertState(v:unknown):v is ExpertState{
- if(!obj(v)||!exact(v,['profiles','sessions','decisions','summaries'])||
+ if(!obj(v)||!exact(v,['profiles','sessions','decisions','summaries'],['votes','reports'])||
   !Array.isArray(v.profiles)||v.profiles.length>100||
   !Array.isArray(v.sessions)||v.sessions.length>100||
   !Array.isArray(v.decisions)||v.decisions.length>2000||
   !Array.isArray(v.summaries)||v.summaries.length>100||
+  (v.votes!==undefined&&(!Array.isArray(v.votes)||v.votes.length>5000))||
+  (v.reports!==undefined&&(!Array.isArray(v.reports)||v.reports.length>1000))||
   v.profiles.some(x=>!validExpertProfile(x))||
   v.sessions.some(x=>!validExpertSession(x))||
   v.decisions.some(x=>!validDecision(x))||
-  v.summaries.some(x=>!validSummary(x)))return false;
+  v.summaries.some(x=>!validSummary(x))||
+  (v.votes??[]).some(x=>!validVote(x))||
+  (v.reports??[]).some(x=>!validReport(x)))return false;
  const profiles=v.profiles as ExpertProfile[],sessions=v.sessions as ExpertSession[];
  const decisions=v.decisions as ExpertDecision[],summaries=v.summaries as ExpertSummary[];
+ const votes=(v.votes??[]) as ExpertVote[],reports=(v.reports??[]) as ExpertReport[];
  if(new Set(profiles.map(x=>x.id)).size!==profiles.length||
   new Set(sessions.map(x=>x.id)).size!==sessions.length||
   new Set(sessions.map(x=>x.questionSessionId)).size!==sessions.length||
   new Set(decisions.map(x=>x.id)).size!==decisions.length||
   new Set(decisions.map(x=>x.sessionId+':'+x.questionId)).size!==decisions.length||
-  new Set(summaries.map(x=>x.sessionId)).size!==summaries.length)return false;
+  new Set(summaries.map(x=>x.sessionId)).size!==summaries.length||
+  new Set(votes.map(x=>x.id)).size!==votes.length||
+  new Set(votes.map(x=>x.sessionId+':'+x.questionId+':'+x.memberId)).size!==votes.length||
+  new Set(reports.map(x=>x.id)).size!==reports.length||
+  new Set(reports.map(x=>x.sessionId+':'+x.questionId+':'+x.reporterId)).size!==reports.length)return false;
  const profilesById=new Map(profiles.map(x=>[x.id,x]));
  const sessionsById=new Map(sessions.map(x=>[x.id,x]));
  for(const x of sessions){
@@ -129,6 +164,12 @@ export function validExpertState(v:unknown):v is ExpertState{
   const session=sessionsById.get(x.sessionId);
   if(!session||session.status==='DRAFT'||x.createdAt<(session.openedAt??0)||
    x.createdAt>session.expiresAt||session.closedAt!==undefined&&
+   x.createdAt>session.closedAt)return false;
+ }
+ for(const x of [...votes,...reports]){
+  const session=sessionsById.get(x.sessionId);
+  if(!session||session.status==='DRAFT'||x.createdAt<(session.openedAt??0)||
+   x.createdAt>=session.expiresAt||session.closedAt!==undefined&&
    x.createdAt>session.closedAt)return false;
  }
  for(const x of summaries){
