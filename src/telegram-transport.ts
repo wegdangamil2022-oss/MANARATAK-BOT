@@ -852,8 +852,6 @@ export class TelegramUpdateApplication {
       if(!screen)return {status:'DENIED',reason:'STAFF_SCOPE_OR_CALLBACK_INVALID'};
       if(this.opts.groupPermissions)screen={...screen,keyboard:{inline_keyboard:[...screen.keyboard.inline_keyboard,[{text:'🔐 قفل وفتح مجموعاتي',callback_data:'lk:1:h'}]]}};
       if(this.opts.moderation)screen={...screen,keyboard:{inline_keyboard:[...screen.keyboard.inline_keyboard,[{text:'⚖️ حالات العقوبات',callback_data:'cs:1:h:b:0'},{text:'⚠️ التحذيرات',callback_data:'cs:1:h:w:0'}]]}};
-      screen={...screen,keyboard:{inline_keyboard:[...screen.keyboard.inline_keyboard,
-       [{text:'🔔 إعداد إشعارات الشبكات',callback_data:'na:1:h:0'}]]}};
       return {status:'APPLIED',reason:'RESPONSE_PLANNED_ONLY',
        plan:this.plan(chatId,screen.text,undefined,screen.keyboard,event.callbackMessageId)};
      }
