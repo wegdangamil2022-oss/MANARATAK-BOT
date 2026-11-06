@@ -457,7 +457,7 @@ export class OwnerNetworkEditor{
     return ui('<b>✅ فُعّلت متابعة سياسة الشبكة محليًا</b>\\n'+
      'المصدر: '+sourceId+'\\nالمستهدفات: '+targets.length+
      '\\nأي تعديل محلي بالمستهدف يوقف المتابعة دون تغيير Telegram.',
-     [[btn('📑 سياسات الشبكة','nw:1:y:'+n.id+':0)],
+     [[btn('📑 سياسات الشبكة','nw:1:y:'+n.id+':0')],
       [btn('🌐 بطاقة الشبكة','nw:1:d:'+n.id)]]);
    }
    if(receipt.action.startsWith(PREFIX+'create:')){
