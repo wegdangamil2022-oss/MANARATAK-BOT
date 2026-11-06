@@ -73,7 +73,7 @@ for(const engine of ['json','sqlite'] as const){
    assert.equal((await f.svc.register(USER,e.id,true)).status,'CLOSED');
    assert.equal(await f.svc.open(OWNER,e.id,1),true);
    assert.equal(await f.svc.open(OWNER,e.id,1),false);
-   assert.equal((await f.store.snapshot()).telegramReplyJobs?.some(x=>x.plan?.chatId===GROUP),false);
+   assert.equal(((await f.store.snapshot()).telegramReplyJobs?.some(x=>x.plan?.chatId===GROUP)??false),false);
   }finally{await f.close();}
  });
  test('EVENT-002 '+engine+': optional consent and atomic capacity; repeated registration is idempotent',async()=>{
