@@ -92,6 +92,7 @@ for(const engine of ['json','sqlite'] as const){
   assert.deepEqual(await f.audit.drain(),{sent:1,unresolved:0});
   const sent=f.calls.filter(x=>x.method==='sendMessage');assert.equal(sent.length,1);
   assert.equal(sent[0]!.body?.chat_id,ROOM);
+  assert.equal(sent[0]!.body?.protect_content,true);
   assert.match(String(sent[0]!.body?.text),/تدقيق|تنظيف/u);
   assert.ok(!JSON.stringify(sent[0]!.body).includes('221'));
   assert.equal(await f.audit.drain().then(x=>x.sent),0);
@@ -150,6 +151,15 @@ for(const engine of ['json','sqlite'] as const){
    assert.equal(f.calls.filter(x=>x.method==='sendMessage').length,0);
   }finally{await f.close();}
  }});
+ test(engine+' owner is guided to establish a notification room before audit can be enabled',async()=>{const f=await fixture();try{
+  const captcha=new CaptchaService(f.store,f.policy,async()=> 'VERIFIED',()=>f.now());
+  const ui=new TelegramCaptchaOwner(f.store,f.policy,captcha,()=>f.now(),undefined,undefined,f.service,undefined,f.audit);
+  const root=await ui.handle(OWNER,'mi:1:i:09:04');
+  const group=await ui.handle(OWNER,button(root,G));
+  assert.match(group?.text??'',/غرفة إدارة|الإشعارات/u);
+  assert.equal(group?.keyboard.inline_keyboard.flat().some(b=>b.text.includes('تفعيل تدقيق الحذف')),false);
+  assert.equal(f.audit.policy(await f.store.snapshot(),G)?.enabled,false);
+ }finally{await f.close();}});
  test(engine+' owner audit controls enforce preview, one-shot confirmation and independent OFF',async()=>{const f=await fixture();try{
   await f.link();const captcha=new CaptchaService(f.store,f.policy,async()=> 'VERIFIED',()=>f.now());
   const ui=new TelegramCaptchaOwner(f.store,f.policy,captcha,()=>f.now(),undefined,undefined,f.service,undefined,f.audit);
