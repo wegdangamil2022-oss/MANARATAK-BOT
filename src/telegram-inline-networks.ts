@@ -3,6 +3,7 @@ import type {BotStore,BotState,Chat} from './store.js';
 import type {GroupNetwork} from './group-network-model.js';
 import {validNetworkName} from './group-network-model.js';
 import {prepareNetworkInheritance,pauseNetworkInheritanceByOwner} from './network-inheritance.js';
+import {decideNetworkEmergency,networkEmergencyStopped} from './network-emergency-stop.js';
 import {OwnerNetworkWatchEditor,validOwnerNetworkWatchRoute} from './telegram-network-watch-owner.js';
 import {OwnerNetworkSanctionEditor,validOwnerNetworkSanctionRoute,
  type NetworkSanctionRemoteRead} from './telegram-network-sanction-owner.js';
@@ -22,6 +23,9 @@ const policySources=new RegExp('^nw:1:y:'+net+':'+page+'$','u');
 const policyPreview=new RegExp('^nw:1:z:'+net+':'+group+':'+page+'$','u');
 const followList=new RegExp('^nw:1:f:'+net+':'+page+'$','u');
 const followStop=/^nw:1:j:([a-f0-9]{12})$/u;
+const emergencyHome=new RegExp('^nw:1:eh:'+net+'$','u');
+const emergencyStop=new RegExp('^nw:1:es:'+net+'$','u');
+const emergencyResume=new RegExp('^nw:1:er:'+net+'$','u');
 const rename=new RegExp('^nw:1:e:'+net+'$','u');
 const remove=new RegExp('^nw:1:x:'+net+'$','u');
 const pick=new RegExp('^nw:1:g:'+net+':'+page+'$','u');
@@ -43,7 +47,9 @@ export function validOwnerNetworkRoute(data:unknown):boolean{
  if(typeof data!=='string'||Buffer.byteLength(data,'utf8')>64)return false;
  return data==='mi:1:i:01:03'||home.test(data)||begin.test(data)||validOwnerNetworkWatchRoute(data)||
    validOwnerNetworkSanctionRoute(data)||
-  [list,detail,policySources,policyPreview,followList,followStop,rename,remove,pick,toggle,stalePage,stalePick,staleBatch,confirm,cancel,historyPage,historyView].some(re=>re.test(data));
+  [list,detail,policySources,policyPreview,followList,followStop,
+   emergencyHome,emergencyStop,emergencyResume,rename,remove,pick,toggle,
+   stalePage,stalePick,staleBatch,confirm,cancel,historyPage,historyView].some(re=>re.test(data));
 }
 function approved(s:BotState,policy:Policy,actor:string,now:number):Chat[]{
  const counts=new Map<string,number>();
@@ -117,6 +123,7 @@ export class OwnerNetworkEditor{
  /** Only explicit owner-reviewed MONITOR/OFF policy templates can be a
   * network source. Each source and target needs current group rights. */
  private availablePolicySources(s:BotState,actor:string,now:number,n:GroupNetwork):Chat[]{
+  if(networkEmergencyStopped(s,n.id))return [];
   const allowed=approved(s,this.policy,actor,now);
   return allowed.filter(c=>n.members.some(m=>m.chatId===c.id&&m.version===c.version)&&
    c.scopes.includes('moderation')&&this.policy.canUseChat(s,c.id,'moderation')&&
@@ -235,6 +242,7 @@ export class OwnerNetworkEditor{
    [[btn('👥 إدارة المجموعات','nw:1:g:'+n.id+':0')],
     [btn('📑 سياسات الشبكة المشتركة','nw:1:y:'+n.id+':0')],
     [btn('⏸️ إدارة المتابعة','nw:1:f:'+n.id+':0')],
+    [btn('🚨 طوارئ الشبكة','nw:1:eh:'+n.id)],
     [btn('🛡️ بلاغات الشبكة المركزية','nw:1:w:'+n.id+':0')],
     ...(stale>0?[[btn('🧹 مراجعة الارتباطات القديمة','nw:1:s:'+n.id+':0')]]:[]),
     [btn('✏️ إعادة تسمية الشبكة','nw:1:e:'+n.id)],
@@ -501,7 +509,7 @@ export class OwnerNetworkEditor{
     const [netId,revision,sourceId,sourceRevision,ids,proof]=data as
      [string,number,string,number,string[],string];
     const n=this.find(s,netId),source=(s.protectionPolicies??[]).filter(x=>x.policy.chatId===sourceId);
-    if(!n||n.revision!==revision||source.length!==1||
+    if(!n||networkEmergencyStopped(s,n.id)||n.revision!==revision||source.length!==1||
        source[0]!.policy.revision!==sourceRevision||
        !this.availablePolicySources(s,actor,now,n).some(x=>x.id===sourceId)||
        this.policyWitness(s,actor,now,n,sourceId)!==proof)return null;
@@ -580,8 +588,13 @@ export class OwnerNetworkEditor{
      typeof data[2]!=='string'||!/^[a-f0-9]{64}$/u.test(data[2]))return null;
     const n=this.find(s,data[0]);
     if(!n||n.revision!==data[1]||n.members.length!==0||
-     editProof(s,n)!==data[2])return null;
+     editProof(s,n)!==data[2]||
+     (s.networkInheritance??[]).some(link=>link.networkId===n.id)||
+     (s.networkWatchCases??[]).some(row=>row.networkId===n.id)||
+     (s.networkSanctionReviews??[]).some(row=>row.networkId===n.id))return null;
     s.groupNetworks=s.groupNetworks!.filter(row=>row.id!==n.id);
+    if(s.networkEmergencyControls)s.networkEmergencyControls=
+     s.networkEmergencyControls.filter(row=>row.networkId!==n.id);
     receipt.used=true;
     s.audit.push({actorId:actor,updateKey:'owner-network:'+nonce,decision:'ALLOW',
      reason:'OWNER_NETWORK_DELETED',policyVersion:n.revision,at:now});
