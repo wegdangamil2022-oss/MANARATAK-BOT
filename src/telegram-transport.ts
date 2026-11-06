@@ -677,7 +677,7 @@ export class TelegramUpdateApplication {
     const discussionInput=kind==='private'&&(
      event.callbackData==='mi:1:i:09:07'||
      event.callbackData?.startsWith('dq:1:')||
-     /^\/discussions(?:$|\s)|^\/discussionnew(?:$|\s)/u.test(text));
+     /^\/discussions(?:$|\s)|^\/discussion(?:new|faq)(?:$|\s)/u.test(text));
     if(discussionInput){
      if(!this.opts.policy.isOwner(actorId)||actorId!==chatId)
       return {status:'DENIED',reason:'DISCUSSION_OWNER_ONLY'};
