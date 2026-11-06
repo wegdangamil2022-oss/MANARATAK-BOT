@@ -2,6 +2,8 @@ import {GroupProtectionPolicyService} from './group-protection-policy.js';
 import {Phase4CommunityService} from './phase4-community.js';
 import {Phase4WhisperService} from './phase4-whispers.js';
 import {startPhase4WhisperPrivacyMaintenance} from './phase4-whisper-maintenance.js';
+import {Phase4DiscussionService} from './phase4-discussions.js';
+import {startPhase4DiscussionPrivacyMaintenance} from './phase4-discussion-maintenance.js';
 import {Phase4ServiceCleanupDispatcher,TelegramBotApiServiceCleanupGateway} from './phase4-service-cleanup.js';
 import {Phase4GroupProfileDispatcher,TelegramBotApiGroupProfileGateway} from './phase4-group-profile.js';
 import {startProtectionMaintenance} from './protection-maintenance.js';
@@ -201,6 +203,9 @@ export async function createLiveTelegramServer(config:LiveTelegramConfig,
   const whisperPrivacy=startPhase4WhisperPrivacyMaintenance(
    new Phase4WhisperService(store,policy),undefined,
    ()=>process.stderr.write('WHISPER_PRIVACY_MAINTENANCE_FAILED\n'));
+  const discussionPrivacy=startPhase4DiscussionPrivacyMaintenance(
+   new Phase4DiscussionService(store,policy),undefined,
+   ()=>process.stderr.write('DISCUSSION_PRIVACY_MAINTENANCE_FAILED\n'));
   const protection=new GroupProtectionPolicyService(store,policy);
   const serviceCleaner=new Phase4ServiceCleanupDispatcher(store,policy,
    new TelegramBotApiServiceCleanupGateway(check.token,request),Date.now,safetyGate);
@@ -217,7 +222,7 @@ export async function createLiveTelegramServer(config:LiveTelegramConfig,
    if(profileEditor)await profileEditor.runDue(2);
   },undefined,()=>process.stderr.write('PROTECTION_OR_SERVICE_MAINTENANCE_FAILED\n'));
   protectionMaintenanceStops.set(server,async()=>{
-   await Promise.all([whisperPrivacy.stop(),cleanup.stop()]);
+   await Promise.all([whisperPrivacy.stop(),discussionPrivacy.stop(),cleanup.stop()]);
   });
   server.once('close',()=>{void protectionMaintenanceStops.get(server)?.();});
  });
