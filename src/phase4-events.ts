@@ -196,10 +196,19 @@ export class Phase4EventService{
   const s=await this.store.snapshot(),rows=state(s).events.filter(e=>e.id===id),e=rows[0];
   if(rows.length!==1||!e||!['OPEN','FINISHED'].includes(e.status)||
    currentChat(s,this.policy,e.chatId)?.version!==e.chatVersion)return null;
+  const rule=witness(s,e.chatId);
   try{if(await this.verifyMember(e.chatId,memberId)!=='VERIFIED')return null;}
   catch{return null;}
-  return {title:e.title,link:e.link,startsAt:e.startsAt,endsAt:e.endsAt,
-   status:e.status,capacity:e.capacity};
+  // Membership may have been checked for a now-revoked group or an old
+  // mandatory-channel rule. Never return an already-read stale URL.
+  const fresh=await this.store.snapshot(),matches=fresh.phase4Events?.events.filter(x=>x.id===id)??[];
+  const row=matches[0];
+  if(matches.length!==1||!row||!['OPEN','FINISHED'].includes(row.status)||
+   row.chatVersion!==e.chatVersion||row.revision!==e.revision||
+   currentChat(fresh,this.policy,row.chatId)?.version!==row.chatVersion||
+   witness(fresh,row.chatId)!==rule)return null;
+  return {title:row.title,link:row.link,startsAt:row.startsAt,endsAt:row.endsAt,
+   status:row.status,capacity:row.capacity};
  }
  /** Draft after event ended, then distinct revision-fenced owner approval.
   * Approved links are owner-reviewed HTTPS references, not link crawling.
