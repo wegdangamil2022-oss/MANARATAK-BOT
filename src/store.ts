@@ -6,6 +6,7 @@ import {validWhisperState,type WhisperState} from './phase4-whisper-model.js';
 import {validDiscussionState,type DiscussionState} from './phase4-discussion-model.js';
 import {validPollState,type PollState} from './phase4-poll-model.js';
 import {validEventState,type EventState} from './phase4-event-model.js';
+import {validExpertState,type ExpertState} from './phase4-expert-model.js';
 import {validCommunityPhotoId,validCommunityLinkKeyboard} from './phase4-community-rich.js';
 import {validCommunityMessageMetadata,type CommunityMessageReceipt} from './community-message-receipt.js';
 import {validAdminUIAccess,type AdminUIAccess} from './protection-ui-access.js';
@@ -179,6 +180,8 @@ export interface BotState {
   phase4Polls?:PollState;
   /** Phase 4 / 09:09 educational meeting opt-in and reviewed follow-up. */
   phase4Events?:EventState;
+  /** Phase 4 / 09:10 owner-reviewed speaker and private AMA lifecycle. */
+  phase4Experts?:ExpertState;
   communityFolders?:CommunityFolder[];
   buttonStudio?:StudioState;
   /** Local owner network folders; never evidence of Telegram rights. */
@@ -271,6 +274,7 @@ export class BotStore {
       (previous.phase4Discussions!==undefined&&!validDiscussionState(previous.phase4Discussions))||
       (previous.phase4Polls!==undefined&&!validPollState(previous.phase4Polls))||
       (previous.phase4Events!==undefined&&!validEventState(previous.phase4Events))||
+      (previous.phase4Experts!==undefined&&!validExpertState(previous.phase4Experts))||
       (previous.groupNetworks!==undefined&&!validGroupNetworks(previous.groupNetworks))||
       (previous.communityFolders!==undefined&&!validCommunityFolders(previous.communityFolders))||
       (previous.privateSettingsRevision!==undefined&&(typeof previous.privateSettingsRevision!=='number'||!Number.isSafeInteger(previous.privateSettingsRevision)||previous.privateSettingsRevision<0||previous.privateSettingsRevision>=Number.MAX_SAFE_INTEGER))||
