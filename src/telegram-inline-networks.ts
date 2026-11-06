@@ -3,6 +3,7 @@ import type {BotStore,BotState,Chat} from './store.js';
 import type {GroupNetwork} from './group-network-model.js';
 import {validNetworkName} from './group-network-model.js';
 import {prepareNetworkInheritance,pauseNetworkInheritanceByOwner} from './network-inheritance.js';
+import {OwnerNetworkWatchEditor,validOwnerNetworkWatchRoute} from './telegram-network-watch-owner.js';
 import {isValidProtectionPolicy,type ProtectionPolicy} from './protection-rules.js';
 import type {Policy} from './policy.js';
 import type {OwnerInlineScreen} from './telegram-inline-owner.js';
@@ -38,7 +39,7 @@ const validId=(value:string)=>/^-[1-9][0-9]{0,15}$/u.test(value)&&Number.isSafeI
 const validClock=(value:number)=>Number.isSafeInteger(value)&&value>=0&&value<=8_640_000_000_000_000-INPUT_TTL;
 export function validOwnerNetworkRoute(data:unknown):boolean{
  if(typeof data!=='string'||Buffer.byteLength(data,'utf8')>64)return false;
- return data==='mi:1:i:01:03'||home.test(data)||begin.test(data)||
+ return data==='mi:1:i:01:03'||home.test(data)||begin.test(data)||validOwnerNetworkWatchRoute(data)||
   [list,detail,policySources,policyPreview,followList,followStop,rename,remove,pick,toggle,stalePage,stalePick,staleBatch,confirm,cancel,historyPage,historyView].some(re=>re.test(data));
 }
 function approved(s:BotState,policy:Policy,actor:string,now:number):Chat[]{
@@ -230,6 +231,7 @@ export class OwnerNetworkEditor{
    [[btn('👥 إدارة المجموعات','nw:1:g:'+n.id+':0')],
     [btn('📑 سياسات الشبكة المشتركة','nw:1:y:'+n.id+':0')],
     [btn('⏸️ إدارة المتابعة','nw:1:f:'+n.id+':0')],
+    [btn('🛡️ بلاغات الشبكة المركزية','nw:1:w:'+n.id+':0')],
     ...(stale>0?[[btn('🧹 مراجعة الارتباطات القديمة','nw:1:s:'+n.id+':0')]]:[]),
     [btn('✏️ إعادة تسمية الشبكة','nw:1:e:'+n.id)],
     ...(n.members.length===0?[[btn('🗑️ حذف الشبكة','nw:1:x:'+n.id)]]:[]),
@@ -389,6 +391,8 @@ export class OwnerNetworkEditor{
   * exists. A failed name is never stored as a network record. */
  async previewName(actor:string,name:string):Promise<OwnerInlineScreen|null>{
   if(!this.policy.isOwner(actor))return null;
+  const watch=await new OwnerNetworkWatchEditor(this.store,this.policy,this.clock).previewInput(actor,name);
+  if(watch)return watch;
   const snapshot=await this.store.snapshot();
   if(!snapshot.callbacks.some(c=>c.actorId===actor&&c.action.startsWith(PREFIX+'input:')&&
    !c.used&&!c.revoked))return null;
@@ -695,6 +699,7 @@ export class OwnerNetworkEditor{
  }
  async cancelInput(actor:string):Promise<void>{
   if(!this.policy.isOwner(actor))return;
+  await new OwnerNetworkWatchEditor(this.store,this.policy,this.clock).cancelInput(actor);
   const snapshot=await this.store.snapshot();
   if(!snapshot.callbacks.some(c=>c.actorId===actor&&c.action.startsWith(PREFIX+'input:')&&
    !c.revoked&&!c.used))return;
@@ -834,8 +839,18 @@ export class OwnerNetworkEditor{
 
  async handle(actor:string,data:string):Promise<OwnerInlineScreen|null>{
   if(!this.policy.isOwner(actor)||!validOwnerNetworkRoute(data))return null;
-  const c=confirm.exec(data);if(c)return this.commit(actor,c[1]!);
-  const k=cancel.exec(data);if(k)return this.revoke(actor,k[1]!);
+  const watchEditor=new OwnerNetworkWatchEditor(this.store,this.policy,this.clock);
+  if(validOwnerNetworkWatchRoute(data))return watchEditor.handle(actor,data);
+  const c=confirm.exec(data);
+  if(c){
+   const result=await watchEditor.handle(actor,data);
+   return result??this.commit(actor,c[1]!);
+  }
+  const k=cancel.exec(data);
+  if(k){
+   const result=await watchEditor.handle(actor,data);
+   return result??this.revoke(actor,k[1]!);
+  }
   const state=await this.store.snapshot(),now=this.clock();
   if(!this.auth(state,actor,now))return null;
   // Navigating away from the name-entry step is an actual cancellation,
