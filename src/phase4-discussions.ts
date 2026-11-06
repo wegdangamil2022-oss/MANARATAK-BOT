@@ -1,6 +1,7 @@
 import {randomBytes} from 'node:crypto';
 import {BotStore,type BotState} from './store.js';
 import {Policy} from './policy.js';
+import {visibleEducationCategory} from './education-category-policy.js';
 import {emptyDiscussionState,type DiscussionState,type DiscussionSession,
  type DiscussionQuestionStatus,validDiscussionGroup,validDiscussionUser,
  validDiscussionTitle,validDiscussionQuestionText} from './phase4-discussion-model.js';
@@ -36,7 +37,7 @@ const scrubSession=(s:DiscussionState,session:DiscussionSession,now:number):void
  session.status='CLOSED';session.closedAt=now;session.revision++;
  for(const q of s.questions.filter(x=>x.sessionId===session.id)){
   if(q.text===undefined)continue;
-  delete q.text;q.status='ARCHIVED';q.revision++;q.reviewedAt=Math.max(now,q.createdAt);
+  delete q.text;delete q.faqId;q.status='ARCHIVED';q.revision++;q.reviewedAt=Math.max(now,q.createdAt);
  }
 };
 /** No Telegram posting, answers or member identity exposure.
@@ -160,7 +161,7 @@ export class Phase4DiscussionService{
    const d=state(s),matches=d.questions.filter(x=>x.id===questionId),q=matches[0];
    if(matches.length!==1||!q||q.memberId!==actor||
     q.text===undefined||now<q.createdAt)return false;
-   delete q.text;q.status='WITHDRAWN';q.revision++;q.reviewedAt=now;
+   delete q.text;delete q.faqId;q.status='WITHDRAWN';q.revision++;q.reviewedAt=now;
    s.phase4Discussions=d;return true;
   });
  }
@@ -190,6 +191,52 @@ export class Phase4DiscussionService{
    if(decision==='REJECTED')delete q.text;
    s.phase4Discussions=d;return true;
   });
+ }
+ /** Bind a human-reviewed, currently approved group FAQ after explicit
+  * question approval. No content or delivery job is created. */
+ async answerFromFAQ(actor:string,id:string,revision:number,faqId:string):Promise<boolean>{
+  const now=this.clock();if(!validClock(now)||!Number.isSafeInteger(revision)||
+   !/^[a-f0-9]{8}-(?:[a-f0-9]{4}-){3}[a-f0-9]{12}$/u.test(faqId))return false;
+  return this.store.transaction(s=>{
+   const d=state(s),found=d.questions.filter(q=>q.id===id),q=found[0];
+   if(found.length!==1||!q||q.status!=='APPROVED'||q.revision!==revision||
+    now<q.createdAt)return false;
+   const sessions=d.sessions.filter(x=>x.id===q.sessionId),session=sessions[0];
+   if(sessions.length!==1||!session||session.status!=='OPEN'||session.ownerId!==actor||
+    this.scope(s,actor,session.chatId)!==session.chatVersion||
+    now>=session.expiresAt)return false;
+   const faq=s.faqEntries.filter(x=>x.id===faqId),entry=faq[0];
+   if(faq.length!==1||!entry||entry.scope!==session.chatId||entry.status!=='APPROVED'||
+    !entry.approvedBy||!this.approvedFAQ(s,entry.scope,entry.sourceResourceId))
+    return false;
+   q.status='ANSWERED';q.revision++;q.reviewedAt=now;q.faqId=entry.id;
+   s.phase4Discussions=d;return true;
+  });
+ }
+ /** Repeat publication/source checks on EVERY private answer retrieval.
+  * A stale, archived or revoked FAQ is never served from a cached record. */
+ private approvedFAQ(s:BotState,scope:string,sourceId:string):boolean{
+  const resources=s.educationResources.filter(x=>x.id===sourceId),resource=resources[0];
+  if(resources.length!==1||!resource||resource.scope!==scope||resource.status!=='PUBLISHED')
+   return false;
+  const categories=s.educationCategories.filter(x=>x.id===resource.categoryId),category=categories[0];
+  return categories.length===1&&Boolean(category&&category.scope===scope&&
+   visibleEducationCategory(s,category));
+ }
+ async myApprovedAnswer(actor:string,id:string):Promise<{answer:string;sourceId:string}|null>{
+  const now=this.clock();if(!validClock(now)||!validDiscussionUser(actor))return null;
+  const s=await this.store.snapshot(),d=state(s);
+  const found=d.questions.filter(x=>x.id===id&&x.memberId===actor),q=found[0];
+  if(found.length!==1||!q||q.status!=='ANSWERED'||!q.faqId)return null;
+  const sessions=d.sessions.filter(x=>x.id===q.sessionId),session=sessions[0];
+  if(sessions.length!==1||!session||session.status!=='OPEN'||
+   now>=session.expiresAt||!group(s,this.policy,session.chatId)||
+   group(s,this.policy,session.chatId)!.version!==session.chatVersion)return null;
+  const entries=s.faqEntries.filter(x=>x.id===q.faqId),faq=entries[0];
+  if(entries.length!==1||!faq||faq.scope!==session.chatId||
+   faq.status!=='APPROVED'||!faq.approvedBy||
+   !this.approvedFAQ(s,faq.scope,faq.sourceResourceId))return null;
+  return {answer:faq.answer,sourceId:faq.sourceResourceId};
  }
  async list(actor:string,chatId?:string):Promise<DiscussionSession[]>{
   const s=await this.store.snapshot();
