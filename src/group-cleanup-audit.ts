@@ -51,7 +51,7 @@ export class TelegramGroupCleanupAuditSender{
     // a normal bot user. Both identities must match the *verified* channel.
     const channelSender=batch.destination==='CHANNEL'&&obj(m.sender_chat)&&
      m.sender_chat.id===Number(batch.room)&&m.sender_chat.type==='channel'&&
-     (m.from===undefined||bot)&&m.chat?.type==='channel';
+     (m.from===undefined||bot)&&obj(m.chat)&&m.chat.type==='channel';
     return chatValid&&(batch.destination==='CHANNEL'?channelSender:bot)&&
      typeof m.message_id==='number'&&Number.isSafeInteger(m.message_id)&&m.message_id>0?
      'CONFIRMED':'UNKNOWN_OUTCOME';
