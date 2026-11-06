@@ -14,6 +14,8 @@ export type DiscussionQuestionStatus='PENDING'|'APPROVED'|'REJECTED'|
 export interface DiscussionQuestion{
  id:string;sessionId:string;memberId:string;status:DiscussionQuestionStatus;
  text?:string;createdAt:number;revision:number;reviewedAt?:number;
+ /** Bound approved, group-scoped FAQ. Never an access grant. */
+ faqId?:string;
 }
 export interface DiscussionState{
  sessions:DiscussionSession[];questions:DiscussionQuestion[];
@@ -71,10 +73,12 @@ export function validDiscussionSession(value:unknown):value is DiscussionSession
 }
 export function validDiscussionQuestion(value:unknown):value is DiscussionQuestion{
  if(!record(value)||!exact(value,['id','sessionId','memberId','status',
-  'createdAt','revision'],['text','reviewedAt']))return false;
+  'createdAt','revision'],['text','reviewedAt','faqId']))return false;
  const x=value;
  if(!validId(x.id)||!validId(x.sessionId)||!validDiscussionUser(x.memberId)||
   !safeTime(x.createdAt)||!version(x.revision))return false;
+ if(x.faqId!==undefined&&(x.status!=='ANSWERED'||typeof x.faqId!=='string'||
+  !/^[a-f0-9]{8}-(?:[a-f0-9]{4}-){3}[a-f0-9]{12}$/u.test(x.faqId)))return false;
  if(x.status==='PENDING')return x.revision===1&&
   validDiscussionQuestionText(x.text)&&x.reviewedAt===undefined;
  if(!safeTime(x.reviewedAt)||Number(x.reviewedAt)<Number(x.createdAt))return false;
