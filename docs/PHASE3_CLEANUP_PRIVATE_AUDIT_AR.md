@@ -1,4 +1,7 @@
-# تدقيق حذف الرسائل في غرفة إشعارات خاصة — المرحلة الثالثة، MOD-008
+# تدقيق حذف الرسائل في غرفة إشعارات خاصة أو قناة Telegram خاصة — المرحلة الثالثة، MOD-008
+
+**تحديث لاحق — دعم القناة الخاصة:** إضافة `src/telegram-private-audit-channel.ts` و`src/telegram-cleanup-audit-channel-owner.ts` تعني أن وجهة التدقيق يمكن أن تكون الآن **قناة Telegram خاصة فعلية من نوع `channel`** مع فحص `getChat` و`getChatMember` وحق `can_post_messages`. الفقرات التي حصرت وجهة التدقيق بغرفة `NOTIFICATIONS` تصف الإصدار السابق. التفصيل الجديد في [PHASE3_CLEANUP_CHANNEL_AUDIT_AR.md](PHASE3_CLEANUP_CHANNEL_AUDIT_AR.md). تظل تجربة القناة الحية وقبول المرحلة الثالثة مفتوحة.
+
 
 ## الهدف
 
