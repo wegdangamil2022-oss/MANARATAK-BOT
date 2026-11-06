@@ -19,6 +19,7 @@ import {validOwnerUploadRoute} from './telegram-owner-upload.js';
 import {validSubscriptionConfigRoute} from './telegram-inline-subscription-config.js';
 import {validCommunityFolderRoute} from './telegram-community-folders.js';
 import {validPhase4CommunityRoute} from './phase4-community-ui.js';
+import {validPhase4GuidanceOwnerRoute} from './phase4-guidance-owner.js';
 import {validWhisperOwnerRoute} from './phase4-whisper-owner.js';
 import {validQuizOwnerRoute} from './phase4-quiz-owner.js';
 import {validGameCatalogOwnerRoute} from './phase4-game-catalog-owner.js';
@@ -708,6 +709,7 @@ export function isValidTelegramInlineKeyboard(input:unknown):input is TelegramIn
      !/^pq:1:(?:h|p:(?:0|[1-9][0-9]{0,2})|v:(?:0|[1-9][0-9]{0,2}):[1-8]:[a-f0-9]{16})$/u.test(button.callback_data)&&
      protectionInlineRoute(button.callback_data)===null&&!validOwnerFAQInlineRoute(button.callback_data)&&!validOwnerLibraryInlineRoute(button.callback_data)&&!validStudioInlineRoute(button.callback_data)&&!validOwnerCategoryInlineRoute(button.callback_data)&&!validPrivateSettingsRoute(button.callback_data)&&!validDelegationEditRoute(button.callback_data)&&!validGroupSetupRoute(button.callback_data)&&!validGroupPolicyStudioRoute(button.callback_data)&&!validOwnerGroupSettingsRoute(button.callback_data)&&!validOwnerGroupBulkRestrictRoute(button.callback_data)&&!validOwnerNetworkRoute(button.callback_data)&&!validOwnerPreviewCancelRoute(button.callback_data)&&!validGroupLibraryInlineRoute(button.callback_data)&&!validPublicNavigationRoute(button.callback_data)&&!validOwnerImportRoute(button.callback_data)&&!validOwnerUploadRoute(button.callback_data)&&!validSubscriptionConfigRoute(button.callback_data)&&!validCommunityFolderRoute(button.callback_data)&&
      !validPhase4CommunityRoute(button.callback_data)&&
+     !validPhase4GuidanceOwnerRoute(button.callback_data)&&
      !validWhisperOwnerRoute(button.callback_data)&&
      !validQuizOwnerRoute(button.callback_data)&&
      !validGameCatalogOwnerRoute(button.callback_data)&&
@@ -729,7 +731,7 @@ const navigation=(back:string,home=true)=>{
 export function ownerInlineConnection(data:string):'EDITOR'|'VIEW'|'SPECIFICATION'|null{
  const m=/^mi:1:i:([0-9]{2}):([0-9]{2})$/u.exec(data);if(!m||m[0]!==data)return null;
  const section=ownerInlineSections[Number(m[1])-1];if(!section||Number(m[2])<1||Number(m[2])>section.items.length)return null;
- if((data==='mi:1:i:08:01'||data==='mi:1:i:08:02'||data==='mi:1:i:08:03'||data==='mi:1:i:09:06'||data==='mi:1:i:09:07'||data==='mi:1:i:09:08'||data==='mi:1:i:09:09'||data==='mi:1:i:09:10'||data==='mi:1:i:09:11'||data==='mi:1:i:09:12'||data==='mi:1:i:09:13'||data==='mi:1:i:09:14'||data==='mi:1:i:09:15'||data==='mi:1:i:09:16')||/^mi:1:i:04:0[234]$/u.test(data)||data==='mi:1:i:13:04'||delegationOwnerEntry(data)||/^mi:1:i:01:(?:03|06|07|08|12)$/u.test(data)||data==='mi:1:i:10:16'||data==='mi:1:i:11:03'||studioOwnerEntry(data))return 'EDITOR';
+ if((data==='mi:1:i:09:02'||data==='mi:1:i:09:03'||data==='mi:1:i:08:01'||data==='mi:1:i:08:02'||data==='mi:1:i:08:03'||data==='mi:1:i:09:06'||data==='mi:1:i:09:07'||data==='mi:1:i:09:08'||data==='mi:1:i:09:09'||data==='mi:1:i:09:10'||data==='mi:1:i:09:11'||data==='mi:1:i:09:12'||data==='mi:1:i:09:13'||data==='mi:1:i:09:14'||data==='mi:1:i:09:15'||data==='mi:1:i:09:16')||/^mi:1:i:04:0[234]$/u.test(data)||data==='mi:1:i:13:04'||delegationOwnerEntry(data)||/^mi:1:i:01:(?:03|06|07|08|12)$/u.test(data)||data==='mi:1:i:10:16'||data==='mi:1:i:11:03'||studioOwnerEntry(data))return 'EDITOR';
  if(ownerInlineLinkedReadOnly(data)!==null||/^mi:1:i:01:(?:09|10|11)$/u.test(data)||data==='mi:1:i:03:01'||data==='mi:1:i:02:01'||data==='mi:1:i:02:15'||data==='mi:1:i:02:16'||data==='mi:1:i:02:13'||/^mi:1:i:02:(?:0[5678]|12)$/u.test(data))return 'VIEW';
  return 'SPECIFICATION';
 }

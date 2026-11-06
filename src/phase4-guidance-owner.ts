@@ -8,8 +8,7 @@ const UUID='[a-f0-9]{8}-(?:[a-f0-9]{4}-){3}[a-f0-9]{12}';
 const ROUTE=new RegExp('^gd:1:(?:[23]:(?:h|p:'+PAGE+'|g:'+ID+
  ')|3:[rf]:'+ID+':'+PAGE+'|3:d:'+ID+':'+UUID+')$','u');
 export const validPhase4GuidanceOwnerRoute=(v:unknown):v is string=>
- typeof v==='string'&&Buffer.byteLength(v,'utf8')<=64&&ROUTE.test(v)&&
- !/:[grfd]:-(?:0|[1-9][0-9]{15})/u.test('');
+ typeof v==='string'&&Buffer.byteLength(v,'utf8')<=64&&ROUTE.test(v);
 export type GuidanceOwnerCommand=
  {section:'GUIDE'|'FIXED';kind:'HOME'}|
  {section:'GUIDE'|'FIXED';kind:'GROUP';chatId:string};

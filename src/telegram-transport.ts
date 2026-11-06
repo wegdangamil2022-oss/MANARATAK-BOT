@@ -81,6 +81,8 @@ import {lectureOwnerScreen} from './phase4-lecture-owner.js';
 import {Phase4EngagementReportsService} from './phase4-engagement-reports.js';
 import {engagementOwnerScreen} from './phase4-engagement-owner.js';
 import {phase4SettingsOwnerScreen} from './phase4-settings-owner.js';
+import {Phase4GuidanceService,parseGuidanceMemberCommand} from './phase4-guidance.js';
+import {phase4GuidanceOwnerScreen} from './phase4-guidance-owner.js';
 import {OwnerInlineGroupControls} from './telegram-inline-group-controls.js';
 import {renderOwnerInlineDelegations,delegationOwnerEntry} from './telegram-inline-delegations.js';
 import {renderStaffInline} from './telegram-inline-staff.js';
@@ -626,6 +628,25 @@ export class TelegramUpdateApplication {
     if(event.kind==='private'&&this.opts.policy.isOwner(event.actorId)&&folderNavigation)await cancelCommunityFolder(this.opts.store,event.actorId);
     if(event.document)return this.handleDocument(event);
     const {actorId,chatId,kind,text}=event;
+    // 09:02/09:03: group-scoped student reading, private and explicitly requested.
+    // No Telegram group ID or text command is proof of membership.
+    const guidanceMemberCommand=parseGuidanceMemberCommand(text);
+    if(guidanceMemberCommand){
+     if(kind!=='private'||actorId!==chatId||event.edited||event.forwarded||
+      event.callbackData!==undefined||!this.opts.community)
+      return {status:'DENIED',reason:'PHASE4_GUIDANCE_PRIVATE_ONLY'};
+     let denied:string|null;
+     try{denied=await this.authorizePrivateGroupBrowse(guidanceMemberCommand.chatId,actorId);}
+     catch{return {status:'DENIED',reason:'PHASE4_GUIDANCE_MEMBERSHIP_UNAVAILABLE'};}
+     if(denied!==null)return {status:'DENIED',reason:'PHASE4_GUIDANCE_'+denied};
+     const html=await new Phase4GuidanceService(this.opts.store,this.opts.policy,
+      this.opts.community).member(guidanceMemberCommand.chatId,
+      guidanceMemberCommand.kind,guidanceMemberCommand.kind==='FAQ'?
+       guidanceMemberCommand.faqId:undefined);
+     if(!html)return {status:'DENIED',reason:'PHASE4_GUIDANCE_SOURCE_UNAVAILABLE'};
+     return {status:'APPLIED',reason:'PHASE4_GUIDANCE_MEMBER',
+      plan:this.plan(chatId,html)};
+    }
     // Stage 4 / 09:06 — the recipient's PRIVATE self-service preferences
     // and local seat requests. No Telegram group post, secret delivery or
     // callback-delegated authorization is implemented here.
@@ -1099,6 +1120,24 @@ export class TelegramUpdateApplication {
      if(!screen)return {status:'DENIED',reason:'ENGAGEMENT_STALE_OR_DENIED'};
      return {status:'APPLIED',reason:'PHASE4_ENGAGEMENT_OWNER',
       plan:this.plan(chatId,screen.text,undefined,screen.keyboard,event.callbackMessageId)};
+    }
+    // 09:02/09:03: read-only owner dashboard over approved group content.
+    const phase4GuidanceInput=kind==='private'&&!!this.opts.community&&(
+     event.callbackData==='mi:1:i:09:02'||
+     event.callbackData==='mi:1:i:09:03'||
+     event.callbackData?.startsWith('gd:1:')||
+     text==='/newmemberguide'||text.startsWith('/newmemberguide ')||
+     text==='/groupfixed'||text.startsWith('/groupfixed '));
+    if(phase4GuidanceInput){
+     if(!this.opts.policy.isOwner(actorId)||actorId!==chatId||
+      event.edited||event.forwarded||!this.opts.community)
+      return {status:'DENIED',reason:'PHASE4_GUIDANCE_OWNER_PRIVATE_ONLY'};
+     const view=await phase4GuidanceOwnerScreen(new Phase4GuidanceService(
+      this.opts.store,this.opts.policy,this.opts.community),
+      actorId,event.callbackData??text);
+     if(!view)return {status:'DENIED',reason:'PHASE4_GUIDANCE_STALE_OR_DENIED'};
+     return {status:'APPLIED',reason:'PHASE4_GUIDANCE_OWNER',
+      plan:this.plan(chatId,view.text,undefined,view.keyboard,event.callbackMessageId)};
     }
     // 09:16 — dedicated settings dashboard. Authorization is private and owner-only.
     const phase4SettingsInput=kind==='private'&&!!this.opts.community&&(
