@@ -38,6 +38,7 @@ export async function whisperMemberScreen(
     '✅ تم إيقاف استقبال همسات هذه المجموعة. لن يُنشأ حجز جديد دون موافقة لاحقة.':
     '🔒 تعذّر إلغاء الموافقة؛ لا يوجد إذن نشط قابل للتعديل لهذا الحساب.'};
   }
+  if(request.kind!=='RESERVE')return null;
   const reservation=await service.reserve(actor,request.id);
   switch(reservation.status){
    case 'HELD':return {text:'💌 تم حجز مقعد مبدئي لك. لا يعني ذلك إرسال الهمسة أو قراءة محتواها. هذه الوظيفة لا تكشف محتوى الرسالة بعد.'};
