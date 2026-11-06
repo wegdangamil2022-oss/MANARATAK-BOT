@@ -79,6 +79,7 @@ import {OwnerGroupBulkRestrict} from './telegram-inline-group-bulk-restrict.js';
 import {OwnerNetworkEditor} from './telegram-inline-networks.js';
 import {validOwnerNetworkBulkServiceRoute} from './telegram-network-bulk-services.js';
 import {validOwnerNetworkPolicyDiffRoute} from './telegram-network-differences.js';
+import {validOwnerNetworkPolicySnapshotRoute} from './telegram-network-policy-snapshots.js';
 import {OwnerInlineGroupControls} from './telegram-inline-group-controls.js';
 import {renderOwnerInlineDelegations,delegationOwnerEntry} from './telegram-inline-delegations.js';
 import {renderStaffInline} from './telegram-inline-staff.js';
@@ -844,7 +845,8 @@ export class TelegramUpdateApplication {
       // New NETWORK-004 service controls must never expose owner selections
       // or approval links in a group message; only a private owner callback.
       if((validOwnerNetworkBulkServiceRoute(event.callbackData)||
-        validOwnerNetworkPolicyDiffRoute(event.callbackData))&&
+        validOwnerNetworkPolicyDiffRoute(event.callbackData)||
+        validOwnerNetworkPolicySnapshotRoute(event.callbackData))&&
        event.kind!=='private')return {status:'DENIED',reason:'OWNER_NETWORK_PRIVATE_ONLY'};
       const view=await new OwnerNetworkEditor(this.opts.store,this.opts.policy,this.clock,
        event.kind==='private'?this.opts.moderationRights:undefined)
