@@ -9,7 +9,7 @@ export type WhisperDraftInput={
 };
 export type WhisperReserveResult={status:'HELD'|'ALREADY_HELD'|'FULL'|
  'CLOSED'|'EXPIRED'|'STALE'|'NOT_RECIPIENT'|'CONSENT_REQUIRED'|
- 'VERIFICATION_REQUIRED'|'DENIED'|'NOT_FOUND';reservationId?:string};
+ 'VERIFICATION_REQUIRED'|'CONSENT_CHANGED'|'DENIED'|'NOT_FOUND';reservationId?:string};
 type VerifyMember=(chatId:string,memberId:string)=>Promise<
  'VERIFIED'|'NOT_MEMBER'|'UNKNOWN'>;
 const isUser=(v:string)=>/^[1-9][0-9]{0,15}$/u.test(v)&&
@@ -132,9 +132,11 @@ export class Phase4WhisperService{
    if(existing.length){
     const row=existing[0]!;
     if(now<row.updatedAt)return false;
+    if(row.revision>=9_999_999_999)return false;
     row.enabled=enabled;row.updatedAt=now;row.chatVersion=chat.version;
+    row.revision++;
    }else data.consents.push({
-    chatId,chatVersion:chat.version,memberId,enabled,updatedAt:now
+    chatId,chatVersion:chat.version,memberId,enabled,revision:1,updatedAt:now
    });
    s.phase4Whispers=data;
    return true;
@@ -155,11 +157,13 @@ export class Phase4WhisperService{
   if(now<whisper.createdAt||now>=whisper.expiresAt)return deny('EXPIRED');
   const chat=approvedChat(before,this.policy,whisper.chatId);
   if(!chat||chat.version!==whisper.chatVersion)return deny('STALE');
+  if(whisper.creatorId===memberId)return deny('DENIED');
   if(whisper.kind==='DIRECT'&&whisper.recipientId!==memberId)return deny('NOT_RECIPIENT');
   const initial=clone(before).consents.filter(c=>
    c.chatId===whisper.chatId&&c.memberId===memberId);
   if(initial.length!==1||initial[0]!.chatVersion!==chat.version||
    !initial[0]!.enabled)return deny('CONSENT_REQUIRED');
+  const consentRevision=initial[0]!.revision;
   let verified=false;
   try{verified=await this.verifyMember(whisper.chatId,memberId)==='VERIFIED';}
   catch{return deny('VERIFICATION_REQUIRED');}
@@ -174,11 +178,15 @@ export class Phase4WhisperService{
    if(now>=row.expiresAt)return deny('EXPIRED');
    const current=approvedChat(s,this.policy,row.chatId);
    if(!current||current.version!==row.chatVersion)return deny('STALE');
+   if(row.creatorId===memberId)return deny('DENIED');
    if(row.kind==='DIRECT'&&row.recipientId!==memberId)return deny('NOT_RECIPIENT');
    const consent=data.consents.filter(c=>c.chatId===row.chatId&&c.memberId===memberId);
    if(consent.length!==1||!consent[0]!.enabled||
     consent[0]!.chatVersion!==current.version||consent[0]!.updatedAt>now)
     return deny('CONSENT_REQUIRED');
+   // A rapid opt-out and opt-in can share the same timestamp. Its monotonic
+   // revision must still invalidate any verification already in flight.
+   if(consent[0]!.revision!==consentRevision)return deny('CONSENT_CHANGED');
    const duplicates=data.reservations.filter(x=>x.messageId===id&&x.memberId===memberId);
    if(duplicates.length!==0)return deny('ALREADY_HELD');
    if(data.reservations.filter(x=>x.messageId===id).length>=row.seats||
@@ -199,7 +207,15 @@ export class Phase4WhisperService{
     row.revision=row.status==='DRAFT'?2:3;
     row.status='CLOSED';row.closedAt=now;delete row.text;total++;
    }
-   if(total)s.phase4Whispers=data;
+   // Redacted tombstones are retained for only 24 hours. There is no
+   // provider receipt to retry; deleting old HELD seats cannot authorize
+   // delivery or reconstruct private content.
+   const before=data.messages.length;
+   data.messages=data.messages.filter(row=>row.status!=='CLOSED'||
+    row.closedAt===undefined||now-row.closedAt<=86_400_000);
+   const kept=new Set(data.messages.map(row=>row.id));
+   data.reservations=data.reservations.filter(row=>kept.has(row.messageId));
+   if(total||data.messages.length!==before)s.phase4Whispers=data;
    return total;
   });
  }
