@@ -3,7 +3,7 @@ import {validEventSummaryInput,validEventURL} from './phase4-event-model.js';
 import type {OwnerInlineScreen,TelegramInlineKeyboard} from './telegram-inline-owner.js';
 
 const ID='[a-f0-9]{24}';
-const ROUTE=new RegExp('^ev:1:(?:h|p:[0-4]|[vs]:'+ID+'|[okcm]:'+ID+':[1-3])$','u');
+const ROUTE=new RegExp('^ev:1:(?:h|p:[0-4]|[vs]:'+ID+'|[okcm]:'+ID+':[1-3]|[qb]:'+ID+':'+ID+':[12])$','u');
 export const validEventOwnerRoute=(x:unknown):x is string=>
  typeof x==='string'&&Buffer.byteLength(x,'utf8')<=64&&ROUTE.test(x);
 const escape=(s:string)=>s.replace(/&/gu,'&amp;').replace(/</gu,'&lt;')
@@ -19,9 +19,13 @@ export type EventOwnerCommand=
  |{kind:'CREATE';chatId:string;input:{
   title:string;startsAt:number;durationMinutes:number;capacity:number;link:string;
  }}
- |{kind:'DRAFT_SUMMARY';eventId:string;text:string;urls:string[]};
+ |{kind:'DRAFT_SUMMARY';eventId:string;text:string;urls:string[]}
+ |{kind:'LINK_QUESTIONS'|'LINK_POLL';eventId:string;linkedId:string};
 export function parseEventOwnerCommand(value:string):EventOwnerCommand|null{
  if(value==='/events')return {kind:'LIST'};
+ const link=/^\/event(questions|poll) ([a-f0-9]{24}) ([a-f0-9]{24})$/u.exec(value);
+ if(link)return {kind:link[1]==='questions'?'LINK_QUESTIONS':'LINK_POLL',
+  eventId:link[2]!,linkedId:link[3]!};
  if(typeof value!=='string'||value.length>1400||/[\r\n]/u.test(value))return null;
  const create=/^\/eventnew (-[1-9][0-9]{0,15}) (\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z) ([0-9]{1,3}) ([0-9]{1,3}) (\S+) (.{5,100})$/u.exec(value);
  if(create){
@@ -70,6 +74,10 @@ async function detail(service:Phase4EventService,actor:string,id:string):
   (consent===null?'':'موافقات التذكير المسجلة محليًا: '+consent+'\n')+
   'الحالة: '+labels[event.status]+'\n'+
   'معرّف اللقاء: <code>'+event.id+'</code>\n'+
+  (event.questionSessionId?'أسئلة الطلاب المسبقة: <code>'+event.questionSessionId+'</code>\n':'')+
+  (event.pollId?'استطلاع التحضير: <code>'+event.pollId+'</code>\n':'')+
+  (event.status==='OPEN'&&!event.questionSessionId?'للربط بعد فتح الأسئلة: <code>/eventquestions '+id+' SESSION_ID</code>\n':'')+
+  (event.status==='OPEN'&&!event.pollId?'للربط بعد فتح الاستطلاع: <code>/eventpoll '+id+' POLL_ID</code>\n':'')+
   'للمشاركة اليدوية: <code>/eventjoin '+id+' no</code>\n'+
   'ملخص اللقاء: '+(summary?summary.status:'لم يُعد بعد')+'\n'+
   '🔐 لا يوجد إعلان جماعي ولا تذكير تلقائي ولا إثبات حضور.',
@@ -129,6 +137,28 @@ export async function eventOwnerScreen(service:Phase4EventService,actor:string,i
    await service.draftSummary(actor,parsed.eventId,parsed.text,parsed.urls);
    return summaryReview(service,actor,parsed.eventId);
   }
+  if(parsed?.kind==='LINK_QUESTIONS'){
+   const review=await service.previewQuestionLink(actor,parsed.eventId,parsed.linkedId);
+   if(!review)return null;
+   return ui('<b>❓ مراجعة ربط أسئلة ما قبل اللقاء</b>\n'+
+    'اللقاء: '+escape(review.eventTitle)+'\n'+
+    'جلسة الأسئلة: '+escape(review.sessionTitle)+'\n'+
+    'نهاية استقبال الأسئلة (UTC): '+new Date(review.expiresAt).toISOString()+'\n'+
+    'لن تُنشر الأسئلة، ولن تُعرض هويات الطلاب من هذا الربط.',
+    [[button('✅ تأكيد الربط مرة واحدة','ev:1:q:'+parsed.eventId+':'+parsed.linkedId+':2')],
+     [button('↩️ إلغاء','ev:1:v:'+parsed.eventId)]]);
+  }
+  if(parsed?.kind==='LINK_POLL'){
+   const review=await service.previewPollLink(actor,parsed.eventId,parsed.linkedId);
+   if(!review)return null;
+   return ui('<b>📊 مراجعة ربط استطلاع ما قبل اللقاء</b>\n'+
+    'اللقاء: '+escape(review.eventTitle)+'\n'+
+    'سؤال الاستطلاع: '+escape(review.pollQuestion)+'\n'+
+    'نهاية التصويت (UTC): '+new Date(review.expiresAt).toISOString()+'\n'+
+    'لا يُرسل استطلاع أو نتيجة للمجموعة تلقائيًا.',
+    [[button('✅ تأكيد الربط مرة واحدة','ev:1:b:'+parsed.eventId+':'+parsed.linkedId+':2')],
+     [button('↩️ إلغاء','ev:1:v:'+parsed.eventId)]]);
+  }
   if(parsed?.kind==='LIST'||input==='mi:1:i:09:09'||input==='ev:1:h')
    return list(service,actor);
   if(!validEventOwnerRoute(input))return null;
@@ -138,6 +168,18 @@ export async function eventOwnerScreen(service:Phase4EventService,actor:string,i
   if(view)return detail(service,actor,view[1]!);
   const summary=/^ev:1:s:([a-f0-9]{24})$/u.exec(input);
   if(summary)return summaryReview(service,actor,summary[1]!);
+  const questionLink=/^ev:1:q:([a-f0-9]{24}):([a-f0-9]{24}):([12])$/u.exec(input);
+  if(questionLink){
+   if(!await service.bindQuestionSession(actor,questionLink[1]!,questionLink[2]!,
+    Number(questionLink[3])))return null;
+   return detail(service,actor,questionLink[1]!);
+  }
+  const pollLink=/^ev:1:b:([a-f0-9]{24}):([a-f0-9]{24}):([12])$/u.exec(input);
+  if(pollLink){
+   if(!await service.bindPoll(actor,pollLink[1]!,pollLink[2]!,
+    Number(pollLink[3])))return null;
+   return detail(service,actor,pollLink[1]!);
+  }
   const opened=/^ev:1:o:([a-f0-9]{24}):([1-3])$/u.exec(input);
   if(opened){
    if(!await service.open(actor,opened[1]!,Number(opened[2])))return null;
