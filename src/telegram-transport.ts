@@ -1163,7 +1163,7 @@ export class TelegramUpdateApplication {
        else try{
         const preview=await networkEditor.previewName(actorId,text);
         if(preview)return {status:'APPLIED',reason:'NETWORK_TEXT_PREVIEW',plan:this.plan(chatId,preview.text,undefined,preview.keyboard)};
-       }catch{return {status:'DENIED',reason:'NETWORK_NAME_INVALID_OR_STALE',plan:this.plan(chatId,'اسم الشبكة غير صالح أو مستخدم سابقًا. اختر اسمًا آخر أو ألغِ إنشاء الشبكة.')};}
+       }catch{return {status:'DENIED',reason:'NETWORK_NAME_INVALID_OR_STALE',plan:this.plan(chatId,'تعذّر قبول اسم الشبكة أو معرّف العضو، أو انتهت خطوة الإدخال. افتح شاشة العملية وأعد المحاولة.')};}
        const delegation=new OwnerDelegationEditor(this.opts.store,this.opts.policy,this.clock);
        if(text.startsWith('/')||Object.values(m).some(label=>label===text)||isOwnerMenuText(text))await delegation.cancel(actorId);
        else try{
