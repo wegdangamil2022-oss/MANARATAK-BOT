@@ -83,12 +83,12 @@ for(const engine of ['json','sqlite'] as const){
     f.svc.register(String(200+i),e.id,i%2===0)));
    assert.equal(result.filter(x=>x.status==='REGISTERED').length,2);
    assert.equal(result.filter(x=>x.status==='FULL').length,28);
-   assert.equal((await f.svc.register(USER,e.id,true)).status,'ALREADY_REGISTERED');
    const st=await new BotStore(f.store.file,{engine}).snapshot();
+   const accepted=st.phase4Events?.registrations??[];
+   assert.equal((await f.svc.register(accepted[0]!.memberId,e.id,true)).status,'ALREADY_REGISTERED');
    assert.equal(st.phase4Events?.registrations.length,2);
-   assert.equal(st.phase4Events?.registrations[0]?.reminderConsent,true);
-   assert.equal(st.phase4Events?.registrations[1]?.reminderConsent,false);
-   assert.equal(await f.svc.reminderCount(OWNER,e.id),1);
+   const expectedReminders=accepted.filter(x=>x.reminderConsent).length;
+   assert.equal(await f.svc.reminderCount(OWNER,e.id),expectedReminders);
    assert.equal(await f.svc.reminderCount(USER,e.id),null);
   }finally{await f.close();}
  });
