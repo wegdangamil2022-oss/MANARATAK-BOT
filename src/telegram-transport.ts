@@ -46,6 +46,7 @@ import {OwnerGroupBulkRestrict} from './telegram-inline-group-bulk-restrict.js';
 import {OwnerNetworkEditor} from './telegram-inline-networks.js';
 import {Phase4WhisperService} from './phase4-whispers.js';
 import {whisperOwnerScreen} from './phase4-whisper-owner.js';
+import {parseWhisperMemberCommand,whisperMemberScreen} from './phase4-whisper-member.js';
 import {OwnerInlineGroupControls} from './telegram-inline-group-controls.js';
 import {renderOwnerInlineDelegations,delegationOwnerEntry} from './telegram-inline-delegations.js';
 import {renderStaffInline} from './telegram-inline-staff.js';
@@ -591,6 +592,38 @@ export class TelegramUpdateApplication {
     if(event.kind==='private'&&this.opts.policy.isOwner(event.actorId)&&folderNavigation)await cancelCommunityFolder(this.opts.store,event.actorId);
     if(event.document)return this.handleDocument(event);
     const {actorId,chatId,kind,text}=event;
+    // Stage 4 / 09:06 — the recipient's PRIVATE self-service preferences
+    // and local seat requests. No Telegram group post, secret delivery or
+    // callback-delegated authorization is implemented here.
+    if(kind==='private'&&parseWhisperMemberCommand(text)!==null){
+     if(actorId!==chatId||event.forwarded||event.edited||
+        event.callbackData!==undefined)
+      return {status:'DENIED',reason:'WHISPER_PRIVATE_ORIGIN_REQUIRED'};
+     const verify=async(groupId:string,memberId:string):Promise<'VERIFIED'|'NOT_MEMBER'|'UNKNOWN'>=>{
+      let current:'VERIFIED'|'NOT_MEMBER'|'UNKNOWN'='UNKNOWN';
+      try{current=await this.opts.membership(groupId,memberId);}
+      catch{return 'UNKNOWN';}
+      if(current!=='VERIFIED')return current;
+      // A Telegram group membership proof alone does not satisfy mandatory
+      // channel subscriptions. Missing gate, corrupt policy or an
+      // inconclusive provider check must all deny a new opt-in/seat.
+      const state=await this.opts.store.snapshot();
+      const mode=subscriptionRequirementMode(state,groupId);
+      if(mode==='INVALID')return 'UNKNOWN';
+      if(mode==='NONE')return 'VERIFIED';
+      if(!this.opts.subscription)return 'UNKNOWN';
+      try{
+       const decision=await this.opts.subscription.verify(groupId,memberId);
+       return decision.status==='MEMBER'||decision.status==='NOT_REQUIRED'?
+        'VERIFIED':'UNKNOWN';
+      }catch{return 'UNKNOWN';}
+     };
+     const screen=await whisperMemberScreen(new Phase4WhisperService(
+      this.opts.store,this.opts.policy,this.clock,verify),actorId,text);
+     if(!screen)return {status:'DENIED',reason:'WHISPER_MEMBER_COMMAND_INVALID'};
+     return {status:'APPLIED',reason:'WHISPER_MEMBER_SELF_SERVICE',
+      plan:this.plan(chatId,screen.text)};
+    }
     // Stage 4 / 09:06 — private OWNER review of unpublished whisper drafts.
     // Member consent/seat reservations are domain-only; do not create any
     // group post, private DM or Telegram reveal before a separately audited
