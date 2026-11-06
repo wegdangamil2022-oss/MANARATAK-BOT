@@ -4,6 +4,7 @@ import {Policy} from './policy.js';
 import {emptyQuizState,type QuizState,type Quiz,type QuizInput,
  validQuizInput,quizUser,quizGroup,quizId} from './phase4-quiz-model.js';
 import {gameCatalogAllowsQuiz,gameCatalogRevision} from './phase4-game-catalog.js';
+import {contestMemberAllowed,contestMemberRevision} from './phase4-contest-model.js';
 
 type VerifyMember=(chatId:string,userId:string)=>Promise<'VERIFIED'|'NOT_MEMBER'|'UNKNOWN'>;
 export type QuizAnswerStatus='RECORDED'|'ALREADY_ANSWERED'|'VERIFICATION_REQUIRED'|
@@ -107,11 +108,14 @@ export class Phase4QuizService{
   const g=approved(initial,this.policy,q.chatId);
   if(!g||g.version!==q.chatVersion||
    !gameCatalogAllowsQuiz(initial,q.chatId,start,'ANSWER'))return deny('STALE');
+  if(q.contestId&&!contestMemberAllowed(initial,q.contestId,q.id,memberId))
+   return deny('VERIFICATION_REQUIRED');
   if(q.status==='CLOSED')return deny('CLOSED');
   if(q.status!=='OPEN')return deny('CLOSED');
   if(start>=q.expiresAt!)return deny('EXPIRED');
   if(start<q.openedAt!||memberId===q.ownerId)return deny('INVALID');
-  const f=fingerprint(initial,q.chatId),catalog=gameCatalogRevision(initial,q.chatId);
+  const f=fingerprint(initial,q.chatId),catalog=gameCatalogRevision(initial,q.chatId),
+   contest=q.contestId?contestMemberRevision(initial,q.contestId,memberId):'NONE';
   let member=false;
   try{member=await this.verifyMember(q.chatId,memberId)==='VERIFIED';}
   catch{return deny('VERIFICATION_REQUIRED');}
@@ -123,6 +127,8 @@ export class Phase4QuizService{
     fingerprint(s,q.chatId)!==f||
     gameCatalogRevision(s,q.chatId)!==catalog||
     !gameCatalogAllowsQuiz(s,q.chatId,now,'ANSWER'))return deny('STALE');
+   if(q.contestId&&(!contestMemberAllowed(s,q.contestId,id,memberId)||
+    contestMemberRevision(s,q.contestId,memberId)!==contest))return deny('STALE');
    if(rows.length!==1||!fresh||fresh.status!=='OPEN'||
     fresh.revision!==2||fresh.chatVersion!==q.chatVersion)
     return deny('STALE');
@@ -156,8 +162,10 @@ export class Phase4QuizService{
   if(rows.length!==1||!quiz||quiz.status==='DRAFT')return null;
   const g=approved(initial,this.policy,quiz.chatId);
   if(!g||g.version!==quiz.chatVersion||
-   !gameCatalogAllowsQuiz(initial,quiz.chatId,this.clock(),'ANSWER'))return null;
-  const f=fingerprint(initial,quiz.chatId),catalog=gameCatalogRevision(initial,quiz.chatId);
+   !gameCatalogAllowsQuiz(initial,quiz.chatId,this.clock(),'ANSWER')||
+   (quiz.contestId&&!contestMemberAllowed(initial,quiz.contestId,id,memberId)))return null;
+  const f=fingerprint(initial,quiz.chatId),catalog=gameCatalogRevision(initial,quiz.chatId),
+   contest=quiz.contestId?contestMemberRevision(initial,quiz.contestId,memberId):'NONE';
   let verified=false;
   try{verified=await this.verifyMember(quiz.chatId,memberId)==='VERIFIED';}
   catch{return null;}
@@ -168,6 +176,8 @@ export class Phase4QuizService{
    fingerprint(fresh,quiz.chatId)===f&&
    gameCatalogRevision(fresh,quiz.chatId)===catalog&&
    gameCatalogAllowsQuiz(fresh,quiz.chatId,this.clock(),'ANSWER')&&
+   (!quiz.contestId||(contestMemberAllowed(fresh,quiz.contestId,id,memberId)&&
+     contestMemberRevision(fresh,quiz.contestId,memberId)===contest))&&
    q&&q.status!=='DRAFT'&&
    q.chatVersion===quiz.chatVersion?structuredClone(q):null;
  }
