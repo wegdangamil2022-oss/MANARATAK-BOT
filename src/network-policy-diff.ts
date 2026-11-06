@@ -1,6 +1,6 @@
 import type {BotState,Chat} from './store.js';
 import type {Policy} from './policy.js';
-import {isValidGroupNetwork} from './group-network-model.js';
+import {validGroupNetwork} from './group-network-model.js';
 import {isValidGroupProtectionRecord,type GroupProtectionRecord}
  from './protection-rules.js';
 import {networkEmergencyStopped} from './network-emergency-stop.js';
@@ -71,7 +71,7 @@ export function summarizeNetworkSettings(
   !policy.privateFeature(s,'owner.dashboard',actor)||
   !/^[a-f0-9]{12}$/u.test(networkId))return null;
  const rows=(s.groupNetworks??[]).filter(n=>n.id===networkId),n=rows[0];
- if(rows.length!==1||!n||!isValidGroupNetwork(n)||n.updatedAt>now)return null;
+ if(rows.length!==1||!n||!validGroupNetwork(n)||n.updatedAt>now)return null;
  const members:NetworkSettingsMember[]=[];
  for(const m of n.members){
   if(!validId(m.chatId))return null;
