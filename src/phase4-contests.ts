@@ -227,8 +227,9 @@ export class Phase4ContestService{
   if(!contestId(id)||!time(now)||!Number.isSafeInteger(revision))return false;
   return this.store.transaction(s=>{
    const d=contests(s),c=d.contests.find(x=>x.id===id);
-   if(!c||c.status!=='RUNNING'||c.revision!==revision||
-    c.ownerId!==actor||this.owner(s,actor,c.chatId)!==c.chatVersion)
+   if(!c||!['DRAFT','REGISTRATION','RUNNING'].includes(c.status)||
+    c.revision!==revision||c.ownerId!==actor||
+    this.owner(s,actor,c.chatId)!==c.chatVersion)
     return false;
    const qd=quizzes(s),current=qd.quizzes.find(q=>
     q.id===c.quizIds[c.quizIds.length-1]);
