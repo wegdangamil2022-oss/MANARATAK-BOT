@@ -110,6 +110,22 @@ for(const engine of ['json','sqlite'] as const){
    assert.equal(saved?.members.length,1);
   }finally{await f.close();}
  });
+ test('GAME-002 '+engine+': withdrawing contest signup also redacts previous round choices',async()=>{
+  const f=await fixture(engine);try{
+   const id=await setup(f);
+   assert.equal((await f.svc.join(STUDENT,id)).status,'REGISTERED');
+   f.advance(11*60_000);
+   const first=await f.svc.start(OWNER,id,4);
+   assert.equal(first.status,'STARTED');
+   assert.equal((await f.quiz.answer(STUDENT,first.quizId!,1)).status,'RECORDED');
+   assert.equal(await f.svc.withdraw(STUDENT,id),true);
+   assert.equal((await f.quiz.info(STUDENT,first.quizId!)),null);
+   const state=await f.store.snapshot();
+   assert.equal(state.phase4Quizzes?.answers[0]?.status,'WITHDRAWN');
+   assert.equal(state.phase4Quizzes?.answers[0]?.choice,undefined);
+   assert.equal((await f.svc.join(STUDENT,id)).status,'CLOSED');
+  }finally{await f.close();}
+ });
  test('GAME-012 '+engine+': signup membership fails closed and concurrent policy revocation invalidates signup',async()=>{
   const f=await fixture(engine);try{
    const id=await setup(f);
