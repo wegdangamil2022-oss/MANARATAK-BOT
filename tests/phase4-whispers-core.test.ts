@@ -146,7 +146,7 @@ for(const engine of ['json','sqlite'] as const){
     s.phase4Whispers!.messages[0]!.chatVersion=0;
    }),/schema/i);
    await assert.rejects(f.store.transaction(s=>{
-    s.phase4Whispers!.messages[0]!.unexpected='x';
+    (s.phase4Whispers!.messages[0]! as unknown as Record<string,unknown>).unexpected='x';
    }),/schema/i);
   }finally{await f.close();}
  });
