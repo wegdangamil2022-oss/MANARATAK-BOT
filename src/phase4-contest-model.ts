@@ -58,6 +58,9 @@ export function validContestRecord(v:unknown):v is ContestRecord{
   Number(v.registrationEndsAt)<Number(v.createdAt)||v.rounds.length<2)return false;
  if(v.status==='REGISTRATION')
   return v.quizIds.length===0&&v.startedAt===undefined&&v.closedAt===undefined;
+ if(v.status==='CANCELLED'&&v.startedAt===undefined)
+  return v.quizIds.length===0&&stamp(v.closedAt)&&
+   Number(v.closedAt)>=Number(v.createdAt);
  if(!stamp(v.startedAt)||Number(v.startedAt)<Number(v.registrationEndsAt)||
   v.quizIds.length<1||v.quizIds.length>v.rounds.length)return false;
  if(v.status==='RUNNING')return v.closedAt===undefined;
