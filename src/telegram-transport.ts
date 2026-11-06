@@ -77,6 +77,7 @@ import {OwnerGroupPolicyTemplates} from './telegram-inline-group-templates.js';
 import {OwnerGroupSettings} from './telegram-inline-group-settings.js';
 import {OwnerGroupBulkRestrict} from './telegram-inline-group-bulk-restrict.js';
 import {OwnerNetworkEditor} from './telegram-inline-networks.js';
+import {TelegramNetworkAlertEditor,validNetworkAlertRoute} from './telegram-network-alerts.js';
 import {validOwnerNetworkBulkServiceRoute} from './telegram-network-bulk-services.js';
 import {validOwnerNetworkPolicyDiffRoute} from './telegram-network-differences.js';
 import {validOwnerNetworkPolicySnapshotRoute} from './telegram-network-policy-snapshots.js';
@@ -713,6 +714,12 @@ export class TelegramUpdateApplication {
      const view=await new TelegramModerationReports(this.opts.store,this.opts.policy,this.clock).handle(event.actorId,'rp:1:h:0');
      return view?{status:'APPLIED',reason:'MODERATION_REPORT_VIEW',plan:this.plan(event.actorId,view.text,undefined,view.keyboard)}:{status:'DENIED',reason:'MODERATION_REPORT_UNAVAILABLE'};
     }
+    if(event.kind==='private'&&event.actorId===event.chatId&&
+     (event.text==='/networkalerts'||event.text==='/start networkalerts')){
+     const view=await new TelegramNetworkAlertEditor(this.opts.store,this.opts.policy,this.clock).handle(event.actorId,'na:1:h:0');
+     return view?{status:'APPLIED',reason:'NETWORK_ALERTS_VIEW',plan:this.plan(event.actorId,view.text,undefined,view.keyboard)}
+      :{status:'DENIED',reason:'NETWORK_ALERTS_UNAVAILABLE'};
+    }
     const verification=/^\/verify(?:@([A-Za-z][A-Za-z0-9_]{4,31}))?(?: (-[1-9][0-9]{0,15}))?$/u.exec(event.text);
     if(verification&&(!verification[1]||verification[1].toLowerCase()===this.opts.botUsername.toLowerCase())){
      const group=verification[2]??(event.kind==='group'?event.chatId:undefined);return group?this.subscriptionVerification(event,group):{status:'APPLIED',reason:'SUBSCRIPTION_VERIFICATION_HELP',plan:this.plan(event.actorId,'للتحقق من حسابك فقط، أرسل /verify ثم رقم المجموعة، أو استخدم زر التحقق في رسالة المجموعة.')};
@@ -769,6 +776,13 @@ export class TelegramUpdateApplication {
      if(event.callbackData.startsWith('rp:1:')){
       const view=await new TelegramModerationReports(this.opts.store,this.opts.policy,this.clock).handle(actorId,event.callbackData);
       return view?{status:'APPLIED',reason:'MODERATION_REPORT_VIEW',...(view.access?{adminUIAccess:view.access}:{}),plan:this.plan(actorId,view.text,undefined,view.keyboard,event.callbackMessageId)}:{status:'DENIED',reason:'MODERATION_REPORT_STALE_OR_UNAUTHORIZED'};
+     }
+     if(event.callbackData.startsWith('na:1:')){
+      if(!validNetworkAlertRoute(event.callbackData))return {status:'DENIED',reason:'NETWORK_ALERT_INVALID_ROUTE'};
+      const view=await new TelegramNetworkAlertEditor(this.opts.store,this.opts.policy,this.clock).handle(actorId,event.callbackData);
+      return view?{status:'APPLIED',reason:'NETWORK_ALERTS_VIEW',
+       plan:this.plan(actorId,view.text,undefined,view.keyboard,event.callbackMessageId)}
+       :{status:'DENIED',reason:'NETWORK_ALERT_STALE_OR_UNAUTHORIZED'};
      }
      if(event.callbackData.startsWith('ap:1:')){
       const view=await new TelegramModerationAppeals(this.opts.store,this.opts.policy,this.clock).handle(actorId,event.callbackData);
