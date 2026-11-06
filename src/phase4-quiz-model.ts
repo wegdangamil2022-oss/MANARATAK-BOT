@@ -14,6 +14,8 @@ export interface Quiz{
  category:QuizCategory;durationMinutes:number;title:string;question:string;
  options:[string,string,string,string];correctIndex:number;
  explanation:string;sourceUrl:string;
+ /** Optional 08:02 contest registration gate; absent for standalone quizzes. */
+ contestId?:string;
  status:QuizStatus;revision:1|2|3;createdAt:number;
  openedAt?:number;expiresAt?:number;closedAt?:number;
 }
@@ -76,8 +78,9 @@ function validQuiz(v:unknown):v is Quiz{
  if(!object(v)||!exact(v,['id','chatId','chatVersion','ownerId',
   'category','durationMinutes','title','question','options',
   'correctIndex','explanation','sourceUrl','status','revision','createdAt'],
-  ['openedAt','expiresAt','closedAt'])||
-  !quizId(v.id)||!quizGroup(v.chatId)||!rev(v.chatVersion)||
+  ['openedAt','expiresAt','closedAt','contestId'])||
+  !quizId(v.id)||!quizGroup(v.chatId)||
+  (v.contestId!==undefined&&!quizId(v.contestId))||!rev(v.chatVersion)||
   !quizUser(v.ownerId)||!time(v.createdAt)||!validQuizInput({
    category:v.category,durationMinutes:v.durationMinutes,title:v.title,
    question:v.question,options:v.options,correctIndex:v.correctIndex,
