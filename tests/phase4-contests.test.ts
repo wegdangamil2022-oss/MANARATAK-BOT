@@ -159,6 +159,19 @@ for(const engine of ['json','sqlite'] as const){
    assert.equal(stored.phase4Contests?.contests.length,0);
   }finally{await f.close();}
  });
+ test('GAME-002 '+engine+': cancel early registration revokes signup immediately and is idempotent',async()=>{
+  const f=await fixture(engine);try{
+   const id=await setup(f);
+   assert.equal((await f.svc.join(STUDENT,id)).status,'REGISTERED');
+   assert.equal(await f.svc.cancel(OWNER,id,3),false);
+   assert.equal(await f.svc.cancel(OWNER,id,4),true);
+   assert.equal(await f.svc.cancel(OWNER,id,4),false);
+   assert.equal((await f.svc.join('201',id)).status,'CLOSED');
+   const row=await f.svc.view(OWNER,id);
+   assert.equal(row?.status,'CANCELLED');
+   assert.equal(row?.startedAt,undefined);
+  }finally{await f.close();}
+ });
  test('GAME-012 '+engine+': signup verification race invalidated by group approval change',async()=>{
   const f=await fixture(engine);try{
    const id=await setup(f);
