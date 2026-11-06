@@ -67,6 +67,8 @@ import {badgeOwnerScreen} from './phase4-badge-owner.js';
 import {parseBadgeMemberCommand,badgeMemberScreen} from './phase4-badge-member.js';
 import {Phase4ReactionsService} from './phase4-reactions.js';
 import {Phase4QuizService} from './phase4-quizzes.js';
+import {Phase4GameCatalogService} from './phase4-game-catalog.js';
+import {gameCatalogOwnerScreen} from './phase4-game-catalog-owner.js';
 import {parseQuizMemberCommand,quizMemberScreen} from './phase4-quiz-member.js';
 import {quizOwnerScreen} from './phase4-quiz-owner.js';
 import {reactionOwnerScreen} from './phase4-reaction-owner.js';
@@ -873,6 +875,23 @@ export class TelegramUpdateApplication {
       this.opts.store,this.opts.policy,this.clock),actorId,event.callbackData??text);
      if(!screen)return {status:'DENIED',reason:'STUDY_OWNER_STALE_OR_DENIED'};
      return {status:'APPLIED',reason:'PHASE4_STUDY_OWNER',
+      plan:this.plan(chatId,screen.text,undefined,screen.keyboard,event.callbackMessageId)};
+    }
+    // Phase 4 / 08:01 — owner-reviewed per-group game availability,
+    // quiz frequency and UTC quiet hours. No live Telegram game dispatch.
+    const gameCatalogInput=kind==='private'&&(
+     event.callbackData==='mi:1:i:08:01'||
+     event.callbackData?.startsWith('gc:1:')||
+     text==='/games'||text.startsWith('/games ')||
+     text.startsWith('/gamequiet '));
+    if(gameCatalogInput){
+     if(!this.opts.policy.isOwner(actorId)||actorId!==chatId||
+      event.edited||event.forwarded)
+      return {status:'DENIED',reason:'GAME_CATALOG_OWNER_PRIVATE_ONLY'};
+     const screen=await gameCatalogOwnerScreen(new Phase4GameCatalogService(
+      this.opts.store,this.opts.policy,this.clock),actorId,event.callbackData??text);
+     if(!screen)return {status:'DENIED',reason:'GAME_CATALOG_STALE_OR_DENIED'};
+     return {status:'APPLIED',reason:'PHASE4_GAME_CATALOG_OWNER',
       plan:this.plan(chatId,screen.text,undefined,screen.keyboard,event.callbackMessageId)};
     }
     // Phase 4 / 08:03 — educational quiz entry. Student answers are accepted
