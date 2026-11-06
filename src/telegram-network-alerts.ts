@@ -46,6 +46,21 @@ function parsePreview(c:string):Preview|null{
   typeof x.enabled!=='boolean'||!time(x.createdAt))return null;
  return x as unknown as Preview;
 }
+interface SilencePreview {network:string;chat:string;hours:0|1|8;proof:string;createdAt:number;}
+function parseSilencePreview(raw:string):SilencePreview|null{
+ let value:unknown;
+ try{value=JSON.parse(raw);}catch{return null;}
+ if(!value||typeof value!=='object'||Array.isArray(value))return null;
+ const v=value as Record<string,unknown>;
+ if(Object.keys(v).sort().join(',')!=='chat,createdAt,hours,network,proof'||
+  typeof v.network!=='string'||!/^[a-f0-9]{12}$/u.test(v.network)||
+  typeof v.chat!=='string'||!/^-[1-9][0-9]{0,15}$/u.test(v.chat)||
+  !Number.isSafeInteger(Number(v.chat))||
+  ![0,1,8].includes(v.hours as number)||!Number.isInteger(v.hours)||
+  typeof v.proof!=='string'||!/^[a-f0-9]{64}$/u.test(v.proof)||
+  !time(v.createdAt))return null;
+ return v as unknown as SilencePreview;
+}
 export class TelegramNetworkAlertEditor{
  constructor(private readonly store:BotStore,private readonly policy:Policy,
   private readonly clock:()=>number=Date.now){}
@@ -108,6 +123,45 @@ export class TelegramNetworkAlertEditor{
    'استلام الرسائل اختياري وشخصي، ولا يُرسل نص البلاغ أو هوية الطالب.\n'+
    'أوقف النوع أو فعّل الصمت المؤقت في أي وقت. لا تُرسل أحداث سابقة لتفعيلك.',rows);
  }
+ private async silencePreview(actor:string,network:string,chat:string,hours:0|1|8):
+  Promise<OwnerInlineScreen|null>{
+  return this.store.transaction(s=>{
+   const now=this.clock(),proof=networkAlertSilenceProof(s,this.policy,actor,network,chat,now);
+   const until=networkAlertSilenceUntil(s,this.policy,actor,network,chat,now);
+   if(!proof||!time(now)||until===null||(hours===0&&until<=now))return null;
+   const scope=networkAlertScope(s,this.policy,actor,network,chat,now)!;
+   const ref=randomBytes(18).toString('base64url');
+   for(const c of s.callbacks)if(c.actorId===actor&&c.ref.startsWith(SILENCE_PREFIX)&&!c.used)c.revoked=true;
+   s.callbacks.push({ref:SILENCE_PREFIX+ref,
+    action:JSON.stringify({network,chat,hours,proof,createdAt:now}),
+    chatId:'private',actorId:actor,policyVersion:scope.chatVersion,
+    expiresAt:now+TTL,oneShot:true,used:false,revoked:false});
+   const label=hours===0?'إلغاء الصمت':hours===1?'كتم الإشعارات لمدة ساعة':'كتم الإشعارات لمدة 8 ساعات';
+   return ui('<b>🔕 معاينة الصمت المؤقت</b>\nالمجموعة: <code>'+escape(chat)+'</code>\n'+
+    'القرار: '+label+'\n'+
+    'ينطبق على تنبيهات هذه المجموعة فقط، ولا يغير الاشتراكات أو العقوبات.\n'+
+    'أحداث فترة الصمت لن تُرسل لاحقًا. التأكيد صالح لدقيقتين ولمرة واحدة.',[
+     [btn('✅ تأكيد '+label,'na:1:zc:'+ref)],
+     [btn('✖ إلغاء','na:1:zx:'+ref)]]);
+  });
+ }
+ private async resolveSilence(actor:string,ref:string,apply:boolean):Promise<OwnerInlineScreen|null>{
+  return this.store.transaction(s=>{
+   const now=this.clock(),rows=s.callbacks.filter(c=>c.ref===SILENCE_PREFIX+ref),c=rows[0];
+   if(rows.length!==1||!c||c.actorId!==actor||c.chatId!=='private'||!c.oneShot||
+    c.used||c.revoked||!time(now)||now>=c.expiresAt||c.expiresAt>now+TTL||
+    !person(actor))return null;
+   const data=parseSilencePreview(c.action);
+   if(!data||now<data.createdAt||c.expiresAt!==data.createdAt+TTL)return null;
+   const scope=networkAlertScope(s,this.policy,actor,data.network,data.chat,now);
+   if(!scope||scope.chatVersion!==c.policyVersion||
+    networkAlertSilenceProof(s,this.policy,actor,data.network,data.chat,now)!==data.proof)return null;
+   if(apply&&!setNetworkAlertSilence(s,this.policy,actor,data.network,data.chat,data.hours,now))return null;
+   c.used=true;
+   return apply?this.detail(s,actor,now,data.network,data.chat):
+    ui('أُلغيت معاينة الصمت دون تغيير.',[[btn('↩️ العودة','na:1:d:'+data.network+':'+data.chat)]]);
+  });
+ }
  private async preview(actor:string,network:string,chat:string,kind:NetworkAlertKind):
   Promise<OwnerInlineScreen|null>{
   return this.store.transaction(s=>{
@@ -150,6 +204,9 @@ export class TelegramNetworkAlertEditor{
  }
  async handle(actor:string,data:string):Promise<OwnerInlineScreen|null>{
   if(!person(actor)||!validNetworkAlertRoute(data))return null;
+  const zc=SILENCE_CONFIRM.exec(data);if(zc)return this.resolveSilence(actor,zc[1]!,true);
+  const zx=SILENCE_CANCEL.exec(data);if(zx)return this.resolveSilence(actor,zx[1]!,false);
+  const z=SILENCE.exec(data);if(z)return this.silencePreview(actor,z[1]!,z[2]!,Number(z[3]) as 0|1|8);
   const c=CONFIRM.exec(data);if(c)return this.resolve(actor,c[1]!,true);
   const x=CANCEL.exec(data);if(x)return this.resolve(actor,x[1]!,false);
   const p=PREVIEW.exec(data);
