@@ -106,7 +106,12 @@ for(const engine of ['json','sqlite'] as const){
   const posts=f.calls.filter(x=>x.method==='sendMessage');
   assert.ok(posts.length>=1&&posts.length<=2);
   assert.equal(posts.some(x=>String(x.body?.text).includes('PRIVATE_PREVIEW')),false);
-  assert.equal(posts.some(x=>String(x.body?.text).includes('251')),false);
+  // The bounded SHA-256 report reference can coincidentally contain the
+  // digits of a private message ID. Mask only that non-reversible reference
+  // before asserting that no plaintext message IDs escaped.
+  assert.equal(posts.some(x=>String(x.body?.text)
+   .replace(/مرجع تقرير غير كاشف: [a-f0-9]{12}/gu,'مرجع تقرير غير كاشف: [HASH]')
+   .includes('251')),false);
  }finally{await f.close();}});
  test(engine+' opt-in at the same millisecond as a completed deletion never backfills its previous result',async()=>{const f=await fixture();try{
   await f.link();
