@@ -21,12 +21,18 @@ export const guidanceEscape=(value:string):string=>value.replace(/&/gu,'&amp;')
  .replace(/</gu,'&lt;').replace(/>/gu,'&gt;').replace(/"/gu,'&quot;')
  .replace(/'/gu,'&#39;');
 export type GuidanceMemberCommand={kind:'GUIDE'|'RULES';chatId:string}|
+ {kind:'FAQ_INDEX'|'NOTES_INDEX';chatId:string;page:number}|
  {kind:'FAQ';chatId:string;faqId:string};
 export function parseGuidanceMemberCommand(input:string):GuidanceMemberCommand|null{
  if(typeof input!=='string'||input.length>90)return null;
  const guide=/^\/(groupguide|grouprules) (-[1-9][0-9]{0,15})$/u.exec(input);
  if(guide&&validGuidanceGroup(guide[2]!))return {
   kind:guide[1]==='groupguide'?'GUIDE':'RULES',chatId:guide[2]!
+ };
+ const index=/^\/(groupfaqs|groupnotes) (-[1-9][0-9]{0,15})(?: ([1-9][0-9]{0,1}))?$/u.exec(input);
+ if(index&&validGuidanceGroup(index[2]!))return {
+  kind:index[1]==='groupfaqs'?'FAQ_INDEX':'NOTES_INDEX',
+  chatId:index[2]!,page:Number(index[3]??1)
  };
  const faq=/^\/groupfaq (-[1-9][0-9]{0,15}) ([a-f0-9]{8}-(?:[a-f0-9]{4}-){3}[a-f0-9]{12})$/u.exec(input);
  return faq&&validGuidanceGroup(faq[1]!)&&validCommunityFAQId(faq[2])?
@@ -59,7 +65,8 @@ function context(s:BotState,policy:Policy,chatId:string):GuidanceData|null{
   reviewedGroupFAQAnswer(s,chatId,e.id)!==null)
   .sort((a,b)=>a.question.localeCompare(b.question)||a.id.localeCompare(b.id))
   .slice(0,100).map(x=>({id:x.id,question:x.question.slice(0,160)}));
- const notes=config.rules.filter(rule=>rule.enabled&&rule.source==='NOTE');
+ const notes=config.rules.filter(rule=>rule.enabled&&rule.source==='NOTE'&&
+  rule.topicId===undefined);
  const educationTopics=s.educationCategories.filter(cat=>
   cat.scope===chatId&&visibleEducationCategory(s,cat)&&
   s.educationResources.some(x=>x.scope===chatId&&x.categoryId===cat.id&&
@@ -107,10 +114,12 @@ export function renderGuidanceWelcome(data:GuidanceData):string{
  */
 export function renderGuidanceRules(data:GuidanceData):string{
  const chat=data.chatId;
- const notes=data.notes.slice(0,6).map((r,i)=>
-  '▫ '+(i+1)+'. '+guidanceEscape(r.response.slice(0,240))).join('\n');
- const faqs=data.faqs.slice(0,6).map((q,i)=>
-  '▫ '+(i+1)+'. '+guidanceEscape(q.question)+'\n'+
+ // Deliberately cap preview bytes even if an owner approved all 30 note rules.
+ // Full reviewed material is available via paginated, membership-checked DMs.
+ const notes=data.notes.slice(0,3).map((r,i)=>
+  '▫ '+(i+1)+'. '+guidanceEscape(r.response.slice(0,90))).join('\n');
+ const faqs=data.faqs.slice(0,4).map((q,i)=>
+  '▫ '+(i+1)+'. '+guidanceEscape(q.question.slice(0,75))+'\n'+
   '   <code>/groupfaq '+chat+' '+q.id+'</code>').join('\n');
  return '<b>📜 القوانين والرسائل الثابتة — 09:03</b>\n'+
   'المجموعة: <code>'+chat+'</code>\n\n'+
@@ -118,11 +127,40 @@ export function renderGuidanceRules(data:GuidanceData):string{
   '⚠️ تفاصيل العقوبات والقوانين الأصلية تظل في قسم الحماية والإشراف، وليس هنا.\n\n'+
   '<b>📝 ملاحظات ثابتة معتمدة ('+data.notes.length+')</b>\n'+
   (notes||'لم تُضف ملاحظات ثابتة مفعّلة.')+
-  (data.notes.length>6?'\nعرض أول 6 ملاحظات فقط؛ راجع الإدارة للبقية.':'')+
+  (data.notes.length>3?'\nعرض أول 3 ملاحظات.':'')+
   '\n\n<b>📚 إجابات شائعة بمصادر منشورة ('+number(data.faqs.length)+')</b>\n'+
   (faqs||'لا توجد إجابات منشورة ومرئية لهذه المجموعة حاليًا.')+
-  (data.faqs.length>6?'\nيمكن طلب بقية المصادر عبر إدارة البوت.':'')+
-  '\n\nالإجابات تُفحص مقابل مصدرها المنشور في كل طلب. ظهور الملاحظة هنا لا يفعّل الردود التلقائية.';
+  (data.faqs.length>4?'\nعرض أول 4 أسئلة.':'')+
+  '\n\n<b>تصفح كل المواد المعتمدة</b>\n'+
+  '<code>/groupfaqs '+chat+'</code> — فهرس FAQ (صفحات)\n'+
+  '<code>/groupnotes '+chat+'</code> — فهرس الملاحظات (صفحات)\n'+
+  'لا يعرض الفهرس FAQ غير منشور أو ملاحظة خاصة بموضوع Forum آخر.';
+}
+/** A private student index, not an owner preview. Page number is 1-based;
+ * never allow unbounded text, callbacks-as-authorization, or stale FAQ rows.
+ */
+export function renderGuidanceIndex(data:GuidanceData,kind:'FAQ_INDEX'|'NOTES_INDEX',
+ page:number):string|null{
+ const isFAQ=kind==='FAQ_INDEX';
+ const list=isFAQ?data.faqs:data.notes;
+ const perPage=4,pages=Math.max(1,Math.ceil(list.length/perPage));
+ if(!Number.isSafeInteger(page)||page<1||page>pages)return null;
+ const first=(page-1)*perPage;
+ const lines=isFAQ?
+  data.faqs.slice(first,first+perPage).map((q,i)=>
+   '◾ '+(first+i+1)+'. '+guidanceEscape(q.question.slice(0,80))+
+   '\n<code>/groupfaq '+data.chatId+' '+q.id+'</code>').join('\n\n'):
+  data.notes.slice(first,first+perPage).map((r,i)=>
+   '◾ '+(first+i+1)+'. '+guidanceEscape(r.response.slice(0,120))).join('\n\n');
+ const cmd=isFAQ?'groupfaqs':'groupnotes';
+ return '<b>'+(isFAQ?'📚 فهرس الأسئلة المعتمدة':'📝 فهرس الملاحظات الثابتة')+
+  '</b>\nالمجموعة: <code>'+data.chatId+'</code>\n'+
+  'صفحة '+page+' من '+pages+' • العدد: '+list.length+'\n\n'+
+  (lines||(isFAQ?'لا توجد إجابات معتمدة ومرئية حاليًا.':
+   'لا توجد ملاحظات ثابتة عامة مفعّلة.'))+'\n\n'+
+  (page>1?'⬅️ السابق: <code>/'+cmd+' '+data.chatId+' '+(page-1)+'</code>\n':'')+
+  (page<pages?'➡️ التالي: <code>/'+cmd+' '+data.chatId+' '+(page+1)+'</code>\n':'')+
+  'يعاد فحص المصدر والعضوية والاشتراك مع كل طلب، ولا تُرسل إشعارات تلقائية.';
 }
 export function renderGuidanceFAQ(s:BotState,chatId:string,id:string):string|null{
  if(!validGuidanceGroup(chatId)||!validCommunityFAQId(id))return null;
@@ -153,12 +191,14 @@ export class Phase4GuidanceService{
  /** The private Telegram transport MUST verify group membership and any
   * mandatory subscription before invoking this method.
   */
- async member(chatId:string,kind:'GUIDE'|'RULES'|'FAQ',faqId?:string):Promise<string|null>{
+ async member(chatId:string,kind:'GUIDE'|'RULES'|'FAQ'|'FAQ_INDEX'|'NOTES_INDEX',
+  faqId?:string,page=1):Promise<string|null>{
   const state=await this.store.snapshot();
   const data=context(state,this.policy,chatId);
   if(!data)return null;
   if(kind==='GUIDE')return renderGuidanceWelcome(data);
   if(kind==='RULES')return renderGuidanceRules(data);
+  if(kind==='FAQ_INDEX'||kind==='NOTES_INDEX')return renderGuidanceIndex(data,kind,page);
   if(kind==='FAQ'&&faqId!==undefined)return renderGuidanceFAQ(state,chatId,faqId);
   return null;
  }

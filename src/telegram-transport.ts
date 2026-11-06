@@ -642,7 +642,9 @@ export class TelegramUpdateApplication {
      const html=await new Phase4GuidanceService(this.opts.store,this.opts.policy,
       this.opts.community).member(guidanceMemberCommand.chatId,
       guidanceMemberCommand.kind,guidanceMemberCommand.kind==='FAQ'?
-       guidanceMemberCommand.faqId:undefined);
+       guidanceMemberCommand.faqId:undefined,
+      guidanceMemberCommand.kind==='FAQ_INDEX'||guidanceMemberCommand.kind==='NOTES_INDEX'?
+       guidanceMemberCommand.page:undefined);
      if(!html)return {status:'DENIED',reason:'PHASE4_GUIDANCE_SOURCE_UNAVAILABLE'};
      return {status:'APPLIED',reason:'PHASE4_GUIDANCE_MEMBER',
       plan:this.plan(chatId,html)};
