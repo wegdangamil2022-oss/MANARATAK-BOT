@@ -47,6 +47,9 @@ import {OwnerNetworkEditor} from './telegram-inline-networks.js';
 import {Phase4WhisperService} from './phase4-whispers.js';
 import {whisperOwnerScreen} from './phase4-whisper-owner.js';
 import {parseWhisperMemberCommand,whisperMemberScreen} from './phase4-whisper-member.js';
+import {Phase4DiscussionService} from './phase4-discussions.js';
+import {parseDiscussionMemberCommand,discussionMemberScreen} from './phase4-discussion-member.js';
+import {discussionOwnerScreen} from './phase4-discussion-owner.js';
 import {OwnerInlineGroupControls} from './telegram-inline-group-controls.js';
 import {renderOwnerInlineDelegations,delegationOwnerEntry} from './telegram-inline-delegations.js';
 import {renderStaffInline} from './telegram-inline-staff.js';
@@ -640,6 +643,48 @@ export class TelegramUpdateApplication {
       actorId,event.callbackData??text);
      if(!screen)return {status:'DENIED',reason:'WHISPER_STALE_OR_DENIED'};
      return {status:'APPLIED',reason:'PHASE4_WHISPER_OWNER_REVIEW',
+      plan:this.plan(chatId,screen.text,undefined,screen.keyboard,event.callbackMessageId)};
+    }
+    // Stage 4 / 09:07 — moderated question intake, entirely in trusted private
+    // Telegram chat. A question ID or callback is never authorization.
+    // The reviewer sees content privately; no group post is emitted.
+    if(kind==='private'&&parseDiscussionMemberCommand(text)!==null){
+     if(actorId!==chatId||event.edited||event.forwarded||
+      event.callbackData!==undefined)
+      return {status:'DENIED',reason:'DISCUSSION_PRIVATE_ORIGIN_REQUIRED'};
+     const verify=async(groupId:string,memberId:string):Promise<'VERIFIED'|'NOT_MEMBER'|'UNKNOWN'>=>{
+      let membership:'VERIFIED'|'NOT_MEMBER'|'UNKNOWN'='UNKNOWN';
+      try{membership=await this.opts.membership(groupId,memberId);}
+      catch{return 'UNKNOWN';}
+      if(membership!=='VERIFIED')return membership;
+      const snapshot=await this.opts.store.snapshot();
+      const rule=subscriptionRequirementMode(snapshot,groupId);
+      if(rule==='INVALID')return 'UNKNOWN';
+      if(rule==='NONE')return 'VERIFIED';
+      if(!this.opts.subscription)return 'UNKNOWN';
+      try{
+       const result=await this.opts.subscription.verify(groupId,memberId);
+       return result.status==='MEMBER'||result.status==='NOT_REQUIRED'?
+        'VERIFIED':'UNKNOWN';
+      }catch{return 'UNKNOWN';}
+     };
+     const screen=await discussionMemberScreen(new Phase4DiscussionService(
+      this.opts.store,this.opts.policy,this.clock,verify),actorId,text);
+     if(!screen)return {status:'DENIED',reason:'DISCUSSION_MEMBER_COMMAND_INVALID'};
+     return {status:'APPLIED',reason:'PHASE4_DISCUSSION_MEMBER',
+      plan:this.plan(chatId,screen.text)};
+    }
+    const discussionInput=kind==='private'&&(
+     event.callbackData==='mi:1:i:09:07'||
+     event.callbackData?.startsWith('dq:1:')||
+     /^\/discussions(?:$|\s)|^\/discussionnew(?:$|\s)/u.test(text));
+    if(discussionInput){
+     if(!this.opts.policy.isOwner(actorId)||actorId!==chatId)
+      return {status:'DENIED',reason:'DISCUSSION_OWNER_ONLY'};
+     const screen=await discussionOwnerScreen(new Phase4DiscussionService(
+      this.opts.store,this.opts.policy,this.clock),actorId,event.callbackData??text);
+     if(!screen)return {status:'DENIED',reason:'DISCUSSION_STALE_OR_DENIED'};
+     return {status:'APPLIED',reason:'PHASE4_DISCUSSION_OWNER',
       plan:this.plan(chatId,screen.text,undefined,screen.keyboard,event.callbackMessageId)};
     }
     const communityCommand=kind==='private'?parsePhase4CommunityCommand(text):null;
