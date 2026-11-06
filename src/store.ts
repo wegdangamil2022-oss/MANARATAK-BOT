@@ -1,5 +1,8 @@
 import {isValidFloodWindow,type FloodWindow} from './protection-flood.js';
 import {validGroupNetworks,type GroupNetwork} from './group-network-model.js';
+import {validNetworkWatchCases,type NetworkWatchCase} from './network-watchlist-model.js';
+import {validNetworkSanctionReviews,validNetworkSanctionReviewReferences,
+ type NetworkSanctionReview} from './network-sanction-review-model.js';
 import {validCommunityFolders,type CommunityFolder} from './community-folder-model.js';
 import {validGroupPermissionJobs,type GroupPermissionJob} from './group-permission-model.js';
 import {validCommunityMessageMetadata,type CommunityMessageReceipt} from './community-message-receipt.js';
@@ -181,6 +184,10 @@ export interface BotState {
   buttonStudio?:StudioState;
   /** Local owner network folders; never evidence of Telegram rights. */
   groupNetworks?:GroupNetwork[];
+  /** Owner-reviewed, information-only network risk reports. Never dispatches bans. */
+  networkWatchCases?:NetworkWatchCase[];
+  /** Per-group proposed moderation review, never an automatic sanction grant. */
+  networkSanctionReviews?:NetworkSanctionReview[];
   schemaVersion: 8;
   /** Optional additive per-group monitor policy, validated on every read/write. */
   protectionPolicies?:GroupProtectionRecord[];
@@ -275,6 +282,10 @@ export class BotStore {
       (previous.subscriptionObservedMembers!==undefined&&!validSubscriptionObservedMembers(previous.subscriptionObservedMembers))||
       (previous.subscriptionGraceMembers!==undefined&&(!Array.isArray(previous.subscriptionGraceMembers)||previous.subscriptionGraceMembers.length>1000||previous.subscriptionGraceMembers.some(row=>!validSubscriptionGraceMember(row))||new Set(previous.subscriptionGraceMembers.map((row:SubscriptionGraceMember)=>JSON.stringify([row.chatId,row.memberId]))).size!==previous.subscriptionGraceMembers.length))||
       (previous.groupNetworks!==undefined&&!validGroupNetworks(previous.groupNetworks))||
+      (previous.networkWatchCases!==undefined&&!validNetworkWatchCases(previous.networkWatchCases))||
+      (previous.networkSanctionReviews!==undefined&&(!validNetworkSanctionReviews(previous.networkSanctionReviews)||
+       !validNetworkSanctionReviewReferences(previous.networkSanctionReviews,
+        Array.isArray(previous.networkWatchCases)?previous.networkWatchCases as NetworkWatchCase[]:[])))||
       (previous.communityFolders!==undefined&&!validCommunityFolders(previous.communityFolders))||
       (previous.moderationRateConfig!==undefined&&!validModerationRateConfig(previous.moderationRateConfig))||
       (previous.groupPermissionJobs!==undefined&&!validGroupPermissionJobs(previous.groupPermissionJobs))||

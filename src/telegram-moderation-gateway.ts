@@ -106,6 +106,26 @@ export class TelegramBotApiModerationGateway implements ModerationGateway{
   * This is a JavaScript method identity check, NOT proof of Telegram truth.
   * Never authenticate against methods freshly read from a mutable prototype.
   */
+ /** NETWORK-003 read-only Telegram evidence is advisory, never authorization for
+  * enforcement. The implementation must be the official immutable adapter. */
+ static usesOfficialNetworkReviewRead(gateway:unknown):boolean{
+  try{
+   if(typeof gateway!=='object'||gateway===null||!(#officialAdapterBrand in gateway))return false;
+   const adapter=gateway as TelegramBotApiModerationGateway;
+   const proto=TelegramBotApiModerationGateway.prototype;
+   return Object.isFrozen(TelegramBotApiModerationGateway)&&
+    Object.getPrototypeOf(adapter)===proto&&
+    proto.inspectTrialGroupKind===officialGatewayMethods.inspectTrialGroupKind&&
+    adapter.inspectTrialGroupKind===officialGatewayMethods.inspectTrialGroupKind&&
+    proto.observeRestriction===officialGatewayMethods.observeRestriction&&
+    adapter.observeRestriction===officialGatewayMethods.observeRestriction&&
+    proto.canRestrict===officialGatewayMethods.canRestrict&&
+    adapter.canRestrict===officialGatewayMethods.canRestrict&&
+    proto.isProtected===officialGatewayMethods.isProtected&&
+    adapter.isProtected===officialGatewayMethods.isProtected&&
+    !('getMember' in adapter)&&!('call' in adapter)&&!('allowed' in adapter);
+  }catch{return false;}
+ }
  static usesOfficialTrialGroupRead(gateway:unknown):boolean{
   try{
    if(typeof gateway!=='object'||gateway===null||
@@ -456,6 +476,7 @@ const officialGatewayMethods=Object.freeze({
  inspectBotModerationRights:TelegramBotApiModerationGateway.prototype.inspectBotModerationRights,
  inspectBotAdminRights:TelegramBotApiModerationGateway.prototype.inspectBotAdminRights,
  inspectTrialGroupKind:TelegramBotApiModerationGateway.prototype.inspectTrialGroupKind,
+ observeRestriction:TelegramBotApiModerationGateway.prototype.observeRestriction,
  inspectRoomPrivacy:TelegramBotApiModerationGateway.prototype.inspectRoomPrivacy
 });
 // Prevent rebinding the static origin-check functions after their definition.
