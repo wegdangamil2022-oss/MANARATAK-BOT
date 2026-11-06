@@ -32,7 +32,7 @@ for(const engine of ['json','sqlite'] as const){
    const id=(100000000000+(++count)).toString();
    await store.transaction(s=>{s.networkWatchCases??=[];s.networkWatchCases.push({
     id,networkId:N,networkRevision:1,sourceChatId:A,sourceChatVersion:1,
-    subjectId:'999888',category:'SPAM',revision:1,status:'PENDING',
+    subjectId:(900000+count).toString(),category:'SPAM',revision:1,status:'PENDING',
     submittedBy:OWNER,submittedAt:now});});
   };
   return {store,policy,ui:new TelegramNetworkAlertEditor(store,policy,()=>now),
