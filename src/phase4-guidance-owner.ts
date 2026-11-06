@@ -94,7 +94,8 @@ function ruleList(d:GuidanceData,page:number):OwnerInlineScreen|null{
 function faqList(d:GuidanceData,page:number):OwnerInlineScreen|null{
  const all=d.faqs,pages=Math.max(1,Math.ceil(all.length/6));
  if(page>=pages)return null;
- const rows:Button[][]=all.slice(page*6,page*6+6).map(x=>[
+ const visible=all.slice(page*6,page*6+6);
+ const rows:Button[][]=visible.map(x=>[
   btn('📚 '+x.question.slice(0,55),'gd:1:3:d:'+d.chatId+':'+x.id)]);
  const nav:Button[]=[];
  if(page>0)nav.push(btn('⬅️ السابق','gd:1:3:f:'+d.chatId+':'+(page-1)));
@@ -103,7 +104,9 @@ function faqList(d:GuidanceData,page:number):OwnerInlineScreen|null{
  rows.push([btn('↩️ القوانين المعتمدة',group('3',d.chatId))]);
  return ui('<b>📚 الأسئلة المعتمدة وذات مصدر منشور — 09:03</b>\n'+
   'المجموعة: <code>'+d.chatId+'</code> • '+(page+1)+'/'+pages+
-  '\nالعدد: '+all.length+
+  '\nالعدد: '+all.length+'\n'+
+  (visible.length?visible.map((x,i)=>'◾ '+(page*6+i+1)+'. '+guidanceEscape(x.question)).join('\n'):
+   'لا توجد إجابات معتمدة ومرئية بعد.')+
   '\nلا تظهر الأسئلة المؤرشفة أو المصادر غير المنشورة أو التصنيفات المحجوبة.',rows);
 }
 export async function phase4GuidanceOwnerScreen(service:Phase4GuidanceService,

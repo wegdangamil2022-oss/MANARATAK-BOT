@@ -111,7 +111,10 @@ for(const engine of ['json','sqlite'] as const){
    assert.ok(guide);assert.match(guide.text,/دليل العضو الجديد/);
    const fixed=await phase4GuidanceOwnerScreen(f.guidance,OWNER,'gd:1:3:g:'+GROUP);
    assert.ok(fixed);assert.match(fixed.text,/القوانين والرسائل الثابتة/);
-   assert.equal(JSON.stringify(await f.store.snapshot()),before);
+   // Telegram records a processed update and a private reply; the guide must
+   // not mutate the phase-four community policy itself.
+   assert.equal(JSON.stringify((await f.store.snapshot()).phase4Community),
+    JSON.stringify(JSON.parse(before).phase4Community));
    assert.equal(await phase4GuidanceOwnerScreen(f.guidance,STUDENT,'gd:1:2:g:'+GROUP),null);
    assert.equal(await phase4GuidanceOwnerScreen(f.guidance,OWNER,'gd:1:2:g:-1001111'),null);
    assert.equal((await f.app().handle(callback(13,STUDENT,'mi:1:i:09:02'))).status,'DENIED');
