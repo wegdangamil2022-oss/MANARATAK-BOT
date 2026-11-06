@@ -50,6 +50,9 @@ import {parseWhisperMemberCommand,whisperMemberScreen} from './phase4-whisper-me
 import {Phase4DiscussionService} from './phase4-discussions.js';
 import {parseDiscussionMemberCommand,discussionMemberScreen} from './phase4-discussion-member.js';
 import {discussionOwnerScreen} from './phase4-discussion-owner.js';
+import {Phase4PollService} from './phase4-polls.js';
+import {parsePollMemberCommand,pollMemberScreen} from './phase4-poll-member.js';
+import {pollOwnerScreen} from './phase4-poll-owner.js';
 import {OwnerInlineGroupControls} from './telegram-inline-group-controls.js';
 import {renderOwnerInlineDelegations,delegationOwnerEntry} from './telegram-inline-delegations.js';
 import {renderStaffInline} from './telegram-inline-staff.js';
@@ -685,6 +688,46 @@ export class TelegramUpdateApplication {
       this.opts.store,this.opts.policy,this.clock),actorId,event.callbackData??text);
      if(!screen)return {status:'DENIED',reason:'DISCUSSION_STALE_OR_DENIED'};
      return {status:'APPLIED',reason:'PHASE4_DISCUSSION_OWNER',
+      plan:this.plan(chatId,screen.text,undefined,screen.keyboard,event.callbackMessageId)};
+    }
+    // Phase 4 / 09:08 — member-only local survey voting. No sendPoll and
+    // no group publication. The owner cannot use a callback to cast a vote.
+    if(kind==='private'&&parsePollMemberCommand(text)!==null){
+     if(actorId!==chatId||event.forwarded||event.edited||
+       event.callbackData!==undefined)
+      return {status:'DENIED',reason:'POLL_PRIVATE_ORIGIN_REQUIRED'};
+     const verify=async(groupId:string,memberId:string):Promise<'VERIFIED'|'NOT_MEMBER'|'UNKNOWN'>=>{
+      let membership:'VERIFIED'|'NOT_MEMBER'|'UNKNOWN'='UNKNOWN';
+      try{membership=await this.opts.membership(groupId,memberId);}
+      catch{return 'UNKNOWN';}
+      if(membership!=='VERIFIED')return membership;
+      const snapshot=await this.opts.store.snapshot();
+      const mode=subscriptionRequirementMode(snapshot,groupId);
+      if(mode==='INVALID')return 'UNKNOWN';
+      if(mode==='NONE')return 'VERIFIED';
+      if(!this.opts.subscription)return 'UNKNOWN';
+      try{
+       const result=await this.opts.subscription.verify(groupId,memberId);
+       return result.status==='MEMBER'||result.status==='NOT_REQUIRED'?'VERIFIED':'UNKNOWN';
+      }catch{return 'UNKNOWN';}
+     };
+     const screen=await pollMemberScreen(new Phase4PollService(
+      this.opts.store,this.opts.policy,this.clock,verify),actorId,text);
+     if(!screen)return {status:'DENIED',reason:'POLL_MEMBER_INVALID'};
+     return {status:'APPLIED',reason:'PHASE4_POLL_MEMBER',
+      plan:this.plan(chatId,screen.text)};
+    }
+    const pollInput=kind==='private'&&(
+      event.callbackData==='mi:1:i:09:08'||
+      event.callbackData?.startsWith('po:1:')||
+      /^\/poll(?:s|new|interests|feedback)(?:$|\s)/u.test(text));
+    if(pollInput){
+     if(!this.opts.policy.isOwner(actorId)||actorId!==chatId)
+      return {status:'DENIED',reason:'POLL_OWNER_ONLY'};
+     const screen=await pollOwnerScreen(new Phase4PollService(
+      this.opts.store,this.opts.policy,this.clock),actorId,event.callbackData??text);
+     if(!screen)return {status:'DENIED',reason:'POLL_OWNER_STALE_OR_DENIED'};
+     return {status:'APPLIED',reason:'PHASE4_POLL_OWNER',
       plan:this.plan(chatId,screen.text,undefined,screen.keyboard,event.callbackMessageId)};
     }
     const communityCommand=kind==='private'?parsePhase4CommunityCommand(text):null;
