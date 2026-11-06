@@ -60,6 +60,7 @@ for(const engine of ['json','sqlite'] as const){
    assert.equal(await f.ui.handle('302','na:1:d:'+N+':'+A),null);
    assert.equal(await f.ui.handle(ADMIN,'na:1:p:'+N+':'+B+':w'),null);
    assert.equal(await f.ui.handle(ADMIN,'na:1:p:'+OTHER+':'+OUT+':w'),null);
+   assert.equal(await f.ui.handle(ADMIN,'na:1:g:'+OTHER+':0'),null,'unauthorized networks must not leak via group selector');
    assert.equal(await f.ui.handle(ADMIN,'na:1:p:'+N+':'+A+':e'),null,'only scoped kinds supported');
    s=await f.store.snapshot();assert.equal(s.audit.filter(x=>x.reason.startsWith('NETWORK_EVENT_ALERT_PREF:')).length,1);
   }finally{await f.close();}
