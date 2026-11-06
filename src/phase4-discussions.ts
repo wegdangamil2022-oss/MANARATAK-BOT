@@ -120,6 +120,10 @@ export class Phase4DiscussionService{
   if(matches.length!==1||!row)return deny('NOT_FOUND');
   if(row.status!=='OPEN')return deny('CLOSED');
   if(now<row.createdAt||now>=row.expiresAt)return deny('EXPIRED');
+  // Read the required-channel policy alongside the membership evidence.
+  // A newly added/changed requirement invalidates a pending verification.
+  const subscriptionFence=JSON.stringify(before.subscriptionRequirements.filter(
+   x=>x.chatId===row.chatId));
   const approved=group(before,this.policy,row.chatId);
   if(!approved||approved.version!==row.chatVersion)return deny('STALE');
   if(row.ownerId===actor)return deny('INVALID');
@@ -138,6 +142,8 @@ export class Phase4DiscussionService{
    const commitTime=this.clock();
    if(!validClock(commitTime)||commitTime<now)return deny('STALE');
    if(commitTime>=fresh.expiresAt)return deny('EXPIRED');
+   if(JSON.stringify(s.subscriptionRequirements.filter(x=>x.chatId===fresh.chatId))!==
+    subscriptionFence)return deny('STALE');
    const c=group(s,this.policy,fresh.chatId);
    if(!c||c.version!==fresh.chatVersion||
     fresh.chatVersion!==row.chatVersion||
