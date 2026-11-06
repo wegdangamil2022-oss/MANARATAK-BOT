@@ -3,7 +3,7 @@
 export type NetworkInheritanceKind='POLICY';
 export type NetworkInheritancePauseReason=
  'LOCAL_OVERRIDE'|'OWNER_REQUIRED'|'NETWORK_STALE'|'GROUP_STALE'|
- 'SOURCE_STALE'|'TARGET_STALE'|'CAP_EXCEEDED'|'OWNER_PAUSED';
+ 'SOURCE_STALE'|'TARGET_STALE'|'CAP_EXCEEDED'|'OWNER_PAUSED'|'NETWORK_EMERGENCY';
 export interface NetworkInheritanceLink {
  id:string;kind:NetworkInheritanceKind;networkId:string;networkRevision:number;
  sourceChatId:string;sourceChatVersion:number;sourceRevision:number;
@@ -19,7 +19,7 @@ const group=(v:unknown):v is string=>typeof v==='string'&&/^-[1-9][0-9]{0,15}$/u
 const rev=(v:unknown)=>typeof v==='number'&&Number.isSafeInteger(v)&&v>=1&&v<=9_999_999_999;
 const clock=(v:unknown)=>typeof v==='number'&&Number.isSafeInteger(v)&&v>=0&&v<=8_640_000_000_000_000;
 const pauseReasons=new Set<string>(['LOCAL_OVERRIDE','OWNER_REQUIRED','NETWORK_STALE',
- 'GROUP_STALE','SOURCE_STALE','TARGET_STALE','CAP_EXCEEDED','OWNER_PAUSED']);
+ 'GROUP_STALE','SOURCE_STALE','TARGET_STALE','CAP_EXCEEDED','OWNER_PAUSED','NETWORK_EMERGENCY']);
 export function validNetworkInheritanceLink(v:unknown):v is NetworkInheritanceLink{
  if(!obj(v))return false;
  const required=['id','kind','networkId','networkRevision','sourceChatId','sourceChatVersion',
