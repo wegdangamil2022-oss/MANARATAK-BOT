@@ -148,6 +148,22 @@ for(const engine of ['json','sqlite'] as const){
    assert.equal((await h.store.snapshot()).networkInheritance!.filter(x=>x.status==='PAUSED').length,1);
   }finally{await h.close();}
  });
+ test(engine+' NETWORK-004 history links selected-group pause to validated owner receipt',async()=>{
+  const f=await fixture();try{
+   const start=await f.editor.handle(OWNER,'nw:1:bl:'+NET+':0');
+   const pick1=await f.editor.handle(OWNER,button(start,targets[0]!));
+   const pick2=await f.editor.handle(OWNER,button(pick1,targets[2]!));
+   const preview=await f.editor.handle(OWNER,button(pick2,'معاينة'));
+   await f.editor.handle(OWNER,button(preview,'تأكيد'));
+   const history=await f.editor.handle(OWNER,'nw:1:r:p:0');
+   assert.match(history?.text??'',/عملية واحدة/u);
+   const record=await f.editor.handle(OWNER,button(history,'إيقاف متابعات مختارة'));
+   assert.match(record?.text??'',/المجموعات/u);
+   assert.match(record?.text??'',/2/u);
+   assert.match(record?.text??'',/100124/u);
+   assert.match(record?.text??'',/100126/u);
+  }finally{await f.close();}
+ });
  test(engine+' NETWORK-004 engine rejects cross-network ids and duplicate selections atomically',async()=>{
   const f=await fixture();try{
    await f.store.transaction(s=>{
