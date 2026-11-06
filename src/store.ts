@@ -3,6 +3,7 @@ import {validGroupNetworks,type GroupNetwork} from './group-network-model.js';
 import {validCommunityFolders,type CommunityFolder} from './community-folder-model.js';
 import {validCommunityState,type CommunityAutomationState} from './phase4-community-model.js';
 import {validWhisperState,type WhisperState} from './phase4-whisper-model.js';
+import {validDiscussionState,type DiscussionState} from './phase4-discussion-model.js';
 import {validCommunityPhotoId,validCommunityLinkKeyboard} from './phase4-community-rich.js';
 import {validCommunityMessageMetadata,type CommunityMessageReceipt} from './community-message-receipt.js';
 import {validAdminUIAccess,type AdminUIAccess} from './protection-ui-access.js';
@@ -170,6 +171,8 @@ export interface BotState {
   phase4Community?:CommunityAutomationState;
   /** Phase 4 / 09:06 private whisper drafts and seat reservations, no delivery. */
   phase4Whispers?:WhisperState;
+  /** Phase 4 / 09:07 moderated, private question inbox. No group deliveries. */
+  phase4Discussions?:DiscussionState;
   communityFolders?:CommunityFolder[];
   buttonStudio?:StudioState;
   /** Local owner network folders; never evidence of Telegram rights. */
@@ -259,6 +262,7 @@ export class BotStore {
     if (previous.schemaVersion !== 8 ||
       (previous.phase4Community!==undefined&&!validCommunityState(previous.phase4Community))||
       (previous.phase4Whispers!==undefined&&!validWhisperState(previous.phase4Whispers))||
+      (previous.phase4Discussions!==undefined&&!validDiscussionState(previous.phase4Discussions))||
       (previous.groupNetworks!==undefined&&!validGroupNetworks(previous.groupNetworks))||
       (previous.communityFolders!==undefined&&!validCommunityFolders(previous.communityFolders))||
       (previous.privateSettingsRevision!==undefined&&(typeof previous.privateSettingsRevision!=='number'||!Number.isSafeInteger(previous.privateSettingsRevision)||previous.privateSettingsRevision<0||previous.privateSettingsRevision>=Number.MAX_SAFE_INTEGER))||
