@@ -108,6 +108,14 @@ for(const engine of ['json','sqlite'] as const){
   assert.equal(posts.some(x=>String(x.body?.text).includes('PRIVATE_PREVIEW')),false);
   assert.equal(posts.some(x=>String(x.body?.text).includes('251')),false);
  }finally{await f.close();}});
+ test(engine+' opt-in at the same millisecond as a completed deletion never backfills its previous result',async()=>{const f=await fixture();try{
+  await f.link();
+  await f.submitService(601,'JOIN');
+  await f.enableAudit(); // Owner confirmation arrives after the deletion, at the same clock tick.
+  f.nextMinute();
+  assert.deepEqual(await f.audit.drain(),{sent:0,unresolved:0});
+  assert.equal(f.calls.filter(x=>x.method==='sendMessage').length,0);
+ }finally{await f.close();}});
  test(engine+' private-room proof blocks public, unknown, STOP and revoked notification links',async()=>{for(const mode of ['public','unknown','stop','revoked'] as const){
   const f=await fixture();try{const id=await f.link();await f.enableAudit();await f.submitService();f.nextMinute();
    if(mode==='public')f.privacy('PUBLIC');if(mode==='unknown')f.privacy('UNKNOWN');if(mode==='stop')f.run(false);
