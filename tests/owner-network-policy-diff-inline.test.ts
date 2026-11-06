@@ -152,6 +152,37 @@ for(const engine of ['json','sqlite'] as const){
    assert.equal(s.networkEmergencyControls?.[0]?.status,'STOPPED');
   }finally{await f.close();}
  });
+ test(engine+' NETWORK-005 paginates more than eight groups without changing the selected network',async()=>{
+  const f=await fixture();try{
+   const extras=Array.from({length:10},(_,i)=>'-100'+String(140+i));
+   for(const id of extras)
+    await f.policy.approveChat(OWNER,id,['moderation','assistant','navigation']);
+   await f.store.transaction(s=>{
+    const n=s.groupNetworks!.find(x=>x.id===N)!;
+    n.members.push(...extras.map(chatId=>({chatId,version:1})));
+   });
+   const p0=await f.editor.handle(OWNER,'nw:1:cp:'+N+':0');
+   assert.match(p0?.text??'',/صفحة 1\/2/u);
+   const p1=await f.editor.handle(OWNER,click(p0,'التالي'));
+   assert.match(p1?.text??'',/صفحة 2\/2/u);
+   const src=await f.editor.handle(OWNER,click(p1,extras[9]!));
+   assert.match(src?.text??'',/اختر مجموعة/u);
+   const target=await f.editor.handle(OWNER,click(src,B));
+   assert.match(target?.text??'',/لا توجد سياسة/u);
+   assert.equal((await f.store.snapshot()).callbacks.length,0);
+  }finally{await f.close();}
+ });
+ test(engine+' NETWORK-005 group service scopes differences remain private and flagged',async()=>{
+  const f=await fixture();try{
+   const s=await f.store.snapshot();
+   s.chats.find(x=>x.id===B)!.scopes=['moderation','navigation','alternate'];
+   const d=compareNetworkGroupSettings(s,f.policy,OWNER,NOW,N,A,B);
+   assert.ok(d);
+   assert.equal(d.equivalent,false);
+   assert.ok(d.differences.some(x=>x.field==='scopes'));
+   assert.equal(d.differences.some(x=>x.field==='rules'),false);
+  }finally{await f.close();}
+ });
  test(engine+' NETWORK-005 comparison rechecks live versions and survives editor restart without storing selections',async()=>{
   const f=await fixture();try{
    const p=await f.editor.handle(OWNER,'nw:1:cp:'+N+':0');
