@@ -133,7 +133,7 @@ for(const engine of ['json','sqlite'] as const){
     'وصف المسابقة الثانية للاختبارات والمراجعة');
    assert.equal(await f.svc.addRound(OWNER,duplicate.id,1,question),true);
    assert.equal(await f.svc.addRound(OWNER,duplicate.id,2,
-    {...question,title:'اختبار ثانٍ بالمنح'}),true);
+    {...question,title:'اختبار ثانٍ بالمنح',question:'كيف يراجع الطالب شروط القبول لكل جامعة؟'}),true);
    assert.equal(await f.svc.openRegistration(OWNER,duplicate.id,3,10),false);
    const old=await contestOwnerScreen(f.svc,OWNER,'ct:1:v:'+id);
    assert.equal(old!==null&&isValidTelegramInlineKeyboard(old.keyboard),true);
