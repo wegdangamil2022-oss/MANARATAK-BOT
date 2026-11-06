@@ -6,7 +6,7 @@ import {tmpdir} from 'node:os';
 import {BotStore} from '../src/store.js';
 import {Policy} from '../src/policy.js';
 import {Phase4QuizService} from '../src/phase4-quizzes.js';
-import {validQuizState} from '../src/phase4-quiz-model.js';
+import {validQuizState,type QuizInput} from '../src/phase4-quiz-model.js';
 import {parseQuizOwnerCommand,quizOwnerScreen} from '../src/phase4-quiz-owner.js';
 import {parseQuizMemberCommand,quizMemberScreen} from '../src/phase4-quiz-member.js';
 import {EducationService} from '../src/education.js';
@@ -16,7 +16,7 @@ import {TelegramUpdateApplication} from '../src/telegram-transport.js';
 
 const OWNER='100',GROUP='-1001234',USER='200',OTHER='201';
 const NOW=1_700_000_000_000;
-const input={category:'SCHOLARSHIPS' as const,durationMinutes:60,
+const input:QuizInput={category:'SCHOLARSHIPS',durationMinutes:60,
  title:'اختبار منح الدراسات العليا',question:'ما الوثيقة الأكثر ارتباطًا بخطة البحث؟',
  options:['جواز السفر','مقترح البحث','بطاقة المكتبة','شهادة الميلاد'],
  correctIndex:1,explanation:'مقترح البحث يوضح المشكلة والمنهج والجدول الزمني.',
