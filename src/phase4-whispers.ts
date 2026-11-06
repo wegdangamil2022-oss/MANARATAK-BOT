@@ -140,6 +140,14 @@ export class Phase4WhisperService{
     const row=existing[0]!;
     if(this.clock()<row.updatedAt||row.revision>=9_999_999_999)return false;
     row.enabled=false;row.updatedAt=this.clock();row.revision++;
+    // A withdrawal also releases every LOCAL (never delivered) HELD seat
+    // associated with this member in the specified group. Do not affect
+    // other groups or other members. The incremented consent revision
+    // fences stale membership verification that was already in flight.
+    const groupMessageIds=new Set(data.messages.filter(m=>m.chatId===chatId)
+     .map(m=>m.id));
+    data.reservations=data.reservations.filter(r=>
+     r.memberId!==memberId||!groupMessageIds.has(r.messageId));
     // Preserve the old chat version: revocation must not reactivate an old
     // consent if the same group later regains approval.
     s.phase4Whispers=data;
