@@ -6,6 +6,7 @@ import {summarizeNetworkSettings} from './network-policy-diff.js';
 import {captureNetworkPolicySnapshot,isValidNetworkPolicySnapshots,
  inspectSavedNetworkPolicy,previewNetworkPolicySnapshot,
  type NetworkPolicySnapshotInspection} from './network-policy-snapshots.js';
+import {previewNetworkPolicyRestore} from './network-policy-restore.js';
 
 const TTL=120_000,SIZE=8,PREFIX='owner-network-policy-snapshot:';
 const net='([a-f0-9]{12})',page='(0|[1-9][0-9]{0,2})',group='(-[1-9][0-9]{0,15})';
@@ -52,10 +53,11 @@ export class OwnerNetworkPolicySnapshots{
   return ui('<b>📸 نسخ سياسات الحماية التاريخية</b>\n'+
    'الشبكة: '+esc(o.networkName)+'\nالنسخ المحفوظة: '+count+
    ' · الحد: 5 لكل مجموعة و100 إجمالًا.\n'+
-   'يحفظ المالك نسخة محلية بعد معاينة وموافقة مستقلة. النسخ لا تُستعاد ولا تُفعّل تلقائيًا.\n'+
+   'يحفظ المالك نسخة محلية بعد معاينة وموافقة مستقلة. يمكن معاينة استرجاع إعداداتها بموافقة أخرى دون إعادة تفعيل الإنفاذ.\n'+
    'لا تعرض هذه الشاشة نصوص القواعد أو بيانات الاستثناءات أو الروابط.',[
     [btn('📸 حفظ نسخة من سياسة مجموعة','nw:1:hp:'+id+':0')],
     [btn('🕘 سجل النسخ التاريخية','nw:1:hl:'+id+':0')],
+    [btn('🕘 سجل استرجاع الإعدادات','nw:1:rl:'+id+':0')],
     [btn('🧩 مقارنة المجموعات','nw:1:ch:'+id)],
     [btn('↩️ بطاقة الشبكة','nw:1:d:'+id)]
    ]);
@@ -175,7 +177,7 @@ export class OwnerNetworkPolicySnapshots{
   return ui('<b>🕘 سجل النسخ التاريخية</b>\n'+
    'الشبكة: '+esc(overview.networkName)+'\nعدد النسخ: '+items.length+
    ' · صفحة '+(p+1)+'/'+pages+'\n'+
-   'النسخ محلية للقراءة فقط. لا توجد أوامر استرجاع أو تنفيذ عبر Telegram.',rows);
+   'النسخ محلية، ولا يحدث استرجاع إلا بمعاينة وموافقة مستقلة ودون أوامر Telegram.',rows);
  }
  private detail(s:BotState,actor:string,id:string):OwnerInlineScreen|null{
   if(!this.allowed(s,actor,this.clock()))return null;
@@ -193,7 +195,9 @@ export class OwnerNetworkPolicySnapshots{
     entry.comparable?'⚠️ تختلف عن السياسة الحالية في '+entry.differences.length+' حقول:\n'+
      entry.differences.map(x=>'• '+(names[x]??'إعداد آخر')).join('\n')+'\n':
     '⚠️ السياسة الحالية غير متاحة للمقارنة الآمنة (مفقودة أو قديمة أو اعتماد متغير).\n')+
-   'القيم الحساسة محفوظة محليًا ولا تُعرض هنا. لا يمكن استرجاع نسخة أو تفعيل حماية من هذه الشاشة.',[
+   'القيم الحساسة محفوظة محليًا ولا تُعرض هنا. يمكن فتح معاينة استرجاع مستقل فقط إذا كانت النسخة مؤهلة؛ لا يُفعّل وضع ENFORCE.',[
+    ...(previewNetworkPolicyRestore(s,this.policy,actor,this.clock(),sn.id)?
+     [[btn('🔁 معاينة استرجاع الإعدادات','nw:1:rr:'+sn.id)]]:[]),
     [btn('↩️ سجل نسخ الشبكة','nw:1:hl:'+sn.networkId+':0')],
     [btn('↩️ بطاقة الشبكة','nw:1:d:'+sn.networkId)]
    ]);
