@@ -63,6 +63,9 @@ export async function whisperOwnerScreen(
  service:Phase4WhisperService,actor:string,input:string
 ):Promise<OwnerInlineScreen|null>{
  try{
+  // A private owner interaction also opportunistically redacts expired
+  // content; this is NOT a substitute for a separate scheduled sweeper.
+  await service.expire();
   const cmd=parseWhisperOwnerCommand(input);
   if(cmd?.kind==='CREATE'){
    const d=await service.draft(actor,cmd.chatId,cmd.input);
