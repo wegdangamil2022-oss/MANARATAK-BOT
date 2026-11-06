@@ -81,14 +81,19 @@ for(const engine of ['json','sqlite'] as const){
    assert.match(detail?.text??'',/متطابقة/u);
    await f.store.transaction(s=>{
     const row=s.protectionPolicies!.find(x=>x.policy.chatId===A)!;
-    row.policy.rules[0]!.value='sensitivebeta';
+    const rule=row.policy.rules[0]!;
+    if(rule.kind!=='WORD')throw new Error('Expected WORD fixture');
+    rule.value='sensitivebeta';
     row.policy.revision++;
    });
    const changed=await f.reopen().handle(OWNER,press(hist,'نسخة'));
    assert.match(changed?.text??'',/قواعد الحماية/u);
    assert.doesNotMatch(changed?.text??'',/sensitivealpha|sensitivebeta/u);
    const state=await f.store.snapshot();
-   assert.equal(state.networkPolicySnapshots?.[0]?.policy.rules[0]?.value,'sensitivealpha');
+   const savedRule=state.networkPolicySnapshots?.[0]?.policy.rules[0];
+   assert.equal(savedRule?.kind,'WORD');
+   if(savedRule?.kind!=='WORD')throw new Error('Expected archived WORD');
+   assert.equal(savedRule.value,'sensitivealpha');
   }finally{await f.close();}
  });
  test(engine+' NETWORK-005 snapshot rejects stale chat version and changed config before consent atomically',async()=>{
