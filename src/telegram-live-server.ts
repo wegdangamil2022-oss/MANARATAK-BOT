@@ -1,5 +1,7 @@
 import {GroupProtectionPolicyService} from './group-protection-policy.js';
 import {Phase4CommunityService} from './phase4-community.js';
+import {Phase4WhisperService} from './phase4-whispers.js';
+import {startPhase4WhisperPrivacyMaintenance} from './phase4-whisper-maintenance.js';
 import {Phase4ServiceCleanupDispatcher,TelegramBotApiServiceCleanupGateway} from './phase4-service-cleanup.js';
 import {Phase4GroupProfileDispatcher,TelegramBotApiGroupProfileGateway} from './phase4-group-profile.js';
 import {startProtectionMaintenance} from './protection-maintenance.js';
@@ -194,6 +196,11 @@ export async function createLiveTelegramServer(config:LiveTelegramConfig,
  const server=createServer(telegramWebhookListener(app,check.webhookSecret,dispatcher,{},safetyGate,
   new TelegramBotApiCallbackAcker(check.token,request)));
  server.once('listening',()=>{
+  // This privacy timer is independent of protection/Telegram cleanup.
+  // Expired private content is scrubbed without opening an owner menu.
+  const whisperPrivacy=startPhase4WhisperPrivacyMaintenance(
+   new Phase4WhisperService(store,policy),undefined,
+   ()=>process.stderr.write('WHISPER_PRIVACY_MAINTENANCE_FAILED\n'));
   const protection=new GroupProtectionPolicyService(store,policy);
   const serviceCleaner=new Phase4ServiceCleanupDispatcher(store,policy,
    new TelegramBotApiServiceCleanupGateway(check.token,request),Date.now,safetyGate);
@@ -209,8 +216,10 @@ export async function createLiveTelegramServer(config:LiveTelegramConfig,
    // Every individual job still requires owner approval and current bot rights.
    if(profileEditor)await profileEditor.runDue(2);
   },undefined,()=>process.stderr.write('PROTECTION_OR_SERVICE_MAINTENANCE_FAILED\n'));
-  protectionMaintenanceStops.set(server,cleanup.stop);
-  server.once('close',()=>{void cleanup.stop();});
+  protectionMaintenanceStops.set(server,async()=>{
+   await Promise.all([whisperPrivacy.stop(),cleanup.stop()]);
+  });
+  server.once('close',()=>{void protectionMaintenanceStops.get(server)?.();});
  });
  // Local-only listener. These are resource budgets, not a substitute for the
  // trusted HTTPS proxy, ingress anti-abuse controls, TLS or real load testing.
