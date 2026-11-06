@@ -1,10 +1,13 @@
 import {validAdminUIAccess,protectionUIEpoch,ADMIN_UI_TTL_MS} from './protection-ui-access.js';
-import {randomUUID} from 'node:crypto';
+import {randomUUID,createHash} from 'node:crypto';
 import {BotStore,type TelegramReplyJob} from './store.js';
 import {Policy} from './policy.js';
 import type {TelegramReplyPlan} from './telegram-transport.js';
 import {isValidTelegramReplyKeyboard} from './telegram-menu.js';
 import {isValidTelegramInlineKeyboard} from './telegram-inline-owner.js';
+import {validCommunityPhotoId,validCommunityLinkKeyboard} from './phase4-community-rich.js';
+import {inCommunityQuietHours,validCommunityConfig} from './phase4-community-model.js';
+import {lectureBlocksAutomation} from './phase4-lectures.js';
 import {validStudioNativeKeyboard} from './telegram-studio-rich.js';
 import {groupQuestionEpochDigest,groupMenuEpochDigest,privateGroupEpochDigest} from './telegram-group-access.js';
 import {privateLibraryEpoch} from './private-library-access.js';
@@ -25,10 +28,14 @@ const validChat=(chat:string)=>/^(?:[1-9]\d{0,15}|-[1-9]\d{0,15})$/.test(chat)&&
 const validPlan=(p:unknown):p is TelegramReplyPlan=>{
  if(!p||typeof p!=='object'||Array.isArray(p))return false;
  const v=p as Record<string,unknown>;
- return (Object.keys(v).length===(3+(v.replyMarkup===undefined?0:1)+(v.inlineMarkup===undefined?0:1)+(v.studioMarkup===undefined?0:1)+(v.editMessageId===undefined?0:1)+(v.messageThreadId===undefined?0:1)))&&
-  Object.keys(v).every(k=>['chatId','parseMode','text','replyMarkup','inlineMarkup','studioMarkup','editMessageId','messageThreadId'].includes(k))&&
+ return (Object.keys(v).length===(3+(v.replyMarkup===undefined?0:1)+(v.inlineMarkup===undefined?0:1)+(v.studioMarkup===undefined?0:1)+(v.editMessageId===undefined?0:1)+(v.messageThreadId===undefined?0:1)+(v.photoFileId===undefined?0:1)+(v.communityLinks===undefined?0:1)))&&
+  Object.keys(v).every(k=>['chatId','parseMode','text','replyMarkup','inlineMarkup','studioMarkup','editMessageId','messageThreadId','photoFileId','communityLinks'].includes(k))&&
   (v.messageThreadId===undefined||typeof v.chatId==='string'&&v.chatId.startsWith('-')&&Number.isSafeInteger(v.messageThreadId)&&Number(v.messageThreadId)>0&&Number(v.messageThreadId)<=2147483647)&&
-  [v.replyMarkup,v.inlineMarkup,v.studioMarkup].filter(x=>x!==undefined).length<=1&&
+  [v.replyMarkup,v.inlineMarkup,v.studioMarkup,v.communityLinks].filter(x=>x!==undefined).length<=1&&
+  (v.photoFileId===undefined||(typeof v.chatId==='string'&&v.chatId.startsWith('-')&&
+    v.editMessageId===undefined&&validCommunityPhotoId(v.photoFileId)))&&
+  (v.communityLinks===undefined||(typeof v.chatId==='string'&&v.chatId.startsWith('-')&&
+    v.editMessageId===undefined&&validCommunityLinkKeyboard(v.communityLinks)))&&
   (v.replyMarkup===undefined||isValidTelegramReplyKeyboard(v.replyMarkup))&&
   (v.inlineMarkup===undefined||isValidTelegramInlineKeyboard(v.inlineMarkup))&&
   (v.studioMarkup===undefined||typeof v.chatId==='string'&&!v.chatId.startsWith('-')&&validStudioNativeKeyboard(v.studioMarkup))&&
@@ -36,12 +43,12 @@ const validPlan=(p:unknown):p is TelegramReplyPlan=>{
     Number.isSafeInteger(v.editMessageId)&&v.editMessageId>0&&(v.inlineMarkup!==undefined||v.studioMarkup!==undefined)))&&
   v.parseMode==='HTML'&&typeof v.chatId==='string'&&
   validChat(v.chatId)&&typeof v.text==='string'&&v.text.length>0&&
-  Buffer.byteLength(v.text,'utf8')<=4096&& !/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/u.test(v.text);
+  Buffer.byteLength(v.text,'utf8')<=(v.photoFileId===undefined?4096:1024)&& !/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/u.test(v.text);
 };
 /**
  * Real Telegram Bot API boundary, but construction alone performs no network
  * calls. Does not retry ambiguous requests, never returns provider descriptions
- * or the token, and sends only fixed-format HTML text plans.
+ * or the token; sends only validated HTML text or Telegram photo captions.
  */
 export class TelegramBotApiTextSender implements TelegramReplySender {
  constructor(private readonly token:string,private readonly request:typeof fetch=fetch){
@@ -53,13 +60,18 @@ export class TelegramBotApiTextSender implements TelegramReplySender {
   let response:Response;
   try{
    response=await this.request('https://api.telegram.org/bot'+this.token+
-    (plan.editMessageId===undefined?'/sendMessage':'/editMessageText'),{
+    (plan.photoFileId!==undefined?'/sendPhoto':plan.editMessageId===undefined?'/sendMessage':'/editMessageText'),{
     method:'POST',headers:{'content-type':'application/json'},
-    body:JSON.stringify({chat_id:plan.chatId,text:plan.text,parse_mode:'HTML',
-     link_preview_options:{is_disabled:true},
+    body:JSON.stringify({chat_id:plan.chatId,
+     ...(plan.photoFileId!==undefined?{photo:plan.photoFileId,caption:plan.text}:
+      {text:plan.text,link_preview_options:{is_disabled:true}}),
+     parse_mode:'HTML',
      ...(plan.editMessageId===undefined?{protect_content:true}:{message_id:plan.editMessageId}),
      ...(plan.editMessageId===undefined&&plan.messageThreadId!==undefined?{message_thread_id:plan.messageThreadId}:{}),
-     ...(plan.studioMarkup?{reply_markup:plan.studioMarkup}:plan.inlineMarkup?{reply_markup:plan.inlineMarkup}:plan.replyMarkup?{reply_markup:plan.replyMarkup}:{})}),
+     ...(plan.communityLinks?{reply_markup:plan.communityLinks}:
+        plan.studioMarkup?{reply_markup:plan.studioMarkup}:
+        plan.inlineMarkup?{reply_markup:plan.inlineMarkup}:
+        plan.replyMarkup?{reply_markup:plan.replyMarkup}:{})}),
     redirect:'error',signal:AbortSignal.timeout(8000)
    });
   }catch{return {status:'UNKNOWN_OUTCOME'};}
@@ -152,8 +164,21 @@ export function validTelegramReplyJob(v:unknown):v is TelegramReplyJob{
  return typeof j.updateKey==='string'&&/^b3-webhook:[a-zA-Z0-9_-]{1,80}:\d+$/.test(j.updateKey)&&
   knownStatus(j.status)&&
   validCommunityMessageMetadata(v as TelegramReplyJob)&&
+  (j.communityAutomation===undefined||(
+   j.status==='QUEUED'&&j.groupReplyKind==='GENERAL'&&validGroupReplyAccess(j.groupMenuAccess)&&
+   typeof j.communityAutomation==='object'&&j.communityAutomation!==null&&
+   !Array.isArray(j.communityAutomation)&&
+   Object.keys(j.communityAutomation as object).length===2&&
+   ['JOIN','LEAVE','TEXT'].includes(String((j.communityAutomation as {kind?:unknown}).kind))&&
+   Number.isSafeInteger((j.communityAutomation as {configVersion?:unknown}).configVersion)&&
+   Number((j.communityAutomation as {configVersion?:unknown}).configVersion)>=1
+  ))&&
   ((j.plan as TelegramReplyPlan|undefined)?.messageThreadId===undefined||j.groupReplyKind==='GENERAL'&&validGroupReplyAccess(j.groupMenuAccess))&&
   (j.status==='QUEUED'?validPlan(j.plan):(j.plan===undefined||validPlan(j.plan)))&&
+  ((j.plan as TelegramReplyPlan|undefined)?.photoFileId===undefined&&
+   (j.plan as TelegramReplyPlan|undefined)?.communityLinks===undefined||
+   (j.status==='QUEUED'&&j.groupReplyKind==='GENERAL'&&
+    validGroupReplyAccess(j.groupMenuAccess)))&&
   (j.queuedAt===undefined||(typeof j.queuedAt==='number'&&Number.isSafeInteger(j.queuedAt)&&j.queuedAt>=0))&&
   (j.startedAt===undefined||(typeof j.startedAt==='number'&&Number.isSafeInteger(j.startedAt)&&j.startedAt>=0))&&
   (j.redactedAt===undefined||(typeof j.redactedAt==='number'&&Number.isSafeInteger(j.redactedAt)&&j.redactedAt>=0))&&
@@ -331,7 +356,30 @@ export class TelegramReplyDispatcher {
    const community=job.communityAccess;
    const communityDenied=Boolean(community&&(community.actorId!==plan.chatId||!Number.isSafeInteger(job.queuedAt)||now<job.queuedAt!||now>=community.expiresAt||community.expiresAt>job.queuedAt!+ADMIN_UI_TTL_MS||communityFolderEpoch(s,this.policy,community.actorId)!==community.epoch));
    const closeDenied=Boolean(job.communityClose&&!matchesCommunityClose(s,this.policy,job.communityClose,now));
-   const forbidden=closeDenied||noGroupProof||noPrivateProvenance||adminDenied||libraryDenied||communityDenied||(!!access&&(
+   // Quiet hours are time-dependent. A reply queued just before the boundary
+   // must not be sent when the provider gate opens during the quiet window.
+   // Only Phase 4 replies carry this trusted server-generated marker; ordinary
+   // navigation/FAQ replies are not affected by the community schedule.
+   const automation=job.communityAutomation;
+   let automationDenied=false;
+   if(automation){
+    // Recheck after queue delay at the durable SEND claim boundary.
+    // Only voluntary group automation is suppressed; not protection.
+    if(lectureBlocksAutomation(s,plan.chatId,now))automationDenied=true;
+    const configs=s.phase4Community?.configs.filter(c=>c.chatId===plan.chatId)??[];
+    const config=configs.length===1?configs[0]:undefined;
+    if(!config||!validCommunityConfig(config)||
+       config.version!==automation.configVersion||
+       (automation.kind==='TEXT'&&!config.repliesEnabled)||
+       (automation.kind==='JOIN'&&!config.welcome.enabled)||
+       (automation.kind==='LEAVE'&&!config.farewell.enabled)){
+     automationDenied=true;
+    }else if(automation.kind==='TEXT'&&config.quietHours){
+     try{automationDenied=automationDenied||inCommunityQuietHours(config.quietHours,now,config.utcOffsetMinutes,config.timeZone);}
+     catch{automationDenied=true;}
+    }
+   }
+   const forbidden=closeDenied||noGroupProof||noPrivateProvenance||adminDenied||libraryDenied||communityDenied||automationDenied||(!!access&&(
     !groupPrecheck?.allowed||
     groupPrecheck.kind!==accessKind||
     groupPrecheck.access.actorId!==access.actorId||
@@ -352,10 +400,11 @@ export class TelegramReplyDispatcher {
     job.accessDenialCode=noGroupProof||noPrivateProvenance?
      'LEGACY_UNVERIFIABLE':groupUnavailable?'GROUP_UNAVAILABLE':'ACCESS_RECHECK_FAILED';
     job.status='FAILED_CONFIRMED';delete job.communityClose;
-    delete job.plan;delete job.adminUIAccess;delete job.privateLibraryAccess;delete job.communityAccess;delete job.groupQuestionAccess;delete job.groupMenuAccess;delete job.privateGroupAccess;delete job.privateReplyKind;delete job.groupReplyKind;job.redactedAt=this.clock();
+    delete job.plan;delete job.adminUIAccess;delete job.privateLibraryAccess;delete job.communityAccess;delete job.groupQuestionAccess;delete job.groupMenuAccess;delete job.privateGroupAccess;delete job.privateReplyKind;delete job.groupReplyKind;delete job.communityAutomation;job.redactedAt=this.clock();
     return {status:'FAILED_CONFIRMED' as const};
    }
    const attemptId=randomUUID();
+   const automationForCleanup=job.communityAutomation;
    const communityReceipt=community&&plan.studioMarkup?.inline_keyboard.some(row=>row.some(b=>'url' in b))?{chatId:plan.chatId,epoch:community.epoch,expiresAt:community.expiresAt}:undefined;
    if(plan.editMessageId!==undefined&&(community||job.communityClose||(s.telegramReplyJobs??[]).some(old=>old.communityMessage?.chatId===plan.chatId&&old.communityMessage.messageId===plan.editMessageId)))job.communityEditTarget={chatId:plan.chatId,messageId:plan.editMessageId};
    // An attempted edit makes the old contents uncertain, even if its outcome
@@ -365,9 +414,9 @@ export class TelegramReplyDispatcher {
    job.status='SENDING';job.attemptId=attemptId;job.startedAt=at;
    // Remove the durable body *before* the external call. The immediate local
    // copy goes to the sender, but a crash leaves no replayable payload.
-   delete job.plan;delete job.adminUIAccess;delete job.privateLibraryAccess;delete job.communityAccess;delete job.groupQuestionAccess;delete job.groupMenuAccess;delete job.privateGroupAccess;delete job.privateReplyKind;delete job.groupReplyKind;job.redactedAt=at;
+   delete job.plan;delete job.adminUIAccess;delete job.privateLibraryAccess;delete job.communityAccess;delete job.groupQuestionAccess;delete job.groupMenuAccess;delete job.privateGroupAccess;delete job.privateReplyKind;delete job.groupReplyKind;delete job.communityAutomation;job.redactedAt=at;
    delete job.communityClose;
-   return {status:'SEND' as const,attemptId,plan,communityReceipt};
+   return {status:'SEND' as const,attemptId,plan,communityReceipt,automationForCleanup};
   });
   if(claim.status!=='SEND')return {status:claim.status};
   let result:TelegramSendResult;
@@ -385,6 +434,36 @@ export class TelegramReplyDispatcher {
    job.status=terminal;
    if(terminal!=='UNKNOWN_OUTCOME')delete job.communityEditTarget;
    if(result.status==='CONFIRMED')job.messageId=result.messageId;
+   // Only a provider-CONFIRMED, bot-authored Phase 4 message can be considered
+   // for expiry. This is NOT scheduled from the inbound user's message ID or
+   // an uncertain SEND response. A policy edit while Telegram was awaited
+   // fences old deletion plans; there is no retry on UNKNOWN_OUTCOME.
+   if(result.status==='CONFIRMED'&&claim.automationForCleanup&&
+      Number.isSafeInteger(result.messageId)&&result.messageId>0&&
+      result.messageId<=2147483647){
+    const now=this.clock();
+    const configs=s.phase4Community?.configs.filter(x=>x.chatId===claim.plan.chatId)??[];
+    const config=configs.length===1?configs[0]:undefined;
+    const chat=s.chats.filter(x=>x.id===claim.plan.chatId&&x.approved&&x.present);
+    if(Number.isSafeInteger(now)&&now>=0&&now<=8_640_000_000_000_000-3600000&&
+       config&&validCommunityConfig(config)&&
+       config.version===claim.automationForCleanup.configVersion&&
+       config.replyCleanup?.enabled===true&&chat.length===1&&
+       this.policy.canUseChat(s,claim.plan.chatId,'navigation')){
+     const key=createHash('sha256').update('P4:AUTOMATIC_REPLY:'+updateKey).digest('hex');
+     const existing=s.phase4Community!.cleanupJobs??[];
+     const kept=existing.filter(x=>x.status==='QUEUED'||x.status==='SENDING'||
+      now-x.observedAt<7*86400000);
+     if(kept.length<1000&&
+        !kept.some(x=>x.key===key||
+         x.chatId===claim.plan.chatId&&x.messageId===result.messageId)){
+      kept.push({key,chatId:claim.plan.chatId,messageId:result.messageId,
+       kind:'AUTOMATIC_REPLY',chatVersion:chat[0]!.version,policyVersion:config.version,
+       observedAt:now,dueAt:now+config.replyCleanup.delayMs,status:'QUEUED'});
+     }
+     s.phase4Community!.cleanupJobs=kept;
+    }
+   }
    if(result.status==='CONFIRMED'&&claim.communityReceipt){
     for(const old of s.telegramReplyJobs??[])if(old.communityMessage?.chatId===claim.plan.chatId&&old.communityMessage.messageId===result.messageId)delete old.communityMessage;
     job.communityMessage={...claim.communityReceipt,messageId:result.messageId};

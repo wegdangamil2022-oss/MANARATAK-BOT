@@ -1,0 +1,420 @@
+import {test} from 'node:test';
+import assert from 'node:assert/strict';
+import {mkdtemp,rm} from 'node:fs/promises';
+import {join} from 'node:path';
+import {tmpdir} from 'node:os';
+import {BotStore} from '../src/store.js';
+import {Policy} from '../src/policy.js';
+import {EducationService} from '../src/education.js';
+import {EducationAdminFacade} from '../src/education-admin.js';
+import {ApprovedAnswerService,ResourceLinkService} from '../src/education-interactions.js';
+import {TelegramUpdateApplication} from '../src/telegram-transport.js';
+import {TelegramReplyDispatcher} from '../src/telegram-replies.js';
+import {Phase4CommunityService} from '../src/phase4-community.js';
+import {validCommunityState,normalizeCommunityMatch,matchCommunityRule,renderCommunityTemplate,
+ defaultCommunityConfig} from '../src/phase4-community-model.js';
+import {phase4CommunityScreen,parsePhase4CommunityCommand,validPhase4CommunityRoute} from '../src/phase4-community-ui.js';
+import {isValidTelegramInlineKeyboard} from '../src/telegram-inline-owner.js';
+
+const GROUP='-1001234',OWNER='100',MEMBER='300';
+async function fixture(engine:'json'|'sqlite'='json'){
+ const dir=await mkdtemp(join(tmpdir(),'manaratak-p4-community-'));
+ const file=join(dir,engine==='json'?'state.json':'state.sqlite');
+ let now=1_000_000;
+ const clock=()=>now,store=new BotStore(file,{engine});
+ const policy=new Policy(store,OWNER,clock);
+ await policy.approveChat(OWNER,GROUP,['navigation']);
+ await policy.setPresence(GROUP,true);
+ const community=new Phase4CommunityService(store,policy,clock);
+ const education=new EducationService(store,policy,clock);
+ const admin=new EducationAdminFacade(store,policy,education);
+ const faq=new ApprovedAnswerService(store,policy),links=new ResourceLinkService(store,policy);
+ const app=()=>new TelegramUpdateApplication({store,policy,education,admin,faq,links,
+  botId:'bot-main',botUsername:'ManaratakBot',membership:async()=> 'VERIFIED',
+  community,clock});
+ return {dir,file,store,policy,community,app,
+  setNow:(v:number)=>{now=v;}, now:clock,close:()=>rm(dir,{force:true,recursive:true})};
+}
+const groupMessage=(id:number,text:string,actor=300,thread?:number)=>({
+ update_id:id,message:{message_id:id,chat:{id:Number(GROUP),type:'supergroup',title:'منارتك <المنح>'},
+  from:{id:actor,is_bot:false,first_name:'محمد & علي'},text,
+  ...(thread?{message_thread_id:thread}:{})}
+});
+const joinMessage=(id:number,kind:'JOIN'|'LEAVE',who=MEMBER)=>({
+ update_id:id,message:{message_id:id,chat:{id:Number(GROUP),type:'supergroup',title:'منارتك <المنح>'},
+  from:{id:Number(who),is_bot:false,first_name:'الضيف'},
+  ...(kind==='JOIN'?{new_chat_members:[{id:Number(who),is_bot:false,first_name:'فاطمة <&>'}]}:
+   {left_chat_member:{id:Number(who),is_bot:false,first_name:'فاطمة <&>'}})}
+});
+const ownerMessage=(id:number,text:string)=>({
+ update_id:id,message:{message_id:id,chat:{id:Number(OWNER),type:'private'},
+  from:{id:Number(OWNER),is_bot:false,first_name:'المالك'},text}
+});
+const ownerCallback=(id:number,data:string)=>({
+ update_id:id,callback_query:{id:'Q'+id,data,from:{id:Number(OWNER),is_bot:false},
+  message:{message_id:50,chat:{id:Number(OWNER),type:'private'},
+   from:{id:900,is_bot:true}}}
+});
+const enable=async(f:Awaited<ReturnType<typeof fixture>>,kind:'WELCOME'|'FAREWELL'|'REPLIES')=>{
+ const action=kind==='WELCOME'?'WELCOME_ON':kind==='FAREWELL'?'FAREWELL_ON':'REPLIES_ON';
+ const draft=await f.community.pending(OWNER,{kind:action},GROUP);
+ return f.community.approve(OWNER,draft.id);
+};
+
+test('P4 templates normalize Arabic, obey word boundaries, escape substitution, never evaluate expressions',()=>{
+ assert.equal(normalizeCommunityMatch('  مَــنـحة  '),'منحة');
+ const config=defaultCommunityConfig(GROUP);
+ assert.equal(config.welcome.enabled,false);assert.equal(config.repliesEnabled,false);
+ const rule={id:'123456789abc',trigger:'منحة',response:'أهلًا',match:'WORD' as const,
+  enabled:true,cooldownMs:60000};
+ assert.equal(matchCommunityRule(rule,'متى تفتح المنحة؟'),false);
+ assert.equal(matchCommunityRule(rule,'منحة جامعية'),true);
+ assert.equal(matchCommunityRule(rule,'منحتي'),false);
+ assert.equal(renderCommunityTemplate('مرحبًا {العضو} في {اسم_المجموعة}',{
+  kind:'JOIN',chatId:GROUP,actorId:MEMBER,memberName:'فاطمة <&>',groupName:'منارتك <المنح>'
+ },1_000_000),'مرحبًا فاطمة &lt;&amp;&gt; في منارتك &lt;المنح&gt;');
+ assert.equal(validCommunityState({configs:[],drafts:[],receipts:[]}),true);
+});
+
+for(const engine of ['json','sqlite'] as const){
+ test('P4 '+engine+': owner-reviewed greeting settings persist and stale confirmation cannot overwrite revisions',async()=>{
+  const f=await fixture(engine);try{
+   await assert.rejects(f.community.pending(MEMBER,{kind:'WELCOME_ON'},GROUP),/COMMUNITY_OWNER_DENIED/);
+   const initial=await f.community.view(OWNER,GROUP);assert.equal(initial.welcome.enabled,false);
+   const first=await f.community.pending(OWNER,{kind:'WELCOME_TEXT',text:'أهلًا {العضو} في {اسم_المجموعة}'},GROUP);
+   assert.equal((await f.community.view(OWNER,GROUP)).welcome.text,initial.welcome.text);
+   const second=await f.community.pending(OWNER,{kind:'WELCOME_ON'},GROUP);
+   await assert.rejects(f.community.approve(OWNER,first.id),/COMMUNITY_DRAFT_NOT_FOUND/);
+   const updated=await f.community.approve(OWNER,second.id);
+   assert.equal(updated.welcome.enabled,true);
+   assert.equal((await new Phase4CommunityService(new BotStore(f.file,{engine}),f.policy,f.now).view(OWNER,GROUP)).welcome.enabled,true);
+   await assert.rejects(f.community.approve(OWNER,second.id),/COMMUNITY_DRAFT_NOT_FOUND/);
+   const future=await f.community.pending(OWNER,{kind:'FAREWELL_ON'},GROUP);
+   f.setNow(f.now()+120000);
+   await assert.rejects(f.community.approve(OWNER,future.id),/COMMUNITY_DRAFT_EXPIRED/);
+  }finally{await f.close();}
+ });
+ test('P4 '+engine+': limits prevent floods and repeated join/reply but do not store raw messages or names',async()=>{
+  const f=await fixture(engine);try{
+   await enable(f,'WELCOME');
+   const base={kind:'JOIN' as const,chatId:GROUP,actorId:MEMBER,memberName:'فاطمة',groupName:'منارتك'};
+   const one=await f.community.propose(base,'b3-webhook:bot-main:1');
+   assert.match(one?.text??'',/فاطمة/);
+   assert.equal(await f.community.propose(base,'b3-webhook:bot-main:1'),null);
+   assert.equal(await f.community.propose(base,'b3-webhook:bot-main:2'),null);
+   f.setNow(f.now()+600001);
+   assert.ok(await f.community.propose(base,'b3-webhook:bot-main:3'));
+   const state=await f.store.snapshot(),encoded=JSON.stringify(state.phase4Community?.receipts);
+   assert.equal(encoded.includes('فاطمة'),false);
+   assert.equal(encoded.includes('البوت'),false);
+   assert.equal(state.phase4Community?.receipts.length,2);
+  }finally{await f.close();}
+ });
+ test('P4 '+engine+': reply keywords obey switch, matching, actor quota, precedence and dangerous command exclusion',async()=>{
+  const f=await fixture(engine);try{
+   const added=await f.community.pending(OWNER,{kind:'REPLY_ADD',match:'WORD',
+    trigger:'منحة',text:'اقرأ دليل المنح يا {العضو}'},GROUP);
+   await f.community.approve(OWNER,added.id);
+   const msg={kind:'TEXT' as const,chatId:GROUP,actorId:MEMBER,
+    memberName:'فاطمة',groupName:'منارتك',messageText:'هل توجد منحة؟'};
+   assert.equal(await f.community.propose(msg,'b3-webhook:bot-main:10'),null);
+   await enable(f,'REPLIES');
+   const reply=await f.community.propose(msg,'b3-webhook:bot-main:11');
+   assert.equal(reply?.text,'اقرأ دليل المنح يا فاطمة');
+   f.setNow(f.now()+9000);
+   assert.equal(await f.community.propose(msg,'b3-webhook:bot-main:12'),null);
+   f.setNow(f.now()+70000);
+   assert.ok(await f.community.propose(msg,'b3-webhook:bot-main:13'));
+   f.setNow(f.now()+70000);
+   assert.equal(await f.community.propose({...msg,messageText:'/منحة'},'b3-webhook:bot-main:14'),null);
+   assert.equal(await f.community.propose({...msg,forwarded:true},'b3-webhook:bot-main:15'),null);
+   assert.equal(await f.community.propose({...msg,fromBot:true},'b3-webhook:bot-main:16'),null);
+  }finally{await f.close();}
+ });
+ test('P4 '+engine+': live-planned join, leave and keyword replies go through authorization-fenced outbox',async()=>{
+  const f=await fixture(engine);try{
+   const off=await f.app().handle(joinMessage(1,'JOIN'));
+   assert.equal(off.status,'IGNORED');assert.equal(off.plan,undefined);
+   await enable(f,'WELCOME');
+   const live=await f.app().handle(joinMessage(2,'JOIN'));
+   assert.equal(live.status,'APPLIED');assert.match(live.plan?.text??'',/فاطمة &lt;&amp;&gt;/);
+   assert.ok(live.deliveryKey);
+   const queued=(await f.store.snapshot()).telegramReplyJobs?.find(j=>j.updateKey===live.deliveryKey);
+   assert.equal(queued?.groupReplyKind,'GENERAL');
+   assert.ok(queued?.groupMenuAccess);
+   let calls=0;
+   const dispatcher=new TelegramReplyDispatcher(f.store,f.policy,{send:async()=>{calls++;return {status:'CONFIRMED',messageId:99};}},f.now);
+   assert.equal((await dispatcher.dispatch(live.deliveryKey!)).status,'CONFIRMED');
+   assert.equal(calls,1);
+   assert.equal((await dispatcher.dispatch(live.deliveryKey!)).status,'SENT');
+   assert.equal(calls,1);
+   f.setNow(f.now()+9000);
+   const silentLeave=await f.app().handle(joinMessage(3,'LEAVE'));
+   assert.equal(silentLeave.status,'IGNORED');
+   await enable(f,'FAREWELL');
+   const farewell=await f.app().handle(joinMessage(4,'LEAVE'));
+   assert.equal(farewell.status,'APPLIED');assert.match(farewell.plan?.text??'',/التوفيق/);
+  }finally{await f.close();}
+ });
+ test('P4 '+engine+': disabling after queuing prevents Telegram send at dispatch',async()=>{
+  const f=await fixture(engine);try{
+   await enable(f,'WELCOME');
+   const first=await f.app().handle(joinMessage(30,'JOIN'));
+   assert.ok(first.deliveryKey);
+   const draft=await f.community.pending(OWNER,{kind:'WELCOME_OFF'},GROUP);
+   await f.community.approve(OWNER,draft.id);
+   let attempts=0;
+   const dispatcher=new TelegramReplyDispatcher(f.store,f.policy,{send:async()=>{attempts++;return {status:'CONFIRMED',messageId:1};}},f.now);
+   assert.equal((await dispatcher.dispatch(first.deliveryKey!)).status,'FAILED_CONFIRMED');
+   assert.equal(attempts,0);
+   assert.equal((await f.store.snapshot()).telegramReplyJobs?.find(j=>j.updateKey===first.deliveryKey)?.plan,undefined);
+  }finally{await f.close();}
+ });
+ test('P4 '+engine+': owner menu uses reviewed private callbacks, not group messages or forged taps',async()=>{
+  const f=await fixture(engine);try{
+   const screen=await phase4CommunityScreen(f.community,OWNER,'mi:1:i:09:01');
+   assert.ok(screen);assert.equal(isValidTelegramInlineKeyboard(screen!.keyboard),true);
+   const root=await f.app().handle(ownerCallback(70,'mi:1:i:09:01'));
+   assert.equal(root.status,'APPLIED');
+   assert.match(root.plan?.text??'',/الترحيب والردود/);
+   const group=await f.app().handle(ownerCallback(71,'p4c:1:g:'+GROUP));
+   assert.equal(group.status,'APPLIED');
+   assert.equal(validPhase4CommunityRoute('p4c:1:g:'+GROUP),true);
+   const preview=await f.app().handle(ownerMessage(72,'/setwelcome '+GROUP+' مرحبًا {العضو}'));
+   assert.equal(preview.status,'APPLIED');assert.match(preview.plan?.text??'',/معاينة/);
+   assert.equal((await f.community.view(OWNER,GROUP)).welcome.text,defaultCommunityConfig(GROUP).welcome.text);
+   const approveBtn=preview.plan?.inlineMarkup?.inline_keyboard.flat().find(b=>b.text.includes('اعتماد'))?.callback_data;
+   assert.ok(approveBtn);
+   const saved=await f.app().handle(ownerCallback(73,approveBtn!));
+   assert.equal(saved.status,'APPLIED');
+   assert.equal((await f.community.view(OWNER,GROUP)).welcome.text,'مرحبًا {العضو}');
+   const bad=await f.app().handle({...ownerCallback(74,'p4c:1:g:'+GROUP),
+     callback_query:{...ownerCallback(74,'p4c:1:g:'+GROUP).callback_query,from:{id:300,is_bot:false}}});
+   assert.equal(bad.status,'DENIED');
+  }finally{await f.close();}
+ });
+ test('P4 '+engine+': corrupt/ambiguous saved config fails closed in both storage engines',async()=>{
+  const f=await fixture(engine);try{
+   await enable(f,'REPLIES');
+   await assert.rejects(f.store.transaction(s=>{
+    s.phase4Community!.configs.push({...s.phase4Community!.configs[0]!});
+   }),/Unsupported state schema/);
+   assert.equal((await f.store.snapshot()).phase4Community?.configs.length,1);
+   await f.policy.revokeChat(OWNER,GROUP);
+   await assert.rejects(f.community.pending(OWNER,{kind:'WELCOME_ON'},GROUP),/COMMUNITY_GROUP_UNAVAILABLE/);
+  }finally{await f.close();}
+ });
+}
+test('P4 command parser rejects malformed editing and callback routes',()=>{
+ assert.deepEqual(parsePhase4CommunityCommand('/community'),{kind:'HOME'});
+ assert.equal(parsePhase4CommunityCommand('/replyadd -100123 WORD x without separator'),null);
+ assert.equal(parsePhase4CommunityCommand('/replydel -100123 ../bad'),null);
+ for(const bad of ['p4c:1:g:123','p4c:1:c:invalid','p4c:1:t:-100:w:2',
+  'p4c:1:l:00','p4c:1:c:'+('f'.repeat(24))+'\n'])
+  assert.equal(validPhase4CommunityRoute(bad),false,bad);
+});
+
+test('P4 safe custom command replies are namespaced and never capture other bots or moderation commands',()=>{
+ const rule={id:'123456789abc',trigger:'m_grants',response:'الدليل',match:'COMMAND' as const,
+  enabled:true,cooldownMs:60000};
+ assert.equal(matchCommunityRule(rule,'/m_grants'),true);
+ assert.equal(matchCommunityRule(rule,'/m_grants تفاصيل'),true);
+ for(const wrong of ['/ban','/m_grants@OtherBot','/m_grants2','النص /m_grants'])
+  assert.equal(matchCommunityRule(rule,wrong),false,wrong);
+ const parsed=parsePhase4CommunityCommand('/replyadd '+GROUP+' topic:777 COMMAND m_grants | رابط الدليل');
+ assert.deepEqual(parsed,{kind:'EDIT',chatId:GROUP,request:{kind:'REPLY_ADD',
+  match:'COMMAND',trigger:'m_grants',text:'رابط الدليل',topicId:777}});
+ assert.equal(parsePhase4CommunityCommand('/replyadd '+GROUP+' COMMAND start | محظور'),null);
+ assert.equal(parsePhase4CommunityCommand('/replyadd '+GROUP+' topic:0 WORD grant | no'),null);
+});
+
+for(const engine of ['json','sqlite'] as const){
+ test('P4 '+engine+': approved groups can prepare greetings before remote presence is observed',async()=>{
+  const f=await fixture(engine);try{
+   await f.policy.setPresence(GROUP,false);
+   const draft=await f.community.pending(OWNER,{kind:'WELCOME_ON'},GROUP);
+   const applied=await f.community.approve(OWNER,draft.id);
+   assert.equal(applied.welcome.enabled,true);
+   await f.policy.revokeChat(OWNER,GROUP);
+   await assert.rejects(f.community.view(OWNER,GROUP),/COMMUNITY_GROUP_UNAVAILABLE|COMMUNITY_OWNER_DENIED/);
+  }finally{await f.close();}
+ });
+ test('P4 '+engine+': owner can dry-run reply rules and explain why a sample does not match without sending',async()=>{
+  const f=await fixture(engine);try{
+   const off=await f.community.diagnose(OWNER,GROUP,'منحة');
+   assert.equal(off.status,'REPLIES_DISABLED');
+   const newRule=await f.community.pending(OWNER,{kind:'REPLY_ADD',
+    match:'WORD',trigger:'منحة',text:'اقرأ الدليل'},GROUP);
+   await f.community.approve(OWNER,newRule.id);
+   await enable(f,'REPLIES');
+   const unchanged=JSON.stringify((await f.store.snapshot()).phase4Community);
+   const missing=await f.community.diagnose(OWNER,GROUP,'جامعة');
+   assert.equal(missing.status,'NO_MATCH');
+   const found=await f.community.diagnose(OWNER,GROUP,'منحة دراسية');
+   assert.equal(found.status,'MATCH');
+   assert.match(found.preview??'',/اقرأ الدليل/);
+   assert.equal(JSON.stringify((await f.store.snapshot()).phase4Community),unchanged);
+   await assert.rejects(f.community.diagnose(MEMBER,GROUP,'منحة'),/COMMUNITY_OWNER_DENIED/);
+  }finally{await f.close();}
+ });
+ test('P4 '+engine+': topic-specific command replies appear only in matching topic and never double-send',async()=>{
+  const f=await fixture(engine);try{
+   const parsed=parsePhase4CommunityCommand('/replyadd '+GROUP+' topic:777 COMMAND m_grants | ملف المنح');
+   assert.ok(parsed&&parsed.kind==='EDIT');
+   await f.community.approve(OWNER,(await f.community.pending(OWNER,parsed.request,GROUP)).id);
+   await enable(f,'REPLIES');
+   const other=await f.app().handle(groupMessage(440,'/m_grants',300,778));
+   assert.equal(other.plan,undefined);
+   const matched=await f.app().handle(groupMessage(441,'/m_grants',300,777));
+   assert.equal(matched.status,'APPLIED');assert.match(matched.plan?.text??'',/ملف المنح/);
+   assert.equal(matched.plan?.messageThreadId,777);
+   const duplicate=await f.app().handle(groupMessage(441,'/m_grants',300,777));
+   assert.equal(duplicate.plan,undefined);
+   assert.ok(['DUPLICATE','UNKNOWN'].includes(duplicate.status));
+  }finally{await f.close();}
+ });
+}
+
+for(const engine of ['json','sqlite'] as const){
+ test('P4 '+engine+': per-rule pause, resume and cooldown require owner review and persist',async()=>{
+  const f=await fixture(engine);try{
+   const create=await f.community.pending(OWNER,{kind:'REPLY_ADD',match:'WORD',
+    trigger:'منحة',text:'دليل المنح'},GROUP);
+   const added=await f.community.approve(OWNER,create.id);
+   const ruleId=added.rules[0]!.id;
+   await enable(f,'REPLIES');
+   const pause=await f.community.pending(OWNER,{kind:'REPLY_DISABLE',ruleId},GROUP);
+   assert.equal((await f.community.view(OWNER,GROUP)).rules[0]?.enabled,true);
+   const disabled=await f.community.approve(OWNER,pause.id);
+   assert.equal(disabled.rules[0]!.enabled,false);
+   assert.equal(await f.community.propose({kind:'TEXT',chatId:GROUP,actorId:MEMBER,
+    memberName:'طالب',groupName:'مجموعة',messageText:'منحة'},'b3-webhook:bot-main:700'),null);
+   const resume=await f.community.pending(OWNER,{kind:'REPLY_ENABLE',ruleId},GROUP);
+   await f.community.approve(OWNER,resume.id);
+   const rate=await f.community.pending(OWNER,{kind:'REPLY_COOLDOWN',ruleId,cooldownMs:120000},GROUP);
+   assert.equal((await f.community.view(OWNER,GROUP)).rules[0]!.cooldownMs,60000);
+   const updated=await f.community.approve(OWNER,rate.id);
+   assert.equal(updated.rules[0]!.cooldownMs,120000);
+   const msg={kind:'TEXT' as const,chatId:GROUP,actorId:MEMBER,
+    memberName:'طالب',groupName:'مجموعة',messageText:'منحة'};
+   assert.ok(await f.community.propose(msg,'b3-webhook:bot-main:701'));
+   f.setNow(f.now()+70000);
+   assert.equal(await f.community.propose(msg,'b3-webhook:bot-main:702'),null);
+   f.setNow(f.now()+50001);
+   assert.ok(await f.community.propose(msg,'b3-webhook:bot-main:703'));
+  }finally{await f.close();}
+ });
+ test('P4 '+engine+': rule toggles appear in owner inline panel with freshness checks',async()=>{
+  const f=await fixture(engine);try{
+   const draft=await f.community.pending(OWNER,{kind:'REPLY_ADD',
+    match:'EXACT',trigger:'دليل',text:'الإجابة'},GROUP);
+   const config=await f.community.approve(OWNER,draft.id);
+   const id=config.rules[0]!.id;
+   const rules=await phase4CommunityScreen(f.community,OWNER,'p4c:1:r:'+GROUP+':0');
+   assert.ok(rules);
+   const toggle=rules?.keyboard.inline_keyboard.flat().find(b=>b.callback_data.startsWith('p4c:1:e:'));
+   assert.ok(toggle);
+   const preview=await phase4CommunityScreen(f.community,OWNER,toggle!.callback_data);
+   const confirm=preview!.keyboard.inline_keyboard.flat().find(b=>b.callback_data.startsWith('p4c:1:c:'));
+   assert.ok(confirm);
+   const modified=await phase4CommunityScreen(f.community,OWNER,confirm!.callback_data);
+   assert.ok(modified);
+   assert.equal((await f.community.view(OWNER,GROUP)).rules[0]!.enabled,false);
+   assert.equal(await phase4CommunityScreen(f.community,OWNER,confirm!.callback_data).catch(()=>null),null);
+   const command=parsePhase4CommunityCommand('/replyrate '+GROUP+' '+id+' 90');
+   assert.deepEqual(command,{kind:'EDIT',chatId:GROUP,request:
+    {kind:'REPLY_COOLDOWN',ruleId:id,cooldownMs:90000}});
+  }finally{await f.close();}
+ });
+}
+
+test('P4 rules-link template uses only explicitly confirmed Telegram HTTPS links',async()=>{
+ const config=defaultCommunityConfig(GROUP);
+ assert.equal(config.rulesUrl,undefined);
+ const student={kind:'JOIN' as const,chatId:GROUP,actorId:MEMBER,memberName:'طالب',groupName:'منارتك'};
+ const template='القوانين: {رابط_القوانين}';
+ assert.equal(renderCommunityTemplate(template,student,1_000_000),'القوانين: ');
+ const example='https://t.me/manaratak_rules/3';
+ assert.equal(renderCommunityTemplate(template,student,1_000_000,example),'القوانين: '+example);
+ for(const unsafe of ['http://t.me/test','https://t.me.evil.org/x',
+  'https://user:secret@t.me/x','https://t.me/x#token',
+  'https://t.me/x?start=private','javascript:alert(1)'])
+  assert.equal(parsePhase4CommunityCommand('/setruleslink '+GROUP+' '+unsafe),null,unsafe);
+ const command=parsePhase4CommunityCommand('/setruleslink '+GROUP+' '+example);
+ assert.deepEqual(command,{kind:'EDIT',chatId:GROUP,request:{kind:'RULES_LINK_SET',text:example}});
+ assert.deepEqual(parsePhase4CommunityCommand('/clearruleslink '+GROUP),
+  {kind:'EDIT',chatId:GROUP,request:{kind:'RULES_LINK_CLEAR'}});
+});
+
+for(const engine of ['json','sqlite'] as const){
+ test('P4 '+engine+': rules links are review-gated, persist, render and revoke queued welcome',async()=>{
+  const f=await fixture(engine);try{
+   const template=await f.community.pending(OWNER,
+    {kind:'WELCOME_TEXT',text:'أهلًا {العضو}! القوانين: {رابط_القوانين}'},GROUP);
+   await f.community.approve(OWNER,template.id);
+   await enable(f,'WELCOME');
+   const before=await f.app().handle(joinMessage(790,'JOIN'));
+   assert.equal(before.status,'APPLIED');
+   assert.equal(before.plan?.text,'أهلًا فاطمة &lt;&amp;&gt;! القوانين: ');
+   const draft=await f.community.pending(OWNER,
+    {kind:'RULES_LINK_SET',text:'https://t.me/manaratak_rules/3'},GROUP);
+   assert.equal((await f.community.view(OWNER,GROUP)).rulesUrl,undefined);
+   assert.match(f.community.preview(draft),/manaratak_rules/);
+   await assert.rejects(f.community.approve(MEMBER,draft.id),/COMMUNITY_DRAFT_NOT_FOUND/);
+   const approved=await f.community.approve(OWNER,draft.id);
+   assert.equal(approved.rulesUrl,'https://t.me/manaratak_rules/3');
+   const restored=await new BotStore(f.file,{engine}).snapshot();
+   assert.equal(restored.phase4Community?.configs[0]?.rulesUrl,approved.rulesUrl);
+   let sent=0;
+   const sender=new TelegramReplyDispatcher(f.store,f.policy,
+    {send:async()=>{sent++;return {status:'CONFIRMED' as const,messageId:900};}},f.now);
+   assert.equal((await sender.dispatch(before.deliveryKey!)).status,'FAILED_CONFIRMED');
+   assert.equal(sent,0);
+   f.setNow(f.now()+9000);
+   // A second unique member joins; original member remains under its anti-spam cooldown.
+   const after=await f.app().handle(joinMessage(791,'JOIN','301'));
+   assert.match(after.plan?.text??'',/https:\/\/t.me\/manaratak_rules\/3/);
+   const remove=await f.community.pending(OWNER,{kind:'RULES_LINK_CLEAR'},GROUP);
+   await f.community.approve(OWNER,remove.id);
+   assert.equal((await f.community.view(OWNER,GROUP)).rulesUrl,undefined);
+   assert.equal((await sender.dispatch(after.deliveryKey!)).status,'FAILED_CONFIRMED');
+   assert.equal(sent,0);
+  }finally{await f.close();}
+ });
+ test('P4 '+engine+': malicious or unauthorized links never become durable policy',async()=>{
+  const f=await fixture(engine);try{
+   for(const url of ['https://evil.test/abc','https://t.me@evil.test/a',
+    'http://t.me/a','https://t.me/a?private=1','https://t.me/a#fragment'])
+    await assert.rejects(f.community.pending(OWNER,{kind:'RULES_LINK_SET',text:url},GROUP));
+   await assert.rejects(f.community.pending(MEMBER,
+    {kind:'RULES_LINK_SET',text:'https://t.me/manaratak_rules'},GROUP));
+   assert.equal((await f.community.view(OWNER,GROUP)).rulesUrl,undefined);
+  }finally{await f.close();}
+ });
+}
+
+for(const engine of ['json','sqlite'] as const){
+ test('P4 '+engine+': rules-link owner conversation previews, confirms and clears without premature saves',async()=>{
+  const f=await fixture(engine);try{
+   const url='https://t.me/manaratak_rules/4';
+   const first=await f.app().handle(ownerMessage(810,'/setruleslink '+GROUP+' '+url));
+   assert.equal(first.status,'APPLIED');
+   assert.match(first.plan?.text??'',/manaratak_rules/);
+   assert.equal((await f.community.view(OWNER,GROUP)).rulesUrl,undefined);
+   const button=first.plan?.inlineMarkup?.inline_keyboard.flat()
+    .find(b=>b.callback_data.startsWith('p4c:1:c:'));
+   assert.ok(button);
+   const confirm=await f.app().handle(ownerCallback(811,button!.callback_data));
+   assert.equal(confirm.status,'APPLIED');
+   assert.equal((await f.community.view(OWNER,GROUP)).rulesUrl,url);
+   const cleared=await f.app().handle(ownerMessage(812,'/clearruleslink '+GROUP));
+   assert.equal(cleared.status,'APPLIED');
+   assert.equal((await f.community.view(OWNER,GROUP)).rulesUrl,url);
+   const remove=cleared.plan?.inlineMarkup?.inline_keyboard.flat()
+    .find(b=>b.callback_data.startsWith('p4c:1:c:'));
+   assert.ok(remove);
+   assert.equal((await f.app().handle(ownerCallback(813,remove!.callback_data))).status,'APPLIED');
+   assert.equal((await f.community.view(OWNER,GROUP)).rulesUrl,undefined);
+  }finally{await f.close();}
+ });
+}

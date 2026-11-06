@@ -1,4 +1,29 @@
 import {GroupProtectionPolicyService} from './group-protection-policy.js';
+import {Phase4CommunityService} from './phase4-community.js';
+import {Phase4WhisperService} from './phase4-whispers.js';
+import {startPhase4WhisperPrivacyMaintenance} from './phase4-whisper-maintenance.js';
+import {Phase4DiscussionService} from './phase4-discussions.js';
+import {startPhase4DiscussionPrivacyMaintenance} from './phase4-discussion-maintenance.js';
+import {Phase4PollService} from './phase4-polls.js';
+import {startPhase4PollPrivacyMaintenance} from './phase4-poll-maintenance.js';
+import {Phase4EventService} from './phase4-events.js';
+import {startPhase4EventPrivacyMaintenance} from './phase4-event-maintenance.js';
+import {Phase4ExpertService} from './phase4-experts.js';
+import {startPhase4ExpertPrivacyMaintenance} from './phase4-expert-maintenance.js';
+import {Phase4StudyPeersService} from './phase4-study-peers.js';
+import {startPhase4StudyPeerMaintenance} from './phase4-study-peer-maintenance.js';
+import {Phase4BadgesService} from './phase4-badges.js';
+import {startPhase4BadgeMaintenance} from './phase4-badge-maintenance.js';
+import {Phase4ReactionsService} from './phase4-reactions.js';
+import {startPhase4ReactionMaintenance} from './phase4-reaction-maintenance.js';
+import {Phase4LectureService} from './phase4-lectures.js';
+import {startPhase4LectureMaintenance} from './phase4-lecture-maintenance.js';
+import {Phase4QuizService} from './phase4-quizzes.js';
+import {startPhase4QuizMaintenance} from './phase4-quiz-maintenance.js';
+import {Phase4ContestService} from './phase4-contests.js';
+import {startPhase4ContestMaintenance} from './phase4-contest-maintenance.js';
+import {Phase4ServiceCleanupDispatcher,TelegramBotApiServiceCleanupGateway} from './phase4-service-cleanup.js';
+import {Phase4GroupProfileDispatcher,TelegramBotApiGroupProfileGateway} from './phase4-group-profile.js';
 import {startProtectionMaintenance} from './protection-maintenance.js';
 import {createServer,type Server} from 'node:http';
 import {lstat,realpath} from 'node:fs/promises';
@@ -20,6 +45,8 @@ import {readTelegramSafetySwitch,createTelegramSafetyGate} from './telegram-safe
 export interface LiveTelegramConfig{
  ownerId:string;botId:string;botUsername:string;stateFile:string;
  token:string;webhookSecret:string;listenPort:number;publicWebhookUrl:string;safetySwitchFile:string;
+ /** High-impact group-profile writes require a second, explicit env opt-in. */
+ profileEditsEnabled?:boolean;
 }
 /** An advisory URL syntax and topology gate, NOT DNS/TLS or proxy verification.
  * Reject deceptive/non-HTTPS local endpoints and alternate routing before the
@@ -61,6 +88,8 @@ export function loadLiveTelegramConfig(env:Readonly<Record<string,string|undefin
  const publicWebhookUrl=env.TELEGRAM_WEBHOOK_PUBLIC_URL;
  const safetySwitchFile=env.TELEGRAM_SAFETY_FILE;
  if(env.BOT_ENV!=='production'||env.TELEGRAM_ENABLED!=='true'||
+    (env.TELEGRAM_GROUP_PROFILE_EDITS_ENABLED!==undefined&&
+     !['true','false'].includes(env.TELEGRAM_GROUP_PROFILE_EDITS_ENABLED))||
     env.TELEGRAM_REPLY_DELIVERY_ENABLED!=='true'||
     !validOwner(ownerId)||
     !botId||!/^[A-Za-z0-9_-]{1,80}$/.test(botId)||
@@ -77,7 +106,8 @@ export function loadLiveTelegramConfig(env:Readonly<Record<string,string|undefin
     /[\u0000-\u001f\u007f]/u.test(safetySwitchFile)||
     safetySwitchFile===stateFile)
    throw new Error('LIVE_TELEGRAM_CONFIG_INVALID');
- return {ownerId,botId,botUsername,stateFile,token,webhookSecret,listenPort:port,publicWebhookUrl,safetySwitchFile};
+ return {ownerId,botId,botUsername,stateFile,token,webhookSecret,listenPort:port,publicWebhookUrl,safetySwitchFile,
+  ...(env.TELEGRAM_GROUP_PROFILE_EDITS_ENABLED==='true'?{profileEditsEnabled:true}:{})};
 }
 /** Independently checks a pre-existing local state; never initializes databases.
  * Common verification for both the read-only preflight command and real runtime.
@@ -155,7 +185,8 @@ export async function createLiveTelegramServer(config:LiveTelegramConfig,
   BOT_STATE_FILE:config.stateFile,TELEGRAM_BOT_TOKEN:config.token,
   TELEGRAM_WEBHOOK_SECRET:config.webhookSecret,TELEGRAM_LISTEN_PORT:String(config.listenPort),
   TELEGRAM_WEBHOOK_PUBLIC_URL:config.publicWebhookUrl,
-  TELEGRAM_SAFETY_FILE:config.safetySwitchFile
+  TELEGRAM_SAFETY_FILE:config.safetySwitchFile,
+  TELEGRAM_GROUP_PROFILE_EDITS_ENABLED:config.profileEditsEnabled===true?'true':'false'
  });
  await assertPrivateStateReady(check.stateFile);
  // Both RUN and STOP are valid *protected* states; STOP starts only the local
@@ -177,20 +208,68 @@ export async function createLiveTelegramServer(config:LiveTelegramConfig,
   botId:check.botId,botUsername:check.botUsername,
   membership:(chatId,actorId)=>membership.verifyMembership(chatId,actorId),subscription,
   documentDownload:new TelegramBotApiDocumentDownloader(check.token,request,safetyGate),
-  moderationSafetyFile:check.safetySwitchFile,ownerMenuMode:'inline',studentMenuMode:'inline'});
+  moderationSafetyFile:check.safetySwitchFile,ownerMenuMode:'inline',studentMenuMode:'inline',
+  community:new Phase4CommunityService(store,policy)});
  const dispatcher=new TelegramReplyDispatcher(store,policy,
   new TelegramBotApiTextSender(check.token,request),Date.now,safetyGate,subscription,
   (chatId,actorId)=>membership.verifyMembership(chatId,actorId));
  const server=createServer(telegramWebhookListener(app,check.webhookSecret,dispatcher,{},safetyGate,
   new TelegramBotApiCallbackAcker(check.token,request)));
  server.once('listening',()=>{
+  // This privacy timer is independent of protection/Telegram cleanup.
+  // Expired private content is scrubbed without opening an owner menu.
+  const whisperPrivacy=startPhase4WhisperPrivacyMaintenance(
+   new Phase4WhisperService(store,policy),undefined,
+   ()=>process.stderr.write('WHISPER_PRIVACY_MAINTENANCE_FAILED\n'));
+  const discussionPrivacy=startPhase4DiscussionPrivacyMaintenance(
+   new Phase4DiscussionService(store,policy),undefined,
+   ()=>process.stderr.write('DISCUSSION_PRIVACY_MAINTENANCE_FAILED\n'));
+  const pollPrivacy=startPhase4PollPrivacyMaintenance(
+   new Phase4PollService(store,policy),undefined,
+   ()=>process.stderr.write('POLL_PRIVACY_MAINTENANCE_FAILED\n'));
+  const eventPrivacy=startPhase4EventPrivacyMaintenance(
+   new Phase4EventService(store,policy),undefined,
+   ()=>process.stderr.write('EVENT_PRIVACY_MAINTENANCE_FAILED\n'));
+  const expertPrivacy=startPhase4ExpertPrivacyMaintenance(
+   new Phase4ExpertService(store,policy),undefined,
+   ()=>process.stderr.write('EXPERT_PRIVACY_MAINTENANCE_FAILED\n'));
+  const studyPrivacy=startPhase4StudyPeerMaintenance(
+   new Phase4StudyPeersService(store,policy),undefined,
+   ()=>process.stderr.write('STUDY_PRIVACY_MAINTENANCE_FAILED\n'));
+  const badgePrivacy=startPhase4BadgeMaintenance(
+   new Phase4BadgesService(store,policy),undefined,
+   ()=>process.stderr.write('BADGE_PRIVACY_MAINTENANCE_FAILED\n'));
+  const reactionPrivacy=startPhase4ReactionMaintenance(
+   new Phase4ReactionsService(store,policy),undefined,
+   ()=>process.stderr.write('REACTION_PRIVACY_MAINTENANCE_FAILED\n'));
+  const lecturePrivacy=startPhase4LectureMaintenance(
+   new Phase4LectureService(store,policy),undefined,
+   ()=>process.stderr.write('LECTURE_MAINTENANCE_FAILED\n'));
+  const quizPrivacy=startPhase4QuizMaintenance(
+   new Phase4QuizService(store,policy),undefined,
+   ()=>process.stderr.write('QUIZ_PRIVACY_MAINTENANCE_FAILED\n'));
+  const contestPrivacy=startPhase4ContestMaintenance(
+   new Phase4ContestService(store,policy),undefined,
+   ()=>process.stderr.write('CONTEST_PRIVACY_MAINTENANCE_FAILED\n'));
   const protection=new GroupProtectionPolicyService(store,policy);
+  const serviceCleaner=new Phase4ServiceCleanupDispatcher(store,policy,
+   new TelegramBotApiServiceCleanupGateway(check.token,request),Date.now,safetyGate);
+  const profileEditor=check.profileEditsEnabled===true?
+   new Phase4GroupProfileDispatcher(store,policy,
+    new TelegramBotApiGroupProfileGateway(check.token,request),Date.now,safetyGate):null;
   const cleanup=startProtectionMaintenance(async()=>{
    const result=await protection.cleanupFloodWindows();
    if(result.status==='CLOCK_UNTRUSTED')throw Error('PROTECTION_CLOCK_UNTRUSTED');
-  },undefined,()=>process.stderr.write('PROTECTION_MAINTENANCE_FAILED\n'));
-  protectionMaintenanceStops.set(server,cleanup.stop);
-  server.once('close',()=>{void cleanup.stop();});
+   // Explicitly enabled group service deletions only; no retries of unknown API outcomes.
+   await serviceCleaner.runDue(4);
+   // Do not create this dispatcher without explicit runtime opt-in.
+   // Every individual job still requires owner approval and current bot rights.
+   if(profileEditor)await profileEditor.runDue(2);
+  },undefined,()=>process.stderr.write('PROTECTION_OR_SERVICE_MAINTENANCE_FAILED\n'));
+  protectionMaintenanceStops.set(server,async()=>{
+   await Promise.all([whisperPrivacy.stop(),discussionPrivacy.stop(),pollPrivacy.stop(),eventPrivacy.stop(),expertPrivacy.stop(),studyPrivacy.stop(),badgePrivacy.stop(),reactionPrivacy.stop(),lecturePrivacy.stop(),quizPrivacy.stop(),contestPrivacy.stop(),cleanup.stop()]);
+  });
+  server.once('close',()=>{void protectionMaintenanceStops.get(server)?.();});
  });
  // Local-only listener. These are resource budgets, not a substitute for the
  // trusted HTTPS proxy, ingress anti-abuse controls, TLS or real load testing.
