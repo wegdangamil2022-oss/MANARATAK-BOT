@@ -10,6 +10,8 @@ import {Phase4EventService} from './phase4-events.js';
 import {startPhase4EventPrivacyMaintenance} from './phase4-event-maintenance.js';
 import {Phase4ExpertService} from './phase4-experts.js';
 import {startPhase4ExpertPrivacyMaintenance} from './phase4-expert-maintenance.js';
+import {Phase4StudyPeersService} from './phase4-study-peers.js';
+import {startPhase4StudyPeerMaintenance} from './phase4-study-peer-maintenance.js';
 import {Phase4ServiceCleanupDispatcher,TelegramBotApiServiceCleanupGateway} from './phase4-service-cleanup.js';
 import {Phase4GroupProfileDispatcher,TelegramBotApiGroupProfileGateway} from './phase4-group-profile.js';
 import {startProtectionMaintenance} from './protection-maintenance.js';
@@ -221,6 +223,9 @@ export async function createLiveTelegramServer(config:LiveTelegramConfig,
   const expertPrivacy=startPhase4ExpertPrivacyMaintenance(
    new Phase4ExpertService(store,policy),undefined,
    ()=>process.stderr.write('EXPERT_PRIVACY_MAINTENANCE_FAILED\n'));
+  const studyPrivacy=startPhase4StudyPeerMaintenance(
+   new Phase4StudyPeersService(store,policy),undefined,
+   ()=>process.stderr.write('STUDY_PRIVACY_MAINTENANCE_FAILED\n'));
   const protection=new GroupProtectionPolicyService(store,policy);
   const serviceCleaner=new Phase4ServiceCleanupDispatcher(store,policy,
    new TelegramBotApiServiceCleanupGateway(check.token,request),Date.now,safetyGate);
@@ -237,7 +242,7 @@ export async function createLiveTelegramServer(config:LiveTelegramConfig,
    if(profileEditor)await profileEditor.runDue(2);
   },undefined,()=>process.stderr.write('PROTECTION_OR_SERVICE_MAINTENANCE_FAILED\n'));
   protectionMaintenanceStops.set(server,async()=>{
-   await Promise.all([whisperPrivacy.stop(),discussionPrivacy.stop(),pollPrivacy.stop(),eventPrivacy.stop(),expertPrivacy.stop(),cleanup.stop()]);
+   await Promise.all([whisperPrivacy.stop(),discussionPrivacy.stop(),pollPrivacy.stop(),eventPrivacy.stop(),expertPrivacy.stop(),studyPrivacy.stop(),cleanup.stop()]);
   });
   server.once('close',()=>{void protectionMaintenanceStops.get(server)?.();});
  });
