@@ -4,6 +4,7 @@ import type {GroupNetwork} from './group-network-model.js';
 import {validNetworkName} from './group-network-model.js';
 import {prepareNetworkInheritance,pauseNetworkInheritanceByOwner} from './network-inheritance.js';
 import {OwnerNetworkWatchEditor,validOwnerNetworkWatchRoute} from './telegram-network-watch-owner.js';
+import {OwnerNetworkSanctionEditor,validOwnerNetworkSanctionRoute} from './telegram-network-sanction-owner.js';
 import {isValidProtectionPolicy,type ProtectionPolicy} from './protection-rules.js';
 import type {Policy} from './policy.js';
 import type {OwnerInlineScreen} from './telegram-inline-owner.js';
@@ -40,6 +41,7 @@ const validClock=(value:number)=>Number.isSafeInteger(value)&&value>=0&&value<=8
 export function validOwnerNetworkRoute(data:unknown):boolean{
  if(typeof data!=='string'||Buffer.byteLength(data,'utf8')>64)return false;
  return data==='mi:1:i:01:03'||home.test(data)||begin.test(data)||validOwnerNetworkWatchRoute(data)||
+   validOwnerNetworkSanctionRoute(data)||
   [list,detail,policySources,policyPreview,followList,followStop,rename,remove,pick,toggle,stalePage,stalePick,staleBatch,confirm,cancel,historyPage,historyView].some(re=>re.test(data));
 }
 function approved(s:BotState,policy:Policy,actor:string,now:number):Chat[]{
@@ -840,17 +842,26 @@ export class OwnerNetworkEditor{
  async handle(actor:string,data:string):Promise<OwnerInlineScreen|null>{
   if(!this.policy.isOwner(actor)||!validOwnerNetworkRoute(data))return null;
   const watchEditor=new OwnerNetworkWatchEditor(this.store,this.policy,this.clock);
+  const sanctionEditor=new OwnerNetworkSanctionEditor(this.store,this.policy,this.clock);
+  if(validOwnerNetworkSanctionRoute(data)){
+   await this.cancelInput(actor);
+   return sanctionEditor.handle(actor,data);
+  }
   if(validOwnerNetworkWatchRoute(data)){
    await this.cancelInput(actor);
    return watchEditor.handle(actor,data);
   }
   const c=confirm.exec(data);
   if(c){
+   const reviewed=await sanctionEditor.handleReceipt(actor,data);
+   if(reviewed)return reviewed;
    const result=await watchEditor.handle(actor,data);
    return result??this.commit(actor,c[1]!);
   }
   const k=cancel.exec(data);
   if(k){
+   const reviewed=await sanctionEditor.handleReceipt(actor,data);
+   if(reviewed)return reviewed;
    const result=await watchEditor.handle(actor,data);
    return result??this.revoke(actor,k[1]!);
   }
