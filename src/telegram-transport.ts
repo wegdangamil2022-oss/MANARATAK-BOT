@@ -68,6 +68,9 @@ import {parseBadgeMemberCommand,badgeMemberScreen} from './phase4-badge-member.j
 import {Phase4ReactionsService} from './phase4-reactions.js';
 import {Phase4QuizService} from './phase4-quizzes.js';
 import {Phase4GameCatalogService} from './phase4-game-catalog.js';
+import {Phase4ContestService} from './phase4-contests.js';
+import {contestOwnerScreen} from './phase4-contest-owner.js';
+import {parseContestMemberCommand,contestMemberScreen} from './phase4-contest-member.js';
 import {gameCatalogOwnerScreen} from './phase4-game-catalog-owner.js';
 import {parseQuizMemberCommand,quizMemberScreen} from './phase4-quiz-member.js';
 import {quizOwnerScreen} from './phase4-quiz-owner.js';
@@ -875,6 +878,50 @@ export class TelegramUpdateApplication {
       this.opts.store,this.opts.policy,this.clock),actorId,event.callbackData??text);
      if(!screen)return {status:'DENIED',reason:'STUDY_OWNER_STALE_OR_DENIED'};
      return {status:'APPLIED',reason:'PHASE4_STUDY_OWNER',
+      plan:this.plan(chatId,screen.text,undefined,screen.keyboard,event.callbackMessageId)};
+    }
+    // Phase 4 / 08:02 — private opt-in registrations and owner-reviewed
+    // multi-round educational contests. Contest-bound quiz answers are
+    // fenced by group membership, subscriptions and registration state.
+    if(kind==='private'&&parseContestMemberCommand(text)!==null){
+     if(actorId!==chatId||event.edited||event.forwarded||
+      event.callbackData!==undefined)
+      return {status:'DENIED',reason:'CONTEST_MEMBER_PRIVATE_ORIGIN_REQUIRED'};
+     const verify=async(groupId:string,memberId:string):Promise<'VERIFIED'|'NOT_MEMBER'|'UNKNOWN'>=>{
+      let membership:'VERIFIED'|'NOT_MEMBER'|'UNKNOWN'='UNKNOWN';
+      try{membership=await this.opts.membership(groupId,memberId);}
+      catch{return 'UNKNOWN';}
+      if(membership!=='VERIFIED')return membership;
+      const snap=await this.opts.store.snapshot();
+      const mode=subscriptionRequirementMode(snap,groupId);
+      if(mode==='INVALID')return 'UNKNOWN';
+      if(mode==='NONE')return 'VERIFIED';
+      if(!this.opts.subscription)return 'UNKNOWN';
+      try{
+       const result=await this.opts.subscription.verify(groupId,memberId);
+       return result.status==='MEMBER'||result.status==='NOT_REQUIRED'?
+        'VERIFIED':'UNKNOWN';
+      }catch{return 'UNKNOWN';}
+     };
+     const screen=await contestMemberScreen(new Phase4ContestService(
+      this.opts.store,this.opts.policy,this.clock,verify),actorId,text);
+     if(!screen)return {status:'DENIED',reason:'CONTEST_MEMBER_INVALID'};
+     return {status:'APPLIED',reason:'PHASE4_CONTEST_MEMBER',
+      plan:this.plan(chatId,screen.text)};
+    }
+    const contestOwnerInput=kind==='private'&&(
+     event.callbackData==='mi:1:i:08:02'||
+     event.callbackData?.startsWith('ct:1:')||
+     text==='/contests'||text.startsWith('/contestnew ')||
+     text.startsWith('/contestadd '));
+    if(contestOwnerInput){
+     if(!this.opts.policy.isOwner(actorId)||actorId!==chatId||
+      event.edited||event.forwarded)
+      return {status:'DENIED',reason:'CONTEST_OWNER_PRIVATE_ONLY'};
+     const screen=await contestOwnerScreen(new Phase4ContestService(
+      this.opts.store,this.opts.policy,this.clock),actorId,event.callbackData??text);
+     if(!screen)return {status:'DENIED',reason:'CONTEST_OWNER_STALE_OR_DENIED'};
+     return {status:'APPLIED',reason:'PHASE4_CONTEST_OWNER',
       plan:this.plan(chatId,screen.text,undefined,screen.keyboard,event.callbackMessageId)};
     }
     // Phase 4 / 08:01 — owner-reviewed per-group game availability,
