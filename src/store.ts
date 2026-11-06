@@ -1,9 +1,5 @@
 import {isValidFloodWindow,type FloodWindow} from './protection-flood.js';
 import {validGroupNetworks,type GroupNetwork} from './group-network-model.js';
-import {validNetworkInheritanceLinks,type NetworkInheritanceLink} from './network-inheritance-model.js';
-import {validNetworkWatchCases,type NetworkWatchCase} from './network-watchlist-model.js';
-import {validNetworkSanctionReviews,validNetworkSanctionReviewReferences,
- type NetworkSanctionReview} from './network-sanction-review-model.js';
 import {validCommunityFolders,type CommunityFolder} from './community-folder-model.js';
 import {validCommunityState,type CommunityAutomationState} from './phase4-community-model.js';
 import {validWhisperState,type WhisperState} from './phase4-whisper-model.js';
@@ -178,12 +174,6 @@ export interface BotState {
   buttonStudio?:StudioState;
   /** Local owner network folders; never evidence of Telegram rights. */
   groupNetworks?:GroupNetwork[];
-  /** Explicit owner-opted, fail-closed, local only network inheritance links. */
-  networkInheritance?:NetworkInheritanceLink[];
-  /** NETWORK-003: owner-reviewed advisory only; not a ban/mute propagation ledger. */
-  networkWatchCases?:NetworkWatchCase[];
-  /** Per-target human-only transfer review, never an enforcement grant or queue. */
-  networkSanctionReviews?:NetworkSanctionReview[];
   schemaVersion: 8;
   /** Optional additive per-group monitor policy, validated on every read/write. */
   protectionPolicies?:GroupProtectionRecord[];
@@ -270,11 +260,6 @@ export class BotStore {
       (previous.phase4Community!==undefined&&!validCommunityState(previous.phase4Community))||
       (previous.phase4Whispers!==undefined&&!validWhisperState(previous.phase4Whispers))||
       (previous.groupNetworks!==undefined&&!validGroupNetworks(previous.groupNetworks))||
-      (previous.networkInheritance!==undefined&&!validNetworkInheritanceLinks(previous.networkInheritance))||
-      (previous.networkWatchCases!==undefined&&!validNetworkWatchCases(previous.networkWatchCases))||
-      (previous.networkSanctionReviews!==undefined&&(!validNetworkSanctionReviews(previous.networkSanctionReviews)||
-       !validNetworkSanctionReviewReferences(previous.networkSanctionReviews,
-        Array.isArray(previous.networkWatchCases)?previous.networkWatchCases as NetworkWatchCase[]:[])))||
       (previous.communityFolders!==undefined&&!validCommunityFolders(previous.communityFolders))||
       (previous.privateSettingsRevision!==undefined&&(typeof previous.privateSettingsRevision!=='number'||!Number.isSafeInteger(previous.privateSettingsRevision)||previous.privateSettingsRevision<0||previous.privateSettingsRevision>=Number.MAX_SAFE_INTEGER))||
       (previous.buttonStudio!==undefined&&!validStudioState(previous.buttonStudio))||
