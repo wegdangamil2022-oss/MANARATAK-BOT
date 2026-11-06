@@ -28,7 +28,7 @@ for(const engine of ['json','sqlite'] as const){
   const add=async(chat=A,network=N)=>{
    const id=(100000000000+(++next)).toString();await store.transaction(s=>{
     s.networkWatchCases??=[];s.networkWatchCases.push({id,networkId:network,
-     networkRevision:1,sourceChatId:chat,sourceChatVersion:1,subjectId:'999888',
+     networkRevision:1,sourceChatId:chat,sourceChatVersion:1,subjectId:(900000+next).toString(),
      category:'SPAM',revision:1,status:'PENDING',submittedBy:OWNER,submittedAt:now});
    });return id;
   };
