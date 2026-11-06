@@ -152,7 +152,8 @@ export class Phase4StudyPeersService{
    policyFingerprint(fresh,row.chatId)!==fence)return null;
   return {topic:row.topic,level:row.level,startsAt:row.startsAt,endsAt:row.endsAt,
    capacity:row.capacity,joined:liveState.members.filter(x=>
-    x.circleId===id&&x.status==='JOINED').length,status:row.status};
+    x.circleId===id&&x.status==='JOINED').length,
+   status:row.status==='OPEN'?'OPEN':'CLOSED'};
  }
  async report(actor:string,id:string,reason:string):Promise<{status:ReportStatus}>{
   const deny=(status:ReportStatus)=>({status});
