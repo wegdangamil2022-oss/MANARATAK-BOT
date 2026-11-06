@@ -87,6 +87,7 @@ async function detail(service:Phase4GameCatalogService,actor:string,id:string):
   '\nفترة الهدوء UTC: '+(v.quietStartUtcMinute===undefined?
    'غير مضبوطة':format(v.quietStartUtcMinute)+' – '+format(v.quietEndUtcMinute!))+
   '\nالإصدار: '+v.revision+'؛ كل إجراء يحتاج معاينة ثم تأكيد صريح.\n'+
+  (v.hasPolicy?'':'⚠️ السياسة الافتراضية غير محفوظة؛ لن يُطبق سقف الجولات المعروض حتى اعتماد أول تعديل.\n')+
   'تعطيل الأسئلة يمنع فتح أسئلة جديدة أو استقبال إجابات لجولات سابقة.\n'+
   'الحد اليومي يتعلق بفتح الأسئلة، وليس بحقوق المشرف أو عقوبات المجموعة.\n'+
   v.games.map(x=>(x.available?'✅ ':'⌛ ')+esc(x.label)+(x.available?'':' — غير مبرمج')).join('\n')+
