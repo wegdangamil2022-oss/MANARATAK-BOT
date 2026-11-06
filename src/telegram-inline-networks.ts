@@ -187,6 +187,61 @@ export class OwnerNetworkEditor{
      [btn('✖ إلغاء المعاينة','nw:1:k:'+ref.slice(2))]]);
   });
  }
+ /** NETWORK-004: persisted emergency gate uses owner approval only.
+  * Stale group memberships may NOT block the owner from STOPPING; no
+  * Telegram operation is made, and paused policies remain locally intact. */
+ private emergencyProof(s:BotState,id:string):string{
+  const n=this.find(s,id);
+  return createHash('sha256').update(JSON.stringify([
+   n,s.networkEmergencyControls??[],s.networkInheritance??[],
+   s.chats,s.grants,s.privateFeatures,s.privateSettingsRevision??null
+  ])).digest('hex');
+ }
+ private emergencyPage(s:BotState,actor:string,now:number,id:string):OwnerInlineScreen|null{
+  const n=this.find(s,id);
+  if(!this.auth(s,actor,now)||!n)return null;
+  const stopped=networkEmergencyStopped(s,id);
+  const links=(s.networkInheritance??[]).filter(x=>x.networkId===id);
+  const active=links.filter(x=>x.status==='ACTIVE').length;
+  const paused=links.filter(x=>x.status==='PAUSED').length;
+  const record=(s.networkEmergencyControls??[]).find(x=>x.networkId===id);
+  return ui('<b>🚨 طوارئ الشبكة</b>\\nالشبكة: '+escape(n.name)+
+   '\\nالحالة: '+(stopped?'⛔ الإيقاف الطارئ مفعل':'✅ لا يوجد إيقاف طارئ')+
+   '\\nالمتابعات النشطة: '+active+' · المتوقفة: '+paused+
+   '\\nإصدار قرار الطوارئ: '+(record?.revision??0)+
+   '\\nالإيقاف يوقف مزامنة سياسات مراقبة الشبكة المحلية فقط، ولا يغير سياسات المجموعات الحالية أو عقوبات Telegram. رفع الإيقاف لا يعيد تشغيل أي متابعة سابقة تلقائيًا.',[
+    [stopped?btn('🔓 رفع الإيقاف بموافقة','nw:1:er:'+id):
+     btn('⛔ إيقاف طارئ للشبكة','nw:1:es:'+id)],
+    [btn('⏸️ إدارة المتابعات','nw:1:f:'+id+':0')],
+    [btn('↩️ بطاقة الشبكة','nw:1:d:'+id)]
+   ]);
+ }
+ private async previewEmergency(actor:string,id:string,action:'STOP'|'RESUME'):Promise<OwnerInlineScreen|null>{
+  return this.store.transaction(s=>{
+   const now=this.clock(),n=this.find(s,id);
+   if(!this.auth(s,actor,now)||!n||
+    action==='STOP'&&networkEmergencyStopped(s,id)||
+    action==='RESUME'&&!networkEmergencyStopped(s,id))return null;
+   const state=(s.networkEmergencyControls??[]).find(x=>x.networkId===id);
+   const revision=state?.revision??0;
+   const active=(s.networkInheritance??[]).filter(x=>x.networkId===id&&x.status==='ACTIVE').length;
+   const proof=this.emergencyProof(s,id);
+   const ref='c_'+randomBytes(18).toString('base64url');
+   if(s.callbacks.some(x=>x.ref===ref))return null;
+   s.callbacks.push({ref,action:PREFIX+'emergency:'+JSON.stringify([id,revision,action,proof]),
+    actorId:actor,chatId:'private',policyVersion:0,oneShot:true,used:false,
+    revoked:false,expiresAt:now+TTL});
+   return ui('<b>🔎 معاينة '+(action==='STOP'?'الإيقاف الطارئ':'رفع الإيقاف')+'</b>\\n'+
+    'الشبكة: '+escape(n.name)+'\\nمتابعات ستتوقف: '+active+
+    '\\n'+(action==='STOP'?
+     'سيتم وقف جميع متابعات سياسات الشبكة الآن وحظر أي متابعة جديدة حتى موافقة لاحقة.':
+     'ستُتاح إعدادات المراقبة المستقبلية فقط؛ لا تُستأنف المتابعات المتوقفة.')+
+    '\\nلا تتغير عقوبات Telegram أو حقوق المجموعات. التأكيد صالح لدقيقتين فقط.',[
+     [btn('✅ تأكيد '+(action==='STOP'?'الإيقاف':'رفع الإيقاف'),'nw:1:c:'+ref.slice(2))],
+     [btn('✖ إلغاء المعاينة','nw:1:k:'+ref.slice(2))]
+    ]);
+  });
+ }
  /** No grant or enforcement. Proof binds network and exact follow record. */
  private followStopProof(s:BotState,n:GroupNetwork,id:string):string{
   const rows=(s.networkInheritance??[]).filter(x=>x.id===id);
