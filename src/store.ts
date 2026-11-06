@@ -1,5 +1,6 @@
 import {isValidFloodWindow,type FloodWindow} from './protection-flood.js';
 import {validGroupNetworks,type GroupNetwork} from './group-network-model.js';
+import {validNetworkInheritanceLinks,type NetworkInheritanceLink} from './network-inheritance-model.js';
 import {validNetworkWatchCases,type NetworkWatchCase} from './network-watchlist-model.js';
 import {validNetworkSanctionReviews,validNetworkSanctionReviewReferences,
  type NetworkSanctionReview} from './network-sanction-review-model.js';
@@ -184,6 +185,8 @@ export interface BotState {
   buttonStudio?:StudioState;
   /** Local owner network folders; never evidence of Telegram rights. */
   groupNetworks?:GroupNetwork[];
+  /** Owner-reviewed network POLICY-only inheritance links, never automatic Telegram enforcement. */
+  networkInheritance?:NetworkInheritanceLink[];
   /** Owner-reviewed, information-only network risk reports. Never dispatches bans. */
   networkWatchCases?:NetworkWatchCase[];
   /** Per-group proposed moderation review, never an automatic sanction grant. */
@@ -282,6 +285,7 @@ export class BotStore {
       (previous.subscriptionObservedMembers!==undefined&&!validSubscriptionObservedMembers(previous.subscriptionObservedMembers))||
       (previous.subscriptionGraceMembers!==undefined&&(!Array.isArray(previous.subscriptionGraceMembers)||previous.subscriptionGraceMembers.length>1000||previous.subscriptionGraceMembers.some(row=>!validSubscriptionGraceMember(row))||new Set(previous.subscriptionGraceMembers.map((row:SubscriptionGraceMember)=>JSON.stringify([row.chatId,row.memberId]))).size!==previous.subscriptionGraceMembers.length))||
       (previous.groupNetworks!==undefined&&!validGroupNetworks(previous.groupNetworks))||
+      (previous.networkInheritance!==undefined&&!validNetworkInheritanceLinks(previous.networkInheritance))||
       (previous.networkWatchCases!==undefined&&!validNetworkWatchCases(previous.networkWatchCases))||
       (previous.networkSanctionReviews!==undefined&&(!validNetworkSanctionReviews(previous.networkSanctionReviews)||
        !validNetworkSanctionReviewReferences(previous.networkSanctionReviews,
