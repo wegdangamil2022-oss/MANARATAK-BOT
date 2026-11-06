@@ -107,7 +107,7 @@ for(const engine of ['json','sqlite'] as const){
    assert.equal(validOwnerNetworkRoute('nw:1:sl:'+N+':b:0'),false);
    const view=await f.editor.handle(OWNER,'nw:1:sh:'+N);
    assert.equal(await f.editor.handle('200',button(view,'المساعد')),null);
-   assert.equal(await f.editor.handle(OWNER,'nw:1:sh:'+OTHER),null);
+   assert.match((await f.editor.handle(OWNER,'nw:1:sh:'+OTHER))?.text??'',/شبكة مستقلة/u);
   }finally{await f.close();}
  });
  test(engine+' NETWORK-004 snapshot drift invalidates selected control without changes',async()=>{
