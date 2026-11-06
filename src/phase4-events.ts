@@ -233,6 +233,15 @@ export class Phase4EventService{
    s.phase4Events=d;return true;
   });
  }
+ /** Read-only owner review of unpublished post-event material. */
+ async ownerSummary(actor:string,id:string):Promise<EventSummary|null>{
+  const s=await this.store.snapshot(),d=state(s);
+  const matches=d.events.filter(e=>e.id===id),e=matches[0];
+  if(matches.length!==1||!e||e.ownerId!==actor||
+   this.owner(s,actor,e.chatId)!==e.chatVersion)return null;
+  const rows=d.summaries.filter(x=>x.eventId===id);
+  return rows.length===1?structuredClone(rows[0]!):null;
+ }
  async summary(memberId:string,id:string):Promise<{text:string;urls:string[]}|null>{
   if(!eventUser(memberId))return null;
   const s=await this.store.snapshot(),d=state(s);
