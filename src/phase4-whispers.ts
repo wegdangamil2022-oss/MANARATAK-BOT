@@ -120,23 +120,38 @@ export class Phase4WhisperService{
   if(!isUser(memberId)||!isGroup(chatId)||typeof enabled!=='boolean'||!validClock(now))
    return false;
   const before=await this.store.snapshot();
-  if(!approvedChat(before,this.policy,chatId))return false;
-  try{if(await this.verifyMember(chatId,memberId)!=='VERIFIED')return false;}
-  catch{return false;}
+  // A member must remain free to WITHDRAW permission after leaving or
+  // losing group authorization. Opt-out is self-service and never requires
+  // a potentially unavailable external membership lookup.
+  if(enabled){
+   if(!approvedChat(before,this.policy,chatId))return false;
+   try{if(await this.verifyMember(chatId,memberId)!=='VERIFIED')return false;}
+   catch{return false;}
+  }
   return this.store.transaction(s=>{
-   const chat=approvedChat(s,this.policy,chatId);
-   if(!chat||chat.version!==getChat(before,chatId)?.version)return false;
    const data=clone(s),existing=data.consents.filter(c=>
     c.chatId===chatId&&c.memberId===memberId);
    if(existing.length>1||!existing.length&&data.consents.length>=2000)return false;
+   if(!enabled){
+    if(existing.length!==1)return false;
+    const row=existing[0]!;
+    if(this.clock()<row.updatedAt||row.revision>=9_999_999_999)return false;
+    row.enabled=false;row.updatedAt=this.clock();row.revision++;
+    // Preserve the old chat version: revocation must not reactivate an old
+    // consent if the same group later regains approval.
+    s.phase4Whispers=data;
+    return true;
+   }
+   const chat=approvedChat(s,this.policy,chatId);
+   if(!chat||chat.version!==getChat(before,chatId)?.version)return false;
    if(existing.length){
     const row=existing[0]!;
-    if(now<row.updatedAt)return false;
-    if(row.revision>=9_999_999_999)return false;
-    row.enabled=enabled;row.updatedAt=now;row.chatVersion=chat.version;
+    if(this.clock()<row.updatedAt||row.revision>=9_999_999_999)return false;
+    row.enabled=true;row.updatedAt=this.clock();row.chatVersion=chat.version;
     row.revision++;
    }else data.consents.push({
-    chatId,chatVersion:chat.version,memberId,enabled,revision:1,updatedAt:now
+    chatId,chatVersion:chat.version,memberId,enabled:true,revision:1,
+    updatedAt:this.clock()
    });
    s.phase4Whispers=data;
    return true;
@@ -175,7 +190,11 @@ export class Phase4WhisperService{
    if(row.status!=='OPEN')return deny('DENIED');
    if(row.chatVersion!==whisper.chatVersion||row.revision!==whisper.revision||
     row.expiresAt!==whisper.expiresAt)return deny('STALE');
-   if(now>=row.expiresAt)return deny('EXPIRED');
+   // The remote Telegram membership read may have waited past expiry.
+   // Never use the pre-I/O timestamp as a valid reservation timestamp.
+   const commitTime=this.clock();
+   if(!validClock(commitTime)||commitTime<now)return deny('STALE');
+   if(commitTime>=row.expiresAt)return deny('EXPIRED');
    const current=approvedChat(s,this.policy,row.chatId);
    if(!current||current.version!==row.chatVersion)return deny('STALE');
    if(row.creatorId===memberId)return deny('DENIED');
@@ -192,7 +211,7 @@ export class Phase4WhisperService{
    if(data.reservations.filter(x=>x.messageId===id).length>=row.seats||
     data.reservations.length>=2000)return deny('FULL');
    const reserved={id:newId(data.reservations),messageId:id,
-    memberId,at:now,status:'HELD' as const};
+    memberId,at:commitTime,status:'HELD' as const};
    data.reservations.push(reserved);
    s.phase4Whispers=data;
    return {status:'HELD',reservationId:reserved.id};
