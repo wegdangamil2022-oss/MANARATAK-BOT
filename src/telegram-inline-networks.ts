@@ -11,6 +11,8 @@ import {OwnerNetworkPolicyDiffEditor,validOwnerNetworkPolicyDiffRoute}
  from './telegram-network-differences.js';
 import {OwnerNetworkPolicySnapshots,validOwnerNetworkPolicySnapshotRoute}
  from './telegram-network-policy-snapshots.js';
+import {OwnerNetworkPolicyRestore,validOwnerNetworkPolicyRestoreRoute}
+ from './telegram-network-policy-restore.js';
 import {OwnerNetworkWatchEditor,validOwnerNetworkWatchRoute} from './telegram-network-watch-owner.js';
 import {OwnerNetworkSanctionEditor,validOwnerNetworkSanctionRoute,
  type NetworkSanctionRemoteRead} from './telegram-network-sanction-owner.js';
@@ -62,6 +64,7 @@ export function validOwnerNetworkRoute(data:unknown):boolean{
  if(typeof data!=='string'||Buffer.byteLength(data,'utf8')>64)return false;
  return data==='mi:1:i:01:03'||home.test(data)||begin.test(data)||validOwnerNetworkWatchRoute(data)||
    validOwnerNetworkBulkServiceRoute(data)||validOwnerNetworkPolicyDiffRoute(data)||validOwnerNetworkPolicySnapshotRoute(data)||
+   validOwnerNetworkPolicyRestoreRoute(data)||
    validOwnerNetworkSanctionRoute(data)||
   [list,detail,policySources,policyPreview,followList,followStop,
    bulkList,bulkToggle,bulkPreview,multiStart,multiMove,multiToggle,multiPreview,multiCancel,
@@ -1234,6 +1237,10 @@ export class OwnerNetworkEditor{
   if(validOwnerNetworkPolicySnapshotRoute(data)){
    await this.cancelInput(actor);
    return new OwnerNetworkPolicySnapshots(this.store,this.policy,this.clock).handle(actor,data);
+  }
+  if(validOwnerNetworkPolicyRestoreRoute(data)){
+   await this.cancelInput(actor);
+   return new OwnerNetworkPolicyRestore(this.store,this.policy,this.clock).handle(actor,data);
   }
   const watchEditor=new OwnerNetworkWatchEditor(this.store,this.policy,this.clock);
   const sanctionEditor=new OwnerNetworkSanctionEditor(this.store,this.policy,this.clock,this.remoteRead);
