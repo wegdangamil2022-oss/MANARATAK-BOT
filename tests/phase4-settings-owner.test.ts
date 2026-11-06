@@ -86,4 +86,59 @@ for(const engine of ['json','sqlite'] as const){
    assert.equal(await phase4SettingsOwnerScreen(f.community,OWNER,'p4s:1:g:'+CHAT),null);
   }finally{await f.close();}
  });
+
+ test('SETTINGS-005 '+engine+' deep links include service types, exceptions and module hub without mutating policies',async()=>{
+  const f=await setup(engine);try{
+   const before=JSON.stringify(await f.store.snapshot());
+   const root=await phase4SettingsOwnerScreen(f.community,OWNER,'p4s:1:g:'+CHAT);
+   assert.ok(root);
+   for(const tab of ['s','e','m'])assert.ok(root.keyboard.inline_keyboard.flat().some(
+    x=>x.callback_data==='p4s:1:v:'+CHAT+':'+tab),tab);
+   const modules=await phase4SettingsOwnerScreen(f.community,OWNER,'p4s:1:v:'+CHAT+':m');
+   assert.ok(modules);assert.ok(modules.keyboard.inline_keyboard.flat().some(x=>x.callback_data==='wh:1:h'));
+   assert.ok(modules.keyboard.inline_keyboard.flat().some(x=>x.callback_data==='er:1:h'));
+   assert.equal(JSON.stringify(await f.store.snapshot()),before);
+  }finally{await f.close();}
+ });
+ test('SETTINGS-006 '+engine+' service event exceptions are reviewed individually with legacy defaults',async()=>{
+  const f=await setup(engine);try{
+   const service=await phase4SettingsOwnerScreen(f.community,OWNER,'p4s:1:v:'+CHAT+':s');
+   assert.ok(service);
+   for(const code of ['j','k','t'])assert.ok(service.keyboard.inline_keyboard.flat().some(
+    x=>x.callback_data==='p4s:1:t:'+CHAT+':0:'+code+':1'),code);
+   const preview=await phase4SettingsOwnerScreen(f.community,OWNER,
+    'p4s:1:t:'+CHAT+':0:j:1');
+   assert.ok(preview);
+   assert.equal((await f.community.view(OWNER,CHAT)).serviceCleanup?.joinEnabled,undefined);
+   const accept=preview.keyboard.inline_keyboard.flat().find(x=>x.text.includes('اعتماد'));
+   await f.community.approve(OWNER,accept!.callback_data.slice(8));
+   const config=await f.community.view(OWNER,CHAT);
+   assert.equal(config.serviceCleanup?.joinEnabled,false);
+   assert.equal(config.serviceCleanup?.enabled,false);
+   assert.equal(config.serviceCleanup?.leaveEnabled,undefined);
+   assert.equal(await phase4SettingsOwnerScreen(f.community,OWNER,
+    'p4s:1:t:'+CHAT+':0:j:1'),null);
+   const next=await phase4SettingsOwnerScreen(f.community,OWNER,
+    'p4s:1:t:'+CHAT+':1:k:1');
+   assert.ok(next);
+  }finally{await f.close();}
+ });
+ test('SETTINGS-007 '+engine+' high-impact profile editing and removal notices require separate approval',async()=>{
+  const f=await setup(engine);try{
+   const tab=await phase4SettingsOwnerScreen(f.community,OWNER,'p4s:1:v:'+CHAT+':e');
+   assert.ok(tab);
+   for(const code of ['g','n'])assert.ok(tab.keyboard.inline_keyboard.flat().some(
+    x=>x.callback_data==='p4s:1:t:'+CHAT+':0:'+code+':0'),code);
+   const editing=await phase4SettingsOwnerScreen(f.community,OWNER,'p4s:1:t:'+CHAT+':0:g:0');
+   assert.ok(editing);
+   const editAccept=editing.keyboard.inline_keyboard.flat().find(x=>x.text.includes('اعتماد'));
+   await f.community.approve(OWNER,editAccept!.callback_data.slice(8));
+   assert.equal((await f.community.view(OWNER,CHAT)).profileEditingEnabled,true);
+   const notices=await phase4SettingsOwnerScreen(f.community,OWNER,'p4s:1:t:'+CHAT+':1:n:0');
+   assert.ok(notices);
+   const noticeAccept=notices.keyboard.inline_keyboard.flat().find(x=>x.text.includes('اعتماد'));
+   await f.community.approve(OWNER,noticeAccept!.callback_data.slice(8));
+   assert.equal((await f.community.view(OWNER,CHAT)).farewellOnRemoval,true);
+  }finally{await f.close();}
+ });
 }
