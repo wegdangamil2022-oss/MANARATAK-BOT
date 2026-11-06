@@ -66,6 +66,9 @@ import {Phase4BadgesService} from './phase4-badges.js';
 import {badgeOwnerScreen} from './phase4-badge-owner.js';
 import {parseBadgeMemberCommand,badgeMemberScreen} from './phase4-badge-member.js';
 import {Phase4ReactionsService} from './phase4-reactions.js';
+import {Phase4QuizService} from './phase4-quizzes.js';
+import {parseQuizMemberCommand,quizMemberScreen} from './phase4-quiz-member.js';
+import {quizOwnerScreen} from './phase4-quiz-owner.js';
 import {reactionOwnerScreen} from './phase4-reaction-owner.js';
 import {parseReactionMemberCommand,reactionMemberScreen} from './phase4-reaction-member.js';
 import {Phase4LectureService} from './phase4-lectures.js';
@@ -870,6 +873,50 @@ export class TelegramUpdateApplication {
       this.opts.store,this.opts.policy,this.clock),actorId,event.callbackData??text);
      if(!screen)return {status:'DENIED',reason:'STUDY_OWNER_STALE_OR_DENIED'};
      return {status:'APPLIED',reason:'PHASE4_STUDY_OWNER',
+      plan:this.plan(chatId,screen.text,undefined,screen.keyboard,event.callbackMessageId)};
+    }
+    // Phase 4 / 08:03 — educational quiz entry. Student answers are accepted
+    // only in a private Telegram message, never a group/forward/edit/callback.
+    // Competition scores are local, independently fenced from 09:08 polls
+    // and 09:13 social reactions; no Telegram-native voting takes place.
+    if(kind==='private'&&parseQuizMemberCommand(text)!==null){
+     if(actorId!==chatId||event.edited||event.forwarded||
+      event.callbackData!==undefined)
+      return {status:'DENIED',reason:'QUIZ_PRIVATE_ORIGIN_REQUIRED'};
+     const verify=async(groupId:string,memberId:string):Promise<'VERIFIED'|'NOT_MEMBER'|'UNKNOWN'>=>{
+      let membership:'VERIFIED'|'NOT_MEMBER'|'UNKNOWN'='UNKNOWN';
+      try{membership=await this.opts.membership(groupId,memberId);}
+      catch{return 'UNKNOWN';}
+      if(membership!=='VERIFIED')return membership;
+      const snap=await this.opts.store.snapshot();
+      const mode=subscriptionRequirementMode(snap,groupId);
+      if(mode==='INVALID')return 'UNKNOWN';
+      if(mode==='NONE')return 'VERIFIED';
+      if(!this.opts.subscription)return 'UNKNOWN';
+      try{
+       const result=await this.opts.subscription.verify(groupId,memberId);
+       return result.status==='MEMBER'||result.status==='NOT_REQUIRED'?
+        'VERIFIED':'UNKNOWN';
+      }catch{return 'UNKNOWN';}
+     };
+     const screen=await quizMemberScreen(new Phase4QuizService(
+      this.opts.store,this.opts.policy,this.clock,verify),actorId,text);
+     if(!screen)return {status:'DENIED',reason:'QUIZ_MEMBER_INVALID'};
+     return {status:'APPLIED',reason:'PHASE4_QUIZ_MEMBER',
+      plan:this.plan(chatId,screen.text)};
+    }
+    const quizOwnerInput=kind==='private'&&(
+     event.callbackData==='mi:1:i:08:03'||
+     event.callbackData?.startsWith('qz:1:')||
+     /^\\/quizzes(?:$|\\s)|^\\/quiznew(?:$|\\s)/u.test(text));
+    if(quizOwnerInput){
+     if(!this.opts.policy.isOwner(actorId)||actorId!==chatId||
+      event.edited||event.forwarded)
+      return {status:'DENIED',reason:'QUIZ_OWNER_PRIVATE_ONLY'};
+     const screen=await quizOwnerScreen(new Phase4QuizService(
+      this.opts.store,this.opts.policy,this.clock),actorId,event.callbackData??text);
+     if(!screen)return {status:'DENIED',reason:'QUIZ_OWNER_STALE_OR_DENIED'};
+     return {status:'APPLIED',reason:'PHASE4_QUIZ_OWNER',
       plan:this.plan(chatId,screen.text,undefined,screen.keyboard,event.callbackMessageId)};
     }
     // Phase 4 / 09:12 — student-controlled opt-in or private badge lookup.
