@@ -65,6 +65,9 @@ import {parseStudyPeerMemberCommand,studyPeerMemberScreen} from './phase4-study-
 import {Phase4BadgesService} from './phase4-badges.js';
 import {badgeOwnerScreen} from './phase4-badge-owner.js';
 import {parseBadgeMemberCommand,badgeMemberScreen} from './phase4-badge-member.js';
+import {Phase4ReactionsService} from './phase4-reactions.js';
+import {reactionOwnerScreen} from './phase4-reaction-owner.js';
+import {parseReactionMemberCommand,reactionMemberScreen} from './phase4-reaction-member.js';
 import {OwnerInlineGroupControls} from './telegram-inline-group-controls.js';
 import {renderOwnerInlineDelegations,delegationOwnerEntry} from './telegram-inline-delegations.js';
 import {renderStaffInline} from './telegram-inline-staff.js';
@@ -903,6 +906,47 @@ export class TelegramUpdateApplication {
       this.opts.store,this.opts.policy,this.clock),actorId,event.callbackData??text);
      if(!screen)return {status:'DENIED',reason:'BADGE_OWNER_STALE_OR_DENIED'};
      return {status:'APPLIED',reason:'PHASE4_BADGE_OWNER',
+      plan:this.plan(chatId,screen.text,undefined,screen.keyboard,event.callbackMessageId)};
+    }
+    // Phase 4 / 09:13. Local post reactions are unrelated to contest
+    // ballots or any public Telegram reaction/update of group messages.
+    if(kind==='private'&&parseReactionMemberCommand(text)!==null){
+     if(actorId!==chatId||event.edited||event.forwarded||
+      event.callbackData!==undefined)
+      return {status:'DENIED',reason:'REACTION_PRIVATE_ORIGIN_REQUIRED'};
+     const verify=async(groupId:string,memberId:string):Promise<'VERIFIED'|'NOT_MEMBER'|'UNKNOWN'>=>{
+      let membership:'VERIFIED'|'NOT_MEMBER'|'UNKNOWN'='UNKNOWN';
+      try{membership=await this.opts.membership(groupId,memberId);}
+      catch{return 'UNKNOWN';}
+      if(membership!=='VERIFIED')return membership;
+      const snapshot=await this.opts.store.snapshot();
+      const mode=subscriptionRequirementMode(snapshot,groupId);
+      if(mode==='INVALID')return 'UNKNOWN';
+      if(mode==='NONE')return 'VERIFIED';
+      if(!this.opts.subscription)return 'UNKNOWN';
+      try{
+       const result=await this.opts.subscription.verify(groupId,memberId);
+       return result.status==='MEMBER'||result.status==='NOT_REQUIRED'?
+        'VERIFIED':'UNKNOWN';
+      }catch{return 'UNKNOWN';}
+     };
+     const screen=await reactionMemberScreen(new Phase4ReactionsService(
+      this.opts.store,this.opts.policy,this.clock,verify),actorId,text);
+     if(!screen)return {status:'DENIED',reason:'REACTION_MEMBER_INVALID'};
+     return {status:'APPLIED',reason:'PHASE4_REACTION_MEMBER',
+      plan:this.plan(chatId,screen.text)};
+    }
+    const reactionInput=kind==='private'&&(
+     event.callbackData==='mi:1:i:09:13'||
+     event.callbackData?.startsWith('rc:1:')||
+     /^\/reactions(?:$|\s)|^\/reactnew(?:$|\s)/u.test(text));
+    if(reactionInput){
+     if(!this.opts.policy.isOwner(actorId)||actorId!==chatId)
+      return {status:'DENIED',reason:'REACTION_OWNER_ONLY'};
+     const screen=await reactionOwnerScreen(new Phase4ReactionsService(
+      this.opts.store,this.opts.policy,this.clock),actorId,event.callbackData??text);
+     if(!screen)return {status:'DENIED',reason:'REACTION_OWNER_STALE_OR_DENIED'};
+     return {status:'APPLIED',reason:'PHASE4_REACTION_OWNER',
       plan:this.plan(chatId,screen.text,undefined,screen.keyboard,event.callbackMessageId)};
     }
     const communityCommand=kind==='private'?parsePhase4CommunityCommand(text):null;
