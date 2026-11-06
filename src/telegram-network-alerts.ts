@@ -56,7 +56,7 @@ function parseSilencePreview(raw:string):SilencePreview|null{
   typeof v.network!=='string'||!/^[a-f0-9]{12}$/u.test(v.network)||
   typeof v.chat!=='string'||!/^-[1-9][0-9]{0,15}$/u.test(v.chat)||
   !Number.isSafeInteger(Number(v.chat))||
-  ![0,1,8].includes(v.hours as number)||!Number.isInteger(v.hours)||
+  ![0,1,8].includes(v.hours as number)||typeof v.hours!=='number'||
   typeof v.proof!=='string'||!/^[a-f0-9]{64}$/u.test(v.proof)||
   !time(v.createdAt))return null;
  return v as unknown as SilencePreview;
