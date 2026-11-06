@@ -9,6 +9,7 @@ import {TelegramNetworkAlertEditor,validNetworkAlertRoute} from '../src/telegram
 import {NetworkEventAlertDispatcher,networkAlertEnabled,setNetworkAlertPreference}
  from '../src/network-event-alerts.js';
 import type {TelegramReplyPlan} from '../src/telegram-transport.js';
+import type {OwnerInlineScreen} from '../src/telegram-inline-owner.js';
 const N='abcdef123456',OTHER='bbbbbb123456',A='-100124',B='-100125',OUT='-100199';
 const OWNER='100',ADMIN='301';
 for(const engine of ['json','sqlite'] as const){
@@ -35,7 +36,7 @@ for(const engine of ['json','sqlite'] as const){
    get now(){return now;},advance:(ms:number)=>{now+=ms;},
    add,close:()=>rm(dir,{recursive:true,force:true})};
  }
- const button=(s:{keyboard:{inline_keyboard:{text:string;callback_data:string}[][]}}|null,word:string)=>{
+ const button=(s:OwnerInlineScreen|null,word:string)=>{
   assert.ok(s);const x=s.keyboard.inline_keyboard.flat().find(v=>v.text.includes(word));assert.ok(x,'button '+word);assert.ok(Buffer.byteLength(x.callback_data,'utf8')<=64);return x.callback_data;
  };
  test(engine+' NETWORK-006 personal alert subscription defaults OFF with per-manager consent and private one-shot confirmation',async()=>{
