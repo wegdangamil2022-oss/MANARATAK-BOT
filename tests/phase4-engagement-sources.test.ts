@@ -31,6 +31,8 @@ for(const engine of ['json','sqlite'] as const){
    assert.equal(await discussions.open(OWNER,discussion.id,1),true);
    assert.equal((await discussions.ask(MEMBER,discussion.id,
     'ما أفضل طريقة لتنظيم خطوات التقديم؟')).status,'RECEIVED');
+   // Closing automatically archives text; this is NOT owner moderation.
+   assert.equal(await discussions.close(OWNER,discussion.id,2),true);
    const poll=await polls.draft(OWNER,GROUP,{
     kind:'NEEDS',question:'ما المجال الذي يحتاج دعمًا تعليميًا أكبر؟',
     options:['التقديم للطب البشري','التحضير للاختبارات'],durationMinutes:60});
