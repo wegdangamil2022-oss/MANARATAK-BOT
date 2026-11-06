@@ -2,7 +2,7 @@ import {Phase4DiscussionService,type DiscussionDraftInput} from './phase4-discus
 import type {OwnerInlineScreen,TelegramInlineKeyboard} from './telegram-inline-owner.js';
 
 const HEX='[a-f0-9]{24}';
-const ACTION=new RegExp('^dq:1:(?:h|[slq]:'+HEX+'|[oka r d c]:'+HEX+':[1-4])$'.replace(/\[oka r d c\]/u,'[okardc]'),'u');
+const ACTION=new RegExp('^dq:1:(?:h|[slq]:'+HEX+'|[okardc]:'+HEX+':[1-4])$','u');
 export const validDiscussionOwnerRoute=(x:unknown):x is string=>
  typeof x==='string'&&Buffer.byteLength(x,'utf8')<=64&&ACTION.test(x);
 const escape=(s:string)=>s.replace(/&/gu,'&amp;').replace(/</gu,'&lt;')
