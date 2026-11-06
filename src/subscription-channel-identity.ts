@@ -22,9 +22,9 @@ function normalizedIdentity(observation:unknown):string|null|{username:string|nu
  const username=typeof value.username==='string'?value.username.toLowerCase():null;
  const aliases=(value.activeUsernames as string[]).map(x=>x.toLowerCase());
  if(new Set(aliases).size!==aliases.length||username!==null&&aliases.length>0&&!aliases.includes(username))return undefined;
- // Exact compatibility with historical single-username observations: a bot
- // upgrade must not create a false channel-identity alert on unchanged state.
- if(aliases.length===0||aliases.length===1&&aliases[0]===username)return username;
+ // The full Telegram alias snapshot has a distinct digest domain, even
+ // when it contains only the primary name. That prevents an initial upgrade
+ // from looking like a real alias change while allowing later additions.
  return {username,activeUsernames:aliases.sort()};
 }
 /** Store only a digest of the complete observed public username set, never
@@ -41,7 +41,18 @@ export function recordChannelIdentity(s:BotState,actor:string,group:string,chann
   seen.add(r.key);if(Number(r.at)>at-30*86400000)rows.push({key:r.key,hash:r.hash,at:Number(r.at)});
  }
  const hash=createHash('sha256').update(JSON.stringify(normalized)).digest('hex'),previous=rows.find(r=>r.key===key);
- if(previous){if(previous.at>started)return false;if(previous.hash!==hash)recordSubscriptionIdentityChange(s,actor,group,channel,ruleVersion,scopeVersion,previous.hash,hash,at);previous.hash=hash;previous.at=at;}
+ if(previous){
+  if(previous.at>started)return false;
+  // The old release tracked only the primary username. First receipt of an
+  // authoritative complete alias set may reveal long-existing names; this is
+  // baseline enrichment, not evidence that those names *just changed*.
+  const priorPrimary=normalized!==null&&typeof normalized==='object'?
+   createHash('sha256').update(JSON.stringify(normalized.username)).digest('hex'):null;
+  const migrating=priorPrimary!==null&&previous.hash===priorPrimary;
+  if(previous.hash!==hash&&!migrating)
+   recordSubscriptionIdentityChange(s,actor,group,channel,ruleVersion,scopeVersion,previous.hash,hash,at);
+  previous.hash=hash;previous.at=at;
+ }
  else{if(rows.length>=1000)return false;rows.push({key,hash,at});}
  s.subscriptionChannelIdentities=rows;return true;
 }
