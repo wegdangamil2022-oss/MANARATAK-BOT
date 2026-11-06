@@ -84,7 +84,12 @@ for(const engine of ['json','sqlite'] as const){
    assert.ok(Buffer.byteLength(first,'utf8')<=4096);
    assert.match(first,/سؤال التعليم/);
    assert.match(second,/صفحة 2/u);
-   assert.match(second,new RegExp(faqId(5)));
+   // Alphabetical sorting deliberately puts 10/11 before 2. Check complete
+   // coverage across pages without depending on the locale's sort order.
+   const allPages=await Promise.all([1,2,3,4].map(n=>
+    f.guide.member(CHAT,'FAQ_INDEX',undefined,n)));
+   for(let i=1;i<=13;i++)
+    assert.ok(allPages.some(text=>text?.includes(faqId(i))),String(i));
    assert.doesNotMatch(second,new RegExp(faqId(1)));
    assert.equal(await f.guide.member(CHAT,'FAQ_INDEX',undefined,99),null);
    const note1=await f.guide.member(CHAT,'NOTES_INDEX',undefined,1);
