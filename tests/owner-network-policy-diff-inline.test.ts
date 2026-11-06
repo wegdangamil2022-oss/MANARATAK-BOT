@@ -25,7 +25,7 @@ for(const engine of ['json','sqlite'] as const){
   const policy=new Policy(store,OWNER,()=>now);
   for(const id of [A,B,C,D,E,OUT])
    await policy.approveChat(OWNER,id,['moderation','assistant','navigation']);
-  const baseRule={id:'r1',kind:'WORD' as const,value:'secret-pattern-alpha',
+  const baseRule={id:'r1',kind:'WORD' as const,value:'secretpatternalpha',
    enabled:true,action:'WARN' as const};
   const cfg=(chatId:string)=>({policy:{
    chatId,revision:1,mode:'MONITOR' as const,rules:[{...baseRule}],
@@ -40,7 +40,7 @@ for(const engine of ['json','sqlite'] as const){
    for(const chat of s.chats)chat.groupAI='ALL_MENTION';
    const second=cfg(B);second.policy.revision=5;
    const third=cfg(C);
-   third.policy.rules=[{...baseRule,value:'secret-pattern-beta'}];
+   third.policy.rules=[{...baseRule,value:'secretpatternbeta'}];
    third.policy.allowedDomains=['sensitive-changed.com'];
    s.protectionPolicies=[cfg(A),second,third];
    s.chats.find(c=>c.id===C)!.groupAI='OFF';
@@ -86,7 +86,7 @@ for(const engine of ['json','sqlite'] as const){
    const screen=await f.editor.handle(OWNER,'nw:1:ct:'+N+':'+A+':'+C);
    assert.match(screen?.text??'',/قواعد/u);
    assert.match(screen?.text??'',/النطاقات/u);
-   assert.doesNotMatch(screen?.text??'',/secret-pattern-(?:alpha|beta)/u);
+   assert.doesNotMatch(screen?.text??'',/secretpattern(?:alpha|beta)/u);
    assert.doesNotMatch(screen?.text??'',/private-example\.com|sensitive-changed\.com/u);
    assert.doesNotMatch(screen?.text??'',/restricted-example/u);
   }finally{await f.close();}
