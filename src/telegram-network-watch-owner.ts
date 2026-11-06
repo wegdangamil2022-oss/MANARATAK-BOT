@@ -161,7 +161,10 @@ export class OwnerNetworkWatchEditor{
    rows.push([btn('✅ اعتماد متابعة معلوماتية','nw:1:m:'+row.id+':W')]);
    rows.push([btn('✖ رفض البلاغ','nw:1:m:'+row.id+':D')]);
   }
-  if(row.status==='WATCHED')rows.push([btn('✅ رفع المتابعة','nw:1:m:'+row.id+':C')]);
+  if(row.status==='WATCHED'){
+   rows.push([btn('⚖️ اقتراحات العقوبات لكل مجموعة','nw:1:sl:'+row.id+':0')]);
+   rows.push([btn('✅ رفع المتابعة','nw:1:m:'+row.id+':C')]);
+  }
   rows.push([btn('↩️ بلاغات الشبكة','nw:1:w:'+row.networkId+':0')]);
   return ui('<b>🛡️ تفاصيل بلاغ الشبكة</b>\nالرقم: <code>'+row.id+
    '</code>\nالمعرّف: <code>'+row.subjectId+'</code>\nالمصدر: <code>'+
