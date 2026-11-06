@@ -246,7 +246,7 @@ export class Phase4ExpertService{
    if(reports.some(x=>x.sessionId===sessionId&&x.questionId===questionId&&x.reporterId===actor))
     return deny('ALREADY_REPORTED');
    if(reports.length>=1000)return deny('CAPACITY');
-   reports.push({id:id(reports),sessionId,questionId,reporterId:actor,reason,createdAt:now});
+   reports.push({id:id(reports),sessionId,questionId,reporterId:actor,reason:reason as ExpertReportReason,createdAt:now});
    st.phase4Experts=data;return deny('REPORTED');
   });
  }
