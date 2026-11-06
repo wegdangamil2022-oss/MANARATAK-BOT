@@ -68,6 +68,8 @@ import {parseBadgeMemberCommand,badgeMemberScreen} from './phase4-badge-member.j
 import {Phase4ReactionsService} from './phase4-reactions.js';
 import {reactionOwnerScreen} from './phase4-reaction-owner.js';
 import {parseReactionMemberCommand,reactionMemberScreen} from './phase4-reaction-member.js';
+import {Phase4LectureService} from './phase4-lectures.js';
+import {lectureOwnerScreen} from './phase4-lecture-owner.js';
 import {OwnerInlineGroupControls} from './telegram-inline-group-controls.js';
 import {renderOwnerInlineDelegations,delegationOwnerEntry} from './telegram-inline-delegations.js';
 import {renderStaffInline} from './telegram-inline-staff.js';
@@ -947,6 +949,22 @@ export class TelegramUpdateApplication {
       this.opts.store,this.opts.policy,this.clock),actorId,event.callbackData??text);
      if(!screen)return {status:'DENIED',reason:'REACTION_OWNER_STALE_OR_DENIED'};
      return {status:'APPLIED',reason:'PHASE4_REACTION_OWNER',
+      plan:this.plan(chatId,screen.text,undefined,screen.keyboard,event.callbackMessageId)};
+    }
+    // Phase 4 / 09:14 — only the owner can start/stop the temporary
+    // quiet period. No group commands, moderation bypass or Telegram edits.
+    const lectureInput=kind==='private'&&(
+     event.callbackData==='mi:1:i:09:14'||
+     event.callbackData?.startsWith('lc:1:')||
+     /^\/lectures(?:$|\s)|^\/lecturenew(?:$|\s)/u.test(text));
+    if(lectureInput){
+     if(!this.opts.policy.isOwner(actorId)||actorId!==chatId||
+      event.forwarded||event.edited)
+      return {status:'DENIED',reason:'LECTURE_OWNER_PRIVATE_ONLY'};
+     const screen=await lectureOwnerScreen(new Phase4LectureService(
+      this.opts.store,this.opts.policy,this.clock),actorId,event.callbackData??text);
+     if(!screen)return {status:'DENIED',reason:'LECTURE_OWNER_STALE_OR_DENIED'};
+     return {status:'APPLIED',reason:'PHASE4_LECTURE_OWNER',
       plan:this.plan(chatId,screen.text,undefined,screen.keyboard,event.callbackMessageId)};
     }
     const communityCommand=kind==='private'?parsePhase4CommunityCommand(text):null;
