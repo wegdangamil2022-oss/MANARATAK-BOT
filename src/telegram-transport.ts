@@ -53,6 +53,9 @@ import {discussionOwnerScreen} from './phase4-discussion-owner.js';
 import {Phase4PollService} from './phase4-polls.js';
 import {parsePollMemberCommand,pollMemberScreen} from './phase4-poll-member.js';
 import {pollOwnerScreen} from './phase4-poll-owner.js';
+import {Phase4EventService} from './phase4-events.js';
+import {eventOwnerScreen} from './phase4-event-owner.js';
+import {parseEventMemberCommand,eventMemberScreen} from './phase4-event-member.js';
 import {OwnerInlineGroupControls} from './telegram-inline-group-controls.js';
 import {renderOwnerInlineDelegations,delegationOwnerEntry} from './telegram-inline-delegations.js';
 import {renderStaffInline} from './telegram-inline-staff.js';
@@ -728,6 +731,47 @@ export class TelegramUpdateApplication {
       this.opts.store,this.opts.policy,this.clock),actorId,event.callbackData??text);
      if(!screen)return {status:'DENIED',reason:'POLL_OWNER_STALE_OR_DENIED'};
      return {status:'APPLIED',reason:'PHASE4_POLL_OWNER',
+      plan:this.plan(chatId,screen.text,undefined,screen.keyboard,event.callbackMessageId)};
+    }
+    // Phase 4 / 09:09. Student self-service is private and opt-in.
+    // This path never sends event announcements, reminders or attendance claims.
+    if(kind==='private'&&parseEventMemberCommand(text)!==null){
+     if(actorId!==chatId||event.forwarded||event.edited||
+      event.callbackData!==undefined)
+      return {status:'DENIED',reason:'EVENT_PRIVATE_ORIGIN_REQUIRED'};
+     const verify=async(groupId:string,memberId:string):Promise<'VERIFIED'|'NOT_MEMBER'|'UNKNOWN'>=>{
+      let membership:'VERIFIED'|'NOT_MEMBER'|'UNKNOWN'='UNKNOWN';
+      try{membership=await this.opts.membership(groupId,memberId);}
+      catch{return 'UNKNOWN';}
+      if(membership!=='VERIFIED')return membership;
+      const snapshot=await this.opts.store.snapshot();
+      const mode=subscriptionRequirementMode(snapshot,groupId);
+      if(mode==='INVALID')return 'UNKNOWN';
+      if(mode==='NONE')return 'VERIFIED';
+      if(!this.opts.subscription)return 'UNKNOWN';
+      try{
+       const result=await this.opts.subscription.verify(groupId,memberId);
+       return result.status==='MEMBER'||result.status==='NOT_REQUIRED'?
+        'VERIFIED':'UNKNOWN';
+      }catch{return 'UNKNOWN';}
+     };
+     const screen=await eventMemberScreen(new Phase4EventService(
+      this.opts.store,this.opts.policy,this.clock,verify),actorId,text);
+     if(!screen)return {status:'DENIED',reason:'EVENT_MEMBER_INVALID'};
+     return {status:'APPLIED',reason:'PHASE4_EVENT_MEMBER',
+      plan:this.plan(chatId,screen.text)};
+    }
+    const eventInput=kind==='private'&&(
+     event.callbackData==='mi:1:i:09:09'||
+     event.callbackData?.startsWith('ev:1:')||
+     /^\/events(?:$|\s)|^\/event(?:new|summarynew)(?:$|\s)/u.test(text));
+    if(eventInput){
+     if(!this.opts.policy.isOwner(actorId)||actorId!==chatId)
+      return {status:'DENIED',reason:'EVENT_OWNER_ONLY'};
+     const screen=await eventOwnerScreen(new Phase4EventService(
+      this.opts.store,this.opts.policy,this.clock),actorId,event.callbackData??text);
+     if(!screen)return {status:'DENIED',reason:'EVENT_OWNER_STALE_OR_DENIED'};
+     return {status:'APPLIED',reason:'PHASE4_EVENT_OWNER',
       plan:this.plan(chatId,screen.text,undefined,screen.keyboard,event.callbackMessageId)};
     }
     const communityCommand=kind==='private'?parsePhase4CommunityCommand(text):null;
