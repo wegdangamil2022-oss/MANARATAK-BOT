@@ -58,6 +58,38 @@ for(const engine of ['json','sqlite'] as const){
    assert.equal((await f.store.snapshot()).networkInheritance?.length??0,0);
   }finally{await f.close();}
  }});
+ test(engine+' owner explicitly pauses one network follow with private, one-shot UI confirmation',async()=>{const f=await fixture();try{
+  await f.save(SOURCE,1,'baseline');
+  const sources=await f.owner.handle(OWNER,'nw:1:y:'+NET+':0');
+  const created=await f.owner.handle(OWNER,button(sources,SOURCE));
+  assert.ok(await f.owner.handle(OWNER,button(created,'تأكيد')));
+  const card=await f.owner.handle(OWNER,'nw:1:d:'+NET);
+  const list=await f.owner.handle(OWNER,button(card,'المتابعة'));
+  assert.match(list?.text??'',/المتابعة/u);
+  const preview=await f.owner.handle(OWNER,button(list,A));
+  const confirm=button(preview,'تأكيد');
+  assert.equal(await f.owner.handle('301',confirm),null);
+  assert.ok(await f.owner.handle(OWNER,confirm));
+  assert.equal(await f.owner.handle(OWNER,confirm),null);
+  await f.save(SOURCE,2,'new after pause');
+  const s=await f.store.snapshot();
+  assert.equal(s.networkInheritance?.find(x=>x.targetChatId===A)?.pausedReason,'OWNER_PAUSED');
+  assert.equal(s.networkInheritance?.find(x=>x.targetChatId===B)?.status,'ACTIVE');
+  assert.equal(s.protectionPolicies?.find(x=>x.policy.chatId===A)?.policy.revision,1);
+  assert.equal(s.protectionPolicies?.find(x=>x.policy.chatId===B)?.policy.revision,2);
+ }finally{await f.close();}});
+ test(engine+' stale owner pause refuses modified network revision and leaves link unchanged',async()=>{const f=await fixture();try{
+  await f.save(SOURCE,1,'baseline');
+  const source=await f.owner.handle(OWNER,'nw:1:y:'+NET+':0');
+  const create=await f.owner.handle(OWNER,button(source,SOURCE));
+  await f.owner.handle(OWNER,button(create,'تأكيد'));
+  const listing=await f.owner.handle(OWNER,'nw:1:f:'+NET+':0');
+  const preview=await f.owner.handle(OWNER,button(listing,B));
+  const confirm=button(preview,'تأكيد');
+  await f.store.transaction(s=>{s.groupNetworks![0]!.revision++;});
+  assert.equal(await f.owner.handle(OWNER,confirm),null);
+  assert.equal((await f.store.snapshot()).networkInheritance?.find(x=>x.targetChatId===B)?.status,'ACTIVE');
+ }finally{await f.close();}});
  test(engine+' stale and unsupported network routes cannot create links',async()=>{const f=await fixture();try{
   assert.equal(validOwnerNetworkRoute('nw:1:y:BAD:0'),false);
   assert.equal(validOwnerNetworkRoute('nw:1:z:'+NET+':'+SOURCE+':0'),true);
