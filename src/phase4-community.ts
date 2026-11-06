@@ -3,6 +3,7 @@ import {BotStore,type BotState} from './store.js';
 import {reviewedGroupFAQAnswer,resolvedCommunityReply} from './phase4-community-sources.js';
 import {groupMenuEpochDigest} from './telegram-group-access.js';
 import {Policy} from './policy.js';
+import {lectureBlocksAutomation} from './phase4-lectures.js';
 import {validCommunityPhotoId,validCommunityLinkButtons,communityLinkKeyboard,
  type CommunityLinkKeyboard} from './phase4-community-rich.js';
 import {defaultCommunityConfig,emptyCommunityState,validCommunityConfig,
@@ -558,6 +559,7 @@ export class Phase4CommunityService{
    throw Error('COMMUNITY_SAMPLE_INVALID');
   const config=configured(state,chatId);
   if(!validCommunityConfig(config))throw Error('COMMUNITY_CONFIG_INVALID');
+  if(lectureBlocksAutomation(state,chatId,this.clock()))return {status:'LECTURE_MODE'};
   if(!config.repliesEnabled)return {status:'REPLIES_DISABLED'};
   if(config.quietHours&&inCommunityQuietHours(config.quietHours,this.clock(),config.utcOffsetMinutes,config.timeZone))
    return {status:'QUIET_HOURS'};
@@ -622,6 +624,11 @@ export class Phase4CommunityService{
    };
    // A denied update must not generate repeat log entries on webhook replay.
    if(config.decisionLogEnabled&&stateOf(s).decisionLog?.some(x=>x.key===key))return null;
+   // The pause is read at the proposal's atomic reservation boundary.
+   // No protection/verification settings or welcome templates are changed.
+   if(lectureBlocksAutomation(s,input.chatId,now)){
+    record('LECTURE_MODE');return null;
+   }
    let template:string,ruleId:string|undefined,preEscaped=false;
    let photoFileId:string|undefined,communityLinks:CommunityLinkKeyboard|undefined;
    if(input.kind==='JOIN'||input.kind==='LEAVE'){
