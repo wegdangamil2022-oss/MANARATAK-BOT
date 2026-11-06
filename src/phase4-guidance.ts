@@ -1,6 +1,8 @@
 import {BotStore,type BotState} from './store.js';
 import {Policy} from './policy.js';
-import {Phase4CommunityService} from './phase4-community.js';
+import {Phase4CommunityService,type DraftRequest} from './phase4-community.js';
+import type {CommunityDraft} from './phase4-community-model.js';
+import {visibleEducationCategory} from './education-category-policy.js';
 import {defaultCommunityConfig,validCommunityConfig,validCommunityRulesUrl,
  validCommunityFAQId,type CommunityConfig,type CommunityReplyRule} from './phase4-community-model.js';
 import {reviewedGroupFAQAnswer} from './phase4-community-sources.js';
@@ -34,6 +36,7 @@ export interface GuidanceFAQ{readonly id:string;readonly question:string;}
 export interface GuidanceData{
  readonly chatId:string;readonly policyVersion:number;readonly config:CommunityConfig;
  readonly folderUrl?:string;readonly faqs:readonly GuidanceFAQ[];
+ readonly educationTopics:readonly string[];
  readonly notes:readonly CommunityReplyRule[];
 }
 /** Read and filter on the *same* snapshot; disabled/unpublished FAQ content
@@ -57,7 +60,13 @@ function context(s:BotState,policy:Policy,chatId:string):GuidanceData|null{
   .sort((a,b)=>a.question.localeCompare(b.question)||a.id.localeCompare(b.id))
   .slice(0,100).map(x=>({id:x.id,question:x.question.slice(0,160)}));
  const notes=config.rules.filter(rule=>rule.enabled&&rule.source==='NOTE');
- return {chatId,policyVersion:group[0]!.version,config,
+ const educationTopics=s.educationCategories.filter(cat=>
+  cat.scope===chatId&&visibleEducationCategory(s,cat)&&
+  s.educationResources.some(x=>x.scope===chatId&&x.categoryId===cat.id&&
+    x.status==='PUBLISHED'))
+  .sort((a,b)=>a.order-b.order||a.title.localeCompare(b.title))
+  .slice(0,8).map(x=>x.title.slice(0,60));
+ return {chatId,policyVersion:group[0]!.version,config,educationTopics,
   ...(folderUrl?{folderUrl}:{}),faqs,notes};
 }
 const link=(label:string,url:string)=>'<a href="'+guidanceEscape(url)+'">'+
@@ -77,7 +86,12 @@ export function renderGuidanceWelcome(data:GuidanceData):string{
   '📁 مجلد المجتمع: لا يوجد رابط مفعّل ومؤهل للعرض بعد.';
  return '<b>🧭 دليل العضو الجديد — منارتك</b>\n'+
   'المجموعة: <code>'+group+'</code>\n\n'+
-  'مرحبًا بك في المجتمع التعليمي. هذه صفحة تعريف مختصرة بطرق الاستفادة من البوت.\n\n'+
+  '<b>نبذة عن المجموعة</b>\n'+
+  guidanceEscape(data.config.guideIntro??'مرحبًا بك في المجتمع التعليمي. هذه صفحة تعريف مختصرة بطرق الاستفادة من البوت.')+
+  '\n\n<b>المجالات التعليمية</b>\n'+
+  (data.config.guideTopics?guidanceEscape(data.config.guideTopics):
+   data.educationTopics.length?data.educationTopics.map(x=>'▫ '+guidanceEscape(x)).join('\n'):
+   'لم تُحدّد مجالات خاصة بهذه المجموعة بعد.')+'\n\n'+
   '◾ <b>التعرّف على المجموعة</b>: راجع القوانين وروابط المصادر المفعّلة أولًا.\n'+
   '◾ <b>المساعدة التعليمية</b>: استعرض إجابات الأسئلة الشائعة المراجعة ومصادرها، إن توفرت.\n'+
   '◾ <b>الاشتراكات</b>: التزم بمتطلبات المجموعة والقنوات الرسمية المعروضة في قسم الاشتراك.\n\n'+
@@ -147,6 +161,22 @@ export class Phase4GuidanceService{
   if(kind==='RULES')return renderGuidanceRules(data);
   if(kind==='FAQ'&&faqId!==undefined)return renderGuidanceFAQ(state,chatId,faqId);
   return null;
+ }
+ /** Owner-only wrapper. Existing community drafts provide 2-minute TTL,
+  * approval-epoch check, stale policy protection and durable audit. */
+ async edit(actor:string,chatId:string,request:DraftRequest):Promise<CommunityDraft>{
+  if(!this.policy.isOwner(actor)||!request.kind.startsWith('GUIDE_'))
+   throw Error('COMMUNITY_OWNER_DENIED');
+  return this.community.pending(actor,request,chatId);
+ }
+ preview(draft:CommunityDraft):string{return this.community.preview(draft);}
+ async confirm(actor:string,id:string):Promise<string>{
+  if(!this.policy.isOwner(actor))throw Error('COMMUNITY_OWNER_DENIED');
+  return (await this.community.approve(actor,id)).chatId;
+ }
+ async cancel(actor:string,id:string):Promise<boolean>{
+  if(!this.policy.isOwner(actor))return false;
+  return this.community.cancel(actor,id);
  }
  async ownerFAQ(actor:string,chatId:string,faqId:string):Promise<string|null>{
   if(!await this.ownerGroup(actor,chatId))return null;

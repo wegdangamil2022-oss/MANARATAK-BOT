@@ -1,3 +1,4 @@
+import {validCommunityGuideText} from './phase4-community-model.js';
 import {Phase4GuidanceService,validGuidanceGroup,
  guidanceEscape,renderGuidanceWelcome,renderGuidanceRules,
  type GuidanceData} from './phase4-guidance.js';
@@ -6,16 +7,34 @@ import type {OwnerInlineScreen,TelegramInlineKeyboard} from './telegram-inline-o
 const ID='-[1-9][0-9]{0,15}',PAGE='(?:0|[1-9][0-9]?)';
 const UUID='[a-f0-9]{8}-(?:[a-f0-9]{4}-){3}[a-f0-9]{12}';
 const ROUTE=new RegExp('^gd:1:(?:[23]:(?:h|p:'+PAGE+'|g:'+ID+
- ')|3:[rf]:'+ID+':'+PAGE+'|3:d:'+ID+':'+UUID+')$','u');
+ ')|2:[cx]:[a-f0-9]{24}|3:[rf]:'+ID+':'+PAGE+'|3:d:'+ID+':'+UUID+')$','u');
 export const validPhase4GuidanceOwnerRoute=(v:unknown):v is string=>
  typeof v==='string'&&Buffer.byteLength(v,'utf8')<=64&&ROUTE.test(v);
 export type GuidanceOwnerCommand=
  {section:'GUIDE'|'FIXED';kind:'HOME'}|
- {section:'GUIDE'|'FIXED';kind:'GROUP';chatId:string};
+ {section:'GUIDE'|'FIXED';kind:'GROUP';chatId:string}|
+ {section:'GUIDE';kind:'EDIT';chatId:string;request:{
+  kind:'GUIDE_INTRO_SET'|'GUIDE_TOPICS_SET'|'GUIDE_INTRO_CLEAR'|'GUIDE_TOPICS_CLEAR';
+  text?:string;
+ }};
 export function parseGuidanceOwnerCommand(input:string):GuidanceOwnerCommand|null{
  if(input==='/newmemberguide')return {section:'GUIDE',kind:'HOME'};
  if(input==='/groupfixed')return {section:'FIXED',kind:'HOME'};
- if(typeof input!=='string'||input.length>90)return null;
+ if(typeof input!=='string'||input.length>460)return null;
+ const set=/^\/(guideset|guidetopics) (-[1-9][0-9]{0,15}) ([^\r\n]+)$/u.exec(input);
+ if(set&&validGuidanceGroup(set[2]!)){
+  const kind=set[1]==='guideset'?'GUIDE_INTRO_SET':'GUIDE_TOPICS_SET',
+   limit=kind==='GUIDE_INTRO_SET'?320:240;
+  if(!validCommunityGuideText(set[3],limit))return null;
+  return {section:'GUIDE',kind:'EDIT',chatId:set[2]!,
+   request:{kind,text:set[3]!}};
+ }
+ const clear=/^\/(guideclear|guidetopicsclear) (-[1-9][0-9]{0,15})$/u.exec(input);
+ if(clear&&validGuidanceGroup(clear[2]!))return {
+  section:'GUIDE',kind:'EDIT',chatId:clear[2]!,
+  request:{kind:clear[1]==='guideclear'?'GUIDE_INTRO_CLEAR':'GUIDE_TOPICS_CLEAR'}
+ };
+ if(input.length>90)return null;
  const match=/^\/(newmemberguide|groupfixed) (-[1-9][0-9]{0,15})$/u.exec(input);
  return match&&validGuidanceGroup(match[2]!)?
   {section:match[1]==='newmemberguide'?'GUIDE':'FIXED',
@@ -52,7 +71,12 @@ async function groups(service:Phase4GuidanceService,actor:string,
 function welcome(d:GuidanceData):OwnerInlineScreen{
  return ui('<b>👁️ معاينة المالك — دليل العضو الجديد 09:02</b>\n\n'+
   renderGuidanceWelcome(d)+'\n\n'+
-  'هذا الدليل للعرض عند طلب الطالب المتحقق من عضويته، ولا يُرسل عند الانضمام تلقائيًا.',
+  'هذا الدليل للعرض عند طلب الطالب المتحقق من عضويته، ولا يُرسل عند الانضمام تلقائيًا.\n\n'+
+  'لإعداد تعريف المجموعة: <code>/guideset '+d.chatId+' تعريف خاص بالمجموعة</code>\n'+
+  'لتحديد المجالات: <code>/guidetopics '+d.chatId+' المنح، الدورات، الاختبارات</code>\n'+
+  'لإزالة التعريف: <code>/guideclear '+d.chatId+'</code>\n'+
+  'لإزالة المجالات: <code>/guidetopicsclear '+d.chatId+'</code>\n'+
+  'كل أمر يعرض معاينة خاصة ولا يُطبّق قبل موافقة مستقلة.',
   [[btn('📜 القوانين والرسائل الثابتة',group('3',d.chatId))],
    [btn('✏️ إعدادات الترحيب والروابط','p4c:1:g:'+d.chatId)],
    [btn('📁 إعداد مجلد المجتمع','cf:1:h')],
@@ -113,6 +137,13 @@ export async function phase4GuidanceOwnerScreen(service:Phase4GuidanceService,
  actor:string,input:string):Promise<OwnerInlineScreen|null>{
  try{
   const cmd=parseGuidanceOwnerCommand(input);
+  if(cmd?.kind==='EDIT'){
+   const draft=await service.edit(actor,cmd.chatId,cmd.request);
+   return ui(service.preview(draft)+'\n\nالمسودة صالحة لدقيقتين فقط، ولا تنشر أي رسالة.',
+    [[btn('✅ اعتماد التعديل','gd:1:2:c:'+draft.id)],
+     [btn('❌ إلغاء التعديل','gd:1:2:x:'+draft.id)],
+     [btn('↩️ دليل المجموعة',group('2',cmd.chatId))]]);
+  }
   if(cmd?.kind==='HOME')return groups(service,actor,cmd.section==='GUIDE'?'2':'3',0);
   if(cmd?.kind==='GROUP'){
    const d=await service.ownerGroup(actor,cmd.chatId);
@@ -123,6 +154,17 @@ export async function phase4GuidanceOwnerScreen(service:Phase4GuidanceService,
   if(input==='mi:1:i:09:03'||input==='gd:1:3:h')
    return groups(service,actor,'3',0);
   if(!validPhase4GuidanceOwnerRoute(input))return null;
+  const decision=/^gd:1:2:([cx]):([a-f0-9]{24})$/u.exec(input);
+  if(decision){
+   if(decision[1]==='x'){
+    const cancelled=await service.cancel(actor,decision[2]!);
+    return cancelled?ui('أُلغيت المسودة ولم تتغير إعدادات الدليل.',
+     [[btn('↩️ اختيار المجموعة',root('2'))]]):null;
+   }
+   const chatId=await service.confirm(actor,decision[2]!);
+   const current=await service.ownerGroup(actor,chatId);
+   return current?welcome(current):null;
+  }
   const list=/^gd:1:([23]):p:(0|[1-9][0-9]?)$/u.exec(input);
   if(list)return groups(service,actor,list[1]! as '2'|'3',Number(list[2]));
   const detail=/^gd:1:([23]):g:(-[1-9][0-9]{0,15})$/u.exec(input);
