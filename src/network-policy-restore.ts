@@ -114,5 +114,5 @@ export function applyNetworkPolicyRestore(
   }
  }
  return {snapshotId,chatId:saved.chatId,newRevision:restored.revision,
-  currentMode:restored.mode,changedFields:current.changedFields,pausedLinks};
+  currentMode:current.currentMode,changedFields:current.changedFields,pausedLinks};
 }
