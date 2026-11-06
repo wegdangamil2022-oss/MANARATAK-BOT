@@ -60,6 +60,7 @@ for(const engine of ['json','sqlite'] as const){
     'studyMembersActive','badgesAwarded'])
     assert.equal(value(name),1,name);
    assert.equal(value('postLikesActive'),0);
+   assert.equal(value('questionsReviewed'),0,'archiving does not constitute human review');
    assert.equal(result.metrics.some(x=>x.key==='messageViews'),false);
    assert.equal(JSON.stringify(result).includes('"memberId"'),false);
    assert.equal(JSON.stringify(result).includes('أفضل طريقة لتنظيم'),false);
