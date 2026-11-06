@@ -17,9 +17,12 @@ const USER=/^[1-9][0-9]{0,15}$/u;
 const CHAT=/^-[1-9][0-9]{0,15}$/u;
 export type DiscussionOwnerCommand=
  |{kind:'LIST'}
- |{kind:'CREATE';chatId:string;input:DiscussionDraftInput};
+ |{kind:'CREATE';chatId:string;input:DiscussionDraftInput}
+ |{kind:'BIND_FAQ';questionId:string;revision:number;faqId:string};
 export function parseDiscussionOwnerCommand(input:string):DiscussionOwnerCommand|null{
  if(input==='/discussions')return {kind:'LIST'};
+ const link=/^\/discussionfaq ([a-f0-9]{24}) ([1-9][0-9]{0,2}) ([a-f0-9]{8}-(?:[a-f0-9]{4}-){3}[a-f0-9]{12})$/u.exec(input);
+ if(link)return {kind:'BIND_FAQ',questionId:link[1]!,revision:Number(link[2]),faqId:link[3]!};
  if(typeof input!=='string'||input.length>180)return null;
  const m=/^\/discussionnew (-[1-9][0-9]{0,15}) ([0-9]{1,4}) ([0-9]{1,3}) ([^\r\n]{4,100})$/u.exec(input);
  if(!m||!CHAT.test(m[1]!)||!Number.isSafeInteger(Number(m[1]))||
@@ -90,7 +93,8 @@ async function questionDetail(service:Phase4DiscussionService,actor:string,id:st
  return ui('<b>💬 مراجعة سؤال (خاص بالمالك)</b>\n'+
   'الحالة: '+q.status+' · الإصدار: '+q.revision+'\n'+
   (q.text===undefined?'🔒 نص السؤال محذوف.':'<b>السؤال:</b>\n'+escape(q.text))+
-  '\n\n⚠️ اعتماد السؤال أو تمييزه كمجاب عنه لا ينشره في Telegram ولا ينشئ ردًا للطالب.',
+  (q.status==='APPROVED'?'\nلربط إجابة FAQ معتمدة: <code>/discussionfaq '+id+' '+q.revision+' FAQ_ID</code>':'')+
+  '\n\n⚠️ لا يوجد نشر جماعي أو إرسال تلقائي لأي إجابة.',
   actions);
 }
 /** Every destructive or state-changing callback is re-authorized at commit. */
@@ -103,6 +107,10 @@ export async function discussionOwnerScreen(
   if(cmd?.kind==='CREATE'){
    const session=await service.draft(actor,cmd.chatId,cmd.input);
    return sessionDetail(service,actor,session.id);
+  }
+  if(cmd?.kind==='BIND_FAQ'){
+   if(!await service.answerFromFAQ(actor,cmd.questionId,cmd.revision,cmd.faqId))return null;
+   return questionDetail(service,actor,cmd.questionId);
   }
   if(cmd?.kind==='LIST'||input==='mi:1:i:09:07'||input==='dq:1:h'){
    const sessions=await service.list(actor);
