@@ -80,7 +80,7 @@ for(const engine of ['json','sqlite'] as const){
    assert.deepEqual(f.calls,[],'preview must not invoke Telegram');
    const confirm=button(preview,'تأكيد');
    assert.equal(await f.owner.handle('200',confirm),null);
-   assert.deepEqual(f.calls,[]);
+   assert.equal(f.calls.length,0);
    const result=await f.owner.handle(OWNER,confirm);
    assert.match(result?.text??'',/رُصد|تم رصد/u);
    assert.match(result?.text??'',/لا.*عقوبة/u);
@@ -101,7 +101,7 @@ for(const engine of ['json','sqlite'] as const){
    const detail=await f.owner.handle(OWNER,'nw:1:sd:'+REVIEW);
    assert.equal(detail?.keyboard.inline_keyboard.flat().some(x=>x.text.includes('فحص Telegram')),false);
    assert.equal(await f.owner.handle(OWNER,'nw:1:sr:'+REVIEW),null);
-   assert.deepEqual(f.calls,[]);
+   assert.equal(f.calls.length,0);
   }finally{await f.close();}
  });
  test(engine+' NETWORK-003 disabled safety switch rejects remote preview and confirmation',async()=>{
@@ -113,7 +113,7 @@ for(const engine of ['json','sqlite'] as const){
    f.setEnabled(false);
    const denied=await f.owner.handle(OWNER,button(preview,'تأكيد'));
    assert.doesNotMatch(denied?.text??'',/رُصد/u);
-   assert.deepEqual(f.calls,[]);
+   assert.equal(f.calls.length,0);
   }finally{await f.close();}
  });
  test(engine+' NETWORK-003 stale network or owner policy invalidates consent before remote calls',async()=>{
@@ -121,13 +121,13 @@ for(const engine of ['json','sqlite'] as const){
    const preview=await f.owner.handle(OWNER,'nw:1:sr:'+REVIEW);
    await f.store.transaction(s=>{s.groupNetworks![0]!.revision++;});
    assert.equal(await f.owner.handle(OWNER,button(preview,'تأكيد')),null);
-   assert.deepEqual(f.calls,[]);
+   assert.equal(f.calls.length,0);
   }finally{await f.close();}
   const g=await fixture();try{
    const preview=await g.owner.handle(OWNER,'nw:1:sr:'+REVIEW);
    await g.store.transaction(s=>{s.privateFeatures['owner.dashboard']=false;});
    assert.equal(await g.owner.handle(OWNER,button(preview,'تأكيد')),null);
-   assert.deepEqual(g.calls,[]);
+   assert.equal(g.calls.length,0);
   }finally{await g.close();}
  });
  test(engine+' NETWORK-003 local pending restriction, rejected review and expiry never read remotely',async()=>{
@@ -138,19 +138,19 @@ for(const engine of ['json','sqlite'] as const){
      policyVersion:1,status:'UNKNOWN_OUTCOME',createdAt:NOW-30});
    });
    assert.equal(await f.owner.handle(OWNER,'nw:1:sr:'+REVIEW),null);
-   assert.deepEqual(f.calls,[]);
+   assert.equal(f.calls.length,0);
   }finally{await f.close();}
   const g=await fixture();try{
    await g.store.transaction(s=>{const row=s.networkSanctionReviews![0]!;
     row.status='REJECTED';});
    assert.equal(await g.owner.handle(OWNER,'nw:1:sr:'+REVIEW),null);
-   assert.deepEqual(g.calls,[]);
+   assert.equal(g.calls.length,0);
   }finally{await g.close();}
   const h=await fixture();try{
    const preview=await h.owner.handle(OWNER,'nw:1:sr:'+REVIEW);
    h.advance(121_000);
    assert.equal(await h.owner.handle(OWNER,button(preview,'تأكيد')),null);
-   assert.deepEqual(h.calls,[]);
+   assert.equal(h.calls.length,0);
   }finally{await h.close();}
  });
  test(engine+' NETWORK-003 failed source proof cannot be presented as successful observation',async()=>{
