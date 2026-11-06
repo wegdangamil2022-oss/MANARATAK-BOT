@@ -54,6 +54,13 @@ export function validContestRecord(v:unknown):v is ContestRecord{
   new Set(v.quizIds).size!==v.quizIds.length)return false;
  if(v.status==='DRAFT')return v.quizIds.length===0&&
   v.registrationEndsAt===undefined&&v.startedAt===undefined&&v.closedAt===undefined;
+ if(v.status==='CANCELLED'&&v.startedAt===undefined){
+  if(v.quizIds.length!==0||!stamp(v.closedAt)||
+   Number(v.closedAt)<Number(v.createdAt))return false;
+  if(v.registrationEndsAt===undefined)return true; // Cancelled a draft.
+  return stamp(v.registrationEndsAt)&&v.rounds.length>=2&&
+   Number(v.registrationEndsAt)>=Number(v.createdAt);
+ }
  if(!stamp(v.registrationEndsAt)||
   Number(v.registrationEndsAt)<Number(v.createdAt)||v.rounds.length<2)return false;
  if(v.status==='REGISTRATION')
