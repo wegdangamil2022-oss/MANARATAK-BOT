@@ -7,6 +7,8 @@ import {decideNetworkEmergency,networkEmergencyStopped} from './network-emergenc
 import {pauseSelectedNetworkPolicyLinks} from './network-bulk-policy-pause.js';
 import {OwnerNetworkBulkServiceEditor,validOwnerNetworkBulkServiceRoute}
  from './telegram-network-bulk-services.js';
+import {OwnerNetworkPolicyDiffEditor,validOwnerNetworkPolicyDiffRoute}
+ from './telegram-network-differences.js';
 import {OwnerNetworkWatchEditor,validOwnerNetworkWatchRoute} from './telegram-network-watch-owner.js';
 import {OwnerNetworkSanctionEditor,validOwnerNetworkSanctionRoute,
  type NetworkSanctionRemoteRead} from './telegram-network-sanction-owner.js';
@@ -57,7 +59,7 @@ const validClock=(value:number)=>Number.isSafeInteger(value)&&value>=0&&value<=8
 export function validOwnerNetworkRoute(data:unknown):boolean{
  if(typeof data!=='string'||Buffer.byteLength(data,'utf8')>64)return false;
  return data==='mi:1:i:01:03'||home.test(data)||begin.test(data)||validOwnerNetworkWatchRoute(data)||
-   validOwnerNetworkBulkServiceRoute(data)||
+   validOwnerNetworkBulkServiceRoute(data)||validOwnerNetworkPolicyDiffRoute(data)||
    validOwnerNetworkSanctionRoute(data)||
   [list,detail,policySources,policyPreview,followList,followStop,
    bulkList,bulkToggle,bulkPreview,multiStart,multiMove,multiToggle,multiPreview,multiCancel,
@@ -521,6 +523,7 @@ export class OwnerNetworkEditor{
     [btn('⏸️ إدارة المتابعة','nw:1:f:'+n.id+':0')],
     [btn('🚨 طوارئ الشبكة','nw:1:eh:'+n.id)],
     [btn('🛑 إيقاف خدمات مجموعات الشبكة','nw:1:sh:'+n.id)],
+    [btn('🧩 مقارنة إعدادات المجموعات','nw:1:ch:'+n.id)],
     [btn('🛡️ بلاغات الشبكة المركزية','nw:1:w:'+n.id+':0')],
     ...(stale>0?[[btn('🧹 مراجعة الارتباطات القديمة','nw:1:s:'+n.id+':0')]]:[]),
     [btn('✏️ إعادة تسمية الشبكة','nw:1:e:'+n.id)],
@@ -1220,6 +1223,10 @@ export class OwnerNetworkEditor{
   if(validOwnerNetworkBulkServiceRoute(data)){
    await this.cancelInput(actor);
    return new OwnerNetworkBulkServiceEditor(this.store,this.policy,this.clock).handle(actor,data);
+  }
+  if(validOwnerNetworkPolicyDiffRoute(data)){
+   await this.cancelInput(actor);
+   return new OwnerNetworkPolicyDiffEditor(this.store,this.policy,this.clock).handle(actor,data);
   }
   const watchEditor=new OwnerNetworkWatchEditor(this.store,this.policy,this.clock);
   const sanctionEditor=new OwnerNetworkSanctionEditor(this.store,this.policy,this.clock,this.remoteRead);
