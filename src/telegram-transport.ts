@@ -988,7 +988,7 @@ export class TelegramUpdateApplication {
       plan:this.plan(chatId,screen.text,undefined,screen.keyboard,event.callbackMessageId)};
     }
     // 09:16 — dedicated settings dashboard. Authorization is private and owner-only.
-    const phase4SettingsInput=kind==='private'&&(
+    const phase4SettingsInput=kind==='private'&&!!this.opts.community&&(
      event.callbackData==='mi:1:i:09:16'||
      event.callbackData?.startsWith('p4s:1:')||
      text==='/communitysettings'||text.startsWith('/communitysettings '));
