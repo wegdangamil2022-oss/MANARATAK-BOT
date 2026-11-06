@@ -6,6 +6,7 @@ import {validNetworkSanctionReviews,validNetworkSanctionReviewReferences,
  type NetworkSanctionReview} from './network-sanction-review-model.js';
 import {validCommunityFolders,type CommunityFolder} from './community-folder-model.js';
 import {validCommunityState,type CommunityAutomationState} from './phase4-community-model.js';
+import {validWhisperState,type WhisperState} from './phase4-whisper-model.js';
 import {validCommunityPhotoId,validCommunityLinkKeyboard} from './phase4-community-rich.js';
 import {validCommunityMessageMetadata,type CommunityMessageReceipt} from './community-message-receipt.js';
 import {validAdminUIAccess,type AdminUIAccess} from './protection-ui-access.js';
@@ -171,6 +172,8 @@ export interface B6BudgetAttempt {
 export interface BotState {
   /** Opt-in phase 4 group interactions; no active rules in legacy states. */
   phase4Community?:CommunityAutomationState;
+  /** Phase 4 / 09:06 private whisper drafts and seat reservations, no delivery. */
+  phase4Whispers?:WhisperState;
   communityFolders?:CommunityFolder[];
   buttonStudio?:StudioState;
   /** Local owner network folders; never evidence of Telegram rights. */
@@ -265,6 +268,7 @@ export class BotStore {
     }
     if (previous.schemaVersion !== 8 ||
       (previous.phase4Community!==undefined&&!validCommunityState(previous.phase4Community))||
+      (previous.phase4Whispers!==undefined&&!validWhisperState(previous.phase4Whispers))||
       (previous.groupNetworks!==undefined&&!validGroupNetworks(previous.groupNetworks))||
       (previous.networkInheritance!==undefined&&!validNetworkInheritanceLinks(previous.networkInheritance))||
       (previous.networkWatchCases!==undefined&&!validNetworkWatchCases(previous.networkWatchCases))||
