@@ -40,7 +40,7 @@ for(const engine of ['json','sqlite'] as const){
    assert.equal(await eventSvc.bindQuestionSession(MEMBER,e.id,q.id,2),false);
    assert.equal(await eventSvc.bindQuestionSession(OWNER,e.id,q.id,1),false);
    const confirmed=await eventOwnerScreen(eventSvc,OWNER,'ev:1:q:'+e.id+':'+q.id+':2');
-   assert.match(confirmed?.text??'',/الأسئلة/);
+   assert.match(confirmed?.text??'',/أسئلة الطلاب المسبقة/);
    const reviewPoll=await eventOwnerScreen(eventSvc,OWNER,'/eventpoll '+e.id+' '+p.id);
    assert.match(reviewPoll?.text??'',/الاستطلاع|المراجعة/);
    assert.equal(await eventSvc.bindPoll(OWNER,e.id,p.id,2),true);
