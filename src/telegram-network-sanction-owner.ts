@@ -12,8 +12,9 @@ import {inspectNetworkTransferLocal,NetworkTransferReadOnlyPreflight,
  type NetworkTransferObservation} from './network-transfer-preflight.js';
 import {TelegramBotApiModerationGateway} from './telegram-moderation-gateway.js';
 
-/** NETWORK-003 — owner-only *advisory* target reviews; no live Telegram gateway.
- * Each target requires its own human review and one-shot confirmation. */
+/** NETWORK-003 — owner-only advisory reviews, with a separately confirmed
+ * official read-only Telegram observation when live phase3 wiring is present.
+ * Neither reviews nor observations authorize moderation actions. */
 const PREFIX='owner-network-sanction-',TTL=120_000,SIZE=8;
 const id='([a-f0-9]{12})',page='(0|[1-9][0-9]{0,2})';
 const group='(-[1-9][0-9]{0,15})';
