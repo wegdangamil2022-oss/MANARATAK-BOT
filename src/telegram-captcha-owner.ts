@@ -195,9 +195,10 @@ export class TelegramCaptchaOwner{
      {...step,kind:enabled?'forum-off':'forum-on'})]);
    }
    if(step.kind==='edit'&&this.cleanupAudit){
-    const audit=this.cleanupAudit.policy(s,step.group),enabled=audit?.enabled===true;
+    const audit=this.cleanupAudit.policy(s,step.group),enabled=audit?.enabled===true,ready=this.cleanupAudit.ready(s,step.group);
     text+='\nتدقيق الحذف إلى غرفة إشعارات خاصة: '+(enabled?'مفعل ومشروط بخصوصية الغرفة':'متوقف');
-    if(audit)rows.push([b(enabled?'إيقاف تدقيق الحذف':'تفعيل تدقيق الحذف',
+    if(!ready)text+='\nيتطلب تفعيل التدقيق ربط غرفة إشعارات إدارة معتمدة بموافقتَي المجموعة والغرفة.';
+    if(audit&&ready)rows.push([b(enabled?'إيقاف تدقيق الحذف':'تفعيل تدقيق الحذف',
      {...step,kind:enabled?'audit-off':'audit-on'})]);
    }
    if(step.kind==='edit'&&this.serviceCleanup)rows.push([{text:'🧹 تنظيف أوامر المشرفين (موافقة مستقلة)',callback_data:'ac:1:h'}]);
