@@ -548,7 +548,8 @@ export class OwnerNetworkEditor{
   kind:'a'|'w'|'r'|'e'|'s'='a',chatId='0'):OwnerInlineScreen|null{
   const selectedKind=kind==='a'?undefined:eventKinds[kind];
   const events=networkAdministrativeEvents(s,this.policy,actor,now,id,{
-   kind:selectedKind,chatId:chatId==='0'?undefined:chatId
+   ...(selectedKind?{kind:selectedKind}:{}),
+   ...(chatId==='0'?{}:{chatId})
   });
   const n=this.find(s,id),pages=Math.max(1,Math.ceil((events??[]).length/SIZE));
   if(!events||!n||p>=pages)return null;
