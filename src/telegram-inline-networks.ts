@@ -840,7 +840,10 @@ export class OwnerNetworkEditor{
  async handle(actor:string,data:string):Promise<OwnerInlineScreen|null>{
   if(!this.policy.isOwner(actor)||!validOwnerNetworkRoute(data))return null;
   const watchEditor=new OwnerNetworkWatchEditor(this.store,this.policy,this.clock);
-  if(validOwnerNetworkWatchRoute(data))return watchEditor.handle(actor,data);
+  if(validOwnerNetworkWatchRoute(data)){
+   await this.cancelInput(actor);
+   return watchEditor.handle(actor,data);
+  }
   const c=confirm.exec(data);
   if(c){
    const result=await watchEditor.handle(actor,data);
