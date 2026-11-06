@@ -839,7 +839,8 @@ export class TelegramUpdateApplication {
      }
      if(!this.opts.policy.isOwner(actorId))return {status:'DENIED',reason:'OWNER_ONLY'};
      if(event.callbackData==='mi:1:i:01:03'||event.callbackData.startsWith('nw:1:')){
-      const view=await new OwnerNetworkEditor(this.opts.store,this.opts.policy,this.clock).handle(actorId,event.callbackData);
+      const view=await new OwnerNetworkEditor(this.opts.store,this.opts.policy,this.clock,
+       this.opts.moderationRights).handle(actorId,event.callbackData);
       return view?{status:'APPLIED',reason:'RESPONSE_PLANNED_ONLY',plan:this.plan(chatId,view.text,undefined,view.keyboard,event.callbackMessageId)}:{status:'DENIED',reason:'OWNER_NETWORK_STALE_OR_UNAUTHORIZED'};
      }
      if(event.callbackData.startsWith('gb:1:')){
