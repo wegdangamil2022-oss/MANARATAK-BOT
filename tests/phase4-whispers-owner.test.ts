@@ -68,7 +68,11 @@ for(const engine of ['json','sqlite'] as const){
    assert.match(result.plan?.text??'',/لم تُنشر/);
    assert.equal((await f.store.snapshot()).phase4Whispers?.messages[0]?.status,'OPEN');
    assert.equal((await f.app.handle(callback(5,approve))).status,'DENIED');
-   assert.equal((await f.store.snapshot()).telegramReplyJobs?.length??0,0);
+   const replyJobs=(await f.store.snapshot()).telegramReplyJobs??[];
+   // Owner-only private previews are real reply jobs. A group disclosure
+   // would be a different, forbidden effect and is what must stay at zero.
+   assert.equal(replyJobs.filter(x=>x.plan?.chatId===GROUP).length,0);
+   assert.ok(replyJobs.every(x=>!x.plan||x.plan.chatId===OWNER));
    assert.equal((await f.store.snapshot()).operations.length,0);
   }finally{await f.close();}
  });
