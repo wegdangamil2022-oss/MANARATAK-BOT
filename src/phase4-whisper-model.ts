@@ -13,7 +13,7 @@ export interface WhisperReservation{
  id:string;messageId:string;memberId:string;at:number;status:'HELD';
 }
 export interface WhisperConsent{
- chatId:string;chatVersion:number;memberId:string;enabled:boolean;updatedAt:number;
+ chatId:string;chatVersion:number;memberId:string;enabled:boolean;revision:number;updatedAt:number;
 }
 export interface WhisperState{
  messages:WhisperMessage[];reservations:WhisperReservation[];consents:WhisperConsent[];
@@ -93,9 +93,10 @@ export function validWhisperState(raw:unknown):raw is WhisperState{
  }
  if(reservations.some(c=>!messages.some(m=>m.id===c.messageId)))return false;
  if(raw.consents.some(c=>!record(c)||!exact(c,
-  ['chatId','chatVersion','memberId','enabled','updatedAt'])||
+  ['chatId','chatVersion','memberId','enabled','revision','updatedAt'])||
   !validChat(c.chatId)||!validRevision(c.chatVersion)||
-  !validUser(c.memberId)||typeof c.enabled!=='boolean'||!validTime(c.updatedAt)))return false;
+  !validUser(c.memberId)||typeof c.enabled!=='boolean'||
+  !validRevision(c.revision)||!validTime(c.updatedAt)))return false;
  const consents=raw.consents as WhisperConsent[];
  return new Set(consents.map(c=>c.chatId+':'+c.memberId)).size===consents.length;
 }
