@@ -5,6 +5,8 @@ import type {TelegramReplySender,TelegramSendResult} from './telegram-replies.js
 import {validGroupNetwork} from './group-network-model.js';
 import {reportManager} from './moderation-report-notices.js';
 import {networkAlertEventSilenced} from './network-alert-silence.js';
+import {networkEmergencyStopped,validNetworkEmergencyControls}
+ from './network-emergency-stop.js';
 import {networkAdministrativeEvents,type NetworkAdministrativeEventKind}
  from './network-administrative-events.js';
 
@@ -125,7 +127,9 @@ interface Candidate{
 /** Sources must be unique, current, owner-visible and current-manager scoped.
  * A forged preference or lost grant cannot unlock an old event. */
 function event(s:BotState,p:Policy,pref:Preference,now:number,eventId?:string){
- if(!active(s,p,pref,now)||!p.privateFeature(s,'owner.dashboard',p.ownerId))return null;
+ if(!active(s,p,pref,now)||!p.privateFeature(s,'owner.dashboard',p.ownerId)||
+  !validNetworkEmergencyControls(s.networkEmergencyControls??[])||
+  networkEmergencyStopped(s,pref.network))return null;
  const matches=networkAdministrativeEvents(s,p,p.ownerId,now,pref.network,{
   kind:EVENT_KIND[pref.kind],chatId:pref.chat});
  if(!matches)return null;
