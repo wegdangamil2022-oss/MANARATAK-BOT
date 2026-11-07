@@ -243,6 +243,79 @@ export class OwnerForumTopicEditor{
      [btn('↩️ مواضيع المجموعة','ft:1:g:'+g+':0)]]);
   });
  }
+ /** Local setting affects educational browsing in this thread only. */
+ async preparePolicy(actor:string,g:string,t:number,
+  mode:ForumTopicEducationMode):Promise<OwnerInlineScreen|null>{
+  return this.store.transaction(s=>{
+   const now=this.clock();
+   if(!this.access(s,actor,now)||!id(g)||!topicId(t))return null;
+   const proof=forumTopicEducationProof(s,this.policy,actor,g,t,mode,now);
+   const version=forumTopicGroupAccess(s,this.policy,actor,g,now);
+   if(!proof||version===null)return null;
+   const pending=s.callbacks.filter(c=>c.actorId===actor&&
+    c.ref.startsWith(POLICY_PREFIX)&&!c.used&&!c.revoked&&c.expiresAt>now);
+   if(pending.length>=100)return null;
+   const nonce=randomBytes(18).toString('base64url'),ref=POLICY_PREFIX+nonce;
+   if(s.callbacks.some(c=>c.ref===ref))return null;
+   for(const c of pending)c.revoked=true;
+   const value:PendingPolicy={group:g,thread:t,mode,proof,createdAt:now,version};
+   s.callbacks.push({ref,action:POLICY_PREFIX+JSON.stringify(value),
+    actorId:actor,chatId:'private',policyVersion:version,oneShot:true,
+    used:false,revoked:false,expiresAt:now+TTL});
+   return ui('<b>🔎 معاينة سياسة تصفح الموضوع</b>\n'+
+    'المجموعة: <code>'+g+'</code>\n'+
+    'الموضوع: <code>'+t+'</code>\n'+
+    'الإعداد الجديد: '+(mode==='PAUSED'?
+     'إيقاف التصفح التعليمي داخل هذا الموضوع':
+     'اتباع أذونات التصفح التعليمي الحالية للمجموعة')+'\n'+
+    'لا تُغيّر هذه الموافقة قواعد Telegram أو حقوق نشر المالك، ولا توقف أو تفتح الموضوع.'+
+    '\nتأكيد خاص لمرة واحدة خلال دقيقتين.',
+    [[btn('✅ تأكيد تغيير سياسة الموضوع','ft:1:e:'+nonce)],
+     [btn('✖ إلغاء','ft:1:k:'+nonce)],
+     [btn('↩️ تفاصيل الموضوع','ft:1:d:'+g+':'+t)]]);
+  });
+ }
+ private async decidePolicy(actor:string,nonce:string,apply:boolean):
+ Promise<OwnerInlineScreen|null>{
+  return this.store.transaction(s=>{
+   const now=this.clock(),ref=POLICY_PREFIX+nonce,
+    rows=s.callbacks.filter(c=>c.ref===ref),c=rows[0];
+   if(!this.access(s,actor,now)||rows.length!==1||!c||
+    c.actorId!==actor||c.chatId!=='private'||c.used||c.revoked||
+    c.oneShot!==true||!clock(c.expiresAt)||
+    c.expiresAt<=now||c.expiresAt>now+TTL)return null;
+   const p=parsePolicy(c.action);
+   if(!p||p.createdAt>now||c.expiresAt!==p.createdAt+TTL||
+    c.policyVersion!==p.version)return null;
+   if(apply&&!setForumTopicEducationPolicy(s,this.policy,actor,
+    p.group,p.thread,p.mode,now,p.proof))return null;
+   c.used=true;
+   return this.detail(s,actor,now,p.group,p.thread);
+  });
+ }
+ private educationHistory(s:BotState,actor:string,now:number,
+  g:string,t:number,page:number):OwnerInlineScreen|null{
+  const rows=forumTopicEducationHistory(s,this.policy,actor,g,t,now);
+  if(!rows)return null;
+  const pages=Math.max(1,Math.ceil(rows.length/SIZE));
+  if(page>=pages)return null;
+  const lines=rows.slice(page*SIZE,(page+1)*SIZE).map(v=>
+   '▫️ '+v.revision+' · '+(v.mode==='PAUSED'?'إيقاف التصفح':'اتباع سياسة المجموعة')+
+   ' · '+new Date(v.at).toISOString().slice(0,16).replace('T',' ')+' UTC');
+  const buttons:{text:string;callback_data:string}[][]=[];
+  const nav:{text:string;callback_data:string}[]=[];
+  if(page>0)nav.push(btn('⬅️ السابق','ft:1:j:'+g+':'+t+':'+(page-1)));
+  if(page+1<pages)nav.push(btn('➡️ التالي','ft:1:j:'+g+':'+t+':'+(page+1)));
+  if(nav.length)buttons.push(nav);
+  buttons.push([btn('↩️ تفاصيل الموضوع','ft:1:d:'+g+':'+t)]);
+  return ui('<b>🕘 سجل سياسات التصفح لكل موضوع</b>\n'+
+   'المجموعة: <code>'+g+'</code> · الموضوع: <code>'+t+'</code>\n'+
+   'إجمالي التغييرات المعتمدة: '+rows.length+' · الصفحة '+(page+1)+'/'+pages+'\n'+
+   (lines.length?lines.join('\n'):'لا توجد تغييرات مستقلة؛ الإعداد يتبع سياسة المجموعة.')+
+   '\nالتسجيل محلي ولا يغيّر أو يغلق أو يعيد فتح موضوعًا في Telegram.',
+   buttons);
+ }
+
  /** Human-authored topic notes remain owner-private and unpublished. */
  async prepareNote(actor:string,g:string,t:number,note:string):Promise<OwnerInlineScreen|null>{
   return this.store.transaction(s=>{
@@ -317,6 +390,13 @@ export class OwnerForumTopicEditor{
   if(!person(actor)||!this.policy.isOwner(actor))return null;
   if(data==='mi:1:i:01:05')data='ft:1:h:0';
   if(!validOwnerForumTopicRoute(data))return null;
+  const pc=POLICY_CONFIRM.exec(data);
+  if(pc)return this.decidePolicy(actor,pc[1]!,true);
+  const pk=POLICY_CANCEL.exec(data);
+  if(pk)return this.decidePolicy(actor,pk[1]!,false);
+  const choice=POLICY_CHOICE.exec(data);
+  if(choice)return this.preparePolicy(actor,choice[1]!,Number(choice[2]),
+   choice[3]==='1'?'PAUSED':'INHERIT');
   const n=NOTE_CONFIRM.exec(data);
   if(n)return this.decideNote(actor,n[1]!,true);
   const z=NOTE_CANCEL.exec(data);
@@ -332,6 +412,8 @@ export class OwnerForumTopicEditor{
   if(g)return this.group(s,actor,now,g[1]!,Number(g[2]));
   const d=DETAIL.exec(data);
   if(d)return this.detail(s,actor,now,d[1]!,Number(d[2]));
+  const ph=POLICY_HISTORY.exec(data);
+  if(ph)return this.educationHistory(s,actor,now,ph[1]!,Number(ph[2]),Number(ph[3]));
   const hst=HISTORY.exec(data);
   return hst?this.history(s,actor,now,hst[1]!,Number(hst[2]),Number(hst[3])):null;
  }
