@@ -192,6 +192,22 @@ export function forumTopicNote(s:BotState,p:Policy,actor:string,g:string,
  if(matching.some(x=>x.registration!==topic.reference))return null;
  return matching.at(-1);
 }
+/** TOPIC-004: non-owner accessor for a note tied to the CURRENT local
+ * registered thread. This is not publication authorization: a separately
+ * approved publication witness is required before students can see it.
+ * null means invalid state; undefined means no note exists.
+ */
+export function registeredForumTopicNote(s:BotState,g:string,t:number,
+ now:number):LocalForumTopicNote|null|undefined{
+ const registration=registeredForumTopic(s,g,t,now);
+ const list=notes(s,now);
+ if(!registration||!list)return null;
+ const scoped=list.filter(x=>x.group===g&&x.thread===t&&
+  x.groupVersion===registration.groupVersion);
+ if(scoped.some(x=>x.registration!==registration.reference))return null;
+ return scoped.at(-1);
+}
+
 /** Owner-only, bounded editorial history. Current chat permission and
  * exact registration witness are checked again for every read. */
 export function localForumTopicNoteHistory(s:BotState,p:Policy,actor:string,
