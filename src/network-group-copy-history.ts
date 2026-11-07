@@ -52,6 +52,15 @@ export function networkGroupCopyHistory(s:BotState,p:Policy,actor:string,
  const networks=(s.groupNetworks??[]).filter(n=>n.id===netId);
  if(networks.length!==1||!validGroupNetwork(networks[0])||
   networks[0]!.updatedAt>now)return null;
+ // Historical receipts are durable, but displaying a former group ID
+ // still requires CURRENT membership, owner scope and approval for BOTH ends.
+ const approved=new Set<string>();
+ for(const m of networks[0]!.members){
+  const chats=s.chats.filter(c=>c.id===m.chatId),c=chats[0];
+  if(chats.length===1&&c&&c.approved&&c.version===m.version&&
+   c.scopes.includes('moderation')&&p.canUseChat(s,c.id,'moderation')&&
+   p.has(s,actor,'chat.manage',c.id,now))approved.add(c.id);
+ }
  const out:NetworkCopyHistoryEntry[]=[];
  // Pre-index once: historical review should remain bounded even with large
  // audit journals, while duplicate keys still fail closed.
@@ -78,6 +87,7 @@ export function networkGroupCopyHistory(s:BotState,p:Policy,actor:string,
    !clock(c.expiresAt)||a.at>=c.expiresAt||a.at<c.expiresAt-120_000)continue;
   const parsed=confirmation(c.action);
   if(!parsed||parsed.netId!==netId||
+   !approved.has(parsed.sourceId)||!approved.has(parsed.targetId)||
    a.policyVersion!==parsed.targetRevision+1)continue;
   out.push({nonce:m[1]!,networkId:netId,
    sourceId:parsed.sourceId,targetId:parsed.targetId,
