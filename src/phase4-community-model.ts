@@ -5,7 +5,7 @@ import {validCommunityPhotoId,validCommunityLinkButtons,type CommunityLinkButton
  */
 export type CommunityEventKind='JOIN'|'LEAVE'|'TEXT';
 /** Classified only from verified Telegram service messages; not user-supplied text. */
-export type CommunityJoinKind='SELF'|'ADDED'|'BATCH';
+export type CommunityJoinKind='SELF'|'ADDED'|'BATCH'|'INVITE';
 /** Exit source derived only from a trusted Telegram membership or service event. */
 export type CommunityLeaveKind='SELF'|'REMOVED';
 export type CommunityServiceKind='JOIN'|'LEAVE'|'TITLE_CHANGED'|'PHOTO_CHANGED'|'PHOTO_REMOVED';
@@ -200,7 +200,7 @@ export function validCommunityRulesUrl(value:unknown):value is string{
 const validTopic=(n:unknown):n is number=>typeof n==='number'&&Number.isSafeInteger(n)&&n>0&&n<=2147483647;
 const validMinute=(v:unknown):v is number=>typeof v==='number'&&Number.isInteger(v)&&v>=0&&v<1440;
 export const validCommunityJoinKind=(value:unknown):value is CommunityJoinKind=>
- value==='SELF'||value==='ADDED'||value==='BATCH';
+ value==='SELF'||value==='ADDED'||value==='BATCH'||value==='INVITE';
 export const validCommunityLeaveKind=(value:unknown):value is CommunityLeaveKind=>
  value==='SELF'||value==='REMOVED';
 /** A supported, canonical IANA zone. All zone names are owner-supplied only. */

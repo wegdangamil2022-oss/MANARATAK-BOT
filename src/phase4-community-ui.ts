@@ -4,7 +4,7 @@ import type {CommunityDraftKind,ReplyMatch,CommunityLanguage,CommunityCalendar,C
 import {validCommunityRulesUrl,validCommunityTimeZone,validCommunityFAQId,validCommunityProfileTitle} from './phase4-community-model.js';
 import {validCommunityLinkButton,validCommunityPhotoId} from './phase4-community-rich.js';
 const group=/^-[1-9]\d{0,15}$/u,hex=/^[a-f0-9]{24}$/u;
-const route=/^p4c:1:(?:q:-[1-9]\d{0,15}|i:-[1-9]\d{0,15}|ac:-[1-9]\d{0,15}:[1-8]|b:-[1-9]\d{0,15}(?::[sam])?|m:-[1-9]\d{0,15}(?::[sr])?|p:-[1-9]\d{0,15}|f:-[1-9]\d{0,15}:(?:0|[1-9]\d{0,2})|s:-[1-9]\d{0,15}|k:-[1-9]\d{0,15}|z:-[1-9]\d{0,15}|n:-[1-9]\d{0,15}|a:-[1-9]\d{0,15}|y:-[1-9]\d{0,15}(?::[1-9]\d{0,9})?|l:(?:0|[1-9]\d{0,2})|g:-[1-9]\d{0,15}|h:-[1-9]\d{0,15}|v:-[1-9]\d{0,15}:[wf]|j:-[1-9]\d{0,15}:[wf]:[pb]|r:-[1-9]\d{0,15}:(?:0|[1-9]\d{0,2})|t:-[1-9]\d{0,15}:[wfrsgbdpujlvm]:[01]|d:-[1-9]\d{0,15}:[a-f0-9]{12}|e:-[1-9]\d{0,15}:[a-f0-9]{12}:[01]|u:-[1-9]\d{0,15}:(?:ar|en)|o:-[1-9]\d{0,15}:(?:12|24):[gh]|[cx]:[a-f0-9]{24})$/u;
+const route=/^p4c:1:(?:q:-[1-9]\d{0,15}|i:-[1-9]\d{0,15}|ac:-[1-9]\d{0,15}:[1-8]|b:-[1-9]\d{0,15}(?::[sami])?|m:-[1-9]\d{0,15}(?::[sr])?|p:-[1-9]\d{0,15}|f:-[1-9]\d{0,15}:(?:0|[1-9]\d{0,2})|s:-[1-9]\d{0,15}|k:-[1-9]\d{0,15}|z:-[1-9]\d{0,15}|n:-[1-9]\d{0,15}|a:-[1-9]\d{0,15}|y:-[1-9]\d{0,15}(?::[1-9]\d{0,9})?|l:(?:0|[1-9]\d{0,2})|g:-[1-9]\d{0,15}|h:-[1-9]\d{0,15}|v:-[1-9]\d{0,15}:[wf]|j:-[1-9]\d{0,15}:[wf]:[pb]|r:-[1-9]\d{0,15}:(?:0|[1-9]\d{0,2})|t:-[1-9]\d{0,15}:[wfrsgbdpujlvm]:[01]|d:-[1-9]\d{0,15}:[a-f0-9]{12}|e:-[1-9]\d{0,15}:[a-f0-9]{12}:[01]|u:-[1-9]\d{0,15}:(?:ar|en)|o:-[1-9]\d{0,15}:(?:12|24):[gh]|[cx]:[a-f0-9]{24})$/u;
 export const validPhase4CommunityRoute=(s:unknown):s is string=>typeof s==='string'&&
  Buffer.byteLength(s,'utf8')<=64&&route.test(s);
 const esc=(s:string):string=>s.replace(/&/gu,'&amp;').replace(/</gu,'&lt;')
@@ -14,6 +14,7 @@ const btn=(text:string,data:string)=>({text,callback_data:data});
 const help='للتعديل أرسل في خاص البوت أحد الأوامر:\n'
  +'<code>/setwelcome -100123 نص الترحيب {العضو}</code>\n'
  +'<code>/welcomevariant -100123 SELF أهلًا {العضو}</code>\n'
+ +'<code>/welcomevariant -100123 INVITE أهلًا بك عبر رابط الدعوة {العضو}</code>\n'
  +'<code>/privatewelcomeon -100123</code>\n'
  +'<code>/privatewelcomeoff -100123</code>\n'
  +'<code>/clearwelcomevariant -100123 SELF</code>\n'
@@ -103,10 +104,10 @@ export function parsePhase4CommunityCommand(text:string):
  const privateGreeting=/^\/privatewelcome(on|off) (-[1-9]\d{0,15})$/u.exec(text);
  if(privateGreeting)return {kind:'EDIT',chatId:privateGreeting[2]!,
   request:{kind:privateGreeting[1]==='on'?'PRIVATE_WELCOME_ON':'PRIVATE_WELCOME_OFF'}};
- const variant=/^\/welcomevariant (-[1-9]\d{0,15}) (SELF|ADDED|BATCH) ([^\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]{1,800})$/u.exec(text);
+ const variant=/^\/welcomevariant (-[1-9]\d{0,15}) (SELF|ADDED|BATCH|INVITE) ([^\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]{1,800})$/u.exec(text);
  if(variant)return {kind:'EDIT',chatId:variant[1]!,request:{
   kind:'WELCOME_VARIANT_SET',joinKind:variant[2]! as CommunityJoinKind,text:variant[3]!.trim()}};
- const variantClear=/^\/clearwelcomevariant (-[1-9]\d{0,15}) (SELF|ADDED|BATCH)$/u.exec(text);
+ const variantClear=/^\/clearwelcomevariant (-[1-9]\d{0,15}) (SELF|ADDED|BATCH|INVITE)$/u.exec(text);
  if(variantClear)return {kind:'EDIT',chatId:variantClear[1]!,request:{
   kind:'WELCOME_VARIANT_CLEAR',joinKind:variantClear[2]! as CommunityJoinKind}};
  const decisionSwitch=/^\/replylog(on|off) (-[1-9]\d{0,15})$/u.exec(text);
@@ -322,7 +323,7 @@ export async function phase4CommunityScreen(service:Phase4CommunityService,actor
    '\nالمنطقة الزمنية: '+(c.timeZone??'غير محددة — إزاحة ثابتة')+
    '\nقالب الترحيب المترجم: '+(c.welcome.localized?.[c.language??'ar']?'متاح':'غير محدد')+
    '\nقالب الوداع المترجم: '+(c.farewell.localized?.[c.language??'ar']?'متاح':'غير محدد')+
-   '\nأنواع الترحيب المخصصة: '+Object.keys(c.welcomeByJoin??{}).length+' من 3'+
+   '\nأنواع الترحيب المخصصة: '+Object.keys(c.welcomeByJoin??{}).length+' من 4'+
    '\nأنواع الوداع المخصصة: '+Object.keys(c.farewellByLeave??{}).length+' من 2'+
    '\nوداع العضو الذي أزالته الإدارة: '+label(c.farewellOnRemoval??false)+
    '\nترحيب خاص بطلب العضو: '+label(c.privateWelcomeEnabled??false)+
@@ -438,7 +439,7 @@ export async function phase4CommunityScreen(service:Phase4CommunityService,actor
  if(joinTypes){
   const id=joinTypes[1]!,config=await service.view(actorId,id);
   const kinds=[['SELF','انضم بنفسه','s'],['ADDED','أضافه عضو آخر','a'],
-   ['BATCH','انضم عدة أعضاء','m']] as const;
+   ['BATCH','انضم عدة أعضاء','m'],['INVITE','عبر رابط دعوة','i']] as const;
   const rows:{text:string;callback_data:string}[][]=[];
   for(const [kind,label,code] of kinds){
    if(config.welcomeByJoin?.[kind])rows.push([btn('🗑️ إزالة قالب '+label,'p4c:1:b:'+id+':'+code)]);
@@ -453,13 +454,15 @@ export async function phase4CommunityScreen(service:Phase4CommunityService,actor
    '<code>/welcomevariant '+id+' SELF مرحبًا {العضو}</code>'+
    '\n<code>/welcomevariant '+id+' ADDED أهلًا {العضو}</code>'+
    '\n<code>/welcomevariant '+id+' BATCH مرحبًا بكم {العضو}</code>'+
+   '\n<code>/welcomevariant '+id+' INVITE أهلًا بك عبر رابط الدعوة {العضو}</code>'+
    '\nلن تُعتمد التعديلات قبل معاينتها وتأكيدها؛ الترحيب العام يظل متوقفًا حتى تفعيله.',
    keyboard:k(rows)};
  }
- const clearJoinType=/^p4c:1:b:(-[1-9]\d{0,15}):([sam])$/u.exec(data);
+ const clearJoinType=/^p4c:1:b:(-[1-9]\d{0,15}):([sami])$/u.exec(data);
  if(clearJoinType){
   const id=clearJoinType[1]!,kind:CommunityJoinKind=
-   clearJoinType[2]==='s'?'SELF':clearJoinType[2]==='a'?'ADDED':'BATCH';
+   clearJoinType[2]==='s'?'SELF':clearJoinType[2]==='a'?'ADDED':
+   clearJoinType[2]==='i'?'INVITE':'BATCH';
   const config=await service.view(actorId,id);
   if(!config.welcomeByJoin?.[kind])return null;
   const draft=await service.pending(actorId,{kind:'WELCOME_VARIANT_CLEAR',joinKind:kind},id);

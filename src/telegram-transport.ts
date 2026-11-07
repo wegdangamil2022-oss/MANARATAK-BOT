@@ -231,6 +231,19 @@ function eventFrom(value:unknown):{event?:Event;reason:string} {
      !positiveId(cm.date)||cm.date>8_640_000_000_000||
      !isObject(cm.old_chat_member)||!isObject(cm.new_chat_member))
     return {reason:'INVALID_CHAT_MEMBER_UPDATE'};
+   // Classify only Telegram-provided ChatMemberUpdated invite metadata.
+   // Neither a student message nor a forwarded link can claim this source.
+   // The invite URL/token is deliberately not copied into the event or storage.
+   if(cm.invite_link!==undefined&&
+      (!isObject(cm.invite_link)||typeof cm.invite_link.invite_link!=='string'||
+       cm.invite_link.invite_link.length>512||
+       !/^https:\/\/t\.me\/[^\s]+$/u.test(cm.invite_link.invite_link)))
+    return {reason:'INVALID_CHAT_MEMBER_UPDATE'};
+   if(cm.via_chat_folder_invite_link!==undefined&&
+      typeof cm.via_chat_folder_invite_link!=='boolean')
+    return {reason:'INVALID_CHAT_MEMBER_UPDATE'};
+   if(cm.via_join_request!==undefined&&typeof cm.via_join_request!=='boolean')
+    return {reason:'INVALID_CHAT_MEMBER_UPDATE'};
    const before=cm.old_chat_member,after=cm.new_chat_member;
    if(!isObject(before.user)||!isObject(after.user)||!positiveId(before.user.id)||
       before.user.id!==after.user.id||before.user.is_bot!==false||after.user.is_bot!==false)
@@ -250,7 +263,9 @@ function eventFrom(value:unknown):{event?:Event;reason:string} {
       user.first_name.trim().slice(0,75):'عضو';
    return {reason:'VALID',event:{updateId:value.update_id as number,actorId:String(cm.from.id),
      chatId:String(cm.chat.id),kind:'group',text:'',communityKind:joining?'JOIN':'LEAVE',
-     ...(joining?{communityJoinKind:cm.from.id===user.id?'SELF' as const:'ADDED' as const}:
+     ...(joining?{communityJoinKind:cm.invite_link!==undefined||
+       cm.via_chat_folder_invite_link===true?'INVITE' as const:
+       cm.from.id===user.id?'SELF' as const:'ADDED' as const}:
       {communityLeaveKind:after.status==='kicked'||cm.from.id!==user.id?'REMOVED' as const:'SELF' as const}),
      communityMemberId:String(user.id),memberName,
      groupName:typeof cm.chat.title==='string'?cm.chat.title:'المجموعة',
