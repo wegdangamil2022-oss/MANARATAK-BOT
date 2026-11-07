@@ -106,6 +106,17 @@ export class TelegramBotApiModerationGateway implements ModerationGateway{
  /** Proof of origin for both independent official getChat and getChatMember
   * readers. Does not authorize approval without a fresh owner confirmation.
   */
+ /** Read-only provenance of is_forum from the official getChat probe.
+  * This does not attest to existence/open status of a specific thread. */
+ static usesOfficialForumStatusRead(gateway:unknown):boolean{
+  try{
+   if(!this.usesOfficialGroupProfileRead(gateway))return false;
+   const adapter=gateway as TelegramBotApiModerationGateway;
+   return TelegramBotApiModerationGateway.prototype.inspectForumStatus===
+    officialGatewayMethods.inspectForumStatus&&
+    adapter.inspectForumStatus===officialGatewayMethods.inspectForumStatus;
+  }catch{return false;}
+ }
  static usesOfficialGroupLinkRead(gateway:unknown):boolean{
   try{
    if(!this.usesOfficialGroupProfileRead(gateway))return false;
@@ -229,6 +240,19 @@ export class TelegramBotApiModerationGateway implements ModerationGateway{
  /** One fresh, bounded getChat observation for an already locally authorized
   * group. The response is not persisted and never grants moderation rights.
   */
+ /** Read-only exact group forum flag; UNKNOWN is never "FORUM". */
+ async inspectForumStatus(chatId:string):Promise<'FORUM'|'NOT_FORUM'|'UNKNOWN'>{
+  if(!validGroup(chatId))return 'UNKNOWN';
+  const response=await this.#call('getChat',{chat_id:chatId});
+  if(response.status!=='HTTP_OK'||!object(response.value))return 'UNKNOWN';
+  const group=response.value;
+  if(group.id!==Number(chatId)||'migrated_to_chat_id' in group)return 'UNKNOWN';
+  if(group.type==='group')return 'NOT_FORUM';
+  if(group.type!=='supergroup')return 'UNKNOWN';
+  return group.is_forum===true?'FORUM':
+   group.is_forum===false?'NOT_FORUM':'UNKNOWN';
+ }
+
  async inspectGroupProfile(chatId:string):Promise<TelegramGroupProfile|null>{
   if(!validGroup(chatId))return null;
   const read=await this.#call('getChat',{chat_id:chatId});
@@ -547,6 +571,7 @@ const officialGatewayMethods=Object.freeze({
  observeRestriction:TelegramBotApiModerationGateway.prototype.observeRestriction,
  inspectRoomPrivacy:TelegramBotApiModerationGateway.prototype.inspectRoomPrivacy,
  inspectGroupProfile:TelegramBotApiModerationGateway.prototype.inspectGroupProfile,
+ inspectForumStatus:TelegramBotApiModerationGateway.prototype.inspectForumStatus,
  inspectGroupLinkEligibility:TelegramBotApiModerationGateway.prototype.inspectGroupLinkEligibility
 });
 // Prevent rebinding the static origin-check functions after their definition.
