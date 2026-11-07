@@ -34,10 +34,24 @@ export function groupQuestionEpochDigest(state:BotState,groupId:string):string{
   .update(groupQuestionSubscriptionEpoch(state,groupId)).digest('hex');
 }
 
+/** The topic menu witness also binds all current topic-local approvals and
+ * editorial versions for THIS group, so withdrawing an approved topic FAQ
+ * or pausing its educational navigation invalidates a queued reply.
+ * Never include an unrelated group's forum messages in this epoch.
+ */
+function groupForumEpochSource(state:BotState,groupId:string):string{
+ const groupTag='"group":'+JSON.stringify(groupId);
+ const registrationTag='"chat":'+JSON.stringify(groupId);
+ const rows=state.audit.filter(a=>
+  a.updateKey.startsWith('group:forum:')&&
+  (a.reason.includes(groupTag)||a.reason.includes(registrationTag)));
+ return JSON.stringify(rows);
+}
 export function groupMenuEpochDigest(state:BotState,groupId:string,topicId?:number):string{
  return createHash('sha256').update('MANARATAK:B6:GROUP-MENU:DISPATCH:v2:')
   .update(topicId===undefined?'':'TOPIC:'+topicId+':')
-  .update(groupQuestionSubscriptionEpoch(state,groupId)).digest('hex');
+  .update(groupQuestionSubscriptionEpoch(state,groupId))
+  .update(topicId===undefined?'':groupForumEpochSource(state,groupId)).digest('hex');
 }
 
 /** Scoped private DM browsing uses a separate change-detection domain. */
