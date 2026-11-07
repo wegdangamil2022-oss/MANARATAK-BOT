@@ -190,6 +190,10 @@ export function renderGuidanceFAQ(s:BotState,chatId:string,id:string):string|nul
 export class Phase4GuidanceService{
  constructor(private readonly store:BotStore,private readonly policy:Policy,
   private readonly community:Phase4CommunityService){}
+ /** Reuse the exact authorized store/policy when composing 09:03 publishing.
+  * Ownership is still checked afresh by every fixed-publication operation. */
+ storeForFixedPublication():BotStore{return this.store;}
+ policyForFixedPublication():Policy{return this.policy;}
  async groups(actor:string):Promise<{chatId:string;configured:boolean}[]>{
   if(!this.policy.isOwner(actor))return [];
   return this.community.listGroups(actor);

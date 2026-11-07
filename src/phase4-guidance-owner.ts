@@ -1,4 +1,5 @@
 import {validCommunityGuideText} from './phase4-community-model.js';
+import {Phase4FixedPublicationService} from './phase4-fixed-publication.js';
 import {Phase4GuidanceService,validGuidanceGroup,
  guidanceEscape,renderGuidanceWelcome,renderGuidanceRules,
  type GuidanceData} from './phase4-guidance.js';
@@ -8,7 +9,9 @@ const ID='-[1-9][0-9]{0,15}',PAGE='(?:0|[1-9][0-9]?)';
 const UUID='[a-f0-9]{8}-(?:[a-f0-9]{4}-){3}[a-f0-9]{12}';
 const ROUTE=new RegExp('^gd:1:(?:[23]:(?:h|p:'+PAGE+'|g:'+ID+
  ')|2:[cxay]:[a-f0-9]{24}|2:z:[a-f0-9]{24}|2:[ts]:'+ID+
- '|2:[rk]:[a-f0-9]{24}|3:[rf]:'+ID+':'+PAGE+'|3:d:'+ID+':'+UUID+')$','u');
+ '|2:[rk]:[a-f0-9]{24}|3:[rf]:'+ID+':'+PAGE+'|3:d:'+ID+':'+UUID+
+ '|3:t:'+ID+':[np]|3:s:'+ID+'|3:[axz]:[a-f0-9]{24}'+
+ '|3:[vk]:[a-f0-9]{24}:[sp])$','u');
 export const validPhase4GuidanceOwnerRoute=(v:unknown):v is string=>
  typeof v==='string'&&Buffer.byteLength(v,'utf8')<=64&&ROUTE.test(v);
 export type GuidanceOwnerCommand=
@@ -100,10 +103,23 @@ function welcome(d:GuidanceData):OwnerInlineScreen{
    [btn('↩️ اختيار المجموعة',root('2')),back]]);
 }
 function fixed(d:GuidanceData):OwnerInlineScreen{
+ const full=renderGuidanceRules(d);
+ const summary=Buffer.byteLength(full,'utf8')>2200?
+  '<b>ملخص المصادر العامة</b>\n'+
+  'رابط القوانين: '+(d.config.rulesUrl?'معتمد':'غير مضاف')+
+  '\nالملاحظات: '+d.notes.length+'\nالأسئلة المنشورة: '+d.faqs.length+
+  '\nاختر المعاينة قبل النشر لرؤية التفاصيل كاملة.':full;
  return ui('<b>👁️ معاينة المالك — القوانين والرسائل الثابتة 09:03</b>\n\n'+
-  renderGuidanceRules(d)+'\n\n'+
-  'يمكن تعديل رابط القوانين والملاحظات وربط FAQ بمحرر الردود الحالي بعد المعاينة والتأكيد.',
-  [[btn('📜 المصادر والردود ('+d.config.rules.length+')','gd:1:3:r:'+d.chatId+':0')],
+  summary+'\n\n'+
+  'محرر العقوبات وقواعد الحماية الأصلية مستقل في قسم الحماية.\n'+
+  'المعاينة لا تنشر أو تثبت تلقائيًا.\n'+
+  'نشر: <code>/fixedpublish '+d.chatId+'</code>\n'+
+  'نشر وتثبيت: <code>/fixedpublish '+d.chatId+' pin</code>',
+  [[btn('📢 معاينة نشر ثابت','gd:1:3:t:'+d.chatId+':n')],
+   [btn('📌 معاينة نشر وتثبيت','gd:1:3:t:'+d.chatId+':p')],
+   [btn('🕘 حالة النشر والتثبيت','gd:1:3:s:'+d.chatId)],
+   [btn('🛡️ إدارة الحماية الأصلية','pr:1:h')],
+   [btn('📜 المصادر والردود ('+d.config.rules.length+')','gd:1:3:r:'+d.chatId+':0')],
    [btn('📚 فهرس FAQ المعتمد ('+d.faqs.length+')','gd:1:3:f:'+d.chatId+':0')],
    [btn('✏️ محرر القوانين والردود','p4c:1:g:'+d.chatId)],
    [btn('🧭 دليل الطالب',group('2',d.chatId))],
