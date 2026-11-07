@@ -135,14 +135,17 @@ export function dueNetworkDailyDigests(s:BotState,p:Policy,now:number):
  if(!rows)return null;
  const current=new Map<string,Preference>();
  const ordered=[...rows].sort((a,b)=>b.at-a.at||a.key.localeCompare(b.key));
- const seen=new Set<string>();
+ const seen=new Map<string,number>();
  for(const pref of ordered){
   const id=[pref.actor,pref.network,pref.group].join(':');
-  if(seen.has(id))continue;
-  const colliding=ordered.filter(x=>x.actor===pref.actor&&x.network===pref.network&&
-   x.group===pref.group&&x.at===pref.at);
-  if(colliding.length!==1)return null;
-  seen.add(id);
+  const firstAt=seen.get(id);
+  if(firstAt!==undefined){
+   // A restored same-timestamp preference is ambiguous, never pick a
+   // favorable row from a tie even when its key sorts before the other.
+   if(firstAt===pref.at)return null;
+   continue;
+  }
+  seen.set(id,pref.at);
   if(pref.enabled&&pref.at<=now&&authorized(s,p,pref,now))current.set(id,pref);
  }
  const results:NetworkDailyDigestDue[]=[];
