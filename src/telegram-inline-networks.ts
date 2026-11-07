@@ -17,6 +17,8 @@ import {OwnerNetworkHealthEditor,validOwnerNetworkHealthRoute}
  from './telegram-network-health.js';
 import {OwnerNetworkRoomBridge,validNetworkRoomBridgeRoute}
  from './telegram-network-room-bridge.js';
+import {OwnerNetworkRoomRelay,validOwnerNetworkRoomRelayRoute}
+ from './telegram-network-room-relay.js';
 import {OwnerNetworkPolicyDiffEditor,validOwnerNetworkPolicyDiffRoute}
  from './telegram-network-differences.js';
 import {OwnerNetworkGroupCopy,validOwnerNetworkGroupCopyRoute}
@@ -85,6 +87,7 @@ export function validOwnerNetworkRoute(data:unknown):boolean{
    validOwnerNetworkBulkServiceRoute(data)||validOwnerNetworkGroupCopyRoute(data)||
    validOwnerNetworkSelectedFollowRoute(data)||validNetworkReviewInboxRoute(data)||
    validOwnerNetworkHealthRoute(data)||validNetworkRoomBridgeRoute(data)||
+   validOwnerNetworkRoomRelayRoute(data)||
    validOwnerNetworkPolicyDiffRoute(data)||validOwnerNetworkPolicySnapshotRoute(data)||
    validOwnerNetworkPolicyRestoreRoute(data)||
    validOwnerNetworkSanctionRoute(data)||
@@ -553,7 +556,8 @@ export class OwnerNetworkEditor{
    'لنسخ قواعد مراقبة مختارة محليًا إلى مجموعة في الشبكة: <code>/networkcopy '+n.id+'</code>\n'+
    'لمراجعة عدد البلاغات والقرارات لكل مجموعة: <code>/networkreviews '+n.id+'</code>\n'+
    'لتشخيص الاعتماد والسياسات والطوارئ محليًا: <code>/networkhealth '+n.id+'</code>\n'+
-   'لمراجعة ربط غرف الإدارة بالمجموعات: <code>/networkrooms '+n.id+'</code>',
+   'لمراجعة ربط غرف الإدارة بالمجموعات: <code>/networkrooms '+n.id+'</code>\n'+
+   'لتفعيل تنبيهات مراجعة الشبكة إلى غرفة معتمدة: <code>/networkroomalerts '+n.id+'</code>',
    [[btn('👥 إدارة المجموعات','nw:1:g:'+n.id+':0')],
     [btn('📑 سياسات الشبكة المشتركة','nw:1:y:'+n.id+':0')],
     [btn('⏸️ إدارة المتابعة','nw:1:f:'+n.id+':0')],
@@ -1342,6 +1346,10 @@ export class OwnerNetworkEditor{
   if(validNetworkRoomBridgeRoute(data)){
    await this.cancelInput(actor);
    return new OwnerNetworkRoomBridge(this.store,this.policy,this.clock).handle(actor,data);
+  }
+  if(validOwnerNetworkRoomRelayRoute(data)){
+   await this.cancelInput(actor);
+   return new OwnerNetworkRoomRelay(this.store,this.policy,this.clock).handle(actor,data);
   }
   if(validOwnerNetworkGroupCopyRoute(data)){
    await this.cancelInput(actor);
