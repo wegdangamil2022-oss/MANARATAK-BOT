@@ -2,6 +2,7 @@ import {createHash,randomBytes} from 'node:crypto';
 import type {BotState} from './store.js';
 import type {Policy} from './policy.js';
 import {networkAlertScope} from './network-event-alerts.js';
+import {networkDailyQuietSuppress} from './network-alert-daily-quiet.js';
 
 /** NETWORK-006: personal, temporary silence. No stored member identities or message bodies.
  * Silence changes never grant event subscriptions or moderation permissions. */
@@ -97,6 +98,9 @@ export function networkAlertEventSilenced(s:BotState,p:Policy,actor:string,netwo
   current.chatVersion===scope.chatVersion&&current.networkRevision===scope.networkRevision&&
   current.until>now)return true;
  const before=rows.find(x=>x.at<=eventAt);
+ // Independently review recurring daily quiet hours, both at event creation
+ // and at dispatch. Invalid receipts must suppress sends, never permit them.
+ if(networkDailyQuietSuppress(s,actor,network,chat,now,eventAt,scope))return true;
  if(!before)return false;
  // Stale authority never enables a silent window to grant anything.
  if(before.authority!==scope.authority||before.chatVersion!==scope.chatVersion||
