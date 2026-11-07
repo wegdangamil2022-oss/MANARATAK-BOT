@@ -46,7 +46,7 @@ function parse(raw:string):Body|null{
   !action(x.action)||!chat(x.group)||!revision(x.groupVersion)||
   !REG.test(String(x.registration))||!topic(x.thread)||
   (x.phase==='RESULT'&&!outcome(x.outcome)))return null;
- return x as Body;
+ return x as unknown as Body;
 }
 function ledger(s:BotState,now:number):ForumTopicControlRecord[]|null{
  if(!clock(now))return null;
