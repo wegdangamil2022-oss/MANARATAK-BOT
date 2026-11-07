@@ -367,14 +367,17 @@ export class OwnerForumTopicEditor{
  OwnerInlineScreen|null{
   const data=previewForumTopicEducationalSources(s,this.policy,actor,g,t,now);
   if(!data)return null;
-  const lines=data.titles.map((name,i)=>
-   '▫️ '+(i+1)+'. '+esc(name));
+  const lines=data.sources.map((source,i)=>
+   '▫️ '+(i+1)+'. '+esc(source.title)+
+   ' · <code>'+source.id+'</code>'+
+   (source.approvedForBroadcast?' · لديه نص منشور مراجَع':' · غير جاهز للنشر'));
   return ui('<b>📚 معاينة مصادر النشر إلى موضوع Forum</b>\n'+
    'المجموعة: <code>'+g+'</code> · الموضوع: <code>'+t+'</code>\n'+
    'الاسم المحلي: '+esc(data.topicTitle)+'\n'+
    'حالة التصفح: '+(data.topicPaused?'متوقف':'يتبع سياسة المجموعة')+'\n'+
    'التصنيفات المعتمدة المرئية في الموضوع: '+data.categoryCount+'\n'+
    'الموارد المنشورة المتاحة في المصدر: '+data.resourceCount+'\n'+
+   'منها موارد ذات نص نشر مراجَع: '+data.approvedForBroadcastCount+'\n'+
    'أمثلة على المصادر:\n'+(lines.length?lines.join('\n'):'لا توجد موارد مناسبة حاليًا.')+'\n'+
    'هذه معاينة قراءة محلية فقط؛ لا تثبت أن الموضوع موجود أو مفتوح أو أن Telegram يسمح بالنشر إليه.'+
    '\nلا يرسل هذا الفحص أي رسالة. للنشر المستقل بعد موافقتين، اكتب في خاص البوت: '+
