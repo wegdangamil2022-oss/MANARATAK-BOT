@@ -4,6 +4,7 @@ import {createHash,randomUUID} from 'node:crypto';
 import {BotStore,type BotState,type TelegramReplyJob} from './store.js';
 import {Policy} from './policy.js';
 import {forumTopicEducationMode} from './group-forum-topic-policy.js';
+import {publishedForumTopicNote} from './group-forum-note-publication.js';
 import type {TelegramReplyPlan} from './telegram-transport.js';
 import {isValidTelegramReplyKeyboard} from './telegram-menu.js';
 import {isValidTelegramInlineKeyboard} from './telegram-inline-owner.js';
@@ -490,6 +491,15 @@ export class TelegramReplyDispatcher {
     delete job.plan;delete job.adminUIAccess;delete job.privateLibraryAccess;delete job.communityAccess;delete job.groupQuestionAccess;delete job.groupMenuAccess;delete job.privateGroupAccess;delete job.privateReplyKind;delete job.groupReplyKind;delete job.verificationEphemeral;delete job.verificationEphemeralTopicId;delete job.verificationFallback;delete job.verificationPublicFallback;delete job.verificationFallbackTopicId;job.redactedAt=this.clock();
     return {status:'FAILED_CONFIRMED' as const};
    }
+   // Carry only a short-lived witness for approved forum FAQ commands.
+   // The durable body is removed before any provider attempt, and we must
+   // re-read the publication decision at the sender boundary.
+   const incoming=s.audit.filter(a=>a.updateKey===updateKey);
+   const forumNoteAccess=incoming.length===1&&
+    incoming[0]!.reason==='TOPIC_FAQ_REVIEWED_THREAD_VIEW'&&
+    plan.messageThreadId!==undefined&&menu&&!faq?
+     {group:plan.chatId,topic:plan.messageThreadId,actor:menu.actorId,
+      epoch:menu.epoch,expiresAt:menu.expiresAt}:undefined;
    const attemptId=randomUUID(),ephemeral=job.verificationEphemeral&&dm?{...structuredClone(dm),...(job.verificationEphemeralTopicId!==undefined?{topicId:job.verificationEphemeralTopicId}:{})}:undefined,fallback=job.verificationFallback&&dm?{...structuredClone(dm),...(job.verificationFallbackTopicId!==undefined?{topicId:job.verificationFallbackTopicId}:{})}:undefined,publicFallback=job.verificationPublicFallback&&dm?{...structuredClone(dm),...(job.verificationFallbackTopicId!==undefined?{topicId:job.verificationFallbackTopicId}:{})}:undefined;
    const communityReceipt=community&&plan.studioMarkup?.inline_keyboard.some(row=>row.some(b=>'url' in b))?{chatId:plan.chatId,epoch:community.epoch,expiresAt:community.expiresAt}:undefined;
    if(plan.editMessageId!==undefined&&(community||job.communityClose||(s.telegramReplyJobs??[]).some(old=>old.communityMessage?.chatId===plan.chatId&&old.communityMessage.messageId===plan.editMessageId)))job.communityEditTarget={chatId:plan.chatId,messageId:plan.editMessageId};
@@ -503,7 +513,8 @@ export class TelegramReplyDispatcher {
    // copy goes to the sender, but a crash leaves no replayable payload.
    delete job.plan;delete job.adminUIAccess;delete job.privateLibraryAccess;delete job.communityAccess;delete job.groupQuestionAccess;delete job.groupMenuAccess;delete job.privateGroupAccess;delete job.privateReplyKind;delete job.groupReplyKind;delete job.verificationEphemeral;delete job.verificationEphemeralTopicId;delete job.verificationFallback;delete job.verificationPublicFallback;delete job.verificationFallbackTopicId;job.redactedAt=at;
    delete job.communityClose;
-   return {status:'SEND' as const,attemptId,plan,communityReceipt,ephemeral,fallback,publicFallback,startedAt:at};
+   return {status:'SEND' as const,attemptId,plan,communityReceipt,ephemeral,
+    fallback,publicFallback,forumNoteAccess,startedAt:at};
   });
   if(claim.status!=='SEND')return {status:claim.status};
   let result:TelegramTemporaryPrivateResult|{status:'EPHEMERAL_ACKNOWLEDGED'|'EPHEMERAL_REJECTED'};
@@ -517,6 +528,24 @@ export class TelegramReplyDispatcher {
     const outcome=await this.publicFallback!.sender.send({chatId:access.scope,botUsername:this.publicFallback!.botUsername,...(access.topicId!==undefined?{topicId:access.topicId}:{})},async()=>{try{if(await this.safetyGate!()!==true||await this.membership!(access.scope,access.actorId)!=='VERIFIED'||await this.safetyGate!()!==true)return false;const state=await this.store.snapshot(),at=this.clock(),jobs=state.telegramReplyJobs?.filter(j=>j.updateKey===updateKey)??[],audit=state.audit.filter(a=>a.updateKey===updateKey+':public-fallback-start');return jobs.length===1&&jobs[0]!.status==='SENDING'&&jobs[0]!.attemptId===claim.attemptId&&audit.length===1&&audit[0]!.actorId===access.actorId&&audit[0]!.reason==='SUBSCRIPTION_PUBLIC_FALLBACK_STARTED:'+claim.attemptId&&at>=claim.startedAt&&at<access.expiresAt&&this.policy.canUseChat(state,access.scope,'navigation')&&subscriptionVerificationEpoch(state,this.policy,access.actorId,access.scope,at)===access.epoch&&await this.safetyGate!()===true;}catch{return false;}});
     result=outcome.status==='CONFIRMED'?{status:'CONFIRMED',messageId:outcome.messageId}:outcome.status==='UNKNOWN_OUTCOME'?{status:'UNKNOWN_OUTCOME'}:{status:'FAILED_CONFIRMED'};
    }else if(claim.fallback){const access=claim.fallback;result=await this.sender.sendTemporaryPrivate!(claim.plan,async()=>{try{if(!this.safetyGate||await this.safetyGate()!==true||!this.membership||await this.membership(access.scope,access.actorId)!=='VERIFIED'||await this.safetyGate()!==true)return false;const state=await this.store.snapshot(),now=this.clock(),jobs=state.telegramReplyJobs?.filter(j=>j.updateKey===updateKey)??[];return jobs.length===1&&jobs[0]!.status==='SENDING'&&jobs[0]!.attemptId===claim.attemptId&&now>=claim.startedAt&&now<access.expiresAt&&this.policy.canUseChat(state,access.scope,'navigation')&&subscriptionVerificationEpoch(state,this.policy,access.actorId,access.scope,now)===access.epoch&&await this.safetyGate()===true;}catch{return false;}});
+   }else if(claim.forumNoteAccess){
+    const proof=claim.forumNoteAccess,now=this.clock();
+    let authorized=false;
+    try{
+     if(this.safetyGate&&await this.safetyGate()===true){
+      const fresh=await this.store.snapshot();
+      const jobs=fresh.telegramReplyJobs?.filter(j=>j.updateKey===updateKey)??[];
+      const note=publishedForumTopicNote(fresh,this.policy,proof.group,proof.topic,now);
+      authorized=jobs.length===1&&jobs[0]!.status==='SENDING'&&
+       jobs[0]!.attemptId===claim.attemptId&&now>=claim.startedAt&&
+       now<proof.expiresAt&&
+       this.policy.canUseChat(fresh,proof.group,'navigation')&&
+       groupMenuEpochDigest(fresh,proof.group,proof.topic)===proof.epoch&&
+       note!==null&&await this.safetyGate()===true;
+     }
+    }catch{/* no send on unreadable or changed publication witness */}
+    result=authorized?await this.sender.send(claim.plan):
+     {status:'FAILED_CONFIRMED'};
    }else result=await this.sender.send(claim.plan);
   }catch{result={status:'UNKNOWN_OUTCOME'};}
   const publicNotice=!!claim.publicFallback;
