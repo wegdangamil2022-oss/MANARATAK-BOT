@@ -35,10 +35,11 @@ const home=/^nw:1:h$/u,begin=/^nw:1:n$/u;
 const list=new RegExp('^nw:1:p:'+page+'$','u');
 const detail=new RegExp('^nw:1:d:'+net+'$','u');
 const eventPage=new RegExp('^nw:1:ev:'+net+':'+page+'$','u');
-const eventFiltered=new RegExp('^nw:1:ef:'+net+':'+page+':([awresc]):(0|-[1-9][0-9]{0,15})$','u');
-const eventGroupPage=new RegExp('^nw:1:eg:'+net+':([awresc]):'+page+'$','u');
-const eventKinds:Record<'w'|'r'|'e'|'s'|'c',NetworkAdministrativeEventKind>={
- w:'WATCH_CASE',r:'SANCTION_REVIEW',e:'EMERGENCY',s:'SNAPSHOT',c:'SETTINGS_COPY'};
+const eventFiltered=new RegExp('^nw:1:ef:'+net+':'+page+':([awrescf]):(0|-[1-9][0-9]{0,15})$','u');
+const eventGroupPage=new RegExp('^nw:1:eg:'+net+':([awrescf]):'+page+'$','u');
+const eventKinds:Record<'w'|'r'|'e'|'s'|'c'|'f',NetworkAdministrativeEventKind>={
+ w:'WATCH_CASE',r:'SANCTION_REVIEW',e:'EMERGENCY',s:'SNAPSHOT',
+ c:'SETTINGS_COPY',f:'POLICY_FOLLOW'};
 
 const policySources=new RegExp('^nw:1:y:'+net+':'+page+'$','u');
 const policyPreview=new RegExp('^nw:1:z:'+net+':'+group+':'+page+'$','u');
@@ -556,7 +557,7 @@ export class OwnerNetworkEditor{
     [btn('📋 الشبكات','nw:1:p:0'),btn('🏠 لوحة المالك','mi:1:h')]]);
  }
  private administrativeEvents(s:BotState,actor:string,now:number,id:string,p:number,
-  kind:'a'|'w'|'r'|'e'|'s'|'c'='a',chatId='0'):OwnerInlineScreen|null{
+  kind:'a'|'w'|'r'|'e'|'s'|'c'|'f'='a',chatId='0'):OwnerInlineScreen|null{
   const selectedKind=kind==='a'?undefined:eventKinds[kind];
   const events=networkAdministrativeEvents(s,this.policy,actor,now,id,{
    ...(selectedKind?{kind:selectedKind}:{}),
@@ -581,11 +582,12 @@ export class OwnerNetworkEditor{
    btn((kind==='e'?'✅ ':'')+'🚨 الطوارئ',route('e'))]);
   rows.push([btn((kind==='s'?'✅ ':'')+'📸 نسخ السياسات',route('s')),
    btn((kind==='c'?'✅ ':'')+'🧩 نسخ الإعدادات',route('c'))]);
+  rows.push([btn((kind==='f'?'✅ ':'')+'🎯 متابعة سياسة مختارة',route('f'))]);
   rows.push([btn('👥 حسب المجموعة','nw:1:eg:'+id+':'+kind+':0'),
    btn('🌐 كل المجموعات',route(kind,'0'))]);
   rows.push([btn('↩️ بطاقة الشبكة','nw:1:d:'+id)]);
   const names={a:'جميع الأحداث',w:'البلاغات',r:'مراجعات العقوبات',
-   e:'الطوارئ',s:'نسخ السياسات',c:'نسخ الإعدادات'} as const;
+   e:'الطوارئ',s:'نسخ السياسات',c:'نسخ الإعدادات',f:'متابعات السياسات المختارة'} as const;
   return ui('<b>🔔 الأحداث الإدارية للشبكة</b>\n'+
    'الشبكة: '+escape(n.name)+' · صفحة '+(p+1)+'/'+pages+
    ' · عدد النتائج: '+events.length+'\n'+
@@ -596,7 +598,7 @@ export class OwnerNetworkEditor{
    'لا تظهر هويات الطلاب أو تفاصيل البلاغات الحساسة.',rows);
  }
  private eventGroupSelector(s:BotState,actor:string,now:number,id:string,
-  kind:'a'|'w'|'r'|'e'|'s'|'c',p:number):OwnerInlineScreen|null{
+  kind:'a'|'w'|'r'|'e'|'s'|'c'|'f',p:number):OwnerInlineScreen|null{
   const n=this.find(s,id);
   if(!n||networkAdministrativeEvents(s,this.policy,actor,now,id)===null)return null;
   const approvedGroups=approved(s,this.policy,actor,now);
