@@ -496,6 +496,12 @@ export class TelegramReplyDispatcher {
    }
    const attemptId=randomUUID();
    const automationForCleanup=job.communityAutomation;
+   // Content is erased from the ledger before the provider call; only
+   // minimal receipt metadata remains in this in-process claim.
+   const whisperDelivery=job.whisperAccess?{
+     messageId:job.whisperAccess.whisperId,memberId:plan.chatId,
+     view:job.whisperAccess.view
+   }:undefined;
    const communityReceipt=community&&plan.studioMarkup?.inline_keyboard.some(row=>row.some(b=>'url' in b))?{chatId:plan.chatId,epoch:community.epoch,expiresAt:community.expiresAt}:undefined;
    if(plan.editMessageId!==undefined&&(community||job.communityClose||(s.telegramReplyJobs??[]).some(old=>old.communityMessage?.chatId===plan.chatId&&old.communityMessage.messageId===plan.editMessageId)))job.communityEditTarget={chatId:plan.chatId,messageId:plan.editMessageId};
    // An attempted edit makes the old contents uncertain, even if its outcome
@@ -507,7 +513,8 @@ export class TelegramReplyDispatcher {
    // copy goes to the sender, but a crash leaves no replayable payload.
    delete job.plan;delete job.adminUIAccess;delete job.privateLibraryAccess;delete job.communityAccess;delete job.groupQuestionAccess;delete job.groupMenuAccess;delete job.privateGroupAccess;delete job.whisperAccess;delete job.privateReplyKind;delete job.groupReplyKind;delete job.communityAutomation;job.redactedAt=at;
    delete job.communityClose;
-   return {status:'SEND' as const,attemptId,plan,communityReceipt,automationForCleanup};
+   return {status:'SEND' as const,attemptId,plan,communityReceipt,
+    automationForCleanup,whisperDelivery};
   });
   if(claim.status!=='SEND')return {status:claim.status};
   let result:TelegramSendResult;
@@ -525,6 +532,31 @@ export class TelegramReplyDispatcher {
    job.status=terminal;
    if(terminal!=='UNKNOWN_OUTCOME')delete job.communityEditTarget;
    if(result.status==='CONFIRMED')job.messageId=result.messageId;
+   // An educational QUESTION's answer unlocks only after Telegram confirms
+   // the private CONTENT send. No read receipt is inferred. If the network
+   // result is UNKNOWN_OUTCOME, do not create delivery proof or retry.
+   if(result.status==='CONFIRMED'&&claim.whisperDelivery){
+    const now=this.clock(),w=s.phase4Whispers,
+     messages=w?.messages.filter(m=>m.id===claim.whisperDelivery.messageId)??[],
+     row=messages[0];
+    if(Number.isSafeInteger(now)&&now>=0&&
+       now<=8_640_000_000_000_000-600000&&
+       messages.length===1&&row?.purpose==='QUESTION'&&
+       row.status==='OPEN'&&row.approvedAt!==undefined&&
+       now>=row.approvedAt&&now<row.expiresAt&&
+       (claim.whisperDelivery.view==='CONTENT'||
+        claim.whisperDelivery.view==='ANSWER')&&
+       w&&!(w.deliveries??[]).some(d=>d.messageId===row.id&&
+          d.memberId===claim.whisperDelivery.memberId&&
+          d.view===claim.whisperDelivery.view)&&
+       (w.deliveries?.length??0)<2000){
+     w.deliveries??=[];
+     w.deliveries.push({
+       messageId:row.id,memberId:claim.whisperDelivery.memberId,
+       view:claim.whisperDelivery.view,confirmedAt:now
+     });
+    }
+   }
    // Only a provider-CONFIRMED, bot-authored Phase 4 message can be considered
    // for expiry. This is NOT scheduled from the inbound user's message ID or
    // an uncertain SEND response. A policy edit while Telegram was awaited
