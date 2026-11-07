@@ -101,6 +101,45 @@ export class Phase4WhisperService{
    return structuredClone(row);
   });
  }
+ /** A SECOND owner action after local approval. A posted teaser never
+  * contains the whisper body, names, recipient ID or a usable authorization.
+  * Group posts are sent by the separate RUN-gated at-most-once worker.
+  */
+ async queueAnnouncement(actor:string,id:string):Promise<string>{
+  const now=this.clock();
+  if(!validClock(now)||!/^[a-f0-9]{24}$/u.test(id))
+   throw Error('WHISPER_ANNOUNCE_INVALID');
+  return this.store.transaction(s=>{
+   const data=clone(s),items=data.messages.filter(m=>m.id===id),row=items[0];
+   if(items.length!==1||!row||row.status!=='OPEN'||!row.text||
+      !row.approvedAt||now<row.approvedAt||now>=row.expiresAt)
+    throw Error('WHISPER_ANNOUNCE_NOT_READY');
+   if(row.creatorId!==actor||this.scope(s,actor,row.chatId)!==row.chatVersion)
+    throw Error('WHISPER_ANNOUNCE_DENIED');
+   if((data.announcements??[]).some(a=>a.messageId===id))
+    throw Error('WHISPER_ANNOUNCEMENT_EXISTS');
+   if((data.announcements?.length??0)>=200)
+    throw Error('WHISPER_ANNOUNCEMENT_CAPACITY');
+   data.announcements??=[];
+   const announcementId=newId(data.announcements);
+   data.announcements.push({id:announcementId,messageId:id,chatId:row.chatId,
+    chatVersion:row.chatVersion,ownerId:actor,createdAt:now,status:'QUEUED'});
+   s.phase4Whispers=data;
+   return announcementId;
+  });
+ }
+ /** Privately read an announcement receipt's current status. It never
+  * represents the recipient's message delivery or whether anyone read it.
+  */
+ async announcementStatus(actor:string,id:string):Promise<
+  'NOT_POSTED'|'QUEUED'|'SENDING'|'CONFIRMED'|'FAILED_CONFIRMED'|'UNKNOWN_OUTCOME'|'SKIPPED'>{
+  const s=await this.store.snapshot(),m=clone(s).messages.filter(x=>x.id===id);
+  if(m.length!==1||m[0]!.creatorId!==actor||
+     this.scope(s,actor,m[0]!.chatId)!==m[0]!.chatVersion)
+   throw Error('WHISPER_DENIED');
+  const rows=clone(s).announcements?.filter(a=>a.messageId===id)??[];
+  return rows.length===1?rows[0]!.status:'NOT_POSTED';
+ }
  /** Immediate close scrubs content even if there were reservations. A held
   * reservation is not a delivery and cannot be reused as a resend ticket. */
  async close(actor:string,id:string,expectedRevision?:number):Promise<boolean>{
@@ -364,6 +403,7 @@ export class Phase4WhisperService{
     row.closedAt===undefined||now-row.closedAt<=86_400_000);
    const kept=new Set(data.messages.map(row=>row.id));
    data.reservations=data.reservations.filter(row=>kept.has(row.messageId));
+   data.announcements=(data.announcements??[]).filter(a=>kept.has(a.messageId));
    // Privacy: report references cannot retain old secret/message identity
    // longer than its redacted tombstone; no unbounded evidence archive.
    data.reports=(data.reports??[]).filter(r=>
@@ -374,7 +414,8 @@ export class Phase4WhisperService{
     b.updatedAt<=now&&(b.enabled||now-b.updatedAt<86400000));
    if(total||data.messages.length!==before||
       (data.reports?.length??0)!==(s.phase4Whispers?.reports?.length??0)||
-      (data.blocks?.length??0)!==(s.phase4Whispers?.blocks?.length??0))
+      (data.blocks?.length??0)!==(s.phase4Whispers?.blocks?.length??0)||
+      (data.announcements?.length??0)!==(s.phase4Whispers?.announcements?.length??0))
     s.phase4Whispers=data;
    return total;
   });
