@@ -207,8 +207,10 @@ export async function whisperMemberScreen(
   if(request.kind!=='RESERVE')return null;
   const reservation=await service.reserve(actor,request.id);
   switch(reservation.status){
-   case 'HELD':return {text:'💌 تم حجز مقعد مبدئي لك. لا يعني ذلك إرسال الهمسة أو قراءة محتواها. هذه الوظيفة لا تكشف محتوى الرسالة بعد.'};
-   case 'ALREADY_HELD':return {text:'💌 سبق حجز مقعد مبدئي لهذا الحساب. لا توجد رسالة خاصة تم تسليمها.'};
+   case 'HELD':return {text:'🎟️ حُجز لك مقعد واحد. الحجز لا يرسل النص ولا يثبت القراءة.'+
+    '\nلفتح النص من خاصك بعد التحقق: <code>/whisperopen '+request.id+'</code>'};
+   case 'ALREADY_HELD':return {text:'🎟️ لديك مقعد محفوظ بالفعل؛ تكرار الطلب لا يمنح مقعدًا ثانيًا.'+
+    '\nلفتحه بشكل فردي: <code>/whisperopen '+request.id+'</code>'};
    case 'FULL':return {text:'⏳ لا توجد مقاعد أو سعة حفظ متاحة حاليًا، ولم يُكشف أي محتوى.'};
    case 'CONSENT_REQUIRED':return {text:'🔒 يلزم تفعيل موافقتك الخاصة على استقبال همسات المجموعة أولًا.'};
    case 'VERIFICATION_REQUIRED':return {text:'🔒 تعذّر التحقق من عضويتك حاليًا. لم يُحجز أي مقعد.'};
