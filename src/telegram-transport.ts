@@ -16,6 +16,8 @@ import {validProtectionUsername} from './protection-rules.js';
 import {TelegramAdminRoomLinks} from './telegram-admin-room-links.js';
 import {OwnerForumTopicEditor} from './telegram-owner-forum-topics.js';
 import {TelegramForumTopicBroadcast} from './telegram-forum-topic-broadcast.js';
+import {TelegramOwnerForumMonitor} from './telegram-owner-forum-monitor.js';
+import type {TopicMonitorChange} from './group-forum-topic-monitor.js';
 import {forumTopicEducationMode} from './group-forum-topic-policy.js';
 import {publishedForumTopicNote} from './group-forum-note-publication.js';
 import {TelegramOncall,validOncallRoute} from './telegram-oncall.js';
@@ -717,6 +719,32 @@ export class TelegramUpdateApplication {
      return view?{status:'APPLIED',reason:'OWNER_FORUM_LOCAL_INVENTORY',
       plan:this.plan(event.actorId,view.text,undefined,view.keyboard)}:
       {status:'DENIED',reason:'OWNER_FORUM_UNAVAILABLE'};
+    }
+    if(event.kind==='private'&&event.actorId===event.chatId&&
+     !event.callbackData&&event.text.startsWith('/topicguard')){
+     if(!this.opts.policy.isOwner(event.actorId)||event.edited||event.forwarded)
+      return {status:'DENIED',reason:'OWNER_FORUM_PRIVATE_ORIGINAL_ONLY'};
+     const parsed=/^\/topicguard (-[1-9][0-9]{0,15}) ([1-9][0-9]{0,9}) (.+)$/u.exec(event.text);
+     if(!parsed)return {status:'DENIED',reason:'OWNER_FORUM_MONITOR_INVALID'};
+     const group=parsed[1]!,thread=Number(parsed[2]),input=parsed[3]!;
+     let change:TopicMonitorChange|null=null;
+     if(input==='monitor'||input==='off')change={kind:'MODE',
+      mode:input==='monitor'?'MONITOR':'OFF'};
+     else if(input==='link'||input==='forward')change={kind:'ADD',
+      rule:{kind:input==='link'?'LINK':'FORWARD',value:''}};
+     else{
+      const word=/^(word|phrase) ([^\r\n]{2,100})$/u.exec(input);
+      const remove=/^remove ([1-9][0-9]?)$/u.exec(input);
+      if(word)change={kind:'ADD',rule:{
+       kind:word[1]==='word'?'WORD':'PHRASE',value:word[2]!}};
+      else if(remove)change={kind:'REMOVE',index:Number(remove[1])-1};
+     }
+     if(!change)return {status:'DENIED',reason:'OWNER_FORUM_MONITOR_CHANGE_INVALID'};
+     const view=await new TelegramOwnerForumMonitor(this.opts.store,
+      this.opts.policy,this.clock).prepare(event.actorId,group,thread,change);
+     return view?{status:'APPLIED',reason:'OWNER_FORUM_MONITOR_PREVIEW',
+      plan:this.plan(event.actorId,view.text,undefined,view.keyboard)}:
+      {status:'DENIED',reason:'OWNER_FORUM_MONITOR_UNAVAILABLE'};
     }
     if(event.kind==='private'&&event.actorId===event.chatId&&
      !event.callbackData&&event.text.startsWith('/topicbroadcast')){
@@ -2015,7 +2043,8 @@ export class TelegramUpdateApplication {
      event.text==='/ownerinline'||event.text==='/ownerlegacy'||event.text==='/ownerrecover'||
      event.text==='/topics'||event.text.startsWith('/topicregister')||
      event.text.startsWith('/topicnote')||
-     event.text.startsWith('/topicbroadcast')||isOwnerMenuText(event.text)||(event.document!==undefined&&handled.plan?.inlineMarkup!==undefined)||
+     event.text.startsWith('/topicbroadcast')||
+     event.text.startsWith('/topicguard')||isOwnerMenuText(event.text)||(event.document!==undefined&&handled.plan?.inlineMarkup!==undefined)||
      handled.reason==='CATEGORY_TEXT_PREVIEW'||handled.reason==='NETWORK_TEXT_PREVIEW'||handled.reason==='DELEGATION_TEXT_PREVIEW'||handled.reason==='STUDIO_DRAFT_SAVED');
     if(ownerScreen&&handled.plan&&!handled.adminUIAccess){
      const state=await this.opts.store.snapshot(),now=this.clock(),epoch=studioInput?studioPreviewEpoch(state,this.opts.policy,event.actorId,now):protectionUIEpoch(state,this.opts.policy,event.actorId,now);
