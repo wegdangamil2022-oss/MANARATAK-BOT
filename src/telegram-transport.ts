@@ -1933,8 +1933,10 @@ export class TelegramUpdateApplication {
     }
     const callback=event.callbackData??'';
     const ownerScreen=event.kind==='private'&&this.opts.policy.isOwner(event.actorId)&&(
-     /^(?:mi:1:|ac:1:|oi:1:|ou:1:|sc:1:|cf:1:|ec:1:|oc:1:|od:1:|gw:1:|gt:1:|gs:1:|gb:1:|nw:1:|gp:1:|of:1:|ol:1:|st:1:|ps:1:|pr:1:|pd:1:|pq:1:|mr:1:|mp:1:|c_)/u.test(callback)||
-     event.text==='/ownerinline'||event.text==='/ownerlegacy'||event.text==='/ownerrecover'||isOwnerMenuText(event.text)||(event.document!==undefined&&handled.plan?.inlineMarkup!==undefined)||
+     /^(?:mi:1:|ac:1:|oi:1:|ou:1:|sc:1:|cf:1:|ec:1:|oc:1:|od:1:|gw:1:|gt:1:|gs:1:|gb:1:|nw:1:|ft:1:|gp:1:|of:1:|ol:1:|st:1:|ps:1:|pr:1:|pd:1:|pq:1:|mr:1:|mp:1:|c_)/u.test(callback)||
+     event.text==='/ownerinline'||event.text==='/ownerlegacy'||event.text==='/ownerrecover'||
+     event.text==='/topics'||event.text.startsWith('/topicregister')||
+     event.text.startsWith('/topicnote')||isOwnerMenuText(event.text)||(event.document!==undefined&&handled.plan?.inlineMarkup!==undefined)||
      handled.reason==='CATEGORY_TEXT_PREVIEW'||handled.reason==='NETWORK_TEXT_PREVIEW'||handled.reason==='DELEGATION_TEXT_PREVIEW'||handled.reason==='STUDIO_DRAFT_SAVED');
     if(ownerScreen&&handled.plan&&!handled.adminUIAccess){
      const state=await this.opts.store.snapshot(),now=this.clock(),epoch=studioInput?studioPreviewEpoch(state,this.opts.policy,event.actorId,now):protectionUIEpoch(state,this.opts.policy,event.actorId,now);
@@ -1954,6 +1956,16 @@ export class TelegramUpdateApplication {
      if(epoch&&epoch===beforeLibrary&&Number.isSafeInteger(now)&&now>=0&&now<=8640000000000000-ADMIN_UI_TTL_MS)
       handled={...handled,privateLibraryAccess:{actorId:event.actorId,epoch,expiresAt:now+ADMIN_UI_TTL_MS}};
      else{const {plan:_,...withoutPlan}=handled;handled={...withoutPlan,reason:'LIBRARY_RESPONSE_WITHHELD'};}
+    }
+    // TOPIC-003: a reply originating inside a Telegram forum thread
+    // must keep that exact destination when an older handler omitted it.
+    // A failed/closed topic is NOT silently retried in General. Explicit
+    // independently targeted thread messages retain their chosen target.
+    if(event.kind==='group'&&event.topicId!==undefined&&
+     handled.plan?.chatId===event.chatId&&
+     handled.plan.editMessageId===undefined&&
+     handled.plan.messageThreadId===undefined){
+     handled={...handled,plan:{...handled.plan,messageThreadId:event.topicId}};
     }
     const audit:AuditRecord={updateKey:key,decision:handled.status==='APPLIED'?'ALLOW':handled.status==='DENIED'?'DENY':'NOOP',reason:handled.reason,policyVersion:0,at:this.clock()};
     // Commit the decision and outbound reply intent in one durable transaction.
