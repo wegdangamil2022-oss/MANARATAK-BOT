@@ -120,7 +120,7 @@ function prepared(s:BotState,p:Policy,owner:string,g:string,t:number,
   forumTopicEducationMode(s,p,g,t,now)!=='INHERIT')return null;
  const resources=s.educationResources.filter(x=>x.id===resourceId),r=resources[0];
  if(resources.length!==1||!r||r.scope!==g||r.status!=='PUBLISHED'||
-  !clean(r.title,160)||!clean(r.publicationText,2400)||
+  !clean(r.title,160)||!clean(r.publicationText,1700)||
   typeof r.publicationTextReviewedBy!=='string'||
   !actor(r.publicationTextReviewedBy))return null;
  const categories=s.educationCategories.filter(c=>c.id===r.categoryId),category=categories[0];
@@ -128,7 +128,10 @@ function prepared(s:BotState,p:Policy,owner:string,g:string,t:number,
   !visibleEducationCategory(s,category,t))return null;
  const body='📚 '+r.title+'\n\n'+r.publicationText+
   '\n\n— منارتك | محتوى تعليمي مُراجع';
- if(Buffer.byteLength(body,'utf8')>3700)return null;
+ if(Buffer.byteLength(body,'utf8')>2600||
+  Buffer.byteLength(body.replace(/&/gu,'&amp;').replace(/</gu,'&lt;').
+   replace(/>/gu,'&gt;').replace(/"/gu,'&quot;').replace(/'/gu,'&#39;'),
+   'utf8')>3000)return null;
  return {group:g,thread:t,groupVersion:v,registration:reg.reference,
   resource:resourceId,resourceDigest:sha([r,category,reg]),
   body};
@@ -191,13 +194,11 @@ export function stillAuthorizedForumBroadcast(s:BotState,p:Policy,
 export function finishForumBroadcast(s:BotState,p:Policy,row:ForumBroadcastStart,
  result:ForumBroadcastOutcome,now:number):boolean{
  if(!outcome(result)||!validTime(now)||now<row.startedAt)return false;
- const history=forumBroadcastHistory(s,p,row.actor,row.group,row.thread,now);
- // A group can be unlinked WHILE the API is in flight: still persist the
- // terminal result instead of silently rewriting or retrying that attempt.
+ // A group can be unlinked WHILE the API is in flight: still persist
+ // the terminal result without relying on CURRENT group permissions.
  const start=s.audit.filter(a=>a.updateKey===ROOT+row.id+':S');
  const prior=s.audit.filter(a=>a.updateKey===ROOT+row.id+':R');
- if(start.length!==1||prior.length!==0||!history&&
-  !start.length)return false;
+ if(start.length!==1||prior.length!==0)return false;
  const payload=parse(start[0]!.reason);
  if(!payload||payload.phase!=='START'||payload.group!==row.group||
   payload.thread!==row.thread||payload.groupVersion!==row.groupVersion||
