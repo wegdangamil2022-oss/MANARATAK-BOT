@@ -679,17 +679,20 @@ export class TelegramUpdateApplication {
     if(event.protectionMedia){
      const media=event.protectionMedia;
      await new GroupProtectionPolicyService(this.opts.store,this.opts.policy,this.clock,this.opts.protectionEnforcer).observeIncomingMessage(
-      {chatId:event.chatId,memberId:event.actorId,type:media.type,caption:media.caption,...(media.vcardFile?{vcardFile:true}:{}),...(event.displayName?{displayName:event.displayName}:{}),...(event.username?{username:event.username}:{}),...(event.forwarded?{forwarded:true}:{})},media.entities,'b3-webhook:'+this.opts.botId+':'+event.updateId,!event.edited,this.delivery(event));
+      {chatId:event.chatId,memberId:event.actorId,type:media.type,caption:media.caption,...(media.vcardFile?{vcardFile:true}:{}),...(event.displayName?{displayName:event.displayName}:{}),...(event.username?{username:event.username}:{}),...(event.forwarded?{forwarded:true}:{})},media.entities,'b3-webhook:'+this.opts.botId+':'+event.updateId,!event.edited,
+      this.delivery(event),event.topicId);
      return media.type==='DOCUMENT'?{status:'DENIED',reason:'PRIVATE_ADMIN_UPLOAD_ONLY'}:{status:'IGNORED',reason:'PROTECTION_MEDIA_MONITOR_ONLY'};
     }
     if(event.forwarded){
      await new GroupProtectionPolicyService(this.opts.store,this.opts.policy,this.clock,this.opts.protectionEnforcer).observeIncomingMessage(
-      {chatId:event.chatId,memberId:event.actorId,type:'TEXT',text:event.text,forwarded:true,...(event.displayName?{displayName:event.displayName}:{}),...(event.username?{username:event.username}:{})},event.entities,'b3-webhook:'+this.opts.botId+':'+event.updateId,!event.edited,this.delivery(event));
+      {chatId:event.chatId,memberId:event.actorId,type:'TEXT',text:event.text,forwarded:true,...(event.displayName?{displayName:event.displayName}:{}),...(event.username?{username:event.username}:{})},event.entities,'b3-webhook:'+this.opts.botId+':'+event.updateId,!event.edited,
+      this.delivery(event),event.topicId);
      return {status:'DENIED',reason:'UNTRUSTED_FORWARD'};
     }
     if(event.edited){
      await new GroupProtectionPolicyService(this.opts.store,this.opts.policy,this.clock,this.opts.protectionEnforcer).observeIncomingText(
-      event.actorId,event.chatId,event.text,event.entities,'b3-webhook:'+this.opts.botId+':'+event.updateId,false,this.delivery(event),event.displayName,event.username);
+      event.actorId,event.chatId,event.text,event.entities,'b3-webhook:'+this.opts.botId+':'+event.updateId,false,
+      this.delivery(event),event.displayName,event.username,event.topicId);
      return {status:'IGNORED',reason:'PROTECTION_EDIT_MONITOR_ONLY'};
     }
     if(event.kind==='private'&&this.opts.policy.isOwner(event.actorId)&&!event.callbackData?.startsWith('sc:1:')&&event.callbackData!=='mi:1:i:04:02'&&event.callbackData!=='mi:1:i:04:04')await cancelSubscriptionConfig(this.opts.store,event.actorId);
@@ -1216,7 +1219,8 @@ export class TelegramUpdateApplication {
       plan:this.plan(chatId,view.text,undefined,view.keyboard,event.callbackMessageId)};
     }
     if(kind==='group')await new GroupProtectionPolicyService(this.opts.store,this.opts.policy,this.clock,this.opts.protectionEnforcer).observeIncomingText(
-     actorId,chatId,text,event.entities,'b3-webhook:'+this.opts.botId+':'+event.updateId,true,this.delivery(event),event.displayName,event.username);
+     actorId,chatId,text,event.entities,'b3-webhook:'+this.opts.botId+':'+event.updateId,true,
+     this.delivery(event),event.displayName,event.username,event.topicId);
     if(kind==='group'&&isReplyDeleteCommand(text,this.opts.botUsername)){
      if(!this.opts.purge)return {status:'DENIED',reason:'DELETE_NOT_CONFIGURED'};
      const result=await previewReplyDelete(this.opts.store,this.opts.policy,this.opts.purge,actorId,chatId,event.messageId,text,event.replyTo,this.clock());
