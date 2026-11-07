@@ -169,6 +169,99 @@ function faqList(d:GuidanceData,page:number):OwnerInlineScreen|null{
 export async function phase4GuidanceOwnerScreen(service:Phase4GuidanceService,
  actor:string,input:string):Promise<OwnerInlineScreen|null>{
  try{
+  // 09:03: only owner-reviewed, one-off public fixed material is sent.
+  const fixedService=new Phase4FixedPublicationService(
+   service.storeForFixedPublication(),service.policyForFixedPublication());
+  const fixedCommand=/^\/fixedpublish (-[1-9][0-9]{0,15})(?: (pin))?$/u.exec(input);
+  const fixedBegin=/^gd:1:3:t:(-[1-9][0-9]{0,15}):([np])$/u.exec(input);
+  if(fixedCommand||fixedBegin){
+   const chatId=fixedCommand?.[1]??fixedBegin?.[1]!;
+   const pinRequested=fixedCommand?.[2]==='pin'||fixedBegin?.[2]==='p';
+   if(!validGuidanceGroup(chatId))return null;
+   const {draft,preview}=await fixedService.prepare(actor,chatId,pinRequested);
+   return ui('<b>📜 معاينة نشر المواد الثابتة — 09:03</b>\n'+
+    'المجموعة: <code>'+chatId+'</code>\n'+
+    'الإجراء: '+(pinRequested?'نشر واحد مع طلب التثبيت':'نشر واحد فقط')+
+    '\n\n'+preview+
+    '\n\nهذه رسالة عامة ستظهر للمجموعة، وليست رسالة خاصة.\n'+
+    'التثبيت لا يبدأ إلا بعد تأكيد Telegram للنشر وتحقق صلاحية البوت.\n'+
+    'يُلغى الاعتماد بعد دقيقتين أو عند تغيّر المصادر أو صلاحيات المجموعة.',
+    [[btn('✅ اعتماد إرسال واحد','gd:1:3:a:'+draft.id)],
+     [btn('❌ إلغاء المسودة','gd:1:3:x:'+draft.id)],
+     [btn('↩️ القوانين والرسائل',group('3',chatId))]]);
+  }
+  const fixedDecision=/^gd:1:3:([ax]):([a-f0-9]{24})$/u.exec(input);
+  if(fixedDecision){
+   if(fixedDecision[1]==='x'){
+    const done=await fixedService.cancelDraft(actor,fixedDecision[2]!);
+    return done?ui('أُلغيت مسودة النشر. لم يُطلب إرسال أي رسالة.',
+     [[btn('↩️ المجموعات',root('3'))]]):null;
+   }
+   const job=await fixedService.confirm(actor,fixedDecision[2]!);
+   return ui('<b>✅ اعتُمدت مهمة نشر الرسالة الثابتة</b>\n'+
+    'المجموعة: <code>'+job.chatId+'</code>\n'+
+    'النشر: في الطابور، ولم يؤكد Telegram تسليمه بعد.\n'+
+    (job.pinRequested?'التثبيت: ينتظر نجاح الإرسال وفحص الصلاحيات.':
+     'التثبيت: غير مطلوب.'),
+    [[btn('🕘 حالة النشر والتثبيت','gd:1:3:s:'+job.chatId)],
+     [btn('↩️ القوانين والرسائل',group('3',job.chatId))]]);
+  }
+  const fixedStatus=/^gd:1:3:s:(-[1-9][0-9]{0,15})$/u.exec(input);
+  if(fixedStatus){
+   const chatId=fixedStatus[1]!,job=await fixedService.recent(actor,chatId);
+   const status:Record<string,string>={
+    QUEUED:'في الطابور؛ لم تؤكد العملية',
+    SENDING:'بدأت محاولة Telegram؛ لا نتيجة مؤكدة بعد',
+    CONFIRMED:'أكد Telegram نجاح هذه العملية',
+    FAILED_CONFIRMED:'فشل مؤكد؛ لا إعادة إرسال تلقائية',
+    UNKNOWN_OUTCOME:'نتيجة غير مؤكدة؛ تتطلب مراجعة',
+    REVIEWED_UNKNOWN:'راجع المالك النتيجة المجهولة دون الجزم بالنجاح',
+    SKIPPED:'أُلغيت أو لم تعد صالحة',
+    NOT_REQUESTED:'غير مطلوب',AWAITING_POST:'ينتظر نجاح النشر'};
+   return ui('<b>🕘 حالة الرسالة الثابتة — 09:03</b>\n'+
+    'المجموعة: <code>'+chatId+'</code>\n\n'+
+    (job?'النشر: '+(status[job.status]??'غير معروف')+
+     '\nالتثبيت: '+(status[job.pinStatus]??'غير معروف')+
+     '\nالموافقة: '+new Date(job.approvedAt).toISOString().slice(0,16).replace('T',' ')+' UTC'+
+     (job.status==='CONFIRMED'&&job.messageId?
+      '\nرقم الرسالة المؤكدة: '+job.messageId:''):
+     'لم يعتمد المالك نشر رسالة ثابتة لهذه المجموعة بعد.')+
+    '\n\nوجود المهمة في الطابور لا يثبت إرسالها أو تثبيتها.',
+    [...(job?.status==='QUEUED'?
+       [[btn('⛔ إلغاء قبل إرسال Telegram','gd:1:3:z:'+job.id)]]:[]),
+     ...(job&&Date.now()>=job.approvedAt+600000&&
+       ['SENDING','UNKNOWN_OUTCOME'].includes(job.status)?
+       [[btn('⚠️ مراجعة نشر غير مؤكد','gd:1:3:v:'+job.id+':s')]]:[]),
+     ...(job&&Date.now()>=job.approvedAt+600000&&
+       ['SENDING','UNKNOWN_OUTCOME'].includes(job.pinStatus)?
+       [[btn('⚠️ مراجعة تثبيت غير مؤكد','gd:1:3:v:'+job.id+':p')]]:[]),
+     [btn('↩️ القوانين والرسائل',group('3',chatId))]]);
+  }
+  const fixedCancel=/^gd:1:3:z:([a-f0-9]{24})$/u.exec(input);
+  if(fixedCancel){
+   const done=await fixedService.cancelQueued(actor,fixedCancel[1]!);
+   return done?ui('أُلغيت مهمة الرسالة الثابتة قبل محاولة Telegram.',
+    [[btn('↩️ المجموعات',root('3'))]]):null;
+  }
+  const fixedReview=/^gd:1:3:v:([a-f0-9]{24}):([sp])$/u.exec(input);
+  if(fixedReview){
+   return ui('<b>⚠️ مراجعة يدوية لنتيجة غير مؤكدة</b>\n'+
+    'العملية: '+(fixedReview[2]==='s'?'نشر الرسالة':'تثبيت الرسالة')+
+    '\nقد تكون Telegram قد نفذتها رغم انقطاع الاتصال.\n'+
+    'راجع المنشورات والمثبتات داخل المجموعة بنفسك أولًا.\n'+
+    'هذا الإقرار لا يؤكد نجاح العملية أو فشلها ولا يعيد المحاولة.',
+    [[btn('✅ راجعت وأقرّ ببقاء النتيجة غير محسومة',
+      'gd:1:3:k:'+fixedReview[1]+':'+fixedReview[2])],
+     [btn('❌ رجوع دون تغيير',root('3'))]]);
+  }
+  const fixedResolve=/^gd:1:3:k:([a-f0-9]{24}):([sp])$/u.exec(input);
+  if(fixedResolve){
+   const done=await fixedService.reviewUnknown(actor,fixedResolve[1]!,
+    fixedResolve[2]==='s'?'POST':'PIN');
+   return done?ui('سُجّلت المراجعة البشرية للنتيجة غير المؤكدة.\n'+
+    'لم تُعد محاولة Telegram السابقة، ولا نفترض النجاح أو الفشل.',
+    [[btn('↩️ المجموعات',root('3'))]]):null;
+  }
   const publishCommand=/^\/guidepublish (-[1-9][0-9]{0,15})$/u.exec(input);
   if(publishCommand||/^gd:1:2:t:-[1-9][0-9]{0,15}$/u.test(input)){
    const chatId=publishCommand?.[1]??input.slice('gd:1:2:t:'.length);
