@@ -5,11 +5,12 @@ import {validNetworkWatchCases} from './network-watchlist-model.js';
 import {validNetworkEmergencyControls} from './network-emergency-stop.js';
 import {validNetworkSanctionReviews,validNetworkSanctionReviewReferences} from './network-sanction-review-model.js';
 import {isValidNetworkPolicySnapshots} from './network-policy-snapshots.js';
+import {networkGroupCopyHistory} from './network-group-copy-history.js';
 
 /** NETWORK-006 read-only owner events. Never a moderation grant or outbox.
  * No subject identities, rule text, report detail or stored snapshot policy is rendered. */
 export type NetworkAdministrativeEventKind =
- 'WATCH_CASE'|'SANCTION_REVIEW'|'EMERGENCY'|'SNAPSHOT';
+ 'WATCH_CASE'|'SANCTION_REVIEW'|'EMERGENCY'|'SNAPSHOT'|'SETTINGS_COPY';
 export interface NetworkAdministrativeEvent {
  id:string;kind:NetworkAdministrativeEventKind;at:number;
  chatId?:string;label:string;
@@ -21,7 +22,7 @@ export interface NetworkAdministrativeEventFilter {
 }
 const validTime=(n:number)=>Number.isSafeInteger(n)&&n>=0&&n<=8_640_000_000_000_000;
 const kinds:readonly NetworkAdministrativeEventKind[]=[
- 'WATCH_CASE','SANCTION_REVIEW','EMERGENCY','SNAPSHOT'
+ 'WATCH_CASE','SANCTION_REVIEW','EMERGENCY','SNAPSHOT','SETTINGS_COPY'
 ];
 /** Filters precede the bounded 200-event projection so older selected-type
  * events cannot disappear behind unselected events. */
@@ -92,6 +93,18 @@ export function networkAdministrativeEvents(
    !target('SNAPSHOT',c.chatId))continue;
   result.push({id:'s:'+c.id,kind:'SNAPSHOT',at:c.capturedAt,
    chatId:c.chatId,label:'نسخة سياسة محفوظة'});
+ }
+ if(filter.kind===undefined||filter.kind==='SETTINGS_COPY'){
+  // Confirmed local copy receipts only. A log line is not proof by itself;
+  // keep the target and source inside the current authorized network.
+  const copy=networkGroupCopyHistory(s,policy,actor,networkId,now);
+  if(copy===null)return null;
+  for(const row of copy){
+   if(!allowed.has(row.sourceId)||!allowed.has(row.targetId)||
+    !target('SETTINGS_COPY',row.targetId))continue;
+   result.push({id:'c:'+row.nonce,kind:'SETTINGS_COPY',at:row.at,
+    chatId:row.targetId,label:'نسخ إعدادات حماية محلية بعد موافقة المالك'});
+  }
  }
  return result.filter(e=>validTime(e.at)&&e.at<=now)
   .sort((a,b)=>b.at-a.at||a.id.localeCompare(b.id)).slice(0,200);
