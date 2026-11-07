@@ -103,6 +103,18 @@ export class TelegramBotApiModerationGateway implements ModerationGateway{
     !('call' in adapter)&&!('getMember' in adapter);
   }catch{return false;}
  }
+ /** Proof of origin for both independent official getChat and getChatMember
+  * readers. Does not authorize approval without a fresh owner confirmation.
+  */
+ static usesOfficialGroupLinkRead(gateway:unknown):boolean{
+  try{
+   if(!this.usesOfficialGroupProfileRead(gateway))return false;
+   const a=gateway as TelegramBotApiModerationGateway;
+   const proto=TelegramBotApiModerationGateway.prototype;
+   return proto.inspectGroupLinkEligibility===officialGatewayMethods.inspectGroupLinkEligibility&&
+    a.inspectGroupLinkEligibility===officialGatewayMethods.inspectGroupLinkEligibility;
+  }catch{return false;}
+ }
  /** Advisory read-only identity check, distinct from dispatch provenance.
   * Typescript structural probes, subclass overrides and mutable public
   * methods must never certify 'GRANTED' without the official getChatMember
@@ -230,6 +242,24 @@ export class TelegramBotApiModerationGateway implements ModerationGateway{
      Buffer.byteLength(title,'utf8')>1024||
      /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/u.test(title))return null;
   return {chatId,title,kind:data.type==='group'?'GROUP':'SUPERGROUP'};
+ }
+ /** Read-only, restrictive onboarding preflight. Every target must be a real
+  * group where both this bot and the requesting owner are Telegram admins.
+  * A restored local chat record, arbitrary numeric ID or service role alone
+  * never grants authorization to approve the group.
+  */
+ async inspectGroupLinkEligibility(chatId:string,ownerId:string):Promise<TelegramGroupProfile|null>{
+  if(!validGroup(chatId)||!validUser(ownerId)||Number(ownerId)===this.#botId)return null;
+  const profile=await this.inspectGroupProfile(chatId);
+  if(!profile)return null;
+  const bot=await this.#getMember(chatId,String(this.#botId));
+  const owner=await this.#getMember(chatId,ownerId);
+  const allowed=(member:Member|null,isBot:boolean):boolean=>
+   !!member&&member.user.is_bot===isBot&&
+   (member.status==='creator'||member.status==='administrator'&&
+    (member as Member&{can_manage_chat?:unknown}).can_manage_chat===true);
+  if(!allowed(bot,true)||!allowed(owner,false))return null;
+  return profile;
  }
  /** Read-only Telegram getChat probe: verify exact numeric chat identity
   * and supported group topology, rejecting channels/private chats and
@@ -516,7 +546,8 @@ const officialGatewayMethods=Object.freeze({
  inspectTrialGroupKind:TelegramBotApiModerationGateway.prototype.inspectTrialGroupKind,
  observeRestriction:TelegramBotApiModerationGateway.prototype.observeRestriction,
  inspectRoomPrivacy:TelegramBotApiModerationGateway.prototype.inspectRoomPrivacy,
- inspectGroupProfile:TelegramBotApiModerationGateway.prototype.inspectGroupProfile
+ inspectGroupProfile:TelegramBotApiModerationGateway.prototype.inspectGroupProfile,
+ inspectGroupLinkEligibility:TelegramBotApiModerationGateway.prototype.inspectGroupLinkEligibility
 });
 // Prevent rebinding the static origin-check functions after their definition.
 Object.freeze(TelegramBotApiModerationGateway);
