@@ -221,9 +221,9 @@ export class OwnerForumTopicEditor{
    (note?'\nمراجعة الملاحظة المحلية: '+note.revision:'')+
    '\nلإضافة ملاحظة: <code>/topicnote '+g+' '+t+' النص_التحريري</code>'+
    '\nلا يسمح هذا السجل بإرسال رسائل أو فرض سياسات مستقلة؛ يلزم التأكد من نوع المجموعة وصلاحية الموضوع الحية.',
-   [[...(note?[btn(publication?.published?
+   [...(note?[[btn(publication?.published?
       '🛑 سحب إتاحة الملاحظة':'✅ اعتماد الملاحظة للعرض',
-      'ft:1:q:'+g+':'+t+':'+(publication?.published?'0':'1'))]:[])],
+      'ft:1:q:'+g+':'+t+':'+(publication?.published?'0':'1'))]]:[]),
     [btn('🕘 سجل اعتماد نشر الملاحظات','ft:1:b:'+g+':'+t+':0')],
     [btn('🔎 فحص صلاحيات Telegram الحية','ft:1:f:'+g+':'+t)],
     [btn(education.mode==='PAUSED'?'▶️ استئناف تصفح الموضوع':'⏸ إيقاف التصفح في الموضوع',
