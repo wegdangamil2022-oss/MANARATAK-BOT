@@ -411,6 +411,87 @@ export class OwnerForumTopicEditor{
    buttons);
  }
 
+ /** TOPIC-004: independent owner approval for displaying the CURRENT note
+  * only when a member explicitly requests it from the matching thread.
+  */
+ async preparePublication(actor:string,g:string,t:number,
+  action:ForumTopicNotePublicationAction):Promise<OwnerInlineScreen|null>{
+  return this.store.transaction(s=>{
+   const now=this.clock();
+   if(!this.access(s,actor,now)||!id(g)||!topicId(t))return null;
+   const proof=forumNotePublicationProof(s,this.policy,actor,g,t,action,now);
+   const version=forumTopicGroupAccess(s,this.policy,actor,g,now);
+   const current=ownerForumNotePublication(s,this.policy,actor,g,t,now);
+   if(!proof||version===null||!current)return null;
+   const pending=s.callbacks.filter(c=>c.actorId===actor&&
+    c.ref.startsWith(PUBLICATION_PREFIX)&&!c.used&&!c.revoked&&c.expiresAt>now);
+   if(pending.length>=100)return null;
+   const nonce=randomBytes(18).toString('base64url'),ref=PUBLICATION_PREFIX+nonce;
+   if(s.callbacks.some(c=>c.ref===ref))return null;
+   for(const c of pending)c.revoked=true;
+   const value:PendingPublication={group:g,thread:t,action,proof,createdAt:now,version};
+   s.callbacks.push({ref,action:PUBLICATION_PREFIX+JSON.stringify(value),
+    actorId:actor,chatId:'private',policyVersion:version,
+    oneShot:true,used:false,revoked:false,expiresAt:now+TTL});
+   return ui('<b>🔎 اعتماد نشر الملاحظة داخل موضوع Forum</b>\n'+
+    'المجموعة: <code>'+g+'</code>\n'+
+    'الموضوع: <code>'+t+'</code>\n'+
+    'مراجعة الملاحظة: '+current.note.revision+'\n'+
+    'الإجراء: '+(action==='PUBLISH'?
+     'السماح بعرضها للأعضاء عند طلب /topicfaq من الموضوع ذاته':
+     'سحب اعتماد العرض الحالي')+'\n'+
+    'نص الملاحظة:\n'+esc(current.note.text)+'\n'+
+    'لن تُنشر تلقائيًا أي رسالة. تغيير نص الملاحظة بعد هذا الإقرار يسحب صلاحية عرض الإصدار القديم.\n'+
+    'تأكيد خاص لمرة واحدة، صالح لدقيقتين فقط.',
+    [[btn(action==='PUBLISH'?'✅ اعتماد عرض الملاحظة':'🛑 تأكيد سحب الاعتماد',
+      'ft:1:r:'+nonce)],
+     [btn('✖ إلغاء','ft:1:s:'+nonce)],
+     [btn('↩️ الموضوع','ft:1:d:'+g+':'+t)]]);
+  });
+ }
+ private async decidePublication(actor:string,nonce:string,apply:boolean):
+ Promise<OwnerInlineScreen|null>{
+  return this.store.transaction(s=>{
+   const now=this.clock(),ref=PUBLICATION_PREFIX+nonce,
+    rows=s.callbacks.filter(c=>c.ref===ref),c=rows[0];
+   if(!this.access(s,actor,now)||rows.length!==1||!c||
+    c.actorId!==actor||c.chatId!=='private'||c.oneShot!==true||
+    c.used||c.revoked||!clock(c.expiresAt)||
+    c.expiresAt<=now||c.expiresAt>now+TTL)return null;
+   const action=parsePublication(c.action);
+   if(!action||action.createdAt>now||
+    c.expiresAt!==action.createdAt+TTL||
+    c.policyVersion!==action.version)return null;
+   if(apply&&!changeForumNotePublication(s,this.policy,actor,
+    action.group,action.thread,action.action,now,action.proof))
+    return null;
+   c.used=true;
+   return this.detail(s,actor,now,action.group,action.thread);
+  });
+ }
+ private publicationHistory(s:BotState,actor:string,now:number,g:string,
+  t:number,p:number):OwnerInlineScreen|null{
+  const list=forumNotePublicationHistory(s,this.policy,actor,g,t,now);
+  // A missing draft has no publication history, but never suppress an
+  // invalid or revoked registration silently.
+  if(!list)return null;
+  const pages=Math.max(1,Math.ceil(list.length/SIZE));
+  if(p>=pages)return null;
+  const lines=list.slice(p*SIZE,(p+1)*SIZE).map(r=>
+   '▫️ مراجعة '+r.eventRevision+' · '+(r.action==='PUBLISH'?
+    'اعتماد عرض النص':'سحب العرض')+' · النص '+r.noteRevision+
+   ' · '+new Date(r.at).toISOString().slice(0,16).replace('T',' ')+' UTC');
+  const nav:{text:string;callback_data:string}[]=[];
+  if(p>0)nav.push(btn('⬅️ السابق','ft:1:b:'+g+':'+t+':'+(p-1)));
+  if(p+1<pages)nav.push(btn('➡️ التالي','ft:1:b:'+g+':'+t+':'+(p+1)));
+  return ui('<b>🕘 سجل اعتماد عرض الملاحظات</b>\n'+
+   'المجموعة: <code>'+g+'</code> · الموضوع: <code>'+t+'</code>\n'+
+   'عدد القرارات: '+list.length+' · صفحة '+(p+1)+'/'+pages+'\n'+
+   (lines.length?lines.join('\n'):'لا توجد قرارات نشر حتى الآن.')+'\n'+
+   'سجل محلي لا يثبت تسليم Telegram، ولا يعيد إتاحة نسخة معدلة دون اعتماد.',
+   [...(nav.length?[nav]:[]),[btn('↩️ الموضوع','ft:1:d:'+g+':'+t)]]);
+ }
+
  /** Human-authored topic notes remain owner-private and unpublished. */
  async prepareNote(actor:string,g:string,t:number,note:string):Promise<OwnerInlineScreen|null>{
   return this.store.transaction(s=>{
@@ -485,6 +566,13 @@ export class OwnerForumTopicEditor{
   if(!person(actor)||!this.policy.isOwner(actor))return null;
   if(data==='mi:1:i:01:05')data='ft:1:h:0';
   if(!validOwnerForumTopicRoute(data))return null;
+  const pub=PUB_CONFIRM.exec(data);
+  if(pub)return this.decidePublication(actor,pub[1]!,true);
+  const withdraw=PUB_CANCEL.exec(data);
+  if(withdraw)return this.decidePublication(actor,withdraw[1]!,false);
+  const pubChoice=PUB_CHOICE.exec(data);
+  if(pubChoice)return this.preparePublication(actor,pubChoice[1]!,
+   Number(pubChoice[2]),pubChoice[3]==='1'?'PUBLISH':'WITHDRAW');
   const pc=POLICY_CONFIRM.exec(data);
   if(pc)return this.decidePolicy(actor,pc[1]!,true);
   const pk=POLICY_CANCEL.exec(data);
@@ -509,6 +597,9 @@ export class OwnerForumTopicEditor{
   if(g)return this.group(s,actor,now,g[1]!,Number(g[2]));
   const d=DETAIL.exec(data);
   if(d)return this.detail(s,actor,now,d[1]!,Number(d[2]));
+  const pubHistory=PUB_HISTORY.exec(data);
+  if(pubHistory)return this.publicationHistory(s,actor,now,
+   pubHistory[1]!,Number(pubHistory[2]),Number(pubHistory[3]));
   const ph=POLICY_HISTORY.exec(data);
   if(ph)return this.educationHistory(s,actor,now,ph[1]!,Number(ph[2]),Number(ph[3]));
   const hst=HISTORY.exec(data);
