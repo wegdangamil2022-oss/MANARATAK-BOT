@@ -386,6 +386,50 @@ export class Phase4WhisperService{
    return true;
   });
  }
+ /** Only a recipient-initiated PRIVATE request can call this method. A
+  * public deep-link carries an ID (NOT a capability); current Telegram group
+  * membership, subscription, consent, block list and atomic seat ownership
+  * are mandatory before even returning plaintext to the trusted transport.
+  * The existing Telegram reply ledger independently rechecks this witness
+  * at the irrevocable outbound-send boundary.
+  */
+ async open(memberId:string,id:string):Promise<
+  {status:'READY';text:string;scope:string;reservationId:string;
+   messageRevision:number;consentRevision:number;chatVersion:number;expiresAt:number}|
+  {status:WhisperReserveResult['status']|'NOT_ANNOUNCED'}>{
+  const now=this.clock();
+  if(!validClock(now)||!isUser(memberId)||!/^[a-f0-9]{24}$/u.test(id))
+   return {status:'DENIED'};
+  const first=await this.store.snapshot(),rows=clone(first).messages.filter(m=>m.id===id);
+  if(rows.length!==1||rows[0]!.status!=='OPEN'||!rows[0]!.text)
+   return {status:'NOT_FOUND'};
+  if(!(clone(first).announcements??[]).some(a=>
+     a.messageId===id&&a.status==='CONFIRMED'))return {status:'NOT_ANNOUNCED'};
+  const result=await this.reserve(memberId,id);
+  if(result.status!=='HELD'&&result.status!=='ALREADY_HELD')
+   return {status:result.status};
+  const after=await this.store.snapshot(),d=clone(after),found=d.messages.filter(m=>m.id===id),
+   item=found[0],current=this.clock();
+  if(found.length!==1||!item||item.status!=='OPEN'||!item.text||
+     !validClock(current)||current<now||current>=item.expiresAt)
+   return {status:'EXPIRED'};
+  const chat=approvedChat(after,this.policy,item.chatId);
+  if(!chat||chat.version!==item.chatVersion)return {status:'STALE'};
+  if(!(d.announcements??[]).some(a=>a.messageId===id&&a.status==='CONFIRMED'))
+   return {status:'NOT_ANNOUNCED'};
+  const consent=d.consents.filter(c=>
+    c.chatId===item.chatId&&c.memberId===memberId&&c.enabled&&
+    c.chatVersion===chat.version);
+  const seats=d.reservations.filter(r=>r.messageId===id&&r.memberId===memberId);
+  if(consent.length!==1||seats.length!==1)return {status:'CONSENT_REQUIRED'};
+  if((d.blocks??[]).some(b=>b.chatId===item.chatId&&
+     b.memberId===memberId&&b.senderId===item.creatorId&&b.enabled))
+   return {status:'DENIED'};
+  return {status:'READY',text:item.text,scope:item.chatId,
+   reservationId:seats[0]!.id,messageRevision:item.revision,
+   consentRevision:consent[0]!.revision,chatVersion:chat.version,
+   expiresAt:Math.min(item.expiresAt,current+30000)};
+ }
  async expire():Promise<number>{
   const now=this.clock();if(!validClock(now))return 0;
   return this.store.transaction(s=>{
