@@ -39,7 +39,7 @@ function ledger(s:BotState,now:number):ForumUnresolvedReview[]|null{
  if(!time(now))return null;
  const rows=s.audit.filter(x=>x.updateKey.startsWith(ROOT));
  if(rows.length>1000)return null;
- const keys=new Set<string>(),attempts=new Set<string>();
+ const keys=new Set<string>(),attempts=new Map<string,ForumUnresolvedReview>();
  const out:ForumUnresolvedReview[]=[];
  for(const record of rows){
   if(!ENTRY.test(record.updateKey)||keys.has(record.updateKey)||
@@ -60,11 +60,16 @@ function ledger(s:BotState,now:number):ForumUnresolvedReview[]|null{
    typeof v.attempt!=='string'||!ATTEMPT.test(v.attempt)||
    !kind(v.kind)||!decision(v.decision))return null;
   const key=JSON.stringify([v.group,v.groupVersion,v.thread,v.kind,v.attempt]);
-  if(attempts.has(key))return null;
-  attempts.add(key);
-  out.push({group:v.group,thread:v.thread,groupVersion:v.groupVersion,
-   registration:v.registration,kind:v.kind,attempt:v.attempt,
-   decision:v.decision,actor:record.actorId,at:record.at});
+  const before=attempts.get(key);
+  if(before&&(before.decision!=='ACKNOWLEDGED_UNRESOLVED'||
+   v.decision!=='ESCALATED'||record.at<=before.at||
+   before.registration!==v.registration))return null;
+  const review:ForumUnresolvedReview={group:v.group,thread:v.thread,
+   groupVersion:v.groupVersion,registration:v.registration,
+   kind:v.kind,attempt:v.attempt,decision:v.decision,
+   actor:record.actorId,at:record.at};
+  attempts.set(key,review);
+  out.push(review);
  }
  return out;
 }
@@ -96,8 +101,12 @@ export function forumUnresolvedReviewProof(s:BotState,p:Policy,actor:string,
  if(!decision(what))return null;
  const item=target(s,p,actor,g,t,k,attempt,now),
   reviews=forumUnresolvedReviewHistory(s,p,actor,g,t,now);
- if(!item||!reviews||reviews.some(r=>r.kind===k&&r.attempt===attempt))
-  return null;
+ const previous=reviews?.filter(r=>r.kind===k&&r.attempt===attempt)??[];
+ if(!item||!reviews||previous.some(r=>r.decision==='ESCALATED')||
+  what==='ACKNOWLEDGED_UNRESOLVED'&&previous.length>0||
+  what==='ESCALATED'&&previous.length>0&&
+   (previous.length!==1||previous[0]!.decision!=='ACKNOWLEDGED_UNRESOLVED'||
+    previous[0]!.at>=now))return null;
  return digest([actor,g,t,k,attempt,what,item,reviews,
   s.chats.filter(x=>x.id===g),
   s.grants.filter(x=>x.chatId===g&&x.actor===actor),
