@@ -213,12 +213,16 @@ export class OwnerForumTopicEditor{
   if(note===null)return null;
   const education=ownerForumTopicEducationPolicy(s,this.policy,actor,g,t,now);
   const publication=note?ownerForumNotePublication(s,this.policy,actor,g,t,now):undefined;
-  const actions=forumTopicActionHistory(s,this.policy,actor,g,t,now);
+  // Telegram General (#1) remains readable in the local registry,
+  // but can NEVER enter the close/reopen or broadcast action workflows.
+  const actions=t===1?[]:forumTopicActionHistory(s,this.policy,actor,g,t,now);
   if(!education||note&&publication===null||actions===null)return null;
   const last=actions[0],quarantined=last!==undefined&&
    (last.outcome===undefined||last.outcome==='UNKNOWN_OUTCOME');
-  const canClose=!quarantined&&!(last?.action==='CLOSE'&&last.outcome==='CONFIRMED');
-  const canReopen=!quarantined&&!(last?.action==='REOPEN'&&last.outcome==='CONFIRMED');
+  const canClose=t>1&&!quarantined&&
+   !(last?.action==='CLOSE'&&last.outcome==='CONFIRMED');
+  const canReopen=t>1&&!quarantined&&
+   !(last?.action==='REOPEN'&&last.outcome==='CONFIRMED');
   return ui('<b>🧩 بيانات موضوع محلي</b>\n'+
    'المجموعة: <code>'+g+'</code>\n'+
    'رقم الموضوع: <code>'+topic.threadId+'</code>\n'+
@@ -241,8 +245,8 @@ export class OwnerForumTopicEditor{
    '\nلا يسمح هذا السجل بإرسال رسائل أو فرض سياسات مستقلة؛ يلزم التأكد من نوع المجموعة وصلاحية الموضوع الحية.',
    [...(canClose?[[btn('🔒 طلب إغلاق الموضوع','ft:1:u:'+g+':'+t+':c')]]:[]),
     ...(canReopen?[[btn('🔓 طلب إعادة فتح الموضوع','ft:1:u:'+g+':'+t+':o')]]:[]),
-    [btn('📨 سجل نشرات الموضوع','ft:1:6:'+g+':'+t+':0')],
-    [btn('🕘 سجل عمليات Telegram للموضوع','ft:1:9:'+g+':'+t+':0')],
+    ...(t>1?[[btn('📨 سجل نشرات الموضوع','ft:1:6:'+g+':'+t+':0')],
+     [btn('🕘 سجل عمليات Telegram للموضوع','ft:1:9:'+g+':'+t+':0')]]:[]),
     ...(note?[[btn(publication?.published?
       '🛑 سحب إتاحة الملاحظة':'✅ اعتماد الملاحظة للعرض',
       'ft:1:q:'+g+':'+t+':'+(publication?.published?'0':'1'))]]:[]),
