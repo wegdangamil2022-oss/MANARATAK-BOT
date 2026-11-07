@@ -35,6 +35,10 @@ const help='للتعديل أرسل في خاص البوت أحد الأوامر
  +'<code>/replyrules -100123 WORD القوانين</code>\n'
  +'<code>/replyfaq -100123 WORD القبول | معرف_FAQ_المعتمد</code>\n'
  +'<code>/replyadd -100123 topic:777 COMMAND m_grants | رابط المنح</code>\n'
+ +'<code>/replyphoto -100123 معرف_القاعدة PHOTO_FILE_ID</code>\n'
+ +'<code>/clearreplyphoto -100123 معرف_القاعدة</code>\n'
+ +'<code>/replybutton -100123 معرف_القاعدة دليل | https://t.me/manaratak</code>\n'
+ +'<code>/clearreplybuttons -100123 معرف_القاعدة</code>\n'
  +'<code>/replycheck -100123 منحة دراسية</code>\n'
  +'<code>/replylog -100123</code>\n'
  +'<code>/replylogon -100123</code>\n'
@@ -211,6 +215,25 @@ export function parsePhase4CommunityCommand(text:string):
   return {kind:'EDIT',chatId:serviceDelay[1]!,
    request:{kind:'SERVICE_CLEANUP_DELAY',delayMs:seconds*1000}};
  }
+ // A media file ID is only accepted after owner authentication; Telegram
+ // photo-captions are also supported in the webhook parser.
+ const replyPhoto=/^\/replyphoto (-[1-9]\d{0,15}) ([a-f0-9]{12}) ([A-Za-z0-9_-]{25,200})$/u.exec(text);
+ if(replyPhoto)return validCommunityPhotoId(replyPhoto[3])?
+  {kind:'EDIT',chatId:replyPhoto[1]!,request:{kind:'REPLY_PHOTO_SET',
+   ruleId:replyPhoto[2]!,photoFileId:replyPhoto[3]!}}:null;
+ const replyPhotoClear=/^\/clearreplyphoto (-[1-9]\d{0,15}) ([a-f0-9]{12})$/u.exec(text);
+ if(replyPhotoClear)return {kind:'EDIT',chatId:replyPhotoClear[1]!,
+  request:{kind:'REPLY_PHOTO_CLEAR',ruleId:replyPhotoClear[2]!}};
+ const replyButton=/^\/replybutton (-[1-9]\d{0,15}) ([a-f0-9]{12}) ([^\u0000-\u001f|]{1,70}) \| (\S{15,512})$/u.exec(text);
+ if(replyButton){
+  const label=replyButton[3]!.trim(),url=replyButton[4]!;
+  if(!validCommunityLinkButton({text:label,url}))return null;
+  return {kind:'EDIT',chatId:replyButton[1]!,request:{kind:'REPLY_BUTTON_ADD',
+   ruleId:replyButton[2]!,buttonText:label,buttonUrl:url}};
+ }
+ const replyButtonsClear=/^\/clearreplybuttons (-[1-9]\d{0,15}) ([a-f0-9]{12})$/u.exec(text);
+ if(replyButtonsClear)return {kind:'EDIT',chatId:replyButtonsClear[1]!,
+  request:{kind:'REPLY_BUTTONS_CLEAR',ruleId:replyButtonsClear[2]!}};
  const rate=/^\/replyrate (-[1-9]\d{0,15}) ([a-f0-9]{12}) (0|[1-9]\d{0,4})$/u.exec(text);
  if(rate){
   const seconds=Number(rate[3]);

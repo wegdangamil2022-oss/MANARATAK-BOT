@@ -364,7 +364,7 @@ function eventFrom(value:unknown):{event?:Event;reason:string} {
    // Telegram has already authenticated the inbound update, but owner
    // authorization and group approval are rechecked by the community editor.
    if(msg.text!==undefined||msg.document!==undefined||
-     typeof msg.caption!=='string'||!/^\/(?:welcomephoto|farewellphoto) -[1-9]\d{0,15}$/u.test(msg.caption)||
+     typeof msg.caption!=='string'||!/^\/(?:welcomephoto|farewellphoto) -[1-9]\d{0,15}$|^\/replyphoto -[1-9]\d{0,15} [a-f0-9]{12}$/u.test(msg.caption)||
      !Array.isArray(msg.photo)||msg.photo.length<1||msg.photo.length>10||
      msg.photo.some(p=>!isObject(p)||!validCommunityPhotoId(p.file_id)||
        typeof p.file_unique_id!=='string'||!/^[A-Za-z0-9_-]{8,512}$/u.test(p.file_unique_id)||
