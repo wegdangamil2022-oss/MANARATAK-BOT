@@ -57,6 +57,7 @@ const help='للتعديل أرسل في خاص البوت أحد الأوامر
  +'<code>/replycleanupoff -100123</code>\n'
  +'<code>/greetinglang -100123 en</code>\n'
  +'<code>/greetingtext -100123 welcome en Welcome {العضو}</code>\n'
+ +'<code>/cleargreetingtext -100123 welcome en</code>\n'
  +'<code>/greetingclock -100123 +03:00 12 hijri</code>\n'
  +'<code>/greetingzone -100123 Asia/Aden</code>\n'
  +'<code>/greetingzoneoff -100123</code>\n'
@@ -179,6 +180,10 @@ export function parsePhase4CommunityCommand(text:string):
  if(translated)return {kind:'EDIT',chatId:translated[1]!,request:{
   kind:translated[2]==='welcome'?'WELCOME_LOCALIZED':'FAREWELL_LOCALIZED',
   language:translated[3]! as CommunityLanguage,text:translated[4]!.trim()}};
+ const clearTranslation=/^\/cleargreetingtext (-[1-9]\d{0,15}) (welcome|farewell) (ar|en)$/u.exec(text);
+ if(clearTranslation)return {kind:'EDIT',chatId:clearTranslation[1]!,request:{
+  kind:clearTranslation[2]==='welcome'?'WELCOME_LOCALIZED_CLEAR':'FAREWELL_LOCALIZED_CLEAR',
+  language:clearTranslation[3]! as CommunityLanguage}};
  const zone=/^\/greetingzone (-[1-9]\d{0,15}) (\S{1,64})$/u.exec(text);
  if(zone)return validCommunityTimeZone(zone[2])?
   {kind:'EDIT',chatId:zone[1]!,request:{kind:'GROUP_TIMEZONE',timeZone:zone[2]!}}:null;

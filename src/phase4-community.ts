@@ -171,12 +171,19 @@ export class Phase4CommunityService{
     throw Error('COMMUNITY_GUIDE_CLEAR_INVALID');
    if(kind==='RULES_LINK_SET'&&!validCommunityRulesUrl(request.text))
     throw Error('COMMUNITY_RULES_URL_INVALID');
-   if((kind==='WELCOME_LOCALIZED'||kind==='FAREWELL_LOCALIZED'||kind==='GROUP_LANGUAGE')&&
+   if((kind==='WELCOME_LOCALIZED'||kind==='FAREWELL_LOCALIZED'||
+       kind==='WELCOME_LOCALIZED_CLEAR'||kind==='FAREWELL_LOCALIZED_CLEAR'||
+       kind==='GROUP_LANGUAGE')&&
      !['ar','en'].includes(request.language??''))
     throw Error('COMMUNITY_LANGUAGE_INVALID');
    if((kind==='WELCOME_LOCALIZED'||kind==='FAREWELL_LOCALIZED')&&
      (typeof request.text!=='string'||request.text.trim().length===0))
     throw Error('COMMUNITY_LOCALIZED_TEMPLATE_REQUIRED');
+   if((kind==='WELCOME_LOCALIZED_CLEAR'||kind==='FAREWELL_LOCALIZED_CLEAR')&&
+     (request.text!==undefined||
+      !(kind==='WELCOME_LOCALIZED_CLEAR'?current.welcome.localized:
+        current.farewell.localized)?.[request.language!]))
+    throw Error('COMMUNITY_LOCALIZED_TEMPLATE_MISSING');
    if(kind==='GROUP_CLOCK'&&(!Number.isInteger(request.utcOffsetMinutes)||
      request.utcOffsetMinutes===undefined||request.utcOffsetMinutes< -720||request.utcOffsetMinutes>840||
      !['12','24'].includes(request.clockFormat??'')||
@@ -283,6 +290,18 @@ export class Phase4CommunityService{
      config.welcome.localized={...config.welcome.localized,[draft.language!]:draft.text!};break;
     case 'FAREWELL_LOCALIZED':
      config.farewell.localized={...config.farewell.localized,[draft.language!]:draft.text!};break;
+    case 'WELCOME_LOCALIZED_CLEAR':{
+     const keep={...config.welcome.localized};delete keep[draft.language!];
+     if(Object.keys(keep).length)config.welcome.localized=keep;
+     else delete config.welcome.localized;
+     break;
+    }
+    case 'FAREWELL_LOCALIZED_CLEAR':{
+     const keep={...config.farewell.localized};delete keep[draft.language!];
+     if(Object.keys(keep).length)config.farewell.localized=keep;
+     else delete config.farewell.localized;
+     break;
+    }
     case 'GROUP_LANGUAGE':config.language=draft.language!;break;
      case 'GROUP_TIMEZONE':config.timeZone=draft.timeZone!;break;
      case 'GROUP_TIMEZONE_CLEAR':delete config.timeZone;break;
@@ -762,6 +781,9 @@ export class Phase4CommunityService{
   if(draft.kind==='WELCOME_LOCALIZED'||draft.kind==='FAREWELL_LOCALIZED')
    return '<b>معاينة قالب '+(draft.kind==='WELCOME_LOCALIZED'?'الترحيب':'الوداع')+
     ' بلغة '+draft.language+'</b>\n'+clean(draft.text??'');
+  if(draft.kind==='WELCOME_LOCALIZED_CLEAR'||draft.kind==='FAREWELL_LOCALIZED_CLEAR')
+   return '<b>إزالة ترجمة '+(draft.kind==='WELCOME_LOCALIZED_CLEAR'?'الترحيب':'الوداع')+
+    ' بلغة '+safe(draft.language??'')+'</b>\nبعد الاعتماد سيعود النص إلى القالب الأساسي أو النوع المخصص.\nلا يفعّل الإرسال تلقائيًا.';
   if(draft.kind==='GROUP_LANGUAGE')
    return '<b>لغة رسائل المجموعة</b>\n'+draft.language+
     '\nإذا لم يوجد قالب مترجم، يُستخدم القالب الأساسي للمجموعة.';
