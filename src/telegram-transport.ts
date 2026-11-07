@@ -720,13 +720,16 @@ export class TelegramUpdateApplication {
       // inconclusive provider check must all deny a new opt-in/seat.
       const state=await this.opts.store.snapshot();
       const mode=subscriptionRequirementMode(state,groupId);
-      if(mode==='INVALID')return 'UNKNOWN';
+      // PAUSED is not positive evidence of a student's eligibility.
+      // Do not trust an old "MEMBER" result from a disabled policy.
+      if(mode==='INVALID'||mode==='PAUSED')return 'UNKNOWN';
       if(mode==='NONE')return 'VERIFIED';
       if(!this.opts.subscription)return 'UNKNOWN';
       try{
        const decision=await this.opts.subscription.verify(groupId,memberId);
-       return decision.status==='MEMBER'||decision.status==='NOT_REQUIRED'?
-        'VERIFIED':'UNKNOWN';
+       // When a rule is ACTIVE, NOT_REQUIRED cannot bypass the required
+       // channels for an ordinary student.
+       return decision.status==='MEMBER'?'VERIFIED':'UNKNOWN';
       }catch{return 'UNKNOWN';}
      };
      const screen=await whisperMemberScreen(new Phase4WhisperService(

@@ -500,7 +500,7 @@ export class TelegramReplyDispatcher {
    // minimal receipt metadata remains in this in-process claim.
    const whisperDelivery=job.whisperAccess?{
      messageId:job.whisperAccess.whisperId,memberId:plan.chatId,
-     view:job.whisperAccess.view
+     view:job.whisperAccess.view??'CONTENT' as const
    }:undefined;
    const communityReceipt=community&&plan.studioMarkup?.inline_keyboard.some(row=>row.some(b=>'url' in b))?{chatId:plan.chatId,epoch:community.epoch,expiresAt:community.expiresAt}:undefined;
    if(plan.editMessageId!==undefined&&(community||job.communityClose||(s.telegramReplyJobs??[]).some(old=>old.communityMessage?.chatId===plan.chatId&&old.communityMessage.messageId===plan.editMessageId)))job.communityEditTarget={chatId:plan.chatId,messageId:plan.editMessageId};
