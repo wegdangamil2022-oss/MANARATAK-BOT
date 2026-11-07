@@ -16,6 +16,9 @@ import {ownerForumNotePublication,forumNotePublicationProof,
  type ForumTopicNotePublicationAction} from './group-forum-note-publication.js';
 import {previewForumTopicEducationalSources}
  from './group-forum-publication-preflight.js';
+import {TelegramForumTopicControl,validForumTopicControlRoute}
+ from './telegram-forum-topic-control.js';
+import {forumTopicActionHistory} from './group-forum-topic-control.js';
 
 /** 01-05: local-only topic registration with private owner consent.
  * No Bot API send, createForumTopic, closeForumTopic or permission mutation.
@@ -139,7 +142,8 @@ export function validOwnerForumTopicRoute(value:unknown):boolean{
    POLICY_CHOICE.test(value)||POLICY_CONFIRM.test(value)||
    POLICY_CANCEL.test(value)||POLICY_HISTORY.test(value)||
    PUB_CHOICE.test(value)||PUB_CONFIRM.test(value)||
-   PUB_CANCEL.test(value)||PUB_HISTORY.test(value));
+   PUB_CANCEL.test(value)||PUB_HISTORY.test(value)||
+   validForumTopicControlRoute(value));
 }
 export class OwnerForumTopicEditor{
  constructor(private readonly store:BotStore,private readonly policy:Policy,
@@ -207,7 +211,12 @@ export class OwnerForumTopicEditor{
   if(note===null)return null;
   const education=ownerForumTopicEducationPolicy(s,this.policy,actor,g,t,now);
   const publication=note?ownerForumNotePublication(s,this.policy,actor,g,t,now):undefined;
-  if(!education||note&&publication===null)return null;
+  const actions=forumTopicActionHistory(s,this.policy,actor,g,t,now);
+  if(!education||note&&publication===null||actions===null)return null;
+  const last=actions[0],quarantined=last!==undefined&&
+   (last.outcome===undefined||last.outcome==='UNKNOWN_OUTCOME');
+  const canClose=!quarantined&&!(last?.action==='CLOSE'&&last.outcome==='CONFIRMED');
+  const canReopen=!quarantined&&!(last?.action==='REOPEN'&&last.outcome==='CONFIRMED');
   return ui('<b>🧩 بيانات موضوع محلي</b>\n'+
    'المجموعة: <code>'+g+'</code>\n'+
    'رقم الموضوع: <code>'+topic.threadId+'</code>\n'+
@@ -217,6 +226,9 @@ export class OwnerForumTopicEditor{
    '\nالتصفح التعليمي لهذا الموضوع: '+
    (education.mode==='PAUSED'?'متوقف محليًا':'يتبع سياسة المجموعة')+
    ' · المراجعة '+education.revision+
+   '\nحالة تحكم Telegram: '+
+   (quarantined?'محجوزة بسبب محاولة بنتيجة غير مؤكدة':
+    last?'آخر محاولة مسجلة؛ الحالة الحية تحتاج مراجعة':'لا توجد محاولات محلية')+
    '\nحالة عرض الملاحظة للطلاب: '+
    (publication?.published?
     education.mode==='PAUSED'?'معتمدة لكن التصفح متوقف في هذا الموضوع':
@@ -225,7 +237,10 @@ export class OwnerForumTopicEditor{
    (note?'\nمراجعة الملاحظة المحلية: '+note.revision:'')+
    '\nلإضافة ملاحظة: <code>/topicnote '+g+' '+t+' النص_التحريري</code>'+
    '\nلا يسمح هذا السجل بإرسال رسائل أو فرض سياسات مستقلة؛ يلزم التأكد من نوع المجموعة وصلاحية الموضوع الحية.',
-   [...(note?[[btn(publication?.published?
+   [...(canClose?[[btn('🔒 طلب إغلاق الموضوع','ft:1:u:'+g+':'+t+':c')]]:[]),
+    ...(canReopen?[[btn('🔓 طلب إعادة فتح الموضوع','ft:1:u:'+g+':'+t+':o')]]:[]),
+    [btn('🕘 سجل عمليات Telegram للموضوع','ft:1:9:'+g+':'+t+':0')],
+    ...(note?[[btn(publication?.published?
       '🛑 سحب إتاحة الملاحظة':'✅ اعتماد الملاحظة للعرض',
       'ft:1:q:'+g+':'+t+':'+(publication?.published?'0':'1'))]]:[]),
     ...(note?[[btn('🕘 سجل اعتماد نشر الملاحظات',
@@ -591,6 +606,9 @@ export class OwnerForumTopicEditor{
   if(!person(actor)||!this.policy.isOwner(actor))return null;
   if(data==='mi:1:i:01:05')data='ft:1:h:0';
   if(!validOwnerForumTopicRoute(data))return null;
+  if(validForumTopicControlRoute(data))
+   return new TelegramForumTopicControl(this.store,this.policy,
+    this.gateway,this.safety,this.clock).handle(actor,data);
   const pub=PUB_CONFIRM.exec(data);
   if(pub)return this.decidePublication(actor,pub[1]!,true);
   const withdraw=PUB_CANCEL.exec(data);
