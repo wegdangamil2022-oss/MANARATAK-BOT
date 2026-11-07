@@ -6,11 +6,12 @@ import {validNetworkEmergencyControls} from './network-emergency-stop.js';
 import {validNetworkSanctionReviews,validNetworkSanctionReviewReferences} from './network-sanction-review-model.js';
 import {isValidNetworkPolicySnapshots} from './network-policy-snapshots.js';
 import {networkGroupCopyHistory} from './network-group-copy-history.js';
+import {networkSelectedFollowHistory} from './network-selected-follow-history.js';
 
 /** NETWORK-006 read-only owner events. Never a moderation grant or outbox.
  * No subject identities, rule text, report detail or stored snapshot policy is rendered. */
 export type NetworkAdministrativeEventKind =
- 'WATCH_CASE'|'SANCTION_REVIEW'|'EMERGENCY'|'SNAPSHOT'|'SETTINGS_COPY';
+ 'WATCH_CASE'|'SANCTION_REVIEW'|'EMERGENCY'|'SNAPSHOT'|'SETTINGS_COPY'|'POLICY_FOLLOW';
 export interface NetworkAdministrativeEvent {
  id:string;kind:NetworkAdministrativeEventKind;at:number;
  chatId?:string;label:string;
@@ -22,7 +23,7 @@ export interface NetworkAdministrativeEventFilter {
 }
 const validTime=(n:number)=>Number.isSafeInteger(n)&&n>=0&&n<=8_640_000_000_000_000;
 const kinds:readonly NetworkAdministrativeEventKind[]=[
- 'WATCH_CASE','SANCTION_REVIEW','EMERGENCY','SNAPSHOT','SETTINGS_COPY'
+ 'WATCH_CASE','SANCTION_REVIEW','EMERGENCY','SNAPSHOT','SETTINGS_COPY','POLICY_FOLLOW'
 ];
 /** Filters precede the bounded 200-event projection so older selected-type
  * events cannot disappear behind unselected events. */
@@ -104,6 +105,19 @@ export function networkAdministrativeEvents(
     !target('SETTINGS_COPY',row.targetId))continue;
    result.push({id:'c:'+row.nonce,kind:'SETTINGS_COPY',at:row.at,
     chatId:row.targetId,label:'نسخ إعدادات حماية محلية بعد موافقة المالك'});
+  }
+ }
+ if(filter.kind===undefined||filter.kind==='POLICY_FOLLOW'){
+  const follows=networkSelectedFollowHistory(s,policy,actor,networkId,now);
+  if(follows===null)return null;
+  for(const row of follows){
+   // Never reveal a decision for a group no longer managed by this owner
+   // or outside the currently approved network membership.
+   if(!allowed.has(row.sourceId)||!allowed.has(row.targetId)||
+    !network.members.some(m=>m.chatId===row.targetId&&m.version===row.targetVersion)||
+    !target('POLICY_FOLLOW',row.targetId))continue;
+   result.push({id:'f:'+row.nonce,kind:'POLICY_FOLLOW',at:row.at,
+    chatId:row.targetId,label:'اختيار متابعة سياسة مراقبة بعد موافقة المالك'});
   }
  }
  return result.filter(e=>validTime(e.at)&&e.at<=now)
