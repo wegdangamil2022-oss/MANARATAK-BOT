@@ -146,7 +146,7 @@ export class TelegramNetworkAlertEditor{
    'إلى: '+new Date(data.at).toISOString().slice(0,16).replace('T',' ')+'\n'+
    '• بلاغات المراجعة: '+data.watch+'\n'+
    '• مقترحات العقوبات البشرية: '+data.sanction+'\n'+
-   '• نسخ السياسات: '+data.snapshots+'\n'+   '• نسخ الإعدادات المحلية: '+data.settingsCopy+'\n'+
+   '• نسخ السياسات: '+data.snapshots+'\n'+   '• نسخ الإعدادات المحلية: '+data.settingsCopy+'\n'+   '• متابعة سياسات لمجموعات مختارة: '+data.selectedFollows+'\n'+
    'مجموع السجلات المعروضة: '+data.total+'\n'+
    (data.truncated?'⚠️ تم بلوغ حد عرض 200 حدث؛ الأرقام قد تكون أقل من العدد الحقيقي.\n':'')+
    'حالة الاشتراكات: بلاغات '+status(data.subscriptions.w)+
