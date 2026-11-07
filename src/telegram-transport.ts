@@ -73,6 +73,7 @@ import {cancelOwnerPreview,ownerPreviewCancelData} from './telegram-owner-previe
 import {OwnerDelegationEditor} from './telegram-inline-delegation-edit.js';
 import {renderOwnerInlineGroups} from './telegram-inline-groups.js';
 import {renderOwnerGroupLiveProfile} from './telegram-owner-group-profile.js';
+import {TelegramOwnerGroupLink} from './telegram-owner-group-link.js';
 import {OwnerGroupSetup} from './telegram-inline-group-setup.js';
 import {OwnerGroupPolicyTemplates} from './telegram-inline-group-templates.js';
 import {OwnerGroupSettings} from './telegram-inline-group-settings.js';
@@ -721,6 +722,18 @@ export class TelegramUpdateApplication {
      return view?{status:'APPLIED',reason:'NETWORK_ALERTS_VIEW',plan:this.plan(event.actorId,view.text,undefined,view.keyboard)}
       :{status:'DENIED',reason:'NETWORK_ALERTS_UNAVAILABLE'};
     }
+    if(event.kind==='private'&&event.actorId===event.chatId&&
+     event.text.startsWith('/linkgroup')&&!event.callbackData){
+     if(!this.opts.policy.isOwner(event.actorId)||event.edited||event.forwarded)
+      return {status:'DENIED',reason:'OWNER_GROUP_LINK_PRIVATE_ORIGINAL_ONLY'};
+     const view=await new TelegramOwnerGroupLink(this.opts.store,this.opts.policy,
+      this.opts.moderationRights?.gateway,
+      this.opts.moderationRights?.safety??(async()=>false),this.clock)
+      .request(event.actorId,event.text);
+     return view?{status:'APPLIED',reason:'OWNER_GROUP_LINK_PREVIEW',
+      plan:this.plan(event.actorId,view.text,undefined,view.keyboard)}
+      :{status:'DENIED',reason:'OWNER_GROUP_LINK_UNAVAILABLE'};
+    }
     const verification=/^\/verify(?:@([A-Za-z][A-Za-z0-9_]{4,31}))?(?: (-[1-9][0-9]{0,15}))?$/u.exec(event.text);
     if(verification&&(!verification[1]||verification[1].toLowerCase()===this.opts.botUsername.toLowerCase())){
      const group=verification[2]??(event.kind==='group'?event.chatId:undefined);return group?this.subscriptionVerification(event,group):{status:'APPLIED',reason:'SUBSCRIPTION_VERIFICATION_HELP',plan:this.plan(event.actorId,'للتحقق من حسابك فقط، أرسل /verify ثم رقم المجموعة، أو استخدم زر التحقق في رسالة المجموعة.')};
@@ -998,6 +1011,15 @@ export class TelegramUpdateApplication {
       if(!control)return {status:'DENIED',reason:'INVALID_OR_STALE_OWNER_CONFIRMATION'};
       return {status:'APPLIED',reason:'RESPONSE_PLANNED_ONLY',
        plan:this.plan(chatId,control.text,undefined,control.keyboard,event.callbackMessageId)};
+     }
+     if(event.callbackData==='mi:1:i:01:02'||event.callbackData.startsWith('og:1:')){
+      const view=await new TelegramOwnerGroupLink(this.opts.store,this.opts.policy,
+       this.opts.moderationRights?.gateway,
+       this.opts.moderationRights?.safety??(async()=>false),this.clock)
+       .handle(actorId,event.callbackData);
+      return view?{status:'APPLIED',reason:'OWNER_GROUP_LINK_VIEW',
+       plan:this.plan(chatId,view.text,undefined,view.keyboard,event.callbackMessageId)}
+       :{status:'DENIED',reason:'OWNER_GROUP_LINK_STALE_OR_UNAVAILABLE'};
      }
      if(event.callbackData.startsWith('mi:1:g:l:')){
       const view=await renderOwnerGroupLiveProfile(
