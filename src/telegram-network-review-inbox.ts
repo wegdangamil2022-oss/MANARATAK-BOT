@@ -61,7 +61,7 @@ export function networkReviewOverview(s:BotState,policy:Policy,actor:string,
    chatId,watchPending:0,watchWatched:0,watchClosed:0,
    sanctionsPending:0,sanctionsReviewed:0,sanctionsClosed:0
   }));
- const mapped=new Map(groups.map(x=>[x.chatId,x]));
+ const mapped=new Map<string,NetworkReviewGroupCounts>(groups.map(x=>[x.chatId,x]));
  for(const c of s.networkWatchCases??[]){
   const target=mapped.get(c.sourceChatId);
   if(!target||c.networkId!==id||c.sourceChatVersion!==approved.get(c.sourceChatId)||
