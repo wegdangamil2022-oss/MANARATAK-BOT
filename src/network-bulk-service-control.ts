@@ -1,6 +1,7 @@
 import type {BotState,Chat} from './store.js';
 import type {Policy} from './policy.js';
-import {networkEmergencyStopped} from './network-emergency-stop.js';
+import {networkEmergencyStopped,validNetworkEmergencyControls} from './network-emergency-stop.js';
+import {validGroupNetwork} from './group-network-model.js';
 import {validNetworkInheritanceLinks} from './network-inheritance-model.js';
 import {isValidGroupProtectionRecord,type GroupProtectionRecord} from './protection-rules.js';
 
@@ -34,10 +35,12 @@ export function eligibleNetworkServiceTargets(
   !/^[a-f0-9]{12}$/u.test(networkId)||
   !['AI_OFF','MONITOR_OFF'].includes(operation)||
   networkEmergencyStopped(s,networkId)||
+  !validNetworkEmergencyControls(s.networkEmergencyControls??[])||
   !validNetworkInheritanceLinks(s.networkInheritance??[]))return null;
  const networks=(s.groupNetworks??[]).filter(n=>n.id===networkId);
  const network=networks[0];
- if(networks.length!==1||!network||network.updatedAt>now)return null;
+ if(networks.length!==1||!network||!validGroupNetwork(network)||
+  network.updatedAt>now)return null;
  const impacts:NetworkServiceControlImpact[]=[];
  for(const member of network.members){
   if(!validChatId(member.chatId))return null;
