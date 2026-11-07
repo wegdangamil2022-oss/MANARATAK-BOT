@@ -210,13 +210,15 @@ export async function createLiveTelegramServer(config:LiveTelegramConfig,
   new ModerationService(store,policy,new FakeModerationGateway()));
  const app=new TelegramUpdateApplication({store,policy,education,admin,faq,links,
   botId:check.botId,botUsername:check.botUsername,
-  membership:(chatId,actorId)=>membership.verifyMembership(chatId,actorId),subscription,
+  membership:(chatId,actorId)=>membership.verifyMembership(chatId,actorId),
+  adminMembership:(chatId,actorId)=>membership.verifyAdminMembership(chatId,actorId),subscription,
   documentDownload:new TelegramBotApiDocumentDownloader(check.token,request,safetyGate),
   moderationSafetyFile:check.safetySwitchFile,ownerMenuMode:'inline',studentMenuMode:'inline',
   community:new Phase4CommunityService(store,policy)});
  const dispatcher=new TelegramReplyDispatcher(store,policy,
   new TelegramBotApiTextSender(check.token,request),Date.now,safetyGate,subscription,
-  (chatId,actorId)=>membership.verifyMembership(chatId,actorId));
+  (chatId,actorId)=>membership.verifyMembership(chatId,actorId),
+  (chatId,actorId)=>membership.verifyAdminMembership(chatId,actorId));
  const server=createServer(telegramWebhookListener(app,check.webhookSecret,dispatcher,{},safetyGate,
   new TelegramBotApiCallbackAcker(check.token,request)));
  server.once('listening',()=>{

@@ -287,7 +287,8 @@ export class TelegramReplyDispatcher {
   private readonly sender:TelegramReplySender,private readonly clock:()=>number=Date.now,
   private readonly safetyGate?:()=>Promise<boolean>,
   private readonly subscription?:SubscriptionGate,
-  private readonly membership?:MembershipPort){}
+  private readonly membership?:MembershipPort,
+  private readonly adminMembership?:MembershipPort){}
  /** Membership evidence is checked before the irreversible SENDING claim.
   * A subsequent transactional policy/epoch fence prevents local state changes
   * during the external membership lookup from authorizing a stale send.
@@ -321,6 +322,17 @@ export class TelegramReplyDispatcher {
     if(kind==='PRIVATE_GROUP'){
      if(!this.membership||await this.membership(groupId,actor)!=='VERIFIED')
       return {access,kind,allowed:false};
+     // A group membership check is NOT moderator authorization.
+     if(job.whisperAccess){
+      const matches=snap.phase4Whispers?.messages.filter(m=>
+        m.id===job.whisperAccess!.whisperId)??[];
+      if(matches.length!==1)return {access,kind,allowed:false};
+      if(matches[0]!.kind==='ADMINS'){
+       if(!this.adminMembership||
+          await this.adminMembership(groupId,actor)!=='VERIFIED')
+        return {access,kind,allowed:false};
+      }
+     }
     }
     const mode=subscriptionRequirementMode(snap,groupId);
     if(mode==='NONE'||mode==='PAUSED')allowed=true;

@@ -159,6 +159,8 @@ type ProcessedReply={status:TelegramResult['status'];reason:string;plan?:Telegra
 export interface TelegramApplicationOptions {
   store: BotStore; policy: Policy; education: EducationService; admin: EducationAdminFacade;
   faq: ApprovedAnswerService; links: ResourceLinkService; membership: MembershipPort;
+ /** Fresh read-only Telegram moderator-role verifier; absent = deny ADMINS. */
+ adminMembership?:MembershipPort;
   botId: string; botUsername: string; subscription?: SubscriptionGate; clock?: () => number; documentDownload?: TelegramDocumentPort;
   /** Optional B5 read-only owner preview; absent in usual offline deployment. */
   platformCatalog?:PlatformCatalogPreviewService;
@@ -728,7 +730,8 @@ export class TelegramUpdateApplication {
       }catch{return 'UNKNOWN';}
      };
      const screen=await whisperMemberScreen(new Phase4WhisperService(
-      this.opts.store,this.opts.policy,this.clock,verify),actorId,text);
+      this.opts.store,this.opts.policy,this.clock,verify,
+      this.opts.adminMembership),actorId,text);
      if(!screen)return {status:'DENIED',reason:'WHISPER_MEMBER_COMMAND_INVALID'};
      if(screen.privateSecret){
       const secret=screen.privateSecret,scope=secret.scope;
