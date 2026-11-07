@@ -709,6 +709,8 @@ export function isValidTelegramInlineKeyboard(input:unknown):input is TelegramIn
      !/^pq:1:(?:h|p:(?:0|[1-9][0-9]{0,2})|v:(?:0|[1-9][0-9]{0,2}):[1-8]:[a-f0-9]{16})$/u.test(button.callback_data)&&
      protectionInlineRoute(button.callback_data)===null&&!validOwnerFAQInlineRoute(button.callback_data)&&!validOwnerLibraryInlineRoute(button.callback_data)&&!validStudioInlineRoute(button.callback_data)&&!validOwnerCategoryInlineRoute(button.callback_data)&&!validPrivateSettingsRoute(button.callback_data)&&!validDelegationEditRoute(button.callback_data)&&!validGroupSetupRoute(button.callback_data)&&!validGroupPolicyStudioRoute(button.callback_data)&&!validOwnerGroupSettingsRoute(button.callback_data)&&!validOwnerGroupBulkRestrictRoute(button.callback_data)&&!validOwnerNetworkRoute(button.callback_data)&&!validOwnerPreviewCancelRoute(button.callback_data)&&!validGroupLibraryInlineRoute(button.callback_data)&&!validPublicNavigationRoute(button.callback_data)&&!validOwnerImportRoute(button.callback_data)&&!validOwnerUploadRoute(button.callback_data)&&!validSubscriptionConfigRoute(button.callback_data)&&!validCommunityFolderRoute(button.callback_data)&&
      !validPhase4CommunityRoute(button.callback_data)&&
+     // The "gm:1" buttons only navigate after private membership checks.
+     !/^gm:1:(?:(?:[gr]:-[1-9][0-9]{0,15})|(?:[fn]:-[1-9][0-9]{0,15}:[1-9][0-9]?)|(?:q:-[1-9][0-9]{0,15}:[a-f0-9]{8}-(?:[a-f0-9]{4}-){3}[a-f0-9]{12}))$/u.test(button.callback_data)&&
      !validPhase4GuidanceOwnerRoute(button.callback_data)&&
      !validWhisperOwnerRoute(button.callback_data)&&
      !validQuizOwnerRoute(button.callback_data)&&
