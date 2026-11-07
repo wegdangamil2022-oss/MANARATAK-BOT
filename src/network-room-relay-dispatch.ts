@@ -28,6 +28,41 @@ interface Candidate{
 const reason=(c:Omit<Candidate,'key'|'started'>)=>'NETWORK_ROOM_RELAY_STARTED:'+
  hash([c.pref.key,c.eventId,c.eventAt,c.eventLabel,c.kind,c.room]);
 
+/** The send namespace is an append-only, at-most-once audit ledger.
+ * A malformed, duplicated or orphaned receipt must never relax throttling or
+ * make a previously reserved Telegram event look fresh again.
+ */
+function relaySendLedger(s:BotState,now:number):{recent:BotState['audit']}|null{
+ const rows=s.audit.filter(a=>a.updateKey.startsWith(SEND));
+ if(rows.length>4000)return null;
+ const seen=new Set<string>();
+ const starts=new Map<string,(typeof rows)[number]>();
+ const outcomes=new Map<string,(typeof rows)[number]>();
+ for(const row of rows){
+  const outcome=row.updateKey.endsWith(':outcome');
+  const base=outcome?row.updateKey.slice(0,-8):row.updateKey;
+  if(!RECEIPT.test(base)||seen.has(row.updateKey)||
+   !Number.isSafeInteger(row.at)||row.at<0||row.at>now||
+   !Number.isSafeInteger(row.policyVersion)||row.policyVersion<1||
+   !/^[1-9][0-9]{0,15}$/u.test(row.actorId)||
+   !Number.isSafeInteger(Number(row.actorId)))return null;
+  seen.add(row.updateKey);
+  if(outcome){
+   if(row.decision!=='NOOP'||!/^NETWORK_ROOM_RELAY_(?:CONFIRMED|FAILED_CONFIRMED|UNKNOWN_OUTCOME|NOT_SENT)$/u.test(row.reason))return null;
+   outcomes.set(base,row);
+  }else{
+   if(row.decision!=='ALLOW'||!/^NETWORK_ROOM_RELAY_STARTED:[a-f0-9]{64}$/u.test(row.reason))return null;
+   starts.set(base,row);
+  }
+ }
+ for(const [base,row] of outcomes){
+  const start=starts.get(base);
+  if(!start||start.actorId!==row.actorId||
+   start.policyVersion!==row.policyVersion||row.at<start.at)return null;
+ }
+ return {recent:[...starts.values()].filter(a=>a.at>now-60_000)};
+}
+
 function eligible(s:BotState,p:Policy,pref:NetworkRoomRelayPreference,
  now:number,eventId?:string,eventAt?:number):{
  event:NetworkAdministrativeEvent;room:string
@@ -87,8 +122,9 @@ export class NetworkRoomRelayDispatcher{
     if(!clock(now)||!validNetworkEmergencyControls(s.networkEmergencyControls??[]))return null;
     const prefs=currentNetworkRoomRelays(s,this.policy,now);
     if(!prefs)return null;
-    const recent=s.audit.filter(a=>RECEIPT.test(a.updateKey)&&
-     a.decision==='ALLOW'&&a.at<=now&&a.at>now-60_000);
+    const ledger=relaySendLedger(s,now);
+    if(!ledger)return null;
+    const recent=ledger.recent;
     if(recent.length>=60)return null;
     for(const pref of prefs){
      if(networkEmergencyStopped(s,pref.network))continue;
