@@ -170,10 +170,27 @@ export interface CommunityGuidePostJob{
  contentDigest:string;approvedAt:number;status:CommunityGuidePostStatus;
  attemptId?:string;messageId?:number;
 }
+/** 09:03 one-off publication is separate from protection's private filters.
+ * Only owner-reviewed public URL, NOTE and publication-backed FAQ are rendered. */
+export type CommunityFixedPostStatus=CommunityGuidePostStatus;
+export type CommunityFixedPinStatus='NOT_REQUESTED'|'AWAITING_POST'|'QUEUED'|
+ 'SENDING'|'CONFIRMED'|'FAILED_CONFIRMED'|'UNKNOWN_OUTCOME'|'REVIEWED_UNKNOWN'|'SKIPPED';
+export interface CommunityFixedPostDraft{
+ id:string;actorId:string;chatId:string;chatVersion:number;configVersion:number;
+ contentDigest:string;createdAt:number;expiresAt:number;pinRequested:boolean;
+}
+export interface CommunityFixedPostJob{
+ id:string;actorId:string;chatId:string;chatVersion:number;configVersion:number;
+ contentDigest:string;approvedAt:number;status:CommunityFixedPostStatus;
+ pinRequested:boolean;pinStatus:CommunityFixedPinStatus;
+ attemptId?:string;messageId?:number;pinAttemptId?:string;
+}
 export interface CommunityAutomationState{
  configs:CommunityConfig[];drafts:CommunityDraft[];receipts:CommunityReceipt[];
  /** 09:02 manual, owner-approved guide publications (off until requested). */
  guidePostDrafts?:CommunityGuidePostDraft[];guidePostJobs?:CommunityGuidePostJob[];
+ /** 09:03 separate reviewed public fixed-message and optional pin operations. */
+ fixedPostDrafts?:CommunityFixedPostDraft[];fixedPostJobs?:CommunityFixedPostJob[];
  /** Owner approved edits, at most once; raw title is only kept while QUEUED. */
  profileJobs?:CommunityProfileJob[];
  /** Opaque arrival witnesses when editing is enabled, not visible in audit UI. */
@@ -363,7 +380,9 @@ export function validCommunityState(value:unknown):value is CommunityAutomationS
   (v.profileObservations!==undefined&&(!Array.isArray(v.profileObservations)||v.profileObservations.length>1000))||
   (v.profileRevisions!==undefined&&(!Array.isArray(v.profileRevisions)||v.profileRevisions.length>500))||
   (v.guidePostDrafts!==undefined&&(!Array.isArray(v.guidePostDrafts)||v.guidePostDrafts.length>50))||
-  (v.guidePostJobs!==undefined&&(!Array.isArray(v.guidePostJobs)||v.guidePostJobs.length>250)))return false;
+  (v.guidePostJobs!==undefined&&(!Array.isArray(v.guidePostJobs)||v.guidePostJobs.length>250))||
+  (v.fixedPostDrafts!==undefined&&(!Array.isArray(v.fixedPostDrafts)||v.fixedPostDrafts.length>50))||
+  (v.fixedPostJobs!==undefined&&(!Array.isArray(v.fixedPostJobs)||v.fixedPostJobs.length>250)))return false;
  const guideId=/^[a-f0-9]{24}$/u,guideHash=/^[a-f0-9]{64}$/u;
  const guideDraftIds=new Set<string>();
  for(const row of v.guidePostDrafts??[]){
@@ -407,6 +426,67 @@ export function validCommunityState(value:unknown):value is CommunityAutomationS
   }
  }
 
+ const fixedDraftIds=new Set<string>();
+ for(const row of v.fixedPostDrafts??[]){
+  if(!row||typeof row!=='object'||Array.isArray(row)||
+     Object.keys(row).some(k=>!['id','actorId','chatId','chatVersion','configVersion',
+       'contentDigest','createdAt','expiresAt','pinRequested'].includes(k))||
+     !guideId.test(row.id)||fixedDraftIds.has(row.id)||!validActor(row.actorId)||
+     !validGroup(row.chatId)||!Number.isSafeInteger(row.chatVersion)||
+     row.chatVersion<1||!Number.isSafeInteger(row.configVersion)||
+     row.configVersion<0||row.configVersion>2_000_000_000||
+     !guideHash.test(row.contentDigest)||!validClock(row.createdAt)||
+     !validClock(row.expiresAt)||row.expiresAt<=row.createdAt||
+     row.expiresAt-row.createdAt>120000||typeof row.pinRequested!=='boolean')return false;
+  fixedDraftIds.add(row.id);
+ }
+ const fixedJobs=new Set<string>(),activeFixedGroups=new Set<string>(),
+  activeFixedPins=new Set<string>();
+ const fixedStatus=new Set<CommunityFixedPostStatus>(['QUEUED','SENDING',
+   'CONFIRMED','FAILED_CONFIRMED','UNKNOWN_OUTCOME','REVIEWED_UNKNOWN','SKIPPED']);
+ const pinStatuses=new Set<CommunityFixedPinStatus>(['NOT_REQUESTED','AWAITING_POST',
+   'QUEUED','SENDING','CONFIRMED','FAILED_CONFIRMED','UNKNOWN_OUTCOME',
+   'REVIEWED_UNKNOWN','SKIPPED']);
+ for(const row of v.fixedPostJobs??[]){
+  if(!row||typeof row!=='object'||Array.isArray(row)||
+    Object.keys(row).some(k=>!['id','actorId','chatId','chatVersion','configVersion',
+      'contentDigest','approvedAt','status','attemptId','messageId','pinRequested',
+      'pinStatus','pinAttemptId'].includes(k))||
+    !guideId.test(row.id)||fixedDraftIds.has(row.id)||fixedJobs.has(row.id)||
+    !validActor(row.actorId)||!validGroup(row.chatId)||
+    !Number.isSafeInteger(row.chatVersion)||row.chatVersion<1||
+    !Number.isSafeInteger(row.configVersion)||row.configVersion<0||
+    row.configVersion>2_000_000_000||!guideHash.test(row.contentDigest)||
+    !validClock(row.approvedAt)||!fixedStatus.has(row.status)||
+    typeof row.pinRequested!=='boolean'||!pinStatuses.has(row.pinStatus)||
+    (row.attemptId!==undefined&&!guideId.test(row.attemptId))||
+    (row.pinAttemptId!==undefined&&!guideId.test(row.pinAttemptId))||
+    (row.messageId!==undefined&&(!Number.isSafeInteger(row.messageId)||
+      row.messageId<1||row.messageId>2147483647))||
+    (row.status==='QUEUED'&&(row.attemptId!==undefined||row.messageId!==undefined))||
+    (row.status==='SENDING'&&!row.attemptId)||
+    (row.status==='CONFIRMED'&&(!row.attemptId||row.messageId===undefined))||
+    (['UNKNOWN_OUTCOME','REVIEWED_UNKNOWN'].includes(row.status)&&!row.attemptId)||
+    (row.status!=='CONFIRMED'&&row.messageId!==undefined)||
+    (!row.pinRequested&&row.pinStatus!=='NOT_REQUESTED')||
+    (row.pinRequested&&row.pinStatus==='NOT_REQUESTED')||
+    (row.pinStatus==='AWAITING_POST'&&(row.status==='CONFIRMED'||row.pinAttemptId!==undefined))||
+    (['QUEUED','SENDING','CONFIRMED','UNKNOWN_OUTCOME',
+      'REVIEWED_UNKNOWN','FAILED_CONFIRMED'].includes(row.pinStatus)&&
+      row.status!=='CONFIRMED')||
+    (['SENDING','CONFIRMED','UNKNOWN_OUTCOME','REVIEWED_UNKNOWN'].includes(row.pinStatus)&&
+      !row.pinAttemptId)||
+    (row.pinStatus==='QUEUED'&&row.pinAttemptId!==undefined))return false;
+  fixedJobs.add(row.id);
+  if(['QUEUED','SENDING','UNKNOWN_OUTCOME'].includes(row.status)){
+   if(activeFixedGroups.has(row.chatId))return false;
+   activeFixedGroups.add(row.chatId);
+  }
+  if(['QUEUED','SENDING','UNKNOWN_OUTCOME'].includes(row.pinStatus)){
+   if(activeFixedPins.has(row.chatId))return false;
+   activeFixedPins.add(row.chatId);
+  }
+ }
  if(v.profileRevisions){
   const ids=new Set<string>();
   for(const row of v.profileRevisions){
