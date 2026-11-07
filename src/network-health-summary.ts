@@ -33,6 +33,7 @@ export interface NetworkHealthSummary{
  readonly duplicates:number;readonly withoutModeration:number;
  readonly off:number;readonly monitor:number;readonly enforce:number;
  readonly invalidPolicies:number;readonly noPolicy:number;
+ readonly locallyAbsent:number;readonly presenceUnconfirmed:number;
  readonly activeFollows:number;readonly pausedFollows:number;
  readonly watchPending:number;readonly sanctionPending:number;
  readonly incomplete:boolean;
@@ -107,10 +108,15 @@ export function networkHealthSummary(s:BotState,p:Policy,actor:string,
   enforce:count(x=>x.policy==='ENFORCE'),
   invalidPolicies:count(x=>x.policy==='INVALID'),
   noPolicy:count(x=>x.policy==='MISSING'),
+  // Local cached presence is diagnostic, never a Telegram rights witness.
+  // Mark the gap even if stale grants still make the group appear READY.
+  locallyAbsent:count(x=>x.locallyPresent===false),
+  presenceUnconfirmed:count(x=>x.locallyPresent===null),
   activeFollows:ownFollows.filter(x=>x.status==='ACTIVE').length,
   pausedFollows:ownFollows.filter(x=>x.status==='PAUSED').length,
   watchPending:groups.reduce((a,x)=>a+x.watchPending,0),
   sanctionPending:groups.reduce((a,x)=>a+x.sanctionPending,0),
-  incomplete:groups.some(g=>g.status!=='READY'||g.policy==='MISSING'||g.policy==='INVALID')
+  incomplete:groups.some(g=>g.status!=='READY'||g.policy==='MISSING'||
+   g.policy==='INVALID'||g.locallyPresent!==true)
  };
 }
