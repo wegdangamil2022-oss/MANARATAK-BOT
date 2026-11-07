@@ -1980,17 +1980,18 @@ export class TelegramUpdateApplication {
     // independently targeted thread messages retain their chosen target.
     if(event.kind==='group'&&event.topicId!==undefined&&
      handled.plan?.chatId===event.chatId&&
-     handled.plan.editMessageId===undefined&&
-     handled.plan.messageThreadId===undefined){
-     // The durable reply schema requires a validated GENERAL-group access
-     // witness for a thread destination. Never create an unsendable plan.
-     if(handled.groupMenuAccess&&!handled.groupQuestionAccess)
-      handled={...handled,plan:{...handled.plan,messageThreadId:event.topicId}};
-     else{
+     handled.plan.editMessageId===undefined){
+     // Never use another topic (or General) for an incoming thread reply
+     // without an independently scoped proof. A durable threaded reply
+     // requires a valid GENERAL-group menu witness at claim/send.
+     if(!handled.groupMenuAccess||handled.groupQuestionAccess||
+      handled.plan.messageThreadId!==undefined&&
+      handled.plan.messageThreadId!==event.topicId){
       const {plan:discarded,...withoutPlan}=handled;
       handled={...withoutPlan,status:'DENIED',
        reason:'FORUM_TOPIC_ROUTING_PROOF_MISSING'};
-     }
+     }else if(handled.plan.messageThreadId===undefined)
+      handled={...handled,plan:{...handled.plan,messageThreadId:event.topicId}};
     }
     const audit:AuditRecord={updateKey:key,decision:handled.status==='APPLIED'?'ALLOW':handled.status==='DENIED'?'DENY':'NOOP',reason:handled.reason,policyVersion:0,at:this.clock()};
     // Commit the decision and outbound reply intent in one durable transaction.
