@@ -72,6 +72,7 @@ import {studioPreviewEpoch,studioPreviewSourceEpoch} from './studio-preview-acce
 import {cancelOwnerPreview,ownerPreviewCancelData} from './telegram-owner-preview-cancel.js';
 import {OwnerDelegationEditor} from './telegram-inline-delegation-edit.js';
 import {renderOwnerInlineGroups} from './telegram-inline-groups.js';
+import {renderOwnerGroupLiveProfile} from './telegram-owner-group-profile.js';
 import {OwnerGroupSetup} from './telegram-inline-group-setup.js';
 import {OwnerGroupPolicyTemplates} from './telegram-inline-group-templates.js';
 import {OwnerGroupSettings} from './telegram-inline-group-settings.js';
@@ -997,6 +998,15 @@ export class TelegramUpdateApplication {
       if(!control)return {status:'DENIED',reason:'INVALID_OR_STALE_OWNER_CONFIRMATION'};
       return {status:'APPLIED',reason:'RESPONSE_PLANNED_ONLY',
        plan:this.plan(chatId,control.text,undefined,control.keyboard,event.callbackMessageId)};
+     }
+     if(event.callbackData.startsWith('mi:1:g:l:')){
+      const view=await renderOwnerGroupLiveProfile(
+       this.opts.store,this.opts.policy,actorId,event.callbackData,
+       this.opts.moderationRights?.gateway,this.opts.moderationRights?.safety??(async()=>false),
+       this.clock);
+      return view?{status:'APPLIED',reason:'OWNER_GROUP_LIVE_PROFILE',
+       plan:this.plan(chatId,view.text,undefined,view.keyboard,event.callbackMessageId)}
+       :{status:'DENIED',reason:'OWNER_GROUP_LIVE_PROFILE_STALE_OR_UNAVAILABLE'};
      }
      // Group browsing is the first migrated *drill-down* feature. Every page,
      // chat revision and local policy is freshly authorized from durable state.
