@@ -43,7 +43,8 @@ const newId=(items:readonly {id:string}[])=>{
 export class Phase4WhisperService{
  constructor(private readonly store:BotStore,private readonly policy:Policy,
   private readonly clock:()=>number=Date.now,
-  private readonly verifyMember:VerifyMember=async()=> 'UNKNOWN'){}
+  private readonly verifyMember:VerifyMember=async()=> 'UNKNOWN',
+  private readonly verifyAdmin:VerifyMember=async()=> 'UNKNOWN'){}
  private owner(s:BotState,actor:string):boolean{
   return this.policy.isOwner(actor)&&
    this.policy.privateFeature(s,'owner.dashboard',actor);
@@ -61,14 +62,14 @@ export class Phase4WhisperService{
    input.text.trim()!==input.text||input.text.length<1||input.text.length>800||
    /[\u0000-\u001f\u007f\u202a-\u202e\u2066-\u2069]/u.test(input.text)||
    !Number.isSafeInteger(input.durationMinutes)||input.durationMinutes<1||
-   input.durationMinutes>60||!['FIRST_N','DIRECT','EVERYONE'].includes(input.kind)||
+   input.durationMinutes>60||!['FIRST_N','DIRECT','EVERYONE','ADMINS'].includes(input.kind)||
    input.kind==='FIRST_N'&&(!Number.isSafeInteger(input.seats)||
     input.seats===undefined||input.seats<1||input.seats>20||
     input.recipientId!==undefined)||
    input.kind==='DIRECT'&&(input.seats!==undefined&&input.seats!==1||
     !isUser(input.recipientId??'')||input.recipientId===actor)||
-   input.kind==='EVERYONE'&&(input.seats!==undefined||
-    input.recipientId!==undefined))
+   (input.kind==='EVERYONE'||input.kind==='ADMINS')&&
+    (input.seats!==undefined||input.recipientId!==undefined))
    throw Error('WHISPER_INPUT_INVALID');
   return this.store.transaction(s=>{
    const version=this.scope(s,actor,chatId);
@@ -83,7 +84,7 @@ export class Phase4WhisperService{
    const record:WhisperMessage={
     id:newId(data.messages),chatId,chatVersion:version,creatorId:actor,
     kind:input.kind,seats:input.kind==='DIRECT'?1:
-     input.kind==='EVERYONE'?0:input.seats!,
+     (input.kind==='EVERYONE'||input.kind==='ADMINS')?0:input.seats!,
     ...(input.kind==='DIRECT'?{recipientId:input.recipientId!}:{}),
     text:input.text,status:'DRAFT',revision:1,
     createdAt:now,expiresAt:now+input.durationMinutes*60_000
@@ -452,6 +453,12 @@ export class Phase4WhisperService{
   try{verified=await this.verifyMember(whisper.chatId,memberId)==='VERIFIED';}
   catch{return deny('VERIFICATION_REQUIRED');}
   if(!verified)return deny('VERIFICATION_REQUIRED');
+  if(whisper.kind==='ADMINS'){
+   try{
+    if(await this.verifyAdmin(whisper.chatId,memberId)!=='VERIFIED')
+     return deny('VERIFICATION_REQUIRED');
+   }catch{return deny('VERIFICATION_REQUIRED');}
+  }
   return this.store.transaction(s=>{
    const data=clone(s),fresh=data.messages.filter(m=>m.id===id),row=fresh[0];
    if(fresh.length!==1||!row)return deny('NOT_FOUND');
@@ -481,7 +488,7 @@ export class Phase4WhisperService{
    if(consent[0]!.revision!==consentRevision)return deny('CONSENT_CHANGED');
    const duplicates=data.reservations.filter(x=>x.messageId===id&&x.memberId===memberId);
    if(duplicates.length!==0)return deny('ALREADY_HELD');
-   if((row.kind!=='EVERYONE'&&
+   if((row.kind!=='EVERYONE'&&row.kind!=='ADMINS'&&
        data.reservations.filter(x=>x.messageId===id).length>=row.seats)||
     data.reservations.length>=2000)return deny('FULL');
    const reserved={id:newId(data.reservations),messageId:id,
@@ -699,8 +706,9 @@ export class Phase4WhisperService{
    throw Error('WHISPER_DENIED');
   const used=clone(s).reservations.filter(c=>c.messageId===id).length;
   return '💌 همسة '+row.kind+' · '+row.status+' · '+
-   (row.kind==='EVERYONE'?
-    'للجميع المؤهلين؛ الفتحات المحجوزة: '+used+'، لا سقف مقاعد مصطنع':
+   (row.kind==='EVERYONE'||row.kind==='ADMINS'?
+    (row.kind==='ADMINS'?'للمشرفين الموثّقين':'للجميع المؤهلين')+
+    '؛ الفتحات المحجوزة: '+used+'، لا سقف مقاعد مصطنع':
     'المقاعد المتبقية: '+Math.max(0,row.seats-used)+'/'+row.seats)+
    ' · الإعلان: '+((clone(s).announcements??[])
     .find(x=>x.messageId===id)?.status??'NOT_POSTED');
