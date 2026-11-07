@@ -2,6 +2,9 @@ import {randomBytes} from 'node:crypto';
 import type {BotState,Chat} from './store.js';
 import type {Policy} from './policy.js';
 import {networkWatchCaseAccessible} from './network-watchlist.js';
+import {validGroupNetwork} from './group-network-model.js';
+import {networkEmergencyStopped,validNetworkEmergencyControls}
+ from './network-emergency-stop.js';
 import {validNetworkSanctionReview,
  type NetworkSanctionReview,type NetworkSanctionKind,
  type NetworkSanctionReviewDecision} from './network-sanction-review-model.js';
@@ -14,7 +17,8 @@ function targetGroup(s:BotState,policy:Policy,actor:string,now:number,
  if(!clockValid(now)||!policy.isOwner(actor)||
   !policy.privateFeature(s,'owner.dashboard',actor)||!validId(targetChatId))return null;
  const network=(s.groupNetworks??[]).filter(n=>n.id===networkId);
- if(network.length!==1||!network[0]||network[0].updatedAt>now)return null;
+ if(network.length!==1||!network[0]||!validGroupNetwork(network[0])||
+  network[0].updatedAt>now)return null;
  const chatRows=s.chats.filter(c=>c.id===targetChatId),chat=chatRows[0];
  if(chatRows.length!==1||!chat||!chat.approved||chat.version<1||
   !chat.scopes.includes('moderation')||!policy.canUseChat(s,targetChatId,'moderation')||
@@ -49,6 +53,8 @@ export function prepareNetworkSanctionReview(
  if(!clockValid(now)||!watch||watch.status!=='WATCHED'||watch.revision!==2||
   watch.reviewedAt===undefined||now<watch.reviewedAt||
   !['MUTE','BAN'].includes(kind)||targetId===watch.sourceChatId||
+  !validNetworkEmergencyControls(s.networkEmergencyControls??[])||
+  networkEmergencyStopped(s,watch.networkId)||
   (s.networkSanctionReviews??[]).length>=500)return null;
  const target=targetGroup(s,policy,actor,now,watch.networkId,targetId);
  const network=(s.groupNetworks??[]).find(n=>n.id===watch.networkId);
@@ -72,14 +78,22 @@ export function decideNetworkSanctionReview(
  s:BotState,policy:Policy,actor:string,now:number,reviewId:string,
  expectedRevision:number,decision:NetworkSanctionReviewDecision
 ):boolean{
- if(!clockValid(now)||!Number.isSafeInteger(expectedRevision)||expectedRevision<1)return false;
+ if(!clockValid(now)||!Number.isSafeInteger(expectedRevision)||expectedRevision<1||
+  !validNetworkEmergencyControls(s.networkEmergencyControls??[]))return false;
  const row=networkSanctionReviewAccessible(s,policy,actor,now,reviewId);
  if(!row||row.revision!==expectedRevision||now<row.requestedAt)return false;
- if(row.status==='PENDING'&&(decision==='REVIEWED_ONLY'||decision==='REJECTED')){
-  row.status=decision;row.revision=2;row.reviewedBy=actor;row.reviewedAt=now;
- }else if(row.status==='REVIEWED_ONLY'&&decision==='CLOSED'&&
-  row.reviewedAt!==undefined&&now>=row.reviewedAt){
-  row.status='CLOSED';row.revision=3;row.closedBy=actor;row.closedAt=now;
+ // During a network STOP only restrictive review clean-up (reject / close)
+ // is available. REVIEWED_ONLY must not be granted by a stale callback.
+ if(decision==='REVIEWED_ONLY'&&networkEmergencyStopped(s,row.networkId))
+  return false;
+ const next:NetworkSanctionReview={...row};
+ if(next.status==='PENDING'&&(decision==='REVIEWED_ONLY'||decision==='REJECTED')){
+  next.status=decision;next.revision=2;next.reviewedBy=actor;next.reviewedAt=now;
+ }else if(next.status==='REVIEWED_ONLY'&&decision==='CLOSED'&&
+  next.reviewedAt!==undefined&&now>=next.reviewedAt){
+  next.status='CLOSED';next.revision=3;next.closedBy=actor;next.closedAt=now;
  }else return false;
- return validNetworkSanctionReview(row);
+ if(!validNetworkSanctionReview(next))return false;
+ Object.assign(row,next);
+ return true;
 }
