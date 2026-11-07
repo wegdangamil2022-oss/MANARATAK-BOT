@@ -130,7 +130,7 @@ export interface TelegramReplyJob {
  groupMenuAccess?:{actorId:string;epoch:string;expiresAt:number};
  /** Immutable Phase 4 source marker for send-time quiet-hour enforcement.
   * Removed at irreversible send claim; never contains student message text. */
- communityAutomation?:{kind:'JOIN'|'LEAVE'|'TEXT';configVersion:number};
+ communityAutomation?:{kind:'JOIN'|'LEAVE'|'TEXT';configVersion:number;ruleId?:string};
  /** Temporary source scope + actor used to recheck DM group browsing at send. */
  privateGroupAccess?:{actorId:string;scope:string;epoch:string;expiresAt:number};
  /** New private replies declare origin; pre-v0.7.56 private QUEUED rows

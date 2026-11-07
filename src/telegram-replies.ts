@@ -168,7 +168,14 @@ export function validTelegramReplyJob(v:unknown):v is TelegramReplyJob{
    j.status==='QUEUED'&&j.groupReplyKind==='GENERAL'&&validGroupReplyAccess(j.groupMenuAccess)&&
    typeof j.communityAutomation==='object'&&j.communityAutomation!==null&&
    !Array.isArray(j.communityAutomation)&&
-   Object.keys(j.communityAutomation as object).length===2&&
+   Object.keys(j.communityAutomation as object).every(k=>
+     ['kind','configVersion','ruleId'].includes(k))&&
+   Object.keys(j.communityAutomation as object).length===
+    ((j.communityAutomation as {ruleId?:unknown}).ruleId===undefined?2:3)&&
+   ((j.communityAutomation as {ruleId?:unknown}).ruleId===undefined||
+     ((j.communityAutomation as {kind?:unknown}).kind==='TEXT'&&
+      typeof (j.communityAutomation as {ruleId?:unknown}).ruleId==='string'&&
+      /^[a-f0-9]{12}$/u.test((j.communityAutomation as {ruleId:string}).ruleId)))&&
    ['JOIN','LEAVE','TEXT'].includes(String((j.communityAutomation as {kind?:unknown}).kind))&&
    Number.isSafeInteger((j.communityAutomation as {configVersion?:unknown}).configVersion)&&
    Number((j.communityAutomation as {configVersion?:unknown}).configVersion)>=1
@@ -374,9 +381,20 @@ export class TelegramReplyDispatcher {
        (automation.kind==='JOIN'&&!config.welcome.enabled)||
        (automation.kind==='LEAVE'&&!config.farewell.enabled)){
      automationDenied=true;
-    }else if(automation.kind==='TEXT'&&config.quietHours){
-     try{automationDenied=automationDenied||inCommunityQuietHours(config.quietHours,now,config.utcOffsetMinutes,config.timeZone);}
-     catch{automationDenied=true;}
+    }else if(automation.kind==='TEXT'){
+     try{
+      if(config.quietHours&&inCommunityQuietHours(config.quietHours,now,
+         config.utcOffsetMinutes,config.timeZone))automationDenied=true;
+      // The exact reviewed rule is bound to this queued reply. Group policy
+      // and FAQ/source epochs are separately fenced by the existing ledger.
+      if(automation.ruleId){
+       const matches=config.rules.filter(r=>r.id===automation.ruleId);
+       if(matches.length!==1||!matches[0]!.enabled)automationDenied=true;
+       else if(matches[0]!.activeHours&&inCommunityQuietHours(
+        matches[0]!.activeHours,now,config.utcOffsetMinutes,config.timeZone))
+        automationDenied=true;
+      }
+     }catch{automationDenied=true;}
     }
    }
    const forbidden=closeDenied||noGroupProof||noPrivateProvenance||adminDenied||libraryDenied||communityDenied||automationDenied||(!!access&&(

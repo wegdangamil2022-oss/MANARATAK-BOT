@@ -611,7 +611,8 @@ export class TelegramUpdateApplication {
     const welcomeText=optIn&&Buffer.byteLength(proposal.text+optIn,'utf8')<=
       (proposal.photoFileId?1024:4096)?proposal.text+optIn:proposal.text;
     return {status:'APPLIED',reason:'PHASE4_COMMUNITY_PLANNED',
-     communityAutomation:{kind:proposal.kind,configVersion:proposal.policyVersion},
+     communityAutomation:{kind:proposal.kind,configVersion:proposal.policyVersion,
+      ...(proposal.ruleId?{ruleId:proposal.ruleId}:{})},
      plan:{chatId:event.chatId,parseMode:'HTML',text:welcomeText,
       ...(proposal.photoFileId?{photoFileId:proposal.photoFileId}:{}),
       ...(proposal.communityLinks?{communityLinks:proposal.communityLinks}:{}),
