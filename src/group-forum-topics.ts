@@ -21,7 +21,8 @@ const clock=(v:unknown):v is number=>typeof v==='number'&&
 export const validForumTopicTitle=(value:unknown):value is string=>
  typeof value==='string'&&value===value.trim()&&
  Array.from(value).length>=2&&Array.from(value).length<=48&&
- Buffer.byteLength(value,'utf8')<=128&&!/[\u0000-\u001f\u007f-\u009f]/u.test(value);
+ Buffer.byteLength(value,'utf8')<=128&&
+ !/[\u0000-\u001f\u007f-\u009f\u202a-\u202e\u2066-\u2069]/u.test(value);
 
 export interface LocalForumTopic{
  readonly chatId:string;readonly groupVersion:number;
@@ -142,7 +143,7 @@ export const validForumTopicNote=(value:unknown):value is string=>
  typeof value==='string'&&value===value.trim()&&
  Array.from(value).length>=8&&Array.from(value).length<=400&&
  Buffer.byteLength(value,'utf8')<=1200&&
- !/[\u0000-\u001f\u007f-\u009f]/u.test(value);
+ !/[\u0000-\u001f\u007f-\u009f\u202a-\u202e\u2066-\u2069]/u.test(value);
 function notes(s:BotState,now:number):LocalForumTopicNote[]|null{
  if(!clock(now))return null;
  const rows=s.audit.filter(a=>a.updateKey.startsWith(NOTE));
