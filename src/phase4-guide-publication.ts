@@ -3,6 +3,8 @@ import {BotStore} from './store.js';
 import {Policy} from './policy.js';
 import {guidanceContext,renderGuidanceWelcome} from './phase4-guidance.js';
 import {TelegramBotApiTextSender,type TelegramSendResult} from './telegram-replies.js';
+import {communityLinkKeyboard} from './phase4-community-rich.js';
+import {communityFolderURL} from './community-folder-model.js';
 import type {CommunityGuidePostStatus} from './phase4-community-model.js';
 
 const guideId=(key:string)=>/^[a-f0-9]{24}$/u.test(key);
@@ -13,7 +15,7 @@ const validClock=(now:number)=>Number.isSafeInteger(now)&&now>=0&&
  now<=8_640_000_000_000_000-120000;
 export interface GuidePostTelegramGateway{
  canPublish(chatId:string):Promise<boolean>;
- publish(chatId:string,text:string):Promise<TelegramSendResult>;
+ publish(chatId:string,text:string,folderUrl?:string):Promise<TelegramSendResult>;
 }
 /** Read-only Telegram admin permissions plus one standard HTML sendMessage.
  * Unlike a channel publisher, this method only accepts group/supergroup IDs.
@@ -61,10 +63,13 @@ export class TelegramBotApiGuidePostGateway implements GuidePostTelegramGateway{
    return false;
   return member.status==='creator'||member.status==='administrator';
  }
- async publish(chatId:string,text:string):Promise<TelegramSendResult>{
-  if(!validGroup(chatId)||!text||Buffer.byteLength(text,'utf8')>3400)
+ async publish(chatId:string,text:string,folderUrl?:string):Promise<TelegramSendResult>{
+  if(!validGroup(chatId)||!text||Buffer.byteLength(text,'utf8')>3400||
+    folderUrl!==undefined&&!communityFolderURL(folderUrl))
    return {status:'FAILED_CONFIRMED'};
-  return this.sender.send({chatId,parseMode:'HTML',text});
+  return this.sender.send({chatId,parseMode:'HTML',text,
+   ...(folderUrl?{communityLinks:communityLinkKeyboard([
+    {text:'📁 مجتمع منارتك',url:folderUrl}])}:{})});
  }
 }
 export type GuidePostDispatchResult=CommunityGuidePostStatus|'NOT_FOUND'|'PAUSED';
@@ -125,11 +130,11 @@ export class Phase4GuidePublicationDispatcher{
    // SENDING and a unique attempt are durable BEFORE contacting Telegram.
    current.status='SENDING';current.attemptId=randomBytes(12).toString('hex');
    return {status:'SEND' as const,chatId:current.chatId,text:body,
-    attemptId:current.attemptId};
+    attemptId:current.attemptId,folderUrl:data?.folderUrl};
   });
   if(claim.status!=='SEND')return claim.status;
   let result:TelegramSendResult={status:'UNKNOWN_OUTCOME'};
-  try{result=await this.gateway.publish(claim.chatId,claim.text);}
+  try{result=await this.gateway.publish(claim.chatId,claim.text,claim.folderUrl);}
   catch{/* ambiguous outcome remains quarantined */}
   await this.store.transaction(s=>{
    const rows=s.phase4Community?.guidePostJobs?.filter(j=>j.id===id)??[];

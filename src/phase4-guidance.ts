@@ -117,7 +117,9 @@ export function renderGuidanceWelcome(data:GuidanceData):string{
   '<b>كيف تستخدم البوت؟</b>\n'+
   '<code>/grouprules '+group+'</code> — القوانين والملاحظات المعتمدة\n'+
   '<code>/groupguide '+group+'</code> — إعادة فتح هذا الدليل\n'+
-  'قائمة الأسئلة المعتمدة، إن وجدت، تعرض معرّفاتها في صفحة القوانين.\n\n'+
+  '<code>/groupfaqs '+group+'</code> — فهرس الأسئلة الشائعة الموثقة\n'+
+  '<code>/groupnotes '+group+'</code> — الملاحظات الثابتة المعتمدة\n'+
+  'افتح خاص البوت لإرسال هذه الأوامر. الفهارس لا تعرض إلا المصادر المتاحة والمعتمدة.\n\n'+
   '⚠️ لا تعني هذه الصفحة موافقة على المنح أو إثبات العضوية، ولا تُرسل تلقائيًا لأعضاء جدد.';
 }
 /** Only approved, enabled NOTE replies are visible as fixed notes. Old plain
