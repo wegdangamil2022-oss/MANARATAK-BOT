@@ -7,7 +7,8 @@ import type {OwnerInlineScreen,TelegramInlineKeyboard} from './telegram-inline-o
 const ID='-[1-9][0-9]{0,15}',PAGE='(?:0|[1-9][0-9]?)';
 const UUID='[a-f0-9]{8}-(?:[a-f0-9]{4}-){3}[a-f0-9]{12}';
 const ROUTE=new RegExp('^gd:1:(?:[23]:(?:h|p:'+PAGE+'|g:'+ID+
- ')|2:[cx]:[a-f0-9]{24}|3:[rf]:'+ID+':'+PAGE+'|3:d:'+ID+':'+UUID+')$','u');
+ ')|2:[cxay]:[a-f0-9]{24}|2:z:[a-f0-9]{24}|2:[ts]:'+ID+
+ '|3:[rf]:'+ID+':'+PAGE+'|3:d:'+ID+':'+UUID+')$','u');
 export const validPhase4GuidanceOwnerRoute=(v:unknown):v is string=>
  typeof v==='string'&&Buffer.byteLength(v,'utf8')<=64&&ROUTE.test(v);
 export type GuidanceOwnerCommand=
@@ -80,8 +81,11 @@ function welcome(d:GuidanceData):OwnerInlineScreen{
   'لإزالة التعريف: <code>/guideclear '+d.chatId+'</code>\n'+
   'لإزالة المجالات: <code>/guidetopicsclear '+d.chatId+'</code>\n'+
   'لإزالة الخدمات المخصصة: <code>/guideservicesclear '+d.chatId+'</code>\n'+
+  'للنشر مرة واحدة بعد المراجعة: <code>/guidepublish '+d.chatId+'</code>\n'+
   'كل أمر يعرض معاينة خاصة ولا يُطبّق قبل موافقة مستقلة.',
-  [[btn('📜 القوانين والرسائل الثابتة',group('3',d.chatId))],
+  [[btn('📢 معاينة نشر الدليل في المجموعة','gd:1:2:t:'+d.chatId)],
+   [btn('🕘 حالة آخر منشور تمهيدي','gd:1:2:s:'+d.chatId)],
+   [btn('📜 القوانين والرسائل الثابتة',group('3',d.chatId))],
    [btn('✏️ إعدادات الترحيب والروابط','p4c:1:g:'+d.chatId)],
    [btn('📁 إعداد مجلد المجتمع','cf:1:h')],
    [btn('↩️ اختيار المجموعة',root('2')),back]]);
@@ -140,6 +144,20 @@ function faqList(d:GuidanceData,page:number):OwnerInlineScreen|null{
 export async function phase4GuidanceOwnerScreen(service:Phase4GuidanceService,
  actor:string,input:string):Promise<OwnerInlineScreen|null>{
  try{
+  const publishCommand=/^\/guidepublish (-[1-9][0-9]{0,15})$/u.exec(input);
+  if(publishCommand||/^gd:1:2:t:-[1-9][0-9]{0,15}$/u.test(input)){
+   const chatId=publishCommand?.[1]??input.slice('gd:1:2:t:'.length);
+   if(!validGuidanceGroup(chatId))return null;
+   const {draft,preview}=await service.preparePublication(actor,chatId);
+   return ui('<b>📢 معاينة المنشور التمهيدي للمجموعة</b>\n'+
+    'المجموعة: <code>'+chatId+'</code>\n'+
+    'الرسالة التالية ستظهر لجميع أعضاء المجموعة عند النشر.\n\n'+preview+
+    '\n\nهذا اعتماد لنشر واحد فقط، وليس رسالة تلقائية لكل عضو جديد.\n'+
+    'ينتهي التأكيد بعد دقيقتين؛ يتوقف النشر إذا تغيرت المصادر أو موافقة المجموعة.',
+    [[btn('✅ اعتماد نشر واحد','gd:1:2:a:'+draft.id)],
+     [btn('❌ إلغاء المسودة','gd:1:2:y:'+draft.id)],
+     [btn('↩️ دليل المجموعة',group('2',chatId))]]);
+  }
   const cmd=parseGuidanceOwnerCommand(input);
   if(cmd?.kind==='EDIT'){
    const draft=await service.edit(actor,cmd.chatId,cmd.request);
@@ -158,6 +176,47 @@ export async function phase4GuidanceOwnerScreen(service:Phase4GuidanceService,
   if(input==='mi:1:i:09:03'||input==='gd:1:3:h')
    return groups(service,actor,'3',0);
   if(!validPhase4GuidanceOwnerRoute(input))return null;
+  const publishDecision=/^gd:1:2:([ay]):([a-f0-9]{24})$/u.exec(input);
+  if(publishDecision){
+   if(publishDecision[1]==='y'){
+    const cancelled=await service.cancelPublicationDraft(actor,publishDecision[2]!);
+    return cancelled?ui('أُلغيت مسودة النشر. لم تُرسل أي رسالة إلى المجموعة.',
+     [[btn('↩️ اختيار المجموعة',root('2'))]]):null;
+   }
+   const job=await service.confirmPublication(actor,publishDecision[2]!);
+   return ui('<b>📢 طلب نشر الدليل معتمد</b>\n'+
+    'المجموعة: <code>'+job.chatId+'</code>\n'+
+    'الحالة: في طابور النشر الآمن. لم نتأكد بعد من تسليم Telegram.\n'+
+    'يتحقق المرسل من الصلاحيات ومصادر الدليل قبل الطلب، ولن يعيد النشر تلقائيًا عند نتيجة مجهولة.',
+    [[btn('🕘 حالة النشر','gd:1:2:s:'+job.chatId)],
+     [btn('↩️ دليل المجموعة',group('2',job.chatId))]]);
+  }
+  const postStatus=/^gd:1:2:s:(-[1-9][0-9]{0,15})$/u.exec(input);
+  if(postStatus){
+   const chatId=postStatus[1]!,job=await service.publicationStatus(actor,chatId);
+   const status:Record<string,string>={
+    QUEUED:'في طابور الإرسال ولم تُرسل بعد',
+    SENDING:'بدأت محاولة الإرسال؛ النتيجة غير محسومة',
+    CONFIRMED:'أكد Telegram تسليم المنشور',
+    FAILED_CONFIRMED:'فشل مؤكد؛ لا إعادة إرسال تلقائية',
+    UNKNOWN_OUTCOME:'النتيجة غير مؤكدة؛ راجع المجموعة قبل أي نشر جديد',
+    SKIPPED:'أُلغي/تُرك دون إرسال لتغير الصلاحية أو الإعدادات'};
+   return ui('<b>🕘 حالة المنشور التمهيدي — 09:02</b>\n'+
+    'المجموعة: <code>'+chatId+'</code>\n'+
+    (job?'الحالة: '+(status[job.status]??'غير معروفة')+
+     '\nوقت الاعتماد: '+new Date(job.approvedAt).toISOString().slice(0,16).replace('T',' ')+' UTC'+
+     (job.status==='CONFIRMED'&&job.messageId?'\nرقم رسالة Telegram: '+job.messageId:''):
+     'لم يطلب المالك نشر دليل لهذه المجموعة بعد.')+
+    '\nلا تُحسب حالة الطابور نشرًا ناجحًا.',
+    [...(job?.status==='QUEUED'?[[btn('⛔ إلغاء النشر قبل الإرسال','gd:1:2:z:'+job.id)]]:[]),
+     [btn('↩️ دليل المجموعة',group('2',chatId))]]);
+  }
+  const cancelQueued=/^gd:1:2:z:([a-f0-9]{24})$/u.exec(input);
+  if(cancelQueued){
+   const done=await service.cancelQueuedPublication(actor,cancelQueued[1]!);
+   return done?ui('أُلغيت مهمة نشر الدليل التي لم يبدأ إرسالها. لا تغيير في مواد الدليل.',
+    [[btn('↩️ اختيار المجموعة',root('2'))]]):null;
+  }
   const decision=/^gd:1:2:([cx]):([a-f0-9]{24})$/u.exec(input);
   if(decision){
    if(decision[1]==='x'){
