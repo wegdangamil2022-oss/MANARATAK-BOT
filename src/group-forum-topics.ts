@@ -109,3 +109,96 @@ export function registerLocalForumTopic(s:BotState,p:Policy,
    thread:topicId,title}),policyVersion:current,at:now});
  return true;
 }
+
+/** TOPIC-004: optional owner-reviewed local notes for a registered topic.
+ * Notes are NOT published, are never inserted into an automatic reply, and
+ * must never be sent to a general thread if a real topic is unavailable.
+ */
+const NOTE='group:forum:note:',NOTE_REASON='GROUP_FORUM_TOPIC_NOTE:';
+const NOTE_KEY=/^group:forum:note:([A-Za-z0-9_-]{24})$/u;
+export interface LocalForumTopicNote{
+ readonly group:string;readonly groupVersion:number;
+ readonly thread:number;readonly registration:string;readonly revision:number;
+ readonly text:string;readonly at:number;
+}
+export const validForumTopicNote=(value:unknown):value is string=>
+ typeof value==='string'&&value===value.trim()&&
+ Array.from(value).length>=8&&Array.from(value).length<=400&&
+ Buffer.byteLength(value,'utf8')<=1200&&
+ !/[\u0000-\u001f\u007f-\u009f]/u.test(value);
+function notes(s:BotState,now:number):LocalForumTopicNote[]|null{
+ if(!clock(now))return null;
+ const rows=s.audit.filter(a=>a.updateKey.startsWith(NOTE));
+ if(rows.length>2000)return null;
+ const seen=new Set<string>(),items:LocalForumTopicNote[]=[];
+ for(const a of rows){
+  if(!NOTE_KEY.test(a.updateKey)||seen.has(a.updateKey)||
+   a.decision!=='ALLOW'||!person(a.actorId)||
+   !version(a.policyVersion)||!clock(a.at)||a.at>now||
+   !a.reason.startsWith(NOTE_REASON))return null;
+  seen.add(a.updateKey);
+  let value:unknown;
+  try{value=JSON.parse(a.reason.slice(NOTE_REASON.length));}catch{return null;}
+  if(!value||typeof value!=='object'||Array.isArray(value))return null;
+  const v=value as Record<string,unknown>;
+  if(Object.keys(v).sort().join(',')!=='group,groupVersion,registration,revision,text,thread'||
+   !chat(v.group)||!thread(v.thread)||!version(v.groupVersion)||
+   !version(v.revision)||Number(v.revision)>60||
+   !validForumTopicNote(v.text)||typeof v.registration!=='string'||
+   !KEY.test(v.registration)||a.policyVersion!==v.groupVersion)return null;
+  items.push({group:v.group,groupVersion:v.groupVersion,
+   thread:v.thread,registration:v.registration,
+   revision:v.revision,text:v.text,at:a.at});
+ }
+ const ordered=[...items].sort((a,b)=>
+  a.group.localeCompare(b.group)||a.groupVersion-b.groupVersion||
+  a.thread-b.thread||a.revision-b.revision);
+ const state=new Map<string,{rev:number;at:number}>();
+ for(const item of ordered){
+  const key=JSON.stringify([item.group,item.groupVersion,item.thread]);
+  const prev=state.get(key);
+  if(item.revision!==(prev?.rev??0)+1||
+   (prev!==undefined&&item.at<=prev.at))return null;
+  state.set(key,{rev:item.revision,at:item.at});
+ }
+ return ordered;
+}
+export function forumTopicNote(s:BotState,p:Policy,actor:string,g:string,
+ t:number,now:number):LocalForumTopicNote|null|undefined{
+ const registry=localForumTopics(s,p,actor,g,now);
+ const allNotes=notes(s,now);
+ if(!registry||!allNotes||!thread(t))return null;
+ const topic=registry.find(x=>x.threadId===t);
+ if(!topic)return null;
+ const matching=allNotes.filter(x=>x.group===g&&
+  x.groupVersion===topic.groupVersion&&x.thread===t);
+ if(matching.some(x=>x.registration!==topic.reference))return null;
+ return matching.at(-1);
+}
+export function forumTopicNoteProof(s:BotState,p:Policy,actor:string,
+ g:string,t:number,note:string,now:number):string|null{
+ if(!validForumTopicNote(note))return null;
+ const rows=localForumTopics(s,p,actor,g,now),topic=rows?.find(x=>x.threadId===t);
+ const current=forumTopicNote(s,p,actor,g,t,now);
+ if(!topic||current===null||current?.revision===60)return null;
+ return digest([actor,g,t,note,topic,current??null,
+  s.chats.filter(c=>c.id===g),
+  s.grants.filter(gr=>gr.chatId===g&&gr.actor===actor),
+  s.privateFeatures,s.privateSettingsRevision??0,
+  s.audit.filter(a=>a.updateKey.startsWith(NOTE))]);
+}
+export function saveLocalForumTopicNote(s:BotState,p:Policy,actor:string,
+ g:string,t:number,note:string,now:number,proof:string):boolean{
+ if(!/^[a-f0-9]{64}$/u.test(proof)||
+  forumTopicNoteProof(s,p,actor,g,t,note,now)!==proof)return false;
+ const topic=localForumTopics(s,p,actor,g,now)?.find(x=>x.threadId===t);
+ const previous=forumTopicNote(s,p,actor,g,t,now);
+ if(!topic||previous===null||previous&&previous.at>=now)return false;
+ const key=NOTE+randomBytes(18).toString('base64url');
+ if(s.audit.some(a=>a.updateKey===key))return false;
+ s.audit.push({updateKey:key,actorId:actor,decision:'ALLOW',
+  reason:NOTE_REASON+JSON.stringify({group:g,groupVersion:topic.groupVersion,
+   thread:t,registration:topic.reference,revision:(previous?.revision??0)+1,
+   text:note}),policyVersion:topic.groupVersion,at:now});
+ return true;
+}
