@@ -76,6 +76,7 @@ export function previewNetworkGroupCopy(
     // These entries bind a person, account or sensitive fraud claim. They
     // cannot be transplanted safely to another group.
     rules.some(r=>!safeKinds.has(r.kind))||
+    to.policy.rules.some(r=>!safeKinds.has(r.kind))||
     (to.policy.ruleExemptions?.length??0)!==0
  ))return null;
  const fields:('rules'|'flood')[]=[];
