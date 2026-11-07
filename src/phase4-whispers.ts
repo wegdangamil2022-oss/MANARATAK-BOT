@@ -433,7 +433,23 @@ export class Phase4WhisperService{
  async expire():Promise<number>{
   const now=this.clock();if(!validClock(now))return 0;
   return this.store.transaction(s=>{
-   const data=clone(s);let total=0;
+   const data=clone(s);let total=0,redacted=0;
+   // A private whisper's plaintext must never remain queued after its
+   // short witness expires, even if Telegram safety STOP prevents sending.
+   // Do not mark attempted SENDING jobs retryable or redact unrelated DMs.
+   for(const job of s.telegramReplyJobs??[]){
+    if(job.status!=='QUEUED'||!job.whisperAccess)continue;
+    const w=job.whisperAccess,source=data.messages.find(m=>m.id===w.whisperId);
+    const member=job.plan?.chatId,scope=job.privateGroupAccess?.scope;
+    const consent=data.consents.find(c=>c.chatId===scope&&c.memberId===member);
+    const blocked=!!(data.blocks??[]).find(b=>b.chatId===scope&&
+      b.memberId===member&&b.senderId===source?.creatorId&&b.enabled);
+    if(now<w.expiresAt&&source?.status==='OPEN'&&source.expiresAt>now&&
+      consent?.enabled&&consent.revision===w.consentRevision&&!blocked)continue;
+    job.status='FAILED_CONFIRMED';delete job.plan;delete job.whisperAccess;
+    delete job.privateGroupAccess;delete job.privateReplyKind;
+    job.redactedAt=now;redacted++;
+   }
    for(const row of data.messages){
     if(row.status==='CLOSED'||now<row.expiresAt)continue;
     row.revision=row.status==='DRAFT'?2:3;
@@ -456,7 +472,7 @@ export class Phase4WhisperService{
    // Disabled blocks and old reviewed reports are pruned regularly.
    data.blocks=(data.blocks??[]).filter(b=>
     b.updatedAt<=now&&(b.enabled||now-b.updatedAt<86400000));
-   if(total||data.messages.length!==before||
+   if(total||redacted||data.messages.length!==before||
       (data.reports?.length??0)!==(s.phase4Whispers?.reports?.length??0)||
       (data.blocks?.length??0)!==(s.phase4Whispers?.blocks?.length??0)||
       (data.announcements?.length??0)!==(s.phase4Whispers?.announcements?.length??0))

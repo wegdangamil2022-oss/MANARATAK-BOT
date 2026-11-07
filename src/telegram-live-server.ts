@@ -1,6 +1,8 @@
 import {GroupProtectionPolicyService} from './group-protection-policy.js';
 import {Phase4CommunityService} from './phase4-community.js';
 import {Phase4WhisperService} from './phase4-whispers.js';
+import {Phase4WhisperAnnouncementDispatcher,
+ TelegramBotApiWhisperAnnouncementGateway} from './phase4-whisper-publication.js';
 import {startPhase4WhisperPrivacyMaintenance} from './phase4-whisper-maintenance.js';
 import {Phase4DiscussionService} from './phase4-discussions.js';
 import {startPhase4DiscussionPrivacyMaintenance} from './phase4-discussion-maintenance.js';
@@ -258,6 +260,9 @@ export async function createLiveTelegramServer(config:LiveTelegramConfig,
    new TelegramBotApiServiceCleanupGateway(check.token,request),Date.now,safetyGate);
   // 09:02 is one-shot, only after a separate owner preview and approval.
   // Disabled by default because the group has no approved jobs until then.
+  const whisperPublisher=new Phase4WhisperAnnouncementDispatcher(store,policy,
+   new TelegramBotApiWhisperAnnouncementGateway(check.token,check.botUsername,request),
+   Date.now,safetyGate);
   const guidePublisher=new Phase4GuidePublicationDispatcher(store,policy,
    new TelegramBotApiGuidePostGateway(check.token,request),Date.now,safetyGate);
   // 09:03: no Telegram publication/pinning without independent owner approval.
@@ -273,6 +278,7 @@ export async function createLiveTelegramServer(config:LiveTelegramConfig,
    // Explicitly enabled group service deletions only; no retries of unknown API outcomes.
    await serviceCleaner.runDue(4);
    await guidePublisher.runDue(2);
+   await whisperPublisher.runDue(2);
    await fixedPublisher.runDue(2);
    // Do not create this dispatcher without explicit runtime opt-in.
    // Every individual job still requires owner approval and current bot rights.
