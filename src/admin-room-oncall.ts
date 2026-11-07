@@ -92,6 +92,42 @@ function assignments(s:BotState,p:Policy,now:number):Assignment[]{
   out.push({id,chat:v.chat,actor:now<deadline?setting.primary:setting.fallback,stage:now<deadline?'primary':'fallback',setting,at:a.at,deadline,witness});
  }return out.sort((a,b)=>a.at-b.at||a.id.localeCompare(b.id));
 }
+/** ADMINLINK-009: owner/admin read-only triage for the CURRENT approved room.
+ * Never surfaces case IDs, member IDs, messages, or acknowledgement tokens.
+ * Presence in this list never grants a Telegram moderation action.
+ */
+export interface AdminRoomOncallQueueSummary{
+ readonly group:string;readonly room:string;readonly configured:boolean;
+ readonly enabled:boolean;readonly primaryWaiting:number;
+ readonly fallbackOverdue:number;readonly pending:number;
+ readonly oldestPendingAt:number|null;readonly earliestDeadline:number|null;
+ readonly ledgerSafe:boolean;
+}
+export function adminRoomOncallQueueSummary(s:BotState,p:Policy,actor:string,
+ chatId:string,now:number):AdminRoomOncallQueueSummary|null{
+ if(!time(now)||!group(chatId)||!person(actor)||
+  !p.canUseChat(s,chatId,'moderation')||
+  !p.has(s,actor,'chat.manage',chatId,now)||
+  (p.isOwner(actor)&&!p.privateFeature(s,'owner.dashboard',actor)))return null;
+ const target=adminRoomNotificationTarget(s,p,chatId,now,true);
+ if(!target||!p.canUseChat(s,target.room,'moderation')||
+  !p.has(s,actor,'chat.manage',target.room,now))return null;
+ const config=oncallSetting(s,p,chatId,now);
+ if(config===null||config&&config.link!==target.id)return null;
+ // A corrupted ledger is not equivalent to "zero pending" or "all sent".
+ if(!oncallSendLedgerSafe(s,now))return null;
+ const queue=config?.enabled?assignments(s,p,now)
+  .filter(a=>a.chat===chatId&&a.setting.key===config.key):[];
+ const primary=queue.filter(a=>a.stage==='primary');
+ const fallback=queue.filter(a=>a.stage==='fallback');
+ return {group:chatId,room:target.room,configured:config!==undefined,
+  enabled:config?.enabled===true,primaryWaiting:primary.length,
+  fallbackOverdue:fallback.length,pending:queue.length,
+  oldestPendingAt:queue.length?Math.min(...queue.map(a=>a.at)):null,
+  earliestDeadline:primary.length?Math.min(...primary.map(a=>a.deadline)):null,
+  ledgerSafe:true};
+}
+
 export class AdminRoomOncall{
  constructor(private readonly store:BotStore,private readonly policy:Policy,private readonly clock:()=>number){ }
  async acknowledge(actor:string,id:string,witness:string):Promise<boolean>{
