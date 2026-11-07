@@ -336,7 +336,11 @@ export class TelegramReplyDispatcher {
      }
     }
     const mode=subscriptionRequirementMode(snap,groupId);
-    if(mode==='NONE'||mode==='PAUSED')allowed=true;
+    // PAUSED is only acceptable for ordinary public navigation where
+    // that pre-existing policy explicitly permits it. It must NEVER
+    // bypass a private whisper recipient's required subscription.
+    const privateWhisper=kind==='PRIVATE_GROUP'&&job.whisperAccess!==undefined;
+    if(mode==='NONE'||mode==='PAUSED'&&!privateWhisper)allowed=true;
     else if(mode==='ACTIVE'&&this.subscription){
      const proof=await this.subscription.verify(groupId,actor);
      allowed=acceptsActiveSubscriptionEvidence(proof.status,this.policy.isOwner(actor));
@@ -462,6 +466,10 @@ export class TelegramReplyDispatcher {
      reservations.length!==1||reservations[0]!.status!=='HELD'||
      blocks.length>0;
    }
+   // A subscription requirement becoming paused between remote lookup
+   // and the irreversible send claim cannot resurrect a private whisper.
+   if(whisper&&subscriptionRequirementMode(s,accessScope)==='PAUSED')
+    whisperDenied=true;
    const forbidden=closeDenied||whisperDenied||noGroupProof||noPrivateProvenance||adminDenied||libraryDenied||communityDenied||automationDenied||(!!access&&(
     !groupPrecheck?.allowed||
     groupPrecheck.kind!==accessKind||

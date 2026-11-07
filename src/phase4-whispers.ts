@@ -466,6 +466,11 @@ export class Phase4WhisperService{
   if(match.length!==1||!whisper)return deny('NOT_FOUND');
   if(whisper.status==='CLOSED')return deny('CLOSED');
   if(whisper.status!=='OPEN')return deny('DENIED');
+  // No one may pre-claim the FIRST_N seats while an owner-approved draft
+  // is waiting for a real Telegram group-announcement receipt.
+  const announcements=clone(before).announcements?.filter(a=>a.messageId===id)??[];
+  if(announcements.length!==1||announcements[0]!.status!=='CONFIRMED')
+   return deny('DENIED');
   if(now<whisper.createdAt||now>=whisper.expiresAt)return deny('EXPIRED');
   const chat=approvedChat(before,this.policy,whisper.chatId);
   if(!chat||chat.version!==whisper.chatVersion)return deny('STALE');
@@ -498,6 +503,11 @@ export class Phase4WhisperService{
    if(fresh.length!==1||!row)return deny('NOT_FOUND');
    if(row.status==='CLOSED')return deny('CLOSED');
    if(row.status!=='OPEN')return deny('DENIED');
+   // Recheck publication atomically with seat reservation, after the
+   // Telegram membership read. The public URL is not an authorization.
+   const confirmed=(data.announcements??[]).filter(a=>a.messageId===id&&
+      a.status==='CONFIRMED');
+   if(confirmed.length!==1)return deny('DENIED');
    if(row.chatVersion!==whisper.chatVersion||row.revision!==whisper.revision||
     row.expiresAt!==whisper.expiresAt)return deny('STALE');
    // The remote Telegram membership read may have waited past expiry.
