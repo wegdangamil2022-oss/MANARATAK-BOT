@@ -6,6 +6,7 @@ import {Phase4WhisperService} from './phase4-whispers.js';
 export type WhisperMemberCommand=
  |{kind:'ON'|'OFF';chatId:string}
  |{kind:'RESERVE';id:string}
+ |{kind:'OPEN';id:string}
  |{kind:'BLOCK';id:string}
  |{kind:'UNBLOCK';chatId:string;senderId:string}
  |{kind:'REPORT';id:string;reason:'SPAM'|'HARASSMENT'|'PERSONAL_DATA'|'OTHER'};
@@ -24,11 +25,20 @@ export function parseWhisperMemberCommand(value:string):WhisperMemberCommand|nul
  const report=/^\/whisperreport ([a-f0-9]{24}) (SPAM|HARASSMENT|PERSONAL_DATA|OTHER)$/u.exec(value);
  if(report)return {kind:'REPORT',id:report[1]!,
   reason:report[2]! as 'SPAM'|'HARASSMENT'|'PERSONAL_DATA'|'OTHER'};
+ const open=/^(?:\/start wh_|\/whisperopen )([a-f0-9]{24})$/u.exec(value);
+ if(open)return {kind:'OPEN',id:open[1]!};
  const reserve=/^\/whisperseat ([a-f0-9]{24})$/u.exec(value);
  if(reserve)return {kind:'RESERVE',id:reserve[1]!};
  return null;
 }
-export interface WhisperMemberScreen{readonly text:string;}
+export interface WhisperMemberScreen{
+ readonly text:string;
+ /** Trusted server-side send witness, never serialized into any public reply. */
+ readonly privateSecret?:{
+  scope:string;whisperId:string;reservationId:string;
+  messageRevision:number;consentRevision:number;chatVersion:number;expiresAt:number;
+ };
+}
 /** Called only after Telegram verifies sender === private chat. This helper
  * does not authenticate a sender and MUST NOT be used for group messages.
  * Private membership verification is delegated to the service's trusted
@@ -64,6 +74,34 @@ export async function whisperMemberScreen(
    const ok=await service.report(actor,request.id,request.reason);
    return {text:ok?'🚩 سُجل البلاغ الخاص للمراجعة. احتفظ النظام بنوع الإساءة فقط، دون نسخ نص الهمسة.':
     'هذا البلاغ غير متاح أو سبق إرساله، أو لا يوجد حجز مثبت باسمك لهذه الهمسة.'};
+  }
+  if(request.kind==='OPEN'){
+   const opened=await service.open(actor,request.id);
+   if(opened.status!=='READY'){
+    const errors:Record<string,string>={
+     NOT_ANNOUNCED:'إعلان الهمسة لم يؤكده Telegram؛ لا يمكن فتح المحتوى حتى النشر المؤكد.',
+     FULL:'انتهت المقاعد المحددة لهذه الهمسة.',
+     CONSENT_REQUIRED:'يلزم تفعيل موافقتك على همسات المجموعة في الخاص أولًا.',
+     VERIFICATION_REQUIRED:'تعذّر التحقق من عضويتك واشتراكاتك المطلوبة حاليًا.',
+     EXPIRED:'انتهت صلاحية الهمسة.',CLOSED:'أغلقت الهمسة.'
+    };
+    return {text:'🔒 '+(errors[opened.status]??'هذه الهمسة غير متاحة لك حاليًا أو تغيّرت صلاحياتها.')+
+     '\nلا يكفي امتلاك رابطها لإثبات الأهلية.'};
+   }
+   const escaped=opened.text.replace(/&/gu,'&amp;').replace(/</gu,'&lt;')
+    .replace(/>/gu,'&gt;').replace(/"/gu,'&quot;').replace(/'/gu,'&#39;');
+   const body='<b>💌 محتوى الهمسة في الخاص فقط</b>\n'+escaped+
+    '\n\n🔐 لا يضمن هذا العرض منع النسخ أو لقطة الشاشة، وليس مشفّرًا طرفيًا.'+
+    '\nللبلاغ: <code>/whisperreport '+request.id+' SPAM</code>'+
+    '\nلحظر المرسل: <code>/whisperblockid '+request.id+'</code>';
+   if(Buffer.byteLength(body,'utf8')>4096)
+    return {text:'🔒 تعذر عرض الهمسة ضمن حد Telegram؛ لم نرسل محتوى جزئيًا.'};
+   return {text:body,privateSecret:{
+    scope:opened.scope,whisperId:request.id,
+    reservationId:opened.reservationId,messageRevision:opened.messageRevision,
+    consentRevision:opened.consentRevision,chatVersion:opened.chatVersion,
+    expiresAt:opened.expiresAt
+   }};
   }
   if(request.kind!=='RESERVE')return null;
   const reservation=await service.reserve(actor,request.id);
