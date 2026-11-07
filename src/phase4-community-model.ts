@@ -857,7 +857,7 @@ export function selectCommunityRule(config:CommunityConfig,text:string,topicId?:
   (command?rule.match==='COMMAND':rule.match!=='COMMAND')&&
   (rule.topicId===undefined||rule.topicId===topicId)&&matchCommunityRule(rule,text)&&
   (rule.activeHours===undefined||now===undefined||
-    !inCommunityQuietHours(rule.activeHours,now,config.utcOffsetMinutes,config.timeZone)));
+    inCommunityQuietHours(rule.activeHours,now,config.utcOffsetMinutes,config.timeZone)));
  candidates.sort((a,b)=>
   Number(b.topicId!==undefined)-Number(a.topicId!==undefined)||
   rank(a.match)-rank(b.match)||

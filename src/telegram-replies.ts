@@ -390,7 +390,7 @@ export class TelegramReplyDispatcher {
       if(automation.ruleId){
        const matches=config.rules.filter(r=>r.id===automation.ruleId);
        if(matches.length!==1||!matches[0]!.enabled)automationDenied=true;
-       else if(matches[0]!.activeHours&&inCommunityQuietHours(
+       else if(matches[0]!.activeHours&&!inCommunityQuietHours(
         matches[0]!.activeHours,now,config.utcOffsetMinutes,config.timeZone))
         automationDenied=true;
       }
