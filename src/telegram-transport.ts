@@ -1152,14 +1152,14 @@ export class TelegramUpdateApplication {
      return {status:'APPLIED',reason:'PHASE4_ENGAGEMENT_OWNER',
       plan:this.plan(chatId,screen.text,undefined,screen.keyboard,event.callbackMessageId)};
     }
-    // 09:02/09:03: read-only owner dashboard over approved group content.
+    // 09:02/09:03: approved guide dashboard plus one-shot owner-reviewed posting.
     const phase4GuidanceInput=kind==='private'&&!!this.opts.community&&(
      event.callbackData==='mi:1:i:09:02'||
      event.callbackData==='mi:1:i:09:03'||
      event.callbackData?.startsWith('gd:1:')||
      text==='/newmemberguide'||text.startsWith('/newmemberguide ')||
      text==='/groupfixed'||text.startsWith('/groupfixed ')||
-     /^\/(?:guideset|guidetopics|guideclear|guidetopicsclear)(?:$|\s)/u.test(text));
+     /^\/(?:guideset|guidetopics|guideservices|guideclear|guidetopicsclear|guideservicesclear|guidepublish)(?:$|\s)/u.test(text));
     if(phase4GuidanceInput){
      if(!this.opts.policy.isOwner(actorId)||actorId!==chatId||
       event.edited||event.forwarded||!this.opts.community)

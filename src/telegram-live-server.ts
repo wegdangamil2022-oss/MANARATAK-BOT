@@ -24,6 +24,7 @@ import {Phase4ContestService} from './phase4-contests.js';
 import {startPhase4ContestMaintenance} from './phase4-contest-maintenance.js';
 import {Phase4ServiceCleanupDispatcher,TelegramBotApiServiceCleanupGateway} from './phase4-service-cleanup.js';
 import {Phase4GroupProfileDispatcher,TelegramBotApiGroupProfileGateway} from './phase4-group-profile.js';
+import {Phase4GuidePublicationDispatcher,TelegramBotApiGuidePostGateway} from './phase4-guide-publication.js';
 import {startProtectionMaintenance} from './protection-maintenance.js';
 import {createServer,type Server} from 'node:http';
 import {lstat,realpath} from 'node:fs/promises';
@@ -254,6 +255,10 @@ export async function createLiveTelegramServer(config:LiveTelegramConfig,
   const protection=new GroupProtectionPolicyService(store,policy);
   const serviceCleaner=new Phase4ServiceCleanupDispatcher(store,policy,
    new TelegramBotApiServiceCleanupGateway(check.token,request),Date.now,safetyGate);
+  // 09:02 is one-shot, only after a separate owner preview and approval.
+  // Disabled by default because the group has no approved jobs until then.
+  const guidePublisher=new Phase4GuidePublicationDispatcher(store,policy,
+   new TelegramBotApiGuidePostGateway(check.token,request),Date.now,safetyGate);
   const profileEditor=check.profileEditsEnabled===true?
    new Phase4GroupProfileDispatcher(store,policy,
     new TelegramBotApiGroupProfileGateway(check.token,request),Date.now,safetyGate):null;
@@ -262,6 +267,7 @@ export async function createLiveTelegramServer(config:LiveTelegramConfig,
    if(result.status==='CLOCK_UNTRUSTED')throw Error('PROTECTION_CLOCK_UNTRUSTED');
    // Explicitly enabled group service deletions only; no retries of unknown API outcomes.
    await serviceCleaner.runDue(4);
+   await guidePublisher.runDue(2);
    // Do not create this dispatcher without explicit runtime opt-in.
    // Every individual job still requires owner approval and current bot rights.
    if(profileEditor)await profileEditor.runDue(2);
