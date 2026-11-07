@@ -450,6 +450,7 @@ export class TelegramReplyDispatcher {
      now>=whisper.expiresAt||m.chatId!==whisperScope||
      m.chatVersion!==whisper.chatVersion||
      m.revision!==whisper.messageRevision||
+     (m.kind==='TEAM'&&!m.recipientIds?.includes(plan.chatId))||
      (whisper.view==='ANSWER'&&
        (m.purpose!=='QUESTION'||!m.answerText))||
      (whisper.view==='CONTENT'&&

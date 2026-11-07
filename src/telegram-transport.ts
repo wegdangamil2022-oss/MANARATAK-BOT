@@ -762,7 +762,7 @@ export class TelegramUpdateApplication {
     const whisperInput=kind==='private'&&(
       event.callbackData==='mi:1:i:09:06'||
       event.callbackData?.startsWith('wh:1:')||
-      /^\/whispers(?:$|\s)|^\/whisper(?:first|direct|reports|members|everyone|admins|question|gift)(?:$|\s)/u.test(text));
+      /^\/whispers(?:$|\s)|^\/whisper(?:first|direct|reports|members|everyone|admins|question|gift|team)(?:$|\s)/u.test(text));
     if(whisperInput){
      if(!this.opts.policy.isOwner(actorId)||actorId!==chatId||
         event.forwarded||event.edited)

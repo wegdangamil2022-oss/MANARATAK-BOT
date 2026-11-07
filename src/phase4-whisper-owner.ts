@@ -50,6 +50,16 @@ export function parseWhisperOwnerCommand(text:string):WhisperOwnerCommand|null{
   return {kind:'CREATE',chatId:first[1]!,input:{
    kind:'FIRST_N',seats:Number(first[2]),durationMinutes:Number(first[3]),text:first[4]!
   }};
+ const team=/^\/whisperteam (-[1-9][0-9]{0,15}) ([1-9]|[1-5][0-9]|60) ([1-9][0-9]{0,15}(?:,[1-9][0-9]{0,15}){0,19}) \| ([^\r\n]{1,800})$/u.exec(text);
+ if(team&&group(team[1]!)){
+  const ids=team[3]!.split(',');
+  if(ids.length>=1&&ids.length<=20&&
+     ids.every(user)&&new Set(ids).size===ids.length)
+   return {kind:'CREATE',chatId:team[1]!,input:{
+    kind:'TEAM',durationMinutes:Number(team[2]),recipientIds:ids,
+    text:team[4]!.trim()
+   }};
+ }
  const admin=/^\/whisperadmins (-[1-9][0-9]{0,15}) ([0-9]{1,2}) ([^\r\n]{1,800})$/u.exec(text);
  if(admin&&group(admin[1]!)&&Number(admin[2])>=1&&Number(admin[2])<=60)
   return {kind:'CREATE',chatId:admin[1]!,input:{
@@ -78,6 +88,7 @@ async function detail(service:Phase4WhisperService,actor:string,id:string):
  const type=row.kind==='FIRST_N'?'أول '+row.seats+' مستلمين مؤهلين':
   row.kind==='EVERYONE'?'للجميع المؤهلين (يفتحون بشكل فردي فقط)':
   row.kind==='ADMINS'?'لمشرفي Telegram المعتمدين فقط':
+  row.kind==='TEAM'?'لفريق محدد من '+(row.recipientIds?.length??0)+' حسابًا':
   'إلى مستلم واحد مُحدد';
  const publication=await service.announcementStatus(actor,id);
  const educational=row.purpose==='QUESTION'?'❓ سؤال تعليمي مع إجابة خاصة لاحقة':
@@ -88,6 +99,9 @@ async function detail(service:Phase4WhisperService,actor:string,id:string):
   'المجموعة: <code>'+row.chatId+'</code>\n'+
   'الوضع: '+type+'\n'+
   'الغرض: '+educational+'\n'+
+  (row.kind==='TEAM'&&row.status==='DRAFT'?
+   'فريق الحسابات المصرّح لها (لا تظهر في المجموعة): <code>'+
+    (row.recipientIds??[]).join(', ')+'</code>\n':'')+
   'الحالة: '+names[row.status]+'\n'+
   'تاريخ الانتهاء: '+new Date(row.expiresAt).toISOString()+'\n'+
   (row.status==='DRAFT'?
@@ -261,7 +275,8 @@ export async function whisperOwnerScreen(
    const buttons=rows.slice(page*8,page*8+8).map(m=>[btn(
     (m.status==='DRAFT'?'📝 ':m.status==='OPEN'?'✅ ':'🔒 ')+
      (m.kind==='FIRST_N'?'أول '+m.seats:m.kind==='EVERYONE'?
-      'كل المؤهلين':m.kind==='ADMINS'?'المشرفون':'شخص محدد')+' · '+m.chatId,
+      'كل المؤهلين':m.kind==='ADMINS'?'المشرفون':
+      m.kind==='TEAM'?'فريق خاص':'شخص محدد')+' · '+m.chatId,
     'wh:1:v:'+m.id
    )]);
    const nav:{text:string;callback_data:string}[]=[];
@@ -277,6 +292,7 @@ export async function whisperOwnerScreen(
     '<code>/whisperdirect -1001234 200 10 نص الهمسة</code>\n'+
     '<code>/whispereveryone -1001234 10 نص تعليمي عام</code>\n'+
     '<code>/whisperadmins -1001234 10 تنبيه للمشرفين</code>\n'+
+    '<code>/whisperteam -1001234 10 111111,222222 | رسالة الفريق</code>\n'+
     '<code>/whisperquestion -1001234 3 10 السؤال؟ | الإجابة</code>\n'+
     '<code>/whispergift -1001234 3 10 هدية تعليمية | https://example.org/open | نسب المصدر | CC-BY-4.0</code>\n'+
     'الأرقام: معرّف مجموعة · المقاعد أو المستلم حسب النوع · مدة بالدقائق (1–60).\n'+
@@ -298,6 +314,7 @@ export async function whisperOwnerScreen(
     'نوع الهمسة: '+(message.kind==='DIRECT'?'مستلم محدد':
      message.kind==='EVERYONE'?'جميع المؤهلين، وليس سرًا بين الجميع':
      message.kind==='ADMINS'?'مشرفو Telegram المعتمدون فقط':
+     message.kind==='TEAM'?'حسابات فريق محددة، دون كشف هوياتها':
      'أول '+message.seats)+
     '\nالغرض: '+(message.purpose==='QUESTION'?'سؤال وإجابة خاصة':
      message.purpose==='GIFT'?'هدية تعليمية برابط وترخيص مُصرح به':'رسالة عادية')+
@@ -305,7 +322,9 @@ export async function whisperOwnerScreen(
     (message.kind==='EVERYONE'?
       '\n⚠️ قد يفتحها جميع أعضاء المجموعة المؤهلين فرديًا؛ محدد فقط بسعة التشغيل.':
      message.kind==='ADMINS'?
-      '\n🛡️ يُعاد التحقق من صلاحية المشرف عبر Telegram عند الفتح وعند الإرسال.':'')+
+      '\n🛡️ يُعاد التحقق من صلاحية المشرف عبر Telegram عند الفتح وعند الإرسال.':
+     message.kind==='TEAM'?
+      '\n👥 يقتصر الفتح على الحسابات التي اخترتها والمثبتة عضويتها حاليًا.':'')+
     '\n\nسيُنشر ملصق بلا أي نص سري أو هوية مستلم، وزر فتح ينقل إلى خاص البوت. '+
     (message.purpose==='GIFT'?
      '⚠️ إقرار الترخيص من المالك؛ لم نتحقق آليًا من حقوق المورد. ':'')+
