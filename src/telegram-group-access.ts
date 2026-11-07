@@ -37,11 +37,21 @@ export function groupQuestionEpochDigest(state:BotState,groupId:string):string{
 export function groupMenuEpochDigest(state:BotState,groupId:string,topicId?:number):string{
  return createHash('sha256').update('MANARATAK:B6:GROUP-MENU:DISPATCH:v2:')
   .update(topicId===undefined?'':'TOPIC:'+topicId+':')
-  .update(groupQuestionSubscriptionEpoch(state,groupId)).digest('hex');
+  .update(groupQuestionSubscriptionEpoch(state,groupId))
+  // A queued automatic reply cannot outlive a revised or disabled community policy.
+  .update(JSON.stringify(state.phase4Community?.configs.filter(c=>c.chatId===groupId)??[]))
+  .digest('hex');
 }
 
 /** Scoped private DM browsing uses a separate change-detection domain. */
 export function privateGroupEpochDigest(state:BotState,scope:string):string{
- return createHash('sha256').update('MANARATAK:B6:PRIVATE-GROUP:DISPATCH:v1:')
-  .update(groupQuestionSubscriptionEpoch(state,scope)).digest('hex');
+ return createHash('sha256').update('MANARATAK:B6:PRIVATE-GROUP:DISPATCH:v2:')
+  .update(groupQuestionSubscriptionEpoch(state,scope))
+  // An optional private welcome must be revoked if the owner changes its
+  // source greeting or disables the feature before Telegram delivery.
+  .update(JSON.stringify(state.phase4Community?.configs.filter(c=>c.chatId===scope)??[]))
+  // The private guide exposes an approved community-folder URL. Retract any
+  // queued guide when that published URL is disabled/replaced before dispatch.
+  .update(JSON.stringify(state.communityFolders?.filter(f=>f.chatId===scope)??[]))
+  .digest('hex');
 }

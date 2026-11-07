@@ -1,6 +1,20 @@
 import {isValidFloodWindow,type FloodWindow} from './protection-flood.js';
 import {validGroupNetworks,type GroupNetwork} from './group-network-model.js';
 import {validCommunityFolders,type CommunityFolder} from './community-folder-model.js';
+import {validCommunityState,type CommunityAutomationState} from './phase4-community-model.js';
+import {validWhisperState,type WhisperState} from './phase4-whisper-model.js';
+import {validDiscussionState,type DiscussionState} from './phase4-discussion-model.js';
+import {validPollState,type PollState} from './phase4-poll-model.js';
+import {validEventState,type EventState} from './phase4-event-model.js';
+import {validExpertState,type ExpertState} from './phase4-expert-model.js';
+import {validStudyPeerState,type StudyPeerState} from './phase4-study-peer-model.js';
+import {validBadgeState,type BadgeState} from './phase4-badge-model.js';
+import {validReactionState,type ReactionState} from './phase4-reaction-model.js';
+import {validLectureState,type LectureState} from './phase4-lecture-model.js';
+import {validQuizState,type QuizState} from './phase4-quiz-model.js';
+import {validGameCatalogState,type GameCatalogState} from './phase4-game-catalog-model.js';
+import {validContestState,type ContestState} from './phase4-contest-model.js';
+import {validCommunityPhotoId,validCommunityLinkKeyboard} from './phase4-community-rich.js';
 import {validCommunityMessageMetadata,type CommunityMessageReceipt} from './community-message-receipt.js';
 import {validAdminUIAccess,type AdminUIAccess} from './protection-ui-access.js';
 import {validStudioState,type StudioState} from './button-studio-model.js';
@@ -97,6 +111,8 @@ export interface TelegramReplyJob {
   replyMarkup?:import('./telegram-menu.js').TelegramReplyKeyboard;
   inlineMarkup?:import('./telegram-inline-owner.js').TelegramInlineKeyboard;
   studioMarkup?:import('./telegram-studio-rich.js').StudioNativeKeyboard;
+  photoFileId?:string;
+  communityLinks?:import('./phase4-community-rich.js').CommunityLinkKeyboard;
   editMessageId?:number;messageThreadId?:number};
  status:'QUEUED'|'SENDING'|'SENT'|'FAILED_CONFIRMED'|'UNKNOWN_OUTCOME';
  attemptId?:string;startedAt?:number;messageId?:number;
@@ -112,12 +128,22 @@ export interface TelegramReplyJob {
   * jobs is valid for storage but MUST deny any attempted send.
   */
  groupMenuAccess?:{actorId:string;epoch:string;expiresAt:number};
+ /** Immutable Phase 4 source marker for send-time quiet-hour enforcement.
+  * Removed at irreversible send claim; never contains student message text. */
+ communityAutomation?:{kind:'JOIN'|'LEAVE'|'TEXT';configVersion:number;ruleId?:string};
  /** Temporary source scope + actor used to recheck DM group browsing at send. */
  privateGroupAccess?:{actorId:string;scope:string;epoch:string;expiresAt:number};
  /** New private replies declare origin; pre-v0.7.56 private QUEUED rows
   * without either this or privateGroupAccess are quarantine-only on dispatch.
   */
  privateReplyKind?:'LOCAL'|'GROUP_SCOPED'|'ADMIN_SCOPED'|'LIBRARY_SCOPED'|'STUDIO_SCOPED'|'COMMUNITY_SCOPED';
+ /** Short-lived private whisper delivery witness. A public link is NOT
+  * authority: dispatcher rechecks consent, seat, sender block and OPEN state.
+  * Always deleted together with the private plan before Bot API send.
+  */
+ whisperAccess?:{whisperId:string;reservationId:string;messageRevision:number;
+  consentRevision:number;chatVersion:number;expiresAt:number;
+  view?:'CONTENT'|'ANSWER'};
  /** Ephemeral administrative view witness, removed before any outbound attempt. */
  adminUIAccess?:AdminUIAccess;
  /** Short-lived witness for private inline library contents. */
@@ -158,6 +184,32 @@ export interface B6BudgetAttempt {
   operatorReview?:{reviewedBy:string;reviewedAt:number};
 }
 export interface BotState {
+  /** Opt-in phase 4 group interactions; no active rules in legacy states. */
+  phase4Community?:CommunityAutomationState;
+  /** Phase 4 / 09:06 private whisper content, seat claims and redacted notices. */
+  phase4Whispers?:WhisperState;
+  /** Phase 4 / 09:07 moderated, private question inbox. No group deliveries. */
+  phase4Discussions?:DiscussionState;
+  /** Phase 4 / 09:08 local community feedback and member ballot privacy. */
+  phase4Polls?:PollState;
+  /** Phase 4 / 09:09 educational meeting opt-in and reviewed follow-up. */
+  phase4Events?:EventState;
+  /** Phase 4 / 09:10 owner-reviewed speaker and private AMA lifecycle. */
+  phase4Experts?:ExpertState;
+  /** Phase 4 / 09:11 approved study-circle opt-in and safety reports. */
+  phase4StudyPeers?:StudyPeerState;
+  /** Phase 4 / 09:12 opt-in, owner-reviewed social recognition. */
+  phase4Badges?:BadgeState;
+  /** Phase 4 / 09:13 non-competition owner-catalogued local post likes. */
+  phase4Reactions?:ReactionState;
+  /** Phase 4 / 09:14 time-bounded nonessential automation pause. */
+  phase4Lectures?:LectureState;
+  /** Phase 4 / 08:03 verified-member educational multiple choice quizzes. */
+  phase4Quizzes?:QuizState;
+  /** Phase 4 / 08:01 per-approved-group opt-in game library settings. */
+  phase4GameCatalog?:GameCatalogState;
+  /** Phase 4 / 08:02 moderated educational contest rounds and temporary signups. */
+  phase4Contests?:ContestState;
   communityFolders?:CommunityFolder[];
   buttonStudio?:StudioState;
   /** Local owner network folders; never evidence of Telegram rights. */
@@ -245,6 +297,19 @@ export class BotStore {
       previous.purgeJobs = [];
     }
     if (previous.schemaVersion !== 8 ||
+      (previous.phase4Community!==undefined&&!validCommunityState(previous.phase4Community))||
+      (previous.phase4Whispers!==undefined&&!validWhisperState(previous.phase4Whispers))||
+      (previous.phase4Discussions!==undefined&&!validDiscussionState(previous.phase4Discussions))||
+      (previous.phase4Polls!==undefined&&!validPollState(previous.phase4Polls))||
+      (previous.phase4Events!==undefined&&!validEventState(previous.phase4Events))||
+      (previous.phase4Experts!==undefined&&!validExpertState(previous.phase4Experts))||
+      (previous.phase4StudyPeers!==undefined&&!validStudyPeerState(previous.phase4StudyPeers))||
+      (previous.phase4Badges!==undefined&&!validBadgeState(previous.phase4Badges))||
+      (previous.phase4Reactions!==undefined&&!validReactionState(previous.phase4Reactions))||
+      (previous.phase4Lectures!==undefined&&!validLectureState(previous.phase4Lectures))||
+      (previous.phase4Quizzes!==undefined&&!validQuizState(previous.phase4Quizzes))||
+      (previous.phase4GameCatalog!==undefined&&!validGameCatalogState(previous.phase4GameCatalog))||
+      (previous.phase4Contests!==undefined&&!validContestState(previous.phase4Contests))||
       (previous.groupNetworks!==undefined&&!validGroupNetworks(previous.groupNetworks))||
       (previous.communityFolders!==undefined&&!validCommunityFolders(previous.communityFolders))||
       (previous.privateSettingsRevision!==undefined&&(typeof previous.privateSettingsRevision!=='number'||!Number.isSafeInteger(previous.privateSettingsRevision)||previous.privateSettingsRevision<0||previous.privateSettingsRevision>=Number.MAX_SAFE_INTEGER))||
@@ -360,7 +425,28 @@ export class BotStore {
         const job=raw as Record<string,unknown>;
         if(!validCommunityMessageMetadata(raw as TelegramReplyJob))return true;
         const plan=job.plan as Record<string,unknown>|undefined;
+        if(job.communityAutomation!==undefined){
+         const proof=job.communityAutomation;
+         if(!proof||typeof proof!=='object'||Array.isArray(proof)||
+           Object.keys(proof).length!==2||
+           !['JOIN','LEAVE','TEXT'].includes(String((proof as Record<string,unknown>).kind))||
+           !Number.isSafeInteger((proof as Record<string,unknown>).configVersion)||
+           Number((proof as Record<string,unknown>).configVersion)<1||
+           job.status!=='QUEUED'||job.groupReplyKind!=='GENERAL'||
+           job.groupMenuAccess===undefined||typeof plan?.chatId!=='string'||!plan.chatId.startsWith('-'))
+          return true;
+        }
         if(plan?.messageThreadId!==undefined&&(!Number.isSafeInteger(plan.messageThreadId)||Number(plan.messageThreadId)<1||Number(plan.messageThreadId)>2147483647||typeof plan.chatId!=='string'||!plan.chatId.startsWith('-')||job.groupMenuAccess===undefined))return true;
+        if(plan?.photoFileId!==undefined||plan?.communityLinks!==undefined){
+         if(typeof plan.chatId!=='string'||!plan.chatId.startsWith('-')||
+            job.groupReplyKind!=='GENERAL'||job.groupMenuAccess===undefined||
+            plan.editMessageId!==undefined||
+            (plan.photoFileId!==undefined&&!validCommunityPhotoId(plan.photoFileId))||
+            (plan.communityLinks!==undefined&&!validCommunityLinkKeyboard(plan.communityLinks))||
+            (plan.photoFileId!==undefined&&
+             (typeof plan.text!=='string'||Buffer.byteLength(plan.text,'utf8')>1024)))
+          return true;
+        }
         if(job.accessDenialCode!==undefined&&(
            job.status!=='FAILED_CONFIRMED'||typeof job.accessDenialCode!=='string'||
            !['LEGACY_UNVERIFIABLE','ACCESS_RECHECK_FAILED','GROUP_UNAVAILABLE']
@@ -730,7 +816,8 @@ export class BotStore {
     groupQuestionAccess?:TelegramReplyJob['groupQuestionAccess'],
     groupMenuAccess?:TelegramReplyJob['groupMenuAccess'],
     privateGroupAccess?:TelegramReplyJob['privateGroupAccess'],
-    adminUIAccess?:TelegramReplyJob['adminUIAccess'],privateLibraryAccess?:TelegramReplyJob['privateLibraryAccess'],studioScoped=false,communityAccess?:TelegramReplyJob['communityAccess'],communityClose?:CommunityMessageReceipt): Promise<void> {
+    adminUIAccess?:TelegramReplyJob['adminUIAccess'],privateLibraryAccess?:TelegramReplyJob['privateLibraryAccess'],studioScoped=false,communityAccess?:TelegramReplyJob['communityAccess'],communityClose?:CommunityMessageReceipt,
+    communityAutomation?:TelegramReplyJob['communityAutomation'],whisperAccess?:TelegramReplyJob['whisperAccess']): Promise<void> {
     await this.transaction(s => {
       const update = s.updates.find(x => x.key === key);
       if (!update || update.status !== 'CLAIMED') throw new Error('Update not claimed');
@@ -746,7 +833,9 @@ export class BotStore {
            :{privateReplyKind:communityAccess?'COMMUNITY_SCOPED' as const:adminUIAccess?(studioScoped?'STUDIO_SCOPED' as const:'ADMIN_SCOPED' as const):privateGroupAccess?'GROUP_SCOPED' as const:privateLibraryAccess?'LIBRARY_SCOPED' as const:'LOCAL' as const}),
           ...(groupQuestionAccess?{groupQuestionAccess:structuredClone(groupQuestionAccess)}:{}),
           ...(groupMenuAccess?{groupMenuAccess:structuredClone(groupMenuAccess)}:{}),
+          ...(communityAutomation?{communityAutomation:structuredClone(communityAutomation)}:{}),
           ...(privateGroupAccess?{privateGroupAccess:structuredClone(privateGroupAccess)}:{}),
+          ...(whisperAccess?{whisperAccess:structuredClone(whisperAccess)}:{}),
           ...(adminUIAccess?{adminUIAccess:structuredClone(adminUIAccess)}:{}),
           ...(communityAccess?{communityAccess:structuredClone(communityAccess)}:{}),
           ...(communityClose?{communityClose:structuredClone(communityClose)}:{}),

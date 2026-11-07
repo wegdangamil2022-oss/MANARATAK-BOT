@@ -44,6 +44,45 @@ import {OwnerGroupPolicyTemplates} from './telegram-inline-group-templates.js';
 import {OwnerGroupSettings} from './telegram-inline-group-settings.js';
 import {OwnerGroupBulkRestrict} from './telegram-inline-group-bulk-restrict.js';
 import {OwnerNetworkEditor} from './telegram-inline-networks.js';
+import {Phase4WhisperService} from './phase4-whispers.js';
+import {whisperOwnerScreen} from './phase4-whisper-owner.js';
+import {parseWhisperMemberCommand,whisperMemberScreen} from './phase4-whisper-member.js';
+import {Phase4DiscussionService} from './phase4-discussions.js';
+import {parseDiscussionMemberCommand,discussionMemberScreen} from './phase4-discussion-member.js';
+import {discussionOwnerScreen} from './phase4-discussion-owner.js';
+import {Phase4PollService} from './phase4-polls.js';
+import {parsePollMemberCommand,pollMemberScreen} from './phase4-poll-member.js';
+import {pollOwnerScreen} from './phase4-poll-owner.js';
+import {Phase4EventService} from './phase4-events.js';
+import {eventOwnerScreen} from './phase4-event-owner.js';
+import {parseEventMemberCommand,eventMemberScreen} from './phase4-event-member.js';
+import {Phase4ExpertService} from './phase4-experts.js';
+import {expertOwnerScreen} from './phase4-expert-owner.js';
+import {parseExpertMemberCommand,expertMemberScreen} from './phase4-expert-member.js';
+import {Phase4StudyPeersService} from './phase4-study-peers.js';
+import {studyPeerOwnerScreen} from './phase4-study-peer-owner.js';
+import {parseStudyPeerMemberCommand,studyPeerMemberScreen} from './phase4-study-peer-member.js';
+import {Phase4BadgesService} from './phase4-badges.js';
+import {badgeOwnerScreen} from './phase4-badge-owner.js';
+import {parseBadgeMemberCommand,badgeMemberScreen} from './phase4-badge-member.js';
+import {Phase4ReactionsService} from './phase4-reactions.js';
+import {Phase4QuizService} from './phase4-quizzes.js';
+import {Phase4GameCatalogService} from './phase4-game-catalog.js';
+import {Phase4ContestService} from './phase4-contests.js';
+import {contestOwnerScreen} from './phase4-contest-owner.js';
+import {parseContestMemberCommand,contestMemberScreen} from './phase4-contest-member.js';
+import {gameCatalogOwnerScreen} from './phase4-game-catalog-owner.js';
+import {parseQuizMemberCommand,quizMemberScreen} from './phase4-quiz-member.js';
+import {quizOwnerScreen} from './phase4-quiz-owner.js';
+import {reactionOwnerScreen} from './phase4-reaction-owner.js';
+import {parseReactionMemberCommand,reactionMemberScreen} from './phase4-reaction-member.js';
+import {Phase4LectureService} from './phase4-lectures.js';
+import {lectureOwnerScreen} from './phase4-lecture-owner.js';
+import {Phase4EngagementReportsService} from './phase4-engagement-reports.js';
+import {engagementOwnerScreen} from './phase4-engagement-owner.js';
+import {phase4SettingsOwnerScreen} from './phase4-settings-owner.js';
+import {Phase4GuidanceService,parseGuidanceMemberCommand,parseGuidanceMemberCallback} from './phase4-guidance.js';
+import {phase4GuidanceOwnerScreen} from './phase4-guidance-owner.js';
 import {OwnerInlineGroupControls} from './telegram-inline-group-controls.js';
 import {renderOwnerInlineDelegations,delegationOwnerEntry} from './telegram-inline-delegations.js';
 import {renderStaffInline} from './telegram-inline-staff.js';
@@ -71,6 +110,13 @@ import {privateFAQSearchLabel,parsePrivateFAQSearchQuery,parsePrivateFAQSearchPa
 import {escapeTelegramListPreview} from './telegram-preview.js';
 import {parseB6ExplicitMention} from './b6-telegram-mention.js';
 import type {ModerationService} from './moderation.js';
+import {Phase4CommunityService} from './phase4-community.js';
+import {phase4CommunityScreen,parsePhase4CommunityCommand} from './phase4-community-ui.js';
+import {phase4ReplyOwnerScreen} from './phase4-reply-owner.js';
+import {Phase4CleanupOperations} from './phase4-cleanup-ops.js';
+import {phase4ServiceOpsScreen} from './phase4-service-ops-ui.js';
+import type {CommunityInput,CommunityJoinKind,CommunityLeaveKind,CommunityLanguage} from './phase4-community-model.js';
+import {validCommunityPhotoId} from './phase4-community-rich.js';
 import type {ModerationPurgeService} from './moderation-purge.js';
 import {isReplyDeleteCommand,previewReplyDelete,handleReplyDeleteCallback} from './telegram-reply-delete.js';
 import {parseReplyModerationCommand,executeReplyModerationCommand} from './telegram-moderation-commands.js';
@@ -95,17 +141,26 @@ interface IncomingDocument {
 }
 /** Offline B3 application adapter: creates plans, NEVER sends a message or connects to Telegram. */
 export interface TelegramReplyPlan { chatId: string; parseMode: 'HTML'; text: string;
- replyMarkup?:TelegramReplyKeyboard; inlineMarkup?:TelegramInlineKeyboard; studioMarkup?:import('./telegram-studio-rich.js').StudioNativeKeyboard; editMessageId?:number;messageThreadId?:number; }
+ replyMarkup?:TelegramReplyKeyboard; inlineMarkup?:TelegramInlineKeyboard; studioMarkup?:import('./telegram-studio-rich.js').StudioNativeKeyboard;
+ /** Community-only photo: trusted Telegram file_id, never a URL. */
+ photoFileId?:string;
+ /** Community-only external HTTPS links; NEVER a callback or owner action. */
+ communityLinks?:import('./phase4-community-rich.js').CommunityLinkKeyboard;
+ editMessageId?:number;messageThreadId?:number; }
 export interface TelegramResult { status: 'APPLIED' | 'DUPLICATE' | 'DENIED' | 'IGNORED' | 'UNKNOWN'; reason: string; plan?: TelegramReplyPlan; deliveryKey?: string; callbackQueryId?:string; }
 type ProcessedReply={status:TelegramResult['status'];reason:string;plan?:TelegramReplyPlan;
  groupQuestionAccess?:TelegramReplyJob['groupQuestionAccess'];
  groupMenuAccess?:TelegramReplyJob['groupMenuAccess'];
+ communityAutomation?:TelegramReplyJob['communityAutomation'];
  privateGroupAccess?:TelegramReplyJob['privateGroupAccess'];
+ whisperAccess?:TelegramReplyJob['whisperAccess'];
  adminUIAccess?:TelegramReplyJob['adminUIAccess'];
  privateLibraryAccess?:TelegramReplyJob['privateLibraryAccess'];communityAccess?:TelegramReplyJob['communityAccess'];communityClose?:TelegramReplyJob['communityClose']};
 export interface TelegramApplicationOptions {
   store: BotStore; policy: Policy; education: EducationService; admin: EducationAdminFacade;
   faq: ApprovedAnswerService; links: ResourceLinkService; membership: MembershipPort;
+ /** Fresh read-only Telegram moderator-role verifier; absent = deny ADMINS. */
+ adminMembership?:MembershipPort;
   botId: string; botUsername: string; subscription?: SubscriptionGate; clock?: () => number; documentDownload?: TelegramDocumentPort;
   /** Optional B5 read-only owner preview; absent in usual offline deployment. */
   platformCatalog?:PlatformCatalogPreviewService;
@@ -121,17 +176,29 @@ export interface TelegramApplicationOptions {
   moderation?:ModerationService;
   /** Explicit reviewed-deletion service; no automatic metadata collection. */
   purge?:ModerationPurgeService;
+  /** Opt-in phase 4 templates/replies. All policies are disabled until owner approval. */
+  community?:Phase4CommunityService;
 }
 
-type Event = {updateId: number; actorId: string; chatId: string; kind: 'private' | 'group'; text: string; topicId?:number; entities?:unknown; messageId?:number; replyTo?:unknown; document?: IncomingDocument; protectionMedia?:ProtectionMedia; edited?:true; forwarded?:true; callbackData?:string; callbackQueryId?:string; callbackMessageId?:number};
+type Event = {updateId: number; actorId: string; chatId: string; kind: 'private' | 'group'; text: string; communityKind?:'JOIN'|'LEAVE'; communityJoinKind?:CommunityJoinKind; communityLeaveKind?:CommunityLeaveKind; communityMemberLanguage?:CommunityLanguage; communityChange?:'TITLE_CHANGED'|'PHOTO_CHANGED'|'PHOTO_REMOVED'; serviceSentAtMs?:number; communityMemberId?:string; memberName?:string; groupName?:string; topicId?:number; entities?:unknown; messageId?:number; replyTo?:unknown; document?: IncomingDocument; protectionMedia?:ProtectionMedia; edited?:true; forwarded?:true; callbackData?:string; callbackQueryId?:string; callbackMessageId?:number};
 const isObject=(x:unknown):x is Record<string,unknown>=>Boolean(x)&&typeof x==='object'&&!Array.isArray(x);
 const positiveId=(x:unknown): x is number=>typeof x==='number'&&Number.isSafeInteger(x)&&x>0;
 const chatId=(x:unknown): x is number=>typeof x==='number'&&Number.isSafeInteger(x)&&x!==0;
+/** A joiner's language hint is optional, sanitized and never persisted. */
+const telegramCommunityLanguage=(value:unknown):CommunityLanguage|undefined=>{
+ if(typeof value!=='string'||!/^(?:ar|en)(?:-[A-Za-z0-9]{2,8}){0,3}$/iu.test(value))
+  return undefined;
+ return value.slice(0,2).toLowerCase() as CommunityLanguage;
+};
 export function escapeTelegramHtml(text:string):string {
   return text.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
 }
 function eventFrom(value:unknown):{event?:Event;reason:string} {
   if(!isObject(value)||!Number.isSafeInteger(value.update_id)||typeof value.update_id!=='number'||value.update_id<0)return {reason:'INVALID_UPDATE_ID'};
+  // Reject ambiguous Telegram envelopes before callback/edited-message dispatch.
+  if(value.chat_member!==undefined&&(value.message!==undefined||value.callback_query!==undefined||
+     value.edited_message!==undefined||value.my_chat_member!==undefined))
+   return {reason:'INVALID_CHAT_MEMBER_UPDATE'};
   if(value.edited_message!==undefined){
    const edited=value.edited_message;
    if(value.message!==undefined||value.callback_query!==undefined||!isObject(edited)||!isObject(edited.chat)||
@@ -162,6 +229,62 @@ function eventFrom(value:unknown):{event?:Event;reason:string} {
     chatId:String(cb.message.chat.id),kind,text:'',
     callbackData:cb.data,callbackQueryId:cb.id,callbackMessageId:cb.message.message_id,...(cb.message.message_thread_id!==undefined?{topicId:cb.message.message_thread_id as number}:{})},reason:'VALID'};
   }
+  // Telegram ChatMemberUpdated is NOT a join request: only a transition from
+  // absent to present constitutes a confirmed join. A bot must explicitly
+  // subscribe to chat_member updates and be a chat administrator to receive it.
+  if(value.chat_member!==undefined){
+   if(value.message!==undefined||value.callback_query!==undefined||
+     value.edited_message!==undefined||value.my_chat_member!==undefined)
+    return {reason:'INVALID_CHAT_MEMBER_UPDATE'};
+   const cm=value.chat_member;
+   if(!isObject(cm)||!isObject(cm.chat)||!chatId(cm.chat.id)||cm.chat.id>=0||
+     !['group','supergroup'].includes(String(cm.chat.type))||
+     !isObject(cm.from)||!positiveId(cm.from.id)||cm.from.is_bot!==false||
+     !positiveId(cm.date)||cm.date>8_640_000_000_000||
+     !isObject(cm.old_chat_member)||!isObject(cm.new_chat_member))
+    return {reason:'INVALID_CHAT_MEMBER_UPDATE'};
+   // Classify only Telegram-provided ChatMemberUpdated invite metadata.
+   // Neither a student message nor a forwarded link can claim this source.
+   // The invite URL/token is deliberately not copied into the event or storage.
+   if(cm.invite_link!==undefined&&
+      (!isObject(cm.invite_link)||typeof cm.invite_link.invite_link!=='string'||
+       cm.invite_link.invite_link.length>512||
+       !/^https:\/\/t\.me\/[^\s]+$/u.test(cm.invite_link.invite_link)))
+    return {reason:'INVALID_CHAT_MEMBER_UPDATE'};
+   if(cm.via_chat_folder_invite_link!==undefined&&
+      typeof cm.via_chat_folder_invite_link!=='boolean')
+    return {reason:'INVALID_CHAT_MEMBER_UPDATE'};
+   if(cm.via_join_request!==undefined&&typeof cm.via_join_request!=='boolean')
+    return {reason:'INVALID_CHAT_MEMBER_UPDATE'};
+   const before=cm.old_chat_member,after=cm.new_chat_member;
+   if(!isObject(before.user)||!isObject(after.user)||!positiveId(before.user.id)||
+      before.user.id!==after.user.id||before.user.is_bot!==false||after.user.is_bot!==false)
+    return {reason:'INVALID_CHAT_MEMBER_UPDATE'};
+   const oldAbsent=before.status==='left'||before.status==='kicked'||
+      before.status==='restricted'&&before.is_member===false;
+   const newPresent=after.status==='member'||after.status==='administrator'||
+      after.status==='creator'||after.status==='restricted'&&after.is_member===true;
+   const oldPresent=before.status==='member'||before.status==='administrator'||
+      before.status==='creator'||before.status==='restricted'&&before.is_member===true;
+   const newAbsent=after.status==='left'||after.status==='kicked'||
+      after.status==='restricted'&&after.is_member===false;
+   const joining=oldAbsent&&newPresent,leaving=oldPresent&&newAbsent;
+   if(!joining&&!leaving)return {reason:'UNSUPPORTED_EVENT'};
+   const user=after.user;
+   const memberLanguage=joining?telegramCommunityLanguage(user.language_code):undefined;
+   const memberName=typeof user.first_name==='string'&&user.first_name.trim()?
+      user.first_name.trim().slice(0,75):'عضو';
+   return {reason:'VALID',event:{updateId:value.update_id as number,actorId:String(cm.from.id),
+     chatId:String(cm.chat.id),kind:'group',text:'',communityKind:joining?'JOIN':'LEAVE',
+     ...(joining?{communityJoinKind:cm.invite_link!==undefined||
+       cm.via_chat_folder_invite_link===true?'INVITE' as const:
+       cm.from.id===user.id?'SELF' as const:'ADDED' as const}:
+      {communityLeaveKind:after.status==='kicked'||cm.from.id!==user.id?'REMOVED' as const:'SELF' as const}),
+     communityMemberId:String(user.id),memberName,
+     ...(memberLanguage?{communityMemberLanguage:memberLanguage}:{}),
+     groupName:typeof cm.chat.title==='string'?cm.chat.title:'المجموعة',
+     serviceSentAtMs:(cm.date as number)*1000}};
+  }
   if(!isObject(value.message))return {reason:'UNSUPPORTED_EVENT'};
   const msg=value.message;
   if(!isObject(msg.chat)||!isObject(msg.from)||!positiveId(msg.from.id)||msg.from.is_bot!==false||!chatId(msg.chat.id))return {reason:'INVALID_ACTOR_OR_CHAT'};
@@ -177,6 +300,92 @@ function eventFrom(value:unknown):{event?:Event;reason:string} {
   const kind=msg.chat.type==='private'?'private':msg.chat.type==='group'||msg.chat.type==='supergroup'?'group':null;
   if(!kind || (kind==='private'&&(msg.chat.id!==msg.from.id))||(kind==='group'&&msg.chat.id>=0))return {reason:'INVALID_CHAT_CONTEXT'};
   if(msg.message_thread_id!==undefined&&!positiveId(msg.message_thread_id))return {reason:'INVALID_MESSAGE_TOPIC'};
+  if(kind==='group'&&(msg.new_chat_title!==undefined||msg.new_chat_photo!==undefined||
+    msg.delete_chat_photo!==undefined)){
+   const title=msg.new_chat_title,photo=msg.new_chat_photo,removed=msg.delete_chat_photo;
+   const count=Number(title!==undefined)+Number(photo!==undefined)+Number(removed!==undefined);
+   const validPhoto=Array.isArray(photo)&&photo.length>=1&&photo.length<=8&&
+      photo.every(p=>isObject(p)&&typeof p.file_id==='string'&&
+       /^[A-Za-z0-9_-]{8,512}$/u.test(p.file_id)&&
+       typeof p.file_unique_id==='string'&&/^[A-Za-z0-9_-]{4,512}$/u.test(p.file_unique_id)&&
+       Number.isSafeInteger(p.width)&&Number.isSafeInteger(p.height)&&
+       (p.width as number)>0&&(p.height as number)>0);
+   if(count!==1||!positiveId(msg.message_id)||msg.text!==undefined||msg.document!==undefined||
+      (title!==undefined&&(typeof title!=='string'||title.trim().length===0||
+       title.length>128||/[\u0000-\u001f\u007f]/u.test(title)))||
+      (photo!==undefined&&!validPhoto)||
+      (removed!==undefined&&removed!==true)||
+      msg.date!==undefined&&(!positiveId(msg.date)||msg.date>8_640_000_000_000))
+    return {reason:'INVALID_SERVICE_EVENT'};
+   const change=title!==undefined?'TITLE_CHANGED' as const:
+       photo!==undefined?'PHOTO_CHANGED' as const:'PHOTO_REMOVED' as const;
+   return {event:{updateId:value.update_id as number,actorId:String(msg.from.id),
+    chatId:String(msg.chat.id),kind,text:'',communityChange:change,
+    messageId:msg.message_id as number,
+    ...(msg.date!==undefined?{serviceSentAtMs:(msg.date as number)*1000}:{})},reason:'VALID'};
+  }
+  if(kind==='group'&&(msg.new_chat_members!==undefined||msg.left_chat_member!==undefined)){
+   if(msg.new_chat_members!==undefined&&msg.left_chat_member!==undefined)return {reason:'INVALID_SERVICE_EVENT'};
+   if(!positiveId(msg.message_id)||msg.text!==undefined||msg.document!==undefined||
+      msg.date!==undefined&&!positiveId(msg.date))return {reason:'INVALID_SERVICE_EVENT'};
+   const members=msg.new_chat_members;
+   if(members!==undefined&&(!Array.isArray(members)||members.length<1||members.length>20||
+     members.some(m=>!isObject(m)||!positiveId(m.id)||typeof m.is_bot!=='boolean')))
+    return {reason:'INVALID_SERVICE_EVENT'};
+   if(msg.left_chat_member!==undefined&&
+     (!isObject(msg.left_chat_member)||!positiveId(msg.left_chat_member.id)||
+      typeof msg.left_chat_member.is_bot!=='boolean'))return {reason:'INVALID_SERVICE_EVENT'};
+   const left=msg.left_chat_member;
+   const human:Record<string,unknown>[]=members!==undefined?
+    (members as Record<string,unknown>[]).filter(m=>m.is_bot===false):
+    left!==undefined&&isObject(left)&&left.is_bot===false?[left]:[];
+   if(human.length===0)return {reason:'UNSUPPORTED_EVENT'};
+   const first=human[0]!;
+   const name=(m:Record<string,unknown>)=>typeof m.first_name==='string'&&m.first_name.trim()?
+     m.first_name.trim().slice(0,75):'عضو';
+   const memberName=human.length===1?name(first):human.slice(0,3).map(name).join('، ')+
+      (human.length>3?' وآخرين':'');
+   // Only Telegram's service fields establish the join category.
+   const communityJoinKind:CommunityJoinKind|undefined=members===undefined?undefined:
+      human.length>1?'BATCH':msg.from.id===first.id?'SELF':'ADDED';
+   const communityLeaveKind:CommunityLeaveKind|undefined=left===undefined?undefined:
+      msg.from.id===first.id?'SELF':'REMOVED';
+   // A batch may contain many languages: do not guess from the first member.
+   const memberLanguage=members!==undefined&&human.length===1?
+      telegramCommunityLanguage(first.language_code):undefined;
+   return {event:{updateId:value.update_id as number,actorId:String(msg.from.id),
+     chatId:String(msg.chat.id),kind,text:'',communityKind:members!==undefined?'JOIN':'LEAVE',
+     communityMemberId:String(first.id),memberName,
+     ...(communityJoinKind?{communityJoinKind}:{}),
+     ...(memberLanguage?{communityMemberLanguage:memberLanguage}:{}),
+     ...(communityLeaveKind?{communityLeaveKind}:{}),messageId:msg.message_id as number,
+     ...(msg.date!==undefined?{serviceSentAtMs:(msg.date as number)*1000}:{}),
+     groupName:typeof msg.chat.title==='string'?msg.chat.title:'المجموعة',
+     ...(msg.message_thread_id!==undefined?{topicId:msg.message_thread_id as number}:{})},reason:'VALID'};
+  }
+  if(kind==='private'&&msg.photo!==undefined){
+   // An owner can attach an actual photo to a private command caption.
+   // Telegram has already authenticated the inbound update, but owner
+   // authorization and group approval are rechecked by the community editor.
+   if(msg.text!==undefined||msg.document!==undefined||
+     typeof msg.caption!=='string'||!/^\/(?:welcomephoto|farewellphoto) -[1-9]\d{0,15}$|^\/replyphoto -[1-9]\d{0,15} [a-f0-9]{12}$/u.test(msg.caption)||
+     !Array.isArray(msg.photo)||msg.photo.length<1||msg.photo.length>10||
+     msg.photo.some(p=>!isObject(p)||!validCommunityPhotoId(p.file_id)||
+       typeof p.file_unique_id!=='string'||!/^[A-Za-z0-9_-]{8,512}$/u.test(p.file_unique_id)||
+       typeof p.width!=='number'||!Number.isSafeInteger(p.width)||p.width<1||p.width>20000||
+       typeof p.height!=='number'||!Number.isSafeInteger(p.height)||p.height<1||p.height>20000||
+       (p.file_size!==undefined&&(typeof p.file_size!=='number'||!Number.isSafeInteger(p.file_size)||
+         p.file_size<1||p.file_size>10_000_000))))
+     return {reason:'INVALID_OWNER_PHOTO'};
+   const photos=msg.photo as Record<string,unknown>[];
+   // Telegram sends increasing sizes, but select on actual bounded area so
+   // malformed order cannot replace a higher-resolution file without review.
+   const largest=photos.reduce((best,item)=>
+    (item.width as number)*(item.height as number)>
+     (best.width as number)*(best.height as number)?item:best);
+   return {event:{updateId:value.update_id as number,actorId:String(msg.from.id),
+     chatId:String(msg.chat.id),kind,text:msg.caption+' '+largest.file_id},reason:'VALID'};
+  }
   if(kind==='group'){
    const decoded=protectionMediaFromMessage(msg);
    if(decoded.status==='INVALID')return {reason:'INVALID_GROUP_MEDIA'};
@@ -204,7 +413,9 @@ function eventFrom(value:unknown):{event?:Event;reason:string} {
   return {event:{updateId:value.update_id as number,actorId:String(msg.from.id),chatId:String(msg.chat.id),kind,text:msg.text,...(forwarded?{forwarded:true as const}:{}),
    ...(msg.entities!==undefined?{entities:msg.entities}:{}),...(msg.message_thread_id!==undefined?{topicId:msg.message_thread_id as number}:{}),
    ...(msg.message_id!==undefined?{messageId:msg.message_id as number}:{}),
-   ...(msg.reply_to_message!==undefined?{replyTo:msg.reply_to_message}:{})},reason:'VALID'};
+   ...(msg.reply_to_message!==undefined?{replyTo:msg.reply_to_message}:{}),
+   ...(kind==='group'?{memberName:typeof msg.from.first_name==='string'?msg.from.first_name:'عضو',groupName:typeof msg.chat.title==='string'?msg.chat.title:'المجموعة'}:
+       {memberName:typeof msg.from.first_name==='string'?msg.from.first_name.slice(0,75):'عضو'})},reason:'VALID'};
 }
 
 /** Immutable local authorization witness for a B6 group question. Membership
@@ -354,7 +565,84 @@ export class TelegramUpdateApplication {
    const planned=this.plan(event.chatId,screen.text,undefined,markup,event.callbackMessageId),{inlineMarkup:_,...base}=planned;
    return {status:'APPLIED',reason:'RESPONSE_PLANNED_ONLY',plan:plain?planned:{...base,studioMarkup:screen.keyboard},...(screen.public?{communityAccess:screen.access}:{adminUIAccess:screen.access})};
   }
+  /** Reuse the existing one-shot durable reply ledger and group-menu epoch.
+   * Revoking the community configuration before dispatch invalidates its digest.
+   */
+  private async phase4Reply(event:Event):Promise<ProcessedReply|null>{
+    if(!this.opts.community||event.kind!=='group'||event.forwarded||event.edited||event.protectionMedia)return null;
+    // Only /m_ custom commands may match, enforced by the scoped rule matcher.
+    // Standard Telegram and moderation commands can never match this namespace.
+    if(!event.communityKind&&!event.text)return null;
+    // Every genuine Telegram service event with a trusted timestamp must be
+    // fresh before posting a greeting/farewell. ChatMemberUpdated has no
+    // deletable service message, so a timestamp is mandatory for that shape.
+    // Service messages without a date are tolerated for old test fixtures.
+    if(event.communityKind){
+      const now=this.clock(),sent=event.serviceSentAtMs;
+      if((event.messageId===undefined&&sent===undefined)||
+        (sent!==undefined&&(!Number.isSafeInteger(sent)||sent>now+60000||
+         now-sent>900000)))return null;
+    }
+    const input:CommunityInput={kind:event.communityKind??'TEXT',chatId:event.chatId,
+      actorId:event.communityMemberId??event.actorId,
+      memberName:event.memberName??'عضو',groupName:event.groupName??'المجموعة',
+      ...(event.text?{messageText:event.text}:{}),
+      ...(event.communityJoinKind?{joinKind:event.communityJoinKind}:{}),
+      ...(event.communityKind==='JOIN'&&event.communityMemberLanguage?
+       {memberLanguage:event.communityMemberLanguage}:{}),
+      ...(event.communityLeaveKind?{leaveKind:event.communityLeaveKind}:{}),
+      ...(event.topicId!==undefined?{topicId:event.topicId}:{})};
+    const proposal=await this.opts.community.propose(input,
+      'b3-webhook:'+this.opts.botId+':'+event.updateId);
+    if(!proposal)return null;
+    const snapshot=await this.opts.store.snapshot(),now=this.clock();
+    // A published FAQ/category can be archived between the atomic reply
+    // reservation and this later read. Refuse the now-stale text instead of
+    // attaching a new authorization witness to an old source's answer.
+    if(!this.opts.policy.canUseChat(snapshot,event.chatId,'navigation')||
+       proposal.sourceEpoch!==groupMenuEpochDigest(snapshot,event.chatId,event.topicId)||
+       !Number.isSafeInteger(now)||now<0||now>8640000000000000-120000)
+      return null;
+    // Telegram has no generic private-to-one group message. A public link
+    // lets a new member voluntarily open the bot DM; no user IDs/tokens in it.
+    const config=snapshot.phase4Community?.configs.find(c=>c.chatId===event.chatId&&
+      c.version===proposal.policyVersion);
+    const optIn=event.communityKind==='JOIN'&&config?.privateWelcomeEnabled===true&&
+      /^[A-Za-z][A-Za-z0-9_]{4,31}$/u.test(this.opts.botUsername)?
+      '\n🔒 <a href="https://t.me/'+this.opts.botUsername+'?start=welcome_'+event.chatId.slice(1)+
+       '">افتح ترحيبك الخاص في البوت (اختياري)</a>':'';
+    const welcomeText=optIn&&Buffer.byteLength(proposal.text+optIn,'utf8')<=
+      (proposal.photoFileId?1024:4096)?proposal.text+optIn:proposal.text;
+    return {status:'APPLIED',reason:'PHASE4_COMMUNITY_PLANNED',
+     communityAutomation:{kind:proposal.kind,configVersion:proposal.policyVersion,
+      ...(proposal.ruleId?{ruleId:proposal.ruleId}:{})},
+     plan:{chatId:event.chatId,parseMode:'HTML',text:welcomeText,
+      ...(proposal.photoFileId?{photoFileId:proposal.photoFileId}:{}),
+      ...(proposal.communityLinks?{communityLinks:proposal.communityLinks}:{}),
+      ...(event.topicId!==undefined?{messageThreadId:event.topicId}:{})},
+     groupMenuAccess:{actorId:proposal.actorId,
+      epoch:groupMenuEpochDigest(snapshot,event.chatId,event.topicId),
+      expiresAt:now+120000}};
+  }
   private async process(event:Event):Promise<ProcessedReply> {
+    if(event.communityKind||event.communityChange){
+     // Only authenticated service-message updates pass this branch. Never
+     // submit user-supplied text/media for deletion or audit processing.
+     if(event.edited)return {status:'IGNORED',reason:'COMMUNITY_SERVICE_EDIT_IGNORED'};
+     const recorded=this.opts.community&&event.messageId!==undefined?
+      await this.opts.community.recordServiceEvent({
+       chatId:event.chatId,actorId:event.actorId,messageId:event.messageId,
+       kind:event.communityChange??event.communityKind!,
+       updateKey:'b3-webhook:'+this.opts.botId+':'+event.updateId,
+       ...(event.serviceSentAtMs!==undefined?{sentAtMs:event.serviceSentAtMs}:{})
+      }):false;
+     if(event.communityChange)
+      return {status:recorded?'APPLIED':'IGNORED',
+       reason:recorded?'COMMUNITY_SERVICE_CHANGE_OBSERVED':'COMMUNITY_SERVICE_LOG_DISABLED'};
+     const output=await this.phase4Reply(event);
+     return output??{status:recorded?'APPLIED':'IGNORED',
+      reason:recorded?'COMMUNITY_SERVICE_CLEANUP_QUEUED':'COMMUNITY_POLICY_DISABLED_OR_THROTTLED'};
+    }
     if(event.protectionMedia){
      const media=event.protectionMedia;
      await new GroupProtectionPolicyService(this.opts.store,this.opts.policy,this.clock).observeIncomingMessage(
@@ -376,6 +664,620 @@ export class TelegramUpdateApplication {
     if(event.kind==='private'&&this.opts.policy.isOwner(event.actorId)&&folderNavigation)await cancelCommunityFolder(this.opts.store,event.actorId);
     if(event.document)return this.handleDocument(event);
     const {actorId,chatId,kind,text}=event;
+    // 09:02/09:03: group-scoped student reading, private and explicitly requested.
+    // No Telegram group ID or text command is proof of membership.
+    const memberGuidanceCallback=event.callbackData?.startsWith('gm:1:')===true;
+    const guidanceMemberCommand=memberGuidanceCallback?
+     parseGuidanceMemberCallback(event.callbackData!):
+     parseGuidanceMemberCommand(text);
+    if(memberGuidanceCallback&&!guidanceMemberCommand)
+     return {status:'DENIED',reason:'PHASE4_GUIDANCE_CALLBACK_INVALID'};
+    if(guidanceMemberCommand){
+     if(kind!=='private'||actorId!==chatId||event.edited||event.forwarded||
+      (event.callbackData!==undefined&&!memberGuidanceCallback)||!this.opts.community)
+      return {status:'DENIED',reason:'PHASE4_GUIDANCE_PRIVATE_ONLY'};
+     let denied:string|null;
+     try{denied=await this.authorizePrivateGroupBrowse(guidanceMemberCommand.chatId,actorId);}
+     catch{return {status:'DENIED',reason:'PHASE4_GUIDANCE_MEMBERSHIP_UNAVAILABLE'};}
+     if(denied!==null)return {status:'DENIED',reason:'PHASE4_GUIDANCE_'+denied};
+     // Private group material must retain its source/entitlement epoch
+     // through the durable outbox, not merely pass a planning-time check.
+     const scope=guidanceMemberCommand.chatId;
+     const beforeGuide=await this.opts.store.snapshot();
+     if(!this.opts.policy.canUseChat(beforeGuide,scope,'navigation'))
+      return {status:'DENIED',reason:'PHASE4_GUIDANCE_CHAT_REVOKED'};
+     const sourceEpoch=privateGroupEpochDigest(beforeGuide,scope);
+     const screen=await new Phase4GuidanceService(this.opts.store,this.opts.policy,
+      this.opts.community).memberScreen(scope,guidanceMemberCommand.kind,
+      guidanceMemberCommand.kind==='FAQ'?
+       guidanceMemberCommand.faqId:undefined,
+      guidanceMemberCommand.kind==='FAQ_INDEX'||guidanceMemberCommand.kind==='NOTES_INDEX'?
+       guidanceMemberCommand.page:undefined);
+     if(!screen)return {status:'DENIED',reason:'PHASE4_GUIDANCE_SOURCE_UNAVAILABLE'};
+     const afterGuide=await this.opts.store.snapshot(),now=this.clock();
+     if(privateGroupEpochDigest(afterGuide,scope)!==sourceEpoch||
+       !this.opts.policy.canUseChat(afterGuide,scope,'navigation')||
+       !Number.isSafeInteger(now)||now<0||now>8_640_000_000_000_000-120000)
+      return {status:'DENIED',reason:'PHASE4_GUIDANCE_SOURCE_CHANGED'};
+     return {status:'APPLIED',reason:'PHASE4_GUIDANCE_MEMBER',
+      plan:this.plan(chatId,screen.text,undefined,screen.keyboard),
+      privateGroupAccess:{actorId,scope,epoch:sourceEpoch,expiresAt:now+120000}};
+    }
+    // Stage 4 / 09:06 — private opt-in, abuse controls and verified opening.
+    // The only public Telegram message is a content-free owner-approved teaser.
+    // A deep link alone never authorizes the private secret.
+    if(kind==='private'&&parseWhisperMemberCommand(text)!==null){
+     if(actorId!==chatId||event.forwarded||event.edited||
+        event.callbackData!==undefined)
+      return {status:'DENIED',reason:'WHISPER_PRIVATE_ORIGIN_REQUIRED'};
+     const verify=async(groupId:string,memberId:string):Promise<'VERIFIED'|'NOT_MEMBER'|'UNKNOWN'>=>{
+      let current:'VERIFIED'|'NOT_MEMBER'|'UNKNOWN'='UNKNOWN';
+      try{current=await this.opts.membership(groupId,memberId);}
+      catch{return 'UNKNOWN';}
+      if(current!=='VERIFIED')return current;
+      // A Telegram group membership proof alone does not satisfy mandatory
+      // channel subscriptions. Missing gate, corrupt policy or an
+      // inconclusive provider check must all deny a new opt-in/seat.
+      const state=await this.opts.store.snapshot();
+      const mode=subscriptionRequirementMode(state,groupId);
+      // PAUSED is not positive evidence of a student's eligibility.
+      // Do not trust an old "MEMBER" result from a disabled policy.
+      if(mode==='INVALID'||mode==='PAUSED')return 'UNKNOWN';
+      if(mode==='NONE')return 'VERIFIED';
+      if(!this.opts.subscription)return 'UNKNOWN';
+      try{
+       const decision=await this.opts.subscription.verify(groupId,memberId);
+       // When a rule is ACTIVE, NOT_REQUIRED cannot bypass the required
+       // channels for an ordinary student.
+       return decision.status==='MEMBER'?'VERIFIED':'UNKNOWN';
+      }catch{return 'UNKNOWN';}
+     };
+     const screen=await whisperMemberScreen(new Phase4WhisperService(
+      this.opts.store,this.opts.policy,this.clock,verify,
+      this.opts.adminMembership),actorId,text);
+     if(!screen)return {status:'DENIED',reason:'WHISPER_MEMBER_COMMAND_INVALID'};
+     if(screen.privateSecret){
+      const secret=screen.privateSecret,scope=secret.scope;
+      const after=await this.opts.store.snapshot(),now=this.clock();
+      const chat=after.chats.filter(c=>c.id===scope&&c.approved&&c.present&&
+        c.scopes.includes('navigation'));
+      if(!Number.isSafeInteger(now)||now>=secret.expiresAt||
+         chat.length!==1||chat[0]!.version!==secret.chatVersion||
+         !this.opts.policy.canUseChat(after,scope,'navigation'))
+       return {status:'DENIED',reason:'WHISPER_DELIVERY_PROOF_CHANGED'};
+      return {status:'APPLIED',reason:'WHISPER_PRIVATE_DELIVERY_PLANNED',
+       plan:this.plan(chatId,screen.text),
+       privateGroupAccess:{actorId,scope,
+        epoch:privateGroupEpochDigest(after,scope),expiresAt:secret.expiresAt},
+       whisperAccess:{whisperId:secret.whisperId,
+        reservationId:secret.reservationId,
+        messageRevision:secret.messageRevision,
+        consentRevision:secret.consentRevision,
+        chatVersion:secret.chatVersion,expiresAt:secret.expiresAt,
+        view:secret.view}};
+     }
+     return {status:'APPLIED',reason:'WHISPER_MEMBER_SELF_SERVICE',
+      plan:this.plan(chatId,screen.text)};
+    }
+    // Stage 4 / 09:06 — private owner-only draft and announcement review.
+    // Actual group teaser is queued only after independent owner confirmation,
+    // and sent once by the RUN-gated publisher. Unknown callbacks are denied.
+    const whisperInput=kind==='private'&&(
+      event.callbackData==='mi:1:i:09:06'||
+      event.callbackData?.startsWith('wh:1:')||
+      /^\/whispers(?:$|\s)|^\/whisper(?:first|direct|reports|members|everyone|admins|question|gift|team)(?:$|\s)/u.test(text));
+    if(whisperInput){
+     if(!this.opts.policy.isOwner(actorId)||actorId!==chatId||
+        event.forwarded||event.edited)
+      return {status:'DENIED',reason:'WHISPER_OWNER_ONLY'};
+     const screen=await whisperOwnerScreen(
+      new Phase4WhisperService(this.opts.store,this.opts.policy,this.clock),
+      actorId,event.callbackData??text);
+     if(!screen)return {status:'DENIED',reason:'WHISPER_STALE_OR_DENIED'};
+     return {status:'APPLIED',reason:'PHASE4_WHISPER_OWNER_REVIEW',
+      plan:this.plan(chatId,screen.text,undefined,screen.keyboard,event.callbackMessageId)};
+    }
+    // Stage 4 / 09:07 — moderated question intake, entirely in trusted private
+    // Telegram chat. A question ID or callback is never authorization.
+    // The reviewer sees content privately; no group post is emitted.
+    if(kind==='private'&&parseDiscussionMemberCommand(text)!==null){
+     if(actorId!==chatId||event.edited||event.forwarded||
+      event.callbackData!==undefined)
+      return {status:'DENIED',reason:'DISCUSSION_PRIVATE_ORIGIN_REQUIRED'};
+     const verify=async(groupId:string,memberId:string):Promise<'VERIFIED'|'NOT_MEMBER'|'UNKNOWN'>=>{
+      let membership:'VERIFIED'|'NOT_MEMBER'|'UNKNOWN'='UNKNOWN';
+      try{membership=await this.opts.membership(groupId,memberId);}
+      catch{return 'UNKNOWN';}
+      if(membership!=='VERIFIED')return membership;
+      const snapshot=await this.opts.store.snapshot();
+      const rule=subscriptionRequirementMode(snapshot,groupId);
+      if(rule==='INVALID')return 'UNKNOWN';
+      if(rule==='NONE')return 'VERIFIED';
+      if(!this.opts.subscription)return 'UNKNOWN';
+      try{
+       const result=await this.opts.subscription.verify(groupId,memberId);
+       return result.status==='MEMBER'||result.status==='NOT_REQUIRED'?
+        'VERIFIED':'UNKNOWN';
+      }catch{return 'UNKNOWN';}
+     };
+     const screen=await discussionMemberScreen(new Phase4DiscussionService(
+      this.opts.store,this.opts.policy,this.clock,verify),actorId,text);
+     if(!screen)return {status:'DENIED',reason:'DISCUSSION_MEMBER_COMMAND_INVALID'};
+     return {status:'APPLIED',reason:'PHASE4_DISCUSSION_MEMBER',
+      plan:this.plan(chatId,screen.text)};
+    }
+    const discussionInput=kind==='private'&&(
+     event.callbackData==='mi:1:i:09:07'||
+     event.callbackData?.startsWith('dq:1:')||
+     /^\/discussions(?:$|\s)|^\/discussion(?:new|faq)(?:$|\s)/u.test(text));
+    if(discussionInput){
+     if(!this.opts.policy.isOwner(actorId)||actorId!==chatId)
+      return {status:'DENIED',reason:'DISCUSSION_OWNER_ONLY'};
+     const screen=await discussionOwnerScreen(new Phase4DiscussionService(
+      this.opts.store,this.opts.policy,this.clock),actorId,event.callbackData??text);
+     if(!screen)return {status:'DENIED',reason:'DISCUSSION_STALE_OR_DENIED'};
+     return {status:'APPLIED',reason:'PHASE4_DISCUSSION_OWNER',
+      plan:this.plan(chatId,screen.text,undefined,screen.keyboard,event.callbackMessageId)};
+    }
+    // Phase 4 / 09:08 — member-only local survey voting. No sendPoll and
+    // no group publication. The owner cannot use a callback to cast a vote.
+    if(kind==='private'&&parsePollMemberCommand(text)!==null){
+     if(actorId!==chatId||event.forwarded||event.edited||
+       event.callbackData!==undefined)
+      return {status:'DENIED',reason:'POLL_PRIVATE_ORIGIN_REQUIRED'};
+     const verify=async(groupId:string,memberId:string):Promise<'VERIFIED'|'NOT_MEMBER'|'UNKNOWN'>=>{
+      let membership:'VERIFIED'|'NOT_MEMBER'|'UNKNOWN'='UNKNOWN';
+      try{membership=await this.opts.membership(groupId,memberId);}
+      catch{return 'UNKNOWN';}
+      if(membership!=='VERIFIED')return membership;
+      const snapshot=await this.opts.store.snapshot();
+      const mode=subscriptionRequirementMode(snapshot,groupId);
+      if(mode==='INVALID')return 'UNKNOWN';
+      if(mode==='NONE')return 'VERIFIED';
+      if(!this.opts.subscription)return 'UNKNOWN';
+      try{
+       const result=await this.opts.subscription.verify(groupId,memberId);
+       return result.status==='MEMBER'||result.status==='NOT_REQUIRED'?'VERIFIED':'UNKNOWN';
+      }catch{return 'UNKNOWN';}
+     };
+     const screen=await pollMemberScreen(new Phase4PollService(
+      this.opts.store,this.opts.policy,this.clock,verify),actorId,text);
+     if(!screen)return {status:'DENIED',reason:'POLL_MEMBER_INVALID'};
+     return {status:'APPLIED',reason:'PHASE4_POLL_MEMBER',
+      plan:this.plan(chatId,screen.text)};
+    }
+    const pollInput=kind==='private'&&(
+      event.callbackData==='mi:1:i:09:08'||
+      event.callbackData?.startsWith('po:1:')||
+      /^\/poll(?:s|new|interests|feedback)(?:$|\s)/u.test(text));
+    if(pollInput){
+     if(!this.opts.policy.isOwner(actorId)||actorId!==chatId)
+      return {status:'DENIED',reason:'POLL_OWNER_ONLY'};
+     const screen=await pollOwnerScreen(new Phase4PollService(
+      this.opts.store,this.opts.policy,this.clock),actorId,event.callbackData??text);
+     if(!screen)return {status:'DENIED',reason:'POLL_OWNER_STALE_OR_DENIED'};
+     return {status:'APPLIED',reason:'PHASE4_POLL_OWNER',
+      plan:this.plan(chatId,screen.text,undefined,screen.keyboard,event.callbackMessageId)};
+    }
+    // Phase 4 / 09:09. Student self-service is private and opt-in.
+    // This path never sends event announcements, reminders or attendance claims.
+    if(kind==='private'&&parseEventMemberCommand(text)!==null){
+     if(actorId!==chatId||event.forwarded||event.edited||
+      event.callbackData!==undefined)
+      return {status:'DENIED',reason:'EVENT_PRIVATE_ORIGIN_REQUIRED'};
+     const verify=async(groupId:string,memberId:string):Promise<'VERIFIED'|'NOT_MEMBER'|'UNKNOWN'>=>{
+      let membership:'VERIFIED'|'NOT_MEMBER'|'UNKNOWN'='UNKNOWN';
+      try{membership=await this.opts.membership(groupId,memberId);}
+      catch{return 'UNKNOWN';}
+      if(membership!=='VERIFIED')return membership;
+      const snapshot=await this.opts.store.snapshot();
+      const mode=subscriptionRequirementMode(snapshot,groupId);
+      if(mode==='INVALID')return 'UNKNOWN';
+      if(mode==='NONE')return 'VERIFIED';
+      if(!this.opts.subscription)return 'UNKNOWN';
+      try{
+       const result=await this.opts.subscription.verify(groupId,memberId);
+       return result.status==='MEMBER'||result.status==='NOT_REQUIRED'?
+        'VERIFIED':'UNKNOWN';
+      }catch{return 'UNKNOWN';}
+     };
+     const screen=await eventMemberScreen(new Phase4EventService(
+      this.opts.store,this.opts.policy,this.clock,verify),actorId,text);
+     if(!screen)return {status:'DENIED',reason:'EVENT_MEMBER_INVALID'};
+     return {status:'APPLIED',reason:'PHASE4_EVENT_MEMBER',
+      plan:this.plan(chatId,screen.text)};
+    }
+    const eventInput=kind==='private'&&(
+     event.callbackData==='mi:1:i:09:09'||
+     event.callbackData?.startsWith('ev:1:')||
+     /^\/events(?:$|\s)|^\/event(?:new|summarynew|questions|poll)(?:$|\s)/u.test(text));
+    if(eventInput){
+     if(!this.opts.policy.isOwner(actorId)||actorId!==chatId)
+      return {status:'DENIED',reason:'EVENT_OWNER_ONLY'};
+     const screen=await eventOwnerScreen(new Phase4EventService(
+      this.opts.store,this.opts.policy,this.clock),actorId,event.callbackData??text);
+     if(!screen)return {status:'DENIED',reason:'EVENT_OWNER_STALE_OR_DENIED'};
+     return {status:'APPLIED',reason:'PHASE4_EVENT_OWNER',
+      plan:this.plan(chatId,screen.text,undefined,screen.keyboard,event.callbackMessageId)};
+    }
+    // Phase 4 / 09:10: owner-only expert credentials review and AMA summaries.
+    // All member content is requested in private; no public or auto delivery.
+    if(kind==='private'&&parseExpertMemberCommand(text)!==null){
+     if(actorId!==chatId||event.edited||event.forwarded||
+      event.callbackData!==undefined)
+      return {status:'DENIED',reason:'EXPERT_PRIVATE_ORIGIN_REQUIRED'};
+     const verify=async(groupId:string,memberId:string):Promise<'VERIFIED'|'NOT_MEMBER'|'UNKNOWN'>=>{
+      let membership:'VERIFIED'|'NOT_MEMBER'|'UNKNOWN'='UNKNOWN';
+      try{membership=await this.opts.membership(groupId,memberId);}
+      catch{return 'UNKNOWN';}
+      if(membership!=='VERIFIED')return membership;
+      const snapshot=await this.opts.store.snapshot();
+      const mode=subscriptionRequirementMode(snapshot,groupId);
+      if(mode==='INVALID')return 'UNKNOWN';
+      if(mode==='NONE')return 'VERIFIED';
+      if(!this.opts.subscription)return 'UNKNOWN';
+      try{
+       const result=await this.opts.subscription.verify(groupId,memberId);
+       return result.status==='MEMBER'||result.status==='NOT_REQUIRED'?'VERIFIED':'UNKNOWN';
+      }catch{return 'UNKNOWN';}
+     };
+     const screen=await expertMemberScreen(new Phase4ExpertService(
+      this.opts.store,this.opts.policy,this.clock,verify),actorId,text);
+     if(!screen)return {status:'DENIED',reason:'EXPERT_MEMBER_INVALID'};
+     return {status:'APPLIED',reason:'PHASE4_EXPERT_MEMBER',
+      plan:this.plan(chatId,screen.text)};
+    }
+    const expertInput=kind==='private'&&(
+      event.callbackData==='mi:1:i:09:10'||
+      event.callbackData?.startsWith('xa:1:')||
+      /^\/experts(?:$|\s)|^\/expertnew(?:$|\s)|^\/ama(?:new|defer|summarynew|rank|reports)(?:$|\s)/u.test(text));
+    if(expertInput){
+     if(!this.opts.policy.isOwner(actorId)||actorId!==chatId)
+      return {status:'DENIED',reason:'EXPERT_OWNER_ONLY'};
+     const screen=await expertOwnerScreen(new Phase4ExpertService(
+      this.opts.store,this.opts.policy,this.clock),actorId,event.callbackData??text);
+     if(!screen)return {status:'DENIED',reason:'EXPERT_OWNER_STALE_OR_DENIED'};
+     return {status:'APPLIED',reason:'PHASE4_EXPERT_OWNER',
+      plan:this.plan(chatId,screen.text,undefined,screen.keyboard,event.callbackMessageId)};
+    }
+    // Phase 4 / 09:11 — group-only study circles, no direct personal matching.
+    // Identity and membership proof are mandatory for opt-in and reporting.
+    if(kind==='private'&&parseStudyPeerMemberCommand(text)!==null){
+     if(actorId!==chatId||event.edited||event.forwarded||
+      event.callbackData!==undefined)
+      return {status:'DENIED',reason:'STUDY_PRIVATE_ORIGIN_REQUIRED'};
+     const verify=async(groupId:string,memberId:string):Promise<'VERIFIED'|'NOT_MEMBER'|'UNKNOWN'>=>{
+      let membership:'VERIFIED'|'NOT_MEMBER'|'UNKNOWN'='UNKNOWN';
+      try{membership=await this.opts.membership(groupId,memberId);}
+      catch{return 'UNKNOWN';}
+      if(membership!=='VERIFIED')return membership;
+      const snapshot=await this.opts.store.snapshot();
+      const mode=subscriptionRequirementMode(snapshot,groupId);
+      if(mode==='INVALID')return 'UNKNOWN';
+      if(mode==='NONE')return 'VERIFIED';
+      if(!this.opts.subscription)return 'UNKNOWN';
+      try{
+       const result=await this.opts.subscription.verify(groupId,memberId);
+       return result.status==='MEMBER'||result.status==='NOT_REQUIRED'?
+        'VERIFIED':'UNKNOWN';
+      }catch{return 'UNKNOWN';}
+     };
+     const screen=await studyPeerMemberScreen(new Phase4StudyPeersService(
+      this.opts.store,this.opts.policy,this.clock,verify),actorId,text);
+     if(!screen)return {status:'DENIED',reason:'STUDY_MEMBER_INVALID'};
+     return {status:'APPLIED',reason:'PHASE4_STUDY_MEMBER',
+      plan:this.plan(chatId,screen.text)};
+    }
+    const peerInput=kind==='private'&&(
+     event.callbackData==='mi:1:i:09:11'||
+     event.callbackData?.startsWith('sp:1:')||
+     /^\/studies(?:$|\s)|^\/studynew(?:$|\s)/u.test(text));
+    if(peerInput){
+     if(!this.opts.policy.isOwner(actorId)||actorId!==chatId)
+      return {status:'DENIED',reason:'STUDY_OWNER_ONLY'};
+     const screen=await studyPeerOwnerScreen(new Phase4StudyPeersService(
+      this.opts.store,this.opts.policy,this.clock),actorId,event.callbackData??text);
+     if(!screen)return {status:'DENIED',reason:'STUDY_OWNER_STALE_OR_DENIED'};
+     return {status:'APPLIED',reason:'PHASE4_STUDY_OWNER',
+      plan:this.plan(chatId,screen.text,undefined,screen.keyboard,event.callbackMessageId)};
+    }
+    // Phase 4 / 08:02 — private opt-in registrations and owner-reviewed
+    // multi-round educational contests. Contest-bound quiz answers are
+    // fenced by group membership, subscriptions and registration state.
+    if(kind==='private'&&parseContestMemberCommand(text)!==null){
+     if(actorId!==chatId||event.edited||event.forwarded||
+      event.callbackData!==undefined)
+      return {status:'DENIED',reason:'CONTEST_MEMBER_PRIVATE_ORIGIN_REQUIRED'};
+     const verify=async(groupId:string,memberId:string):Promise<'VERIFIED'|'NOT_MEMBER'|'UNKNOWN'>=>{
+      let membership:'VERIFIED'|'NOT_MEMBER'|'UNKNOWN'='UNKNOWN';
+      try{membership=await this.opts.membership(groupId,memberId);}
+      catch{return 'UNKNOWN';}
+      if(membership!=='VERIFIED')return membership;
+      const snap=await this.opts.store.snapshot();
+      const mode=subscriptionRequirementMode(snap,groupId);
+      if(mode==='INVALID')return 'UNKNOWN';
+      if(mode==='NONE')return 'VERIFIED';
+      if(!this.opts.subscription)return 'UNKNOWN';
+      try{
+       const result=await this.opts.subscription.verify(groupId,memberId);
+       return result.status==='MEMBER'||result.status==='NOT_REQUIRED'?
+        'VERIFIED':'UNKNOWN';
+      }catch{return 'UNKNOWN';}
+     };
+     const screen=await contestMemberScreen(new Phase4ContestService(
+      this.opts.store,this.opts.policy,this.clock,verify),actorId,text);
+     if(!screen)return {status:'DENIED',reason:'CONTEST_MEMBER_INVALID'};
+     return {status:'APPLIED',reason:'PHASE4_CONTEST_MEMBER',
+      plan:this.plan(chatId,screen.text)};
+    }
+    const contestOwnerInput=kind==='private'&&(
+     event.callbackData==='mi:1:i:08:02'||
+     event.callbackData?.startsWith('ct:1:')||
+     text==='/contests'||text.startsWith('/contestnew ')||
+     text.startsWith('/contestadd '));
+    if(contestOwnerInput){
+     if(!this.opts.policy.isOwner(actorId)||actorId!==chatId||
+      event.edited||event.forwarded)
+      return {status:'DENIED',reason:'CONTEST_OWNER_PRIVATE_ONLY'};
+     const screen=await contestOwnerScreen(new Phase4ContestService(
+      this.opts.store,this.opts.policy,this.clock),actorId,event.callbackData??text);
+     if(!screen)return {status:'DENIED',reason:'CONTEST_OWNER_STALE_OR_DENIED'};
+     return {status:'APPLIED',reason:'PHASE4_CONTEST_OWNER',
+      plan:this.plan(chatId,screen.text,undefined,screen.keyboard,event.callbackMessageId)};
+    }
+    // Phase 4 / 08:01 — owner-reviewed per-group game availability,
+    // quiz frequency and UTC quiet hours. No live Telegram game dispatch.
+    const gameCatalogInput=kind==='private'&&(
+     event.callbackData==='mi:1:i:08:01'||
+     event.callbackData?.startsWith('gc:1:')||
+     text==='/games'||text.startsWith('/games ')||
+     text.startsWith('/gamequiet '));
+    if(gameCatalogInput){
+     if(!this.opts.policy.isOwner(actorId)||actorId!==chatId||
+      event.edited||event.forwarded)
+      return {status:'DENIED',reason:'GAME_CATALOG_OWNER_PRIVATE_ONLY'};
+     const screen=await gameCatalogOwnerScreen(new Phase4GameCatalogService(
+      this.opts.store,this.opts.policy,this.clock),actorId,event.callbackData??text);
+     if(!screen)return {status:'DENIED',reason:'GAME_CATALOG_STALE_OR_DENIED'};
+     return {status:'APPLIED',reason:'PHASE4_GAME_CATALOG_OWNER',
+      plan:this.plan(chatId,screen.text,undefined,screen.keyboard,event.callbackMessageId)};
+    }
+    // Phase 4 / 08:03 — educational quiz entry. Student answers are accepted
+    // only in a private Telegram message, never a group/forward/edit/callback.
+    // Competition scores are local, independently fenced from 09:08 polls
+    // and 09:13 social reactions; no Telegram-native voting takes place.
+    if(kind==='private'&&parseQuizMemberCommand(text)!==null){
+     if(actorId!==chatId||event.edited||event.forwarded||
+      event.callbackData!==undefined)
+      return {status:'DENIED',reason:'QUIZ_PRIVATE_ORIGIN_REQUIRED'};
+     const verify=async(groupId:string,memberId:string):Promise<'VERIFIED'|'NOT_MEMBER'|'UNKNOWN'>=>{
+      let membership:'VERIFIED'|'NOT_MEMBER'|'UNKNOWN'='UNKNOWN';
+      try{membership=await this.opts.membership(groupId,memberId);}
+      catch{return 'UNKNOWN';}
+      if(membership!=='VERIFIED')return membership;
+      const snap=await this.opts.store.snapshot();
+      const mode=subscriptionRequirementMode(snap,groupId);
+      if(mode==='INVALID')return 'UNKNOWN';
+      if(mode==='NONE')return 'VERIFIED';
+      if(!this.opts.subscription)return 'UNKNOWN';
+      try{
+       const result=await this.opts.subscription.verify(groupId,memberId);
+       return result.status==='MEMBER'||result.status==='NOT_REQUIRED'?
+        'VERIFIED':'UNKNOWN';
+      }catch{return 'UNKNOWN';}
+     };
+     const screen=await quizMemberScreen(new Phase4QuizService(
+      this.opts.store,this.opts.policy,this.clock,verify),actorId,text);
+     if(!screen)return {status:'DENIED',reason:'QUIZ_MEMBER_INVALID'};
+     return {status:'APPLIED',reason:'PHASE4_QUIZ_MEMBER',
+      plan:this.plan(chatId,screen.text)};
+    }
+    const quizOwnerInput=kind==='private'&&(
+     event.callbackData==='mi:1:i:08:03'||
+     event.callbackData?.startsWith('qz:1:')||
+     text==='/quizzes'||text.startsWith('/quiznew '));
+    if(quizOwnerInput){
+     if(!this.opts.policy.isOwner(actorId)||actorId!==chatId||
+      event.edited||event.forwarded)
+      return {status:'DENIED',reason:'QUIZ_OWNER_PRIVATE_ONLY'};
+     const screen=await quizOwnerScreen(new Phase4QuizService(
+      this.opts.store,this.opts.policy,this.clock),actorId,event.callbackData??text);
+     if(!screen)return {status:'DENIED',reason:'QUIZ_OWNER_STALE_OR_DENIED'};
+     return {status:'APPLIED',reason:'PHASE4_QUIZ_OWNER',
+      plan:this.plan(chatId,screen.text,undefined,screen.keyboard,event.callbackMessageId)};
+    }
+    // Phase 4 / 09:12 — student-controlled opt-in or private badge lookup.
+    // No group broadcast, social ranking or new Telegram privileges.
+    if(kind==='private'&&parseBadgeMemberCommand(text)!==null){
+     if(actorId!==chatId||event.edited||event.forwarded||
+      event.callbackData!==undefined)
+      return {status:'DENIED',reason:'BADGE_PRIVATE_ORIGIN_REQUIRED'};
+     const verify=async(groupId:string,memberId:string):Promise<'VERIFIED'|'NOT_MEMBER'|'UNKNOWN'>=>{
+      let membership:'VERIFIED'|'NOT_MEMBER'|'UNKNOWN'='UNKNOWN';
+      try{membership=await this.opts.membership(groupId,memberId);}
+      catch{return 'UNKNOWN';}
+      if(membership!=='VERIFIED')return membership;
+      const snapshot=await this.opts.store.snapshot();
+      const mode=subscriptionRequirementMode(snapshot,groupId);
+      if(mode==='INVALID')return 'UNKNOWN';
+      if(mode==='NONE')return 'VERIFIED';
+      if(!this.opts.subscription)return 'UNKNOWN';
+      try{
+       const result=await this.opts.subscription.verify(groupId,memberId);
+       return result.status==='MEMBER'||result.status==='NOT_REQUIRED'?
+        'VERIFIED':'UNKNOWN';
+      }catch{return 'UNKNOWN';}
+     };
+     const screen=await badgeMemberScreen(new Phase4BadgesService(
+      this.opts.store,this.opts.policy,this.clock,verify),actorId,text);
+     if(!screen)return {status:'DENIED',reason:'BADGE_MEMBER_INVALID'};
+     return {status:'APPLIED',reason:'PHASE4_BADGE_MEMBER',
+      plan:this.plan(chatId,screen.text)};
+    }
+    const badgeInput=kind==='private'&&(
+     event.callbackData==='mi:1:i:09:12'||
+     event.callbackData?.startsWith('bg:1:')||
+     /^\/badges(?:$|\s)|^\/badgedraft(?:$|\s)/u.test(text));
+    if(badgeInput){
+     if(!this.opts.policy.isOwner(actorId)||actorId!==chatId)
+      return {status:'DENIED',reason:'BADGE_OWNER_ONLY'};
+     const screen=await badgeOwnerScreen(new Phase4BadgesService(
+      this.opts.store,this.opts.policy,this.clock),actorId,event.callbackData??text);
+     if(!screen)return {status:'DENIED',reason:'BADGE_OWNER_STALE_OR_DENIED'};
+     return {status:'APPLIED',reason:'PHASE4_BADGE_OWNER',
+      plan:this.plan(chatId,screen.text,undefined,screen.keyboard,event.callbackMessageId)};
+    }
+    // Phase 4 / 09:13. Local post reactions are unrelated to contest
+    // ballots or any public Telegram reaction/update of group messages.
+    if(kind==='private'&&parseReactionMemberCommand(text)!==null){
+     if(actorId!==chatId||event.edited||event.forwarded||
+      event.callbackData!==undefined)
+      return {status:'DENIED',reason:'REACTION_PRIVATE_ORIGIN_REQUIRED'};
+     const verify=async(groupId:string,memberId:string):Promise<'VERIFIED'|'NOT_MEMBER'|'UNKNOWN'>=>{
+      let membership:'VERIFIED'|'NOT_MEMBER'|'UNKNOWN'='UNKNOWN';
+      try{membership=await this.opts.membership(groupId,memberId);}
+      catch{return 'UNKNOWN';}
+      if(membership!=='VERIFIED')return membership;
+      const snapshot=await this.opts.store.snapshot();
+      const mode=subscriptionRequirementMode(snapshot,groupId);
+      if(mode==='INVALID')return 'UNKNOWN';
+      if(mode==='NONE')return 'VERIFIED';
+      if(!this.opts.subscription)return 'UNKNOWN';
+      try{
+       const result=await this.opts.subscription.verify(groupId,memberId);
+       return result.status==='MEMBER'||result.status==='NOT_REQUIRED'?
+        'VERIFIED':'UNKNOWN';
+      }catch{return 'UNKNOWN';}
+     };
+     const screen=await reactionMemberScreen(new Phase4ReactionsService(
+      this.opts.store,this.opts.policy,this.clock,verify),actorId,text);
+     if(!screen)return {status:'DENIED',reason:'REACTION_MEMBER_INVALID'};
+     return {status:'APPLIED',reason:'PHASE4_REACTION_MEMBER',
+      plan:this.plan(chatId,screen.text)};
+    }
+    const reactionInput=kind==='private'&&(
+     event.callbackData==='mi:1:i:09:13'||
+     event.callbackData?.startsWith('rc:1:')||
+     /^\/reactions(?:$|\s)|^\/reactnew(?:$|\s)/u.test(text));
+    if(reactionInput){
+     if(!this.opts.policy.isOwner(actorId)||actorId!==chatId)
+      return {status:'DENIED',reason:'REACTION_OWNER_ONLY'};
+     const screen=await reactionOwnerScreen(new Phase4ReactionsService(
+      this.opts.store,this.opts.policy,this.clock),actorId,event.callbackData??text);
+     if(!screen)return {status:'DENIED',reason:'REACTION_OWNER_STALE_OR_DENIED'};
+     return {status:'APPLIED',reason:'PHASE4_REACTION_OWNER',
+      plan:this.plan(chatId,screen.text,undefined,screen.keyboard,event.callbackMessageId)};
+    }
+    // Phase 4 / 09:14 — only the owner can start/stop the temporary
+    // quiet period. No group commands, moderation bypass or Telegram edits.
+    const lectureInput=kind==='private'&&(
+     event.callbackData==='mi:1:i:09:14'||
+     event.callbackData?.startsWith('lc:1:')||
+     /^\/lectures(?:$|\s)|^\/lecturenew(?:$|\s)/u.test(text));
+    if(lectureInput){
+     if(!this.opts.policy.isOwner(actorId)||actorId!==chatId||
+      event.forwarded||event.edited)
+      return {status:'DENIED',reason:'LECTURE_OWNER_PRIVATE_ONLY'};
+     const screen=await lectureOwnerScreen(new Phase4LectureService(
+      this.opts.store,this.opts.policy,this.clock),actorId,event.callbackData??text);
+     if(!screen)return {status:'DENIED',reason:'LECTURE_OWNER_STALE_OR_DENIED'};
+     return {status:'APPLIED',reason:'PHASE4_LECTURE_OWNER',
+      plan:this.plan(chatId,screen.text,undefined,screen.keyboard,event.callbackMessageId)};
+    }
+    // Phase 4 / 09:15 — on-demand, read-only and group-scoped engagement.
+    // Owner's private identity is required; never return records to a group.
+    const engagementInput=kind==='private'&&(
+     event.callbackData==='mi:1:i:09:15'||
+     event.callbackData?.startsWith('er:1:')||
+     /^\/engagement(?:$|\s)/u.test(text));
+    if(engagementInput){
+     if(!this.opts.policy.isOwner(actorId)||actorId!==chatId||
+      event.edited||event.forwarded)
+      return {status:'DENIED',reason:'ENGAGEMENT_OWNER_PRIVATE_ONLY'};
+     const screen=await engagementOwnerScreen(
+      new Phase4EngagementReportsService(this.opts.store,this.opts.policy,this.clock),
+      actorId,event.callbackData??text);
+     if(!screen)return {status:'DENIED',reason:'ENGAGEMENT_STALE_OR_DENIED'};
+     return {status:'APPLIED',reason:'PHASE4_ENGAGEMENT_OWNER',
+      plan:this.plan(chatId,screen.text,undefined,screen.keyboard,event.callbackMessageId)};
+    }
+    // 09:02/09:03: approved guide dashboard plus one-shot owner-reviewed posting.
+    const phase4GuidanceInput=kind==='private'&&!!this.opts.community&&(
+     event.callbackData==='mi:1:i:09:02'||
+     event.callbackData==='mi:1:i:09:03'||
+     event.callbackData?.startsWith('gd:1:')||
+     text==='/newmemberguide'||text.startsWith('/newmemberguide ')||
+     text==='/groupfixed'||text.startsWith('/groupfixed ')||
+     /^\/(?:guideset|guidetopics|guideservices|guideclear|guidetopicsclear|guideservicesclear|guidepublish|fixedpublish)(?:$|\s)/u.test(text));
+    if(phase4GuidanceInput){
+     if(!this.opts.policy.isOwner(actorId)||actorId!==chatId||
+      event.edited||event.forwarded||!this.opts.community)
+      return {status:'DENIED',reason:'PHASE4_GUIDANCE_OWNER_PRIVATE_ONLY'};
+     const view=await phase4GuidanceOwnerScreen(new Phase4GuidanceService(
+      this.opts.store,this.opts.policy,this.opts.community),
+      actorId,event.callbackData??text);
+     if(!view)return {status:'DENIED',reason:'PHASE4_GUIDANCE_STALE_OR_DENIED'};
+     return {status:'APPLIED',reason:'PHASE4_GUIDANCE_OWNER',
+      plan:this.plan(chatId,view.text,undefined,view.keyboard,event.callbackMessageId)};
+    }
+    // 09:16 — dedicated settings dashboard. Authorization is private and owner-only.
+    const phase4SettingsInput=kind==='private'&&!!this.opts.community&&(
+     event.callbackData==='mi:1:i:09:16'||
+     event.callbackData?.startsWith('p4s:1:')||
+     text==='/communitysettings'||text.startsWith('/communitysettings '));
+    if(phase4SettingsInput){
+     if(!this.opts.policy.isOwner(actorId)||actorId!==chatId||
+      event.edited||event.forwarded||!this.opts.community)
+      return {status:'DENIED',reason:'PHASE4_SETTINGS_OWNER_PRIVATE_ONLY'};
+     const screen=await phase4SettingsOwnerScreen(this.opts.community,actorId,
+      event.callbackData??text);
+     if(!screen)return {status:'DENIED',reason:'PHASE4_SETTINGS_STALE_OR_DENIED'};
+     return {status:'APPLIED',reason:'PHASE4_SETTINGS_OWNER',
+      plan:this.plan(chatId,screen.text,undefined,screen.keyboard,event.callbackMessageId)};
+    }
+    // Dedicated 09:04 panel. Old service-cleanup toggles still use the existing
+    // p4c editor, but opening 09:04 now shows actual queue/status controls.
+    const serviceOpsInput=kind==='private'&&(
+      event.callbackData==='mi:1:i:09:04'||
+      event.callbackData?.startsWith('sc4:1:')||
+      text==='/servicejobs');
+    if(serviceOpsInput){
+      if(!this.opts.policy.isOwner(actorId)||actorId!==chatId||
+         event.edited||event.forwarded)
+        return {status:'DENIED',reason:'SERVICE_OPS_OWNER_PRIVATE_ONLY'};
+      const screen=await phase4ServiceOpsScreen(new Phase4CleanupOperations(
+        this.opts.store,this.opts.policy,this.clock),actorId,event.callbackData??text);
+      if(!screen)return {status:'DENIED',reason:'SERVICE_OPS_STALE_OR_DENIED'};
+      return {status:'APPLIED',reason:'PHASE4_SERVICE_OPS_OWNER',
+        plan:this.plan(chatId,screen.text,undefined,screen.keyboard,event.callbackMessageId)};
+    }
+    // 09:05 owns a focused group/rule dashboard; individual edits still use
+    // the shared community approval engine, never a second copy of policy.
+    const replyOwnerInput=kind==='private'&&!!this.opts.community&&(
+     event.callbackData==='mi:1:i:09:05'||
+     event.callbackData?.startsWith('r5:1:')||
+     text==='/replyadmin'||/^\/replyadmin -[1-9][0-9]{0,15}$/u.test(text));
+    if(replyOwnerInput){
+     if(!this.opts.policy.isOwner(actorId)||actorId!==chatId||
+        event.edited||event.forwarded||!this.opts.community)
+      return {status:'DENIED',reason:'PHASE4_REPLY_OWNER_PRIVATE_ONLY'};
+     const screen=await phase4ReplyOwnerScreen(this.opts.community,actorId,
+      event.callbackData??text);
+     if(!screen)return {status:'DENIED',reason:'PHASE4_REPLY_OWNER_STALE_OR_DENIED'};
+     return {status:'APPLIED',reason:'PHASE4_REPLY_OWNER',
+      plan:this.plan(chatId,screen.text,undefined,screen.keyboard,event.callbackMessageId)};
+    }
+    const communityCommand=kind==='private'?parsePhase4CommunityCommand(text):null;
+    if(kind==='private'&&(communityCommand||event.callbackData?.startsWith('p4c:1:')||
+      (this.opts.community&&['mi:1:i:09:01','mi:1:i:09:04','mi:1:i:09:05','mi:1:i:09:15','mi:1:i:07:10'].includes(event.callbackData??'')))){
+     if(!this.opts.policy.isOwner(actorId)||!this.opts.community)
+      return {status:'DENIED',reason:'COMMUNITY_EDITOR_DISABLED'};
+     const screen=await phase4CommunityScreen(this.opts.community,actorId,
+       event.callbackData??text);
+     if(!screen)return {status:'DENIED',reason:'COMMUNITY_EDITOR_STALE'};
+     return {status:'APPLIED',reason:'PHASE4_COMMUNITY_EDITOR',
+       plan:this.plan(chatId,screen.text,undefined,screen.keyboard,event.callbackMessageId)};
+    }
     if(kind==='private'&&this.opts.policy.isOwner(actorId)&&!event.callbackData?.startsWith('ou:1:'))await cancelOwnerUpload(this.opts.store,actorId);
     if(kind==='private'&&event.topicId!==undefined)return {status:'DENIED',reason:'PRIVATE_TOPIC_NOT_SUPPORTED'};
     if(kind==='private'&&event.callbackData===undefined&&this.opts.policy.isOwner(actorId)&&!folderNavigation){const screen=await new CommunityFolderUI(this.opts.store,this.opts.policy,this.opts.subscription,this.clock).text(actorId,text);if(screen)return this.folderReply(event,screen);}
@@ -598,6 +1500,10 @@ export class TelegramUpdateApplication {
     }
     if(kind==='group')await new GroupProtectionPolicyService(this.opts.store,this.opts.policy,this.clock).observeIncomingText(
      actorId,chatId,text,event.entities,'b3-webhook:'+this.opts.botId+':'+event.updateId);
+    if(kind==='group'){
+     const reply=await this.phase4Reply(event);
+     if(reply)return reply;
+    }
     if(kind==='group'&&isReplyDeleteCommand(text,this.opts.botUsername)){
      if(!this.opts.purge)return {status:'DENIED',reason:'DELETE_NOT_CONFIGURED'};
      const result=await previewReplyDelete(this.opts.store,this.opts.policy,this.opts.purge,actorId,chatId,event.messageId,text,event.replyTo,this.clock());
@@ -743,6 +1649,20 @@ export class TelegramUpdateApplication {
        actorId,text,Object.values(m).some(label=>label===text)||isOwnerMenuText(text));
       if(editorResult)return {status:editorResult.status,reason:editorResult.reason,
        plan:this.plan(chatId,editorResult.screen.text,undefined,editorResult.screen.keyboard)};
+      const privateWelcome=/^(?:\/start welcome_|\/mywelcome -)([1-9]\d{0,15})$/u.exec(text);
+      if(privateWelcome){
+       if(!this.opts.community)return {status:'DENIED',reason:'PRIVATE_WELCOME_DISABLED'};
+       const scope='-'+privateWelcome[1]!;
+       // User explicitly started a private conversation; no auto-DM on join.
+       // This check is external membership proof, fenced by the same group
+       // approval/subscription witness used by other scoped private resources.
+       const denied=await this.authorizePrivateGroupBrowse(scope,actorId);
+       if(denied)return {status:'DENIED',reason:'PRIVATE_WELCOME_ACCESS_DENIED'};
+       await markPrivateGroupSource(scope);
+       const welcome=await this.opts.community.claimPrivateWelcome(actorId,scope,event.memberName??'عضو');
+       if(!welcome)return {status:'DENIED',reason:'PRIVATE_WELCOME_UNAVAILABLE'};
+       return result('<b>🔒 ترحيب خاص بطلبك</b>\n'+welcome);
+      }
       if(cmd==='/start'||cmd==='/help'||text===m.home||text===m.back)return main();
       if(text==='/ownerrecover'){
        if(!owner)return {status:'DENIED',reason:'OWNER_ONLY'};
@@ -1291,8 +2211,8 @@ export class TelegramUpdateApplication {
     }
     const callback=event.callbackData??'';
     const ownerScreen=event.kind==='private'&&this.opts.policy.isOwner(event.actorId)&&(
-     /^(?:mi:1:|oi:1:|ou:1:|sc:1:|cf:1:|ec:1:|oc:1:|od:1:|gw:1:|gt:1:|gs:1:|gb:1:|nw:1:|gp:1:|of:1:|ol:1:|st:1:|ps:1:|pr:1:|pd:1:|pq:1:|mr:1:|mp:1:|c_)/u.test(callback)||
-     event.text==='/ownerinline'||event.text==='/ownerlegacy'||event.text==='/ownerrecover'||isOwnerMenuText(event.text)||(event.document!==undefined&&handled.plan?.inlineMarkup!==undefined)||
+     /^(?:p4c:1:|mi:1:|oi:1:|ou:1:|sc:1:|cf:1:|ec:1:|oc:1:|od:1:|gw:1:|gt:1:|gs:1:|gb:1:|nw:1:|gp:1:|of:1:|ol:1:|st:1:|ps:1:|pr:1:|pd:1:|pq:1:|mr:1:|mp:1:|c_)/u.test(callback)||
+     event.text==='/ownerinline'||event.text==='/ownerlegacy'||event.text==='/ownerrecover'||Boolean(parsePhase4CommunityCommand(event.text))||isOwnerMenuText(event.text)||(event.document!==undefined&&handled.plan?.inlineMarkup!==undefined)||
      handled.reason==='CATEGORY_TEXT_PREVIEW'||handled.reason==='NETWORK_TEXT_PREVIEW'||handled.reason==='DELEGATION_TEXT_PREVIEW'||handled.reason==='STUDIO_DRAFT_SAVED');
     if(ownerScreen&&handled.plan&&!handled.adminUIAccess){
      const state=await this.opts.store.snapshot(),now=this.clock(),epoch=studioInput?studioPreviewEpoch(state,this.opts.policy,event.actorId,now):protectionUIEpoch(state,this.opts.policy,event.actorId,now);
@@ -1317,9 +2237,9 @@ export class TelegramUpdateApplication {
     // Commit the decision and outbound reply intent in one durable transaction.
     // No external call occurs before the outbox row exists.
     await this.opts.store.finish(key,audit,handled.plan,handled.groupQuestionAccess,
-     handled.groupMenuAccess,handled.privateGroupAccess,handled.adminUIAccess,handled.privateLibraryAccess,studioInput&&!!handled.adminUIAccess,handled.communityAccess,handled.communityClose);
+     handled.groupMenuAccess,handled.privateGroupAccess,handled.adminUIAccess,handled.privateLibraryAccess,studioInput&&!!handled.adminUIAccess,handled.communityAccess,handled.communityClose,handled.communityAutomation,handled.whisperAccess);
     // Temporary actor IDs are only stored in the guarded queue, never returned.
-    const {groupQuestionAccess:_,groupMenuAccess:__,privateGroupAccess:___,adminUIAccess:____,privateLibraryAccess:_____,communityAccess:______,communityClose:_______,...publicResult}=handled;
+    const {groupQuestionAccess:_,groupMenuAccess:__,privateGroupAccess:___,whisperAccess:_________,adminUIAccess:____,privateLibraryAccess:_____,communityAccess:______,communityClose:_______,communityAutomation:________,...publicResult}=handled;
     const visible=publicResult.plan?{...publicResult,deliveryKey:key}:publicResult;
     return event.callbackQueryId?{...visible,callbackQueryId:event.callbackQueryId}:visible;
   }
