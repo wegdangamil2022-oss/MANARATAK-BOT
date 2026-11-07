@@ -24,7 +24,7 @@ export class TelegramBotApiServiceCleanupGateway implements Phase4ServiceDeletio
   this.botId=Number(token.split(':',1)[0]);
   if(!Number.isSafeInteger(this.botId))throw Error('COMMUNITY_TELEGRAM_BOT_INVALID');
  }
- private async call(method:'getChatMember'|'deleteMessage',body:Record<string,string|number>):
+ private async call(method:'getChat'|'getChatMember'|'deleteMessage',body:Record<string,string|number>):
   Promise<{status:number;ok:boolean;result:unknown}|null>{
   let result:Response;
   try{
@@ -46,9 +46,19 @@ export class TelegramBotApiServiceCleanupGateway implements Phase4ServiceDeletio
  }
  async canDelete(chatId:string):Promise<boolean>{
   if(!groupValid(chatId))return false;
+  // A numeric negative id alone cannot prove the remote chat is still a group.
+  const chat=await this.call('getChat',{chat_id:chatId});
+  if(!chat?.ok||!chat.result||typeof chat.result!=='object'||
+     Array.isArray(chat.result))return false;
+  const details=chat.result as Record<string,unknown>;
+  if(details.id!==Number(chatId)||!['group','supergroup'].includes(String(details.type)))
+   return false;
   const data=await this.call('getChatMember',{chat_id:chatId,user_id:this.botId});
-  if(!data?.ok||!data.result||typeof data.result!=='object'||Array.isArray(data.result))return false;
-  const member=data.result as Record<string,unknown>;
+  if(!data?.ok||!data.result||typeof data.result!=='object'||Array.isArray(data.result))
+   return false;
+  const member=data.result as Record<string,unknown>,user=member.user;
+  if(!user||typeof user!=='object'||Array.isArray(user)||
+     (user as Record<string,unknown>).id!==this.botId)return false;
   return member.status==='creator'||member.status==='administrator'&&member.can_delete_messages===true;
  }
  async deleteMessage(chatId:string,messageId:number):Promise<CommunityDeleteResult>{
@@ -72,7 +82,7 @@ export class Phase4ServiceCleanupDispatcher{
   private readonly clock:()=>number=Date.now,
   private readonly safetyGate?:()=>Promise<boolean>){}
  private async allowedBySafety():Promise<boolean>{
-  if(!this.safetyGate)return true;
+  if(!this.safetyGate)return false; // irreversible Telegram deletions require an explicit RUN gate
   try{return (await this.safetyGate())===true;}catch{return false;}
  }
  async dispatch(key:string):Promise<CommunityCleanupDispatchResult>{
@@ -109,7 +119,9 @@ export class Phase4ServiceCleanupDispatcher{
       config.serviceCleanup.profileEnabled!==false);
    if(liveNow<current.observedAt||liveNow-current.observedAt>2*3600000||
      cleanupEnabled!==true||!config||config.version!==current.policyVersion||
-     chat.length!==1||!chat[0]!.approved||chat[0]!.version!==current.chatVersion||
+     chat.length!==1||!chat[0]!.approved||!chat[0]!.present||
+     !chat[0]!.scopes.includes('navigation')||
+     chat[0]!.version!==current.chatVersion||
      !this.policy.canUseChat(state,current.chatId,'navigation')){
     current.status='SKIPPED';
     return {status:'SKIPPED' as const};
@@ -138,11 +150,30 @@ export class Phase4ServiceCleanupDispatcher{
  async runDue(limit=8):Promise<{attempted:number;results:CommunityCleanupDispatchResult[]}>{
   if(!Number.isSafeInteger(limit)||limit<1||limit>20)throw Error('COMMUNITY_CLEANUP_LIMIT_INVALID');
   const snap=await this.store.snapshot(),now=this.clock();
-  const eligible=(snap.phase4Community?.cleanupJobs??[])
+  if(!Number.isSafeInteger(now)||now<0||now>8_640_000_000_000_000)
+   return {attempted:0,results:[]};
+  // Prevent one noisy group from starving other approved groups. Old work is
+  // inspected by dispatch() but never blindly retried after a remote ambiguity.
+  const due=(snap.phase4Community?.cleanupJobs??[])
    .filter(j=>j.status==='QUEUED'&&j.dueAt<=now)
-   .sort((a,b)=>a.dueAt-b.dueAt).slice(0,limit);
+   .sort((a,b)=>a.dueAt-b.dueAt||a.key.localeCompare(b.key));
+  const chosen:typeof due=[];
+  const seen=new Set<string>();
+  for(const job of due){
+   if(seen.has(job.chatId))continue;
+   seen.add(job.chatId);chosen.push(job);
+   if(chosen.length>=limit)break;
+  }
+  if(chosen.length<limit){
+   const selected=new Set(chosen.map(j=>j.key));
+   for(const job of due){
+    if(selected.has(job.key))continue;
+    chosen.push(job);
+    if(chosen.length>=limit)break;
+   }
+  }
   const results:CommunityCleanupDispatchResult[]=[];
-  for(const job of eligible)results.push(await this.dispatch(job.key));
+  for(const job of chosen)results.push(await this.dispatch(job.key));
   return {attempted:results.length,results};
  }
 }
