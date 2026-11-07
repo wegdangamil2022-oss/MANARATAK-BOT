@@ -47,6 +47,33 @@ function oncallSendLedgerSafe(s:BotState,now:number):boolean{
  return true;
 }
 
+/** An acknowledgement is evidence of receipt only with a unique local
+ * report, bounded timestamp, matching group revision and a valid digest.
+ * This never infers a Telegram message delivery or a sanction.
+ */
+const ACK='admin-room:oncall-ack:';
+function oncallAcknowledgementLedgerSafe(s:BotState,now:number):boolean{
+ if(!time(now))return false;
+ const rows=s.audit.filter(a=>a.updateKey.startsWith(ACK));
+ if(rows.length>4000)return false;
+ const seen=new Set<string>();
+ for(const row of rows){
+  const m=/^admin-room:oncall-ack:([A-Za-z0-9_-]{24})$/u.exec(row.updateKey);
+  if(!m||seen.has(row.updateKey)||row.decision!=='ALLOW'||
+   !/^ADMIN_ROOM_ONCALL_ACK:[a-f0-9]{64}$/u.test(row.reason)||
+   !person(row.actorId)||!Number.isSafeInteger(row.at)||
+   row.at<0||row.at>now||
+   !Number.isSafeInteger(row.policyVersion)||row.policyVersion<1)return false;
+  seen.add(row.updateKey);
+  const reports=s.audit.filter(a=>a.updateKey==='moderation:report:'+m[1]);
+  if(reports.length!==1||reports[0]!.decision!=='ALLOW'||
+   reports[0]!.policyVersion!==row.policyVersion||
+   !Number.isSafeInteger(reports[0]!.at)||
+   reports[0]!.at>row.at)return false;
+ }
+ return true;
+}
+
 export type OncallOptions={primary:string;fallback:string;seconds:number;enabled:boolean};
 export type OncallSetting=OncallOptions&{key:string;group:string;link:string;actor:string;at:number;witness:string;authority:string};
 type Stored=OncallOptions&{link:string;authority:string};
@@ -115,7 +142,8 @@ export function adminRoomOncallQueueSummary(s:BotState,p:Policy,actor:string,
  const config=oncallSetting(s,p,chatId,now);
  if(config===null||config&&config.link!==target.id)return null;
  // A corrupted ledger is not equivalent to "zero pending" or "all sent".
- if(!oncallSendLedgerSafe(s,now))return null;
+ if(!oncallSendLedgerSafe(s,now)||!oncallAcknowledgementLedgerSafe(s,now))
+  return null;
  const queue=config?.enabled?assignments(s,p,now)
   .filter(a=>a.chat===chatId&&a.setting.key===config.key):[];
  const primary=queue.filter(a=>a.stage==='primary');
@@ -143,11 +171,15 @@ export class AdminRoomOncallDispatcher{
   for(let i=0;i<limit;i++){
    if(!await safe())break;
    const job=await this.store.transaction(s=>{const now=this.clock();
-    if(!oncallSendLedgerSafe(s,now))return null;
+    if(!oncallSendLedgerSafe(s,now)||
+     !oncallAcknowledgementLedgerSafe(s,now))return null;
     const a=assignments(s,this.policy,now).find(a=>{const key='admin-room:oncall-send:'+a.id+':'+a.setting.witness+':'+a.stage;return now-(a.stage==='primary'?a.at:a.deadline)<WINDOW&&!s.audit.some(x=>x.updateKey===key)&&!s.audit.some(x=>x.updateKey.startsWith('admin-room:oncall-send:')&&x.actorId===a.actor&&x.at<=now&&x.at>now-60000);});if(!a)return null;
     const key='admin-room:oncall-send:'+a.id+':'+a.setting.witness+':'+a.stage;s.audit.push({updateKey:key,actorId:a.actor,decision:'ALLOW',reason:'ADMIN_ROOM_ONCALL_STARTED:'+a.witness,policyVersion:this.policy.chatRevision(s,a.chat),at:now});return {...a,key,started:now};});
    if(!job)break;
-   const current=(s:BotState,now:number)=>{if(!oncallSendLedgerSafe(s,now))return false;const rows=s.audit.filter(a=>a.updateKey===job.key),started=rows[0];return time(now)&&now>=job.started&&now-job.started<WINDOW&&assignments(s,this.policy,now).some(a=>a.id===job.id&&a.actor===job.actor&&a.stage===job.stage&&a.witness===job.witness)&&rows.length===1&&!!started&&started.actorId===job.actor&&started.decision==='ALLOW'&&started.reason==='ADMIN_ROOM_ONCALL_STARTED:'+job.witness&&started.policyVersion===this.policy.chatRevision(s,job.chat)&&started.at===job.started&&!s.audit.some(a=>a.updateKey===job.key+':outcome');};
+   const current=(s:BotState,now:number)=>{if(!oncallSendLedgerSafe(s,now)||!oncallAcknowledgementLedgerSafe(s,now))return false;const rows=s.audit.filter(a=>a.updateKey===job.key),started=rows[0];return time(now)&&now>=job.started&&now-job.started<WINDOW&&assignments(s,this.policy,now).some(a=>a.id===job.id&&a.actor===job.actor&&a.stage===job.stage&&a.witness===job.witness)&&rows.length===1&&!!started&&started.actorId===job.actor&&started.decision==='ALLOW'&&started.reason==='ADMIN_ROOM_ONCALL_STARTED:'+job.witness&&started.policyVersion===this.policy.chatRevision(s,job.chat)&&started.at===job.started&&!s.audit.some(a=>a.updateKey===job.key+':outcome');};
+   if(!await safe()||!current(await this.store.snapshot(),this.clock()))continue;
+   // Reservation is durable; a second check is still required immediately
+   // before attempting the Telegram send. No automatic retry if it fails.
    if(!await safe()||!current(await this.store.snapshot(),this.clock()))continue;
    let outcome='UNKNOWN_OUTCOME';try{const result=await this.sender.send({chatId:job.actor,parseMode:'HTML',text:(job.stage==='primary'?'📨 بلاغ بانتظار استلامك كمشرف مناوب.':'🚨 تصعيد بلاغ لم يُستلم خلال المهلة. لا ينفذ التصعيد عقوبة.')+'\nالمجموعة: '+job.chat,inlineMarkup:{inline_keyboard:[[{text:'✅ استلام البلاغ',callback_data:'oc:1:a:'+job.id+':'+job.witness.slice(0,16)}],[{text:'📨 صندوق البلاغات',callback_data:'rp:1:r:0'}]]}});outcome=result.status==='CONFIRMED'&&Number.isSafeInteger(result.messageId)&&result.messageId>0?'CONFIRMED':result.status==='FAILED_CONFIRMED'?'FAILED_CONFIRMED':'UNKNOWN_OUTCOME';}catch{/* never retry */}
    await this.store.transaction(s=>{const now=this.clock();if(!s.audit.some(a=>a.updateKey===job.key+':outcome'))s.audit.push({updateKey:job.key+':outcome',actorId:job.actor,decision:'NOOP',reason:'ADMIN_ROOM_ONCALL_'+(current(s,now)?outcome:'UNKNOWN_OUTCOME'),policyVersion:this.policy.chatRevision(s,job.chat),at:time(now)?now:job.started});});count++;
