@@ -3,7 +3,7 @@ import {validWhisperGiftResourceUrl} from './phase4-whisper-model.js';
 import type {OwnerInlineScreen,TelegramInlineKeyboard} from './telegram-inline-owner.js';
 
 const hex='[a-f0-9]{24}';
-const route=new RegExp('^wh:1:(?:h|l:(?:0|[1-9][0-9]?)|[vaxps]:'+hex+'|c:'+hex+':[12]|r:-[1-9][0-9]{0,15}|[zykj]:'+hex+'|f:(?:0|[1-9][0-9]?)|t:(?:0|[1-9][0-9]?)|g:-[1-9][0-9]{0,15}|o:-[1-9][0-9]{0,15}:[01])$','u');
+const route=new RegExp('^wh:1:(?:h|l:(?:0|[1-9][0-9]?)|[vaxps]:'+hex+'|c:'+hex+':[12]|r:-[1-9][0-9]{0,15}|[zykj]:'+hex+'|f:(?:0|[1-9][0-9]?)|t:(?:0|[1-9][0-9]?)|b:(?:0|[1-9][0-9]?)|u:-[1-9][0-9]{0,15}|n:-[1-9][0-9]{0,15}:[fdamtqg]|g:-[1-9][0-9]{0,15}|o:-[1-9][0-9]{0,15}:[01])$','u');
 export const validWhisperOwnerRoute=(s:unknown):s is string=>
  typeof s==='string'&&Buffer.byteLength(s,'utf8')<=64&&route.test(s);
 const escape=(s:string)=>s.replace(/&/gu,'&amp;').replace(/</gu,'&lt;')
@@ -143,6 +143,70 @@ export async function whisperOwnerScreen(
   }
   if(cmd?.kind==='REPORTS')input='wh:1:r:'+cmd.chatId;
   if(cmd?.kind==='SETTINGS')input='wh:1:o:'+cmd.chatId+':'+(cmd.enabled?'1':'0');
+  const builderGroups=/^wh:1:b:(0|[1-9][0-9]?)$/u.exec(input);
+  if(builderGroups){
+   const groups=await service.ownerGroups(actor),page=Number(builderGroups[1]);
+   const pages=Math.max(1,Math.ceil(groups.length/7));
+   if(page>=pages)return null;
+   const rows=groups.slice(page*7,page*7+7).map(g=>[
+    btn('👥 '+g,'wh:1:u:'+g)]);
+   const nav:{text:string;callback_data:string}[]=[];
+   if(page>0)nav.push(btn('⬅️ السابق','wh:1:b:'+(page-1)));
+   if(page+1<pages)nav.push(btn('التالي ➡️','wh:1:b:'+(page+1)));
+   if(nav.length)rows.push(nav);
+   rows.push([list],[home]);
+   return ui('<b>🧭 دليل إنشاء همسة — اختيار المجموعة</b>\n'+
+    'اختر المجموعة أولًا، ثم النوع. ستظهر صيغة إدخال مخصصة للنوع. '+
+    'لا تُحفظ رسالة بمجرد اختيار الزر، والتأكيد النهائي مستقل بعد إرسال الأمر.'+
+    '\nالمجموعات: '+groups.length+' · صفحة '+(page+1)+'/'+pages,rows);
+  }
+  const builderTypes=/^wh:1:u:(-[1-9][0-9]{0,15})$/u.exec(input);
+  if(builderTypes){
+   const g=builderTypes[1]!;
+   if(!await service.groupSettings(actor,g))return null;
+   const choice=(label:string,k:string)=>btn(label,'wh:1:n:'+g+':'+k);
+   return ui('<b>🧭 نوع الهمسة للمجموعة</b>\n<code>'+g+'</code>\n'+
+    'مسودات الطلاب منفصلة؛ الخيارات هنا للمالك فقط. '+
+    'كل نوع يحتاج معاينة اعتماد، ثم مراجعة إعلان Telegram بلا نص سري.',
+    [[choice('🎟️ أول N أعضاء','f'),choice('✉️ شخص محدد','d')],
+     [choice('🌐 كل المؤهلين','a'),choice('🛡️ مشرفو Telegram','m')],
+     [choice('👥 فريق حسابات محدد','t'),choice('❓ سؤال مع إجابة','q')],
+     [choice('🎁 مورد تعليمي منسوب','g')],
+     [btn('↩️ اختيار المجموعة','wh:1:b:0')],[list]]);
+  }
+  const builderTemplate=/^wh:1:n:(-[1-9][0-9]{0,15}):([fdamtqg])$/u.exec(input);
+  if(builderTemplate){
+   const g=builderTemplate[1]!,mode=builderTemplate[2]!;
+   if(!await service.groupSettings(actor,g))return null;
+   const commands:Record<string,{label:string;command:string;hint:string}>={
+    f:{label:'🎟️ أول N',command:'/whisperfirst '+g+' 3 10 نص الهمسة',
+      hint:'استبدل 3 بعدد 1–20 حسابًا مؤهلًا، و10 بمدة 1–60 دقيقة.'},
+    d:{label:'✉️ مستلم واحد',command:'/whisperdirect '+g+' 111111 10 نص الهمسة',
+      hint:'استبدل 111111 بمعرّف Telegram الرقمي للمستلم، لا اسم المستخدم.'},
+    a:{label:'🌐 للجميع',command:'/whispereveryone '+g+' 10 محتوى عام للمؤهلين',
+      hint:'قد يفتحه كل عضو مؤهل في الخاص بنفسه؛ لا ترسله إذا كان سريًا بينهم.'},
+    m:{label:'🛡️ للمشرفين',command:'/whisperadmins '+g+' 10 تنبيه المشرفين',
+      hint:'الرتبة تُراجع من Telegram عند الفتح وعند الإرسال، لا من الاسم.'},
+    t:{label:'👥 فريق محدد',command:'/whisperteam '+g+' 10 111111,222222 | النص',
+      hint:'استبدل القائمة بـ 1–20 معرف Telegram مفصولًا بفواصل. لا تظهر في المنشور العام.'},
+    q:{label:'❓ سؤال تعليمي',command:'/whisperquestion '+g+
+       ' 3 10 ما الإجابة؟ | الإجابة النموذجية',
+      hint:'يفتح المؤهل السؤال أولًا، ثم يطلب الإجابة من الخاص عبر /whisperanswer.'},
+    g:{label:'🎁 هدية تعليمية',command:'/whispergift '+g+
+       ' 3 10 دليل تعليمي | https://example.org/resource | اسم صاحب المورد | CC-BY-4.0',
+      hint:'يجب تقديم رابط HTTPS مباشر ومصدر النسب وإقرار ترخيص CC0-1.0 أو CC-BY-4.0 أو CC-BY-SA-4.0. فحص الحقوق ليس آليًا.'}
+   };
+   const selected=commands[mode];
+   if(!selected)return null;
+   return ui('<b>🧭 '+selected.label+'</b>\n'+
+    'المجموعة: <code>'+g+'</code>\n\n'+
+    'أرسل في خاص المالك الصيغة التالية بعد تعديل البيانات:\n'+
+    '<code>'+escape(selected.command)+'</code>\n\n'+selected.hint+
+    '\n\nالخطوة التالية: معاينة المسودة ثم اعتمادها، ثم موافقة مستقلة لإعلان المجموعة. '+
+    'لا تنشر هذه الشاشة محتوى ولا تحجز مقاعد.',
+    [[btn('↩️ تغيير النوع','wh:1:u:'+g)],
+     [btn('↩️ تغيير المجموعة','wh:1:b:0')],[list]]);
+  }
   const memberReviewPage=/^wh:1:t:(0|[1-9][0-9]?)$/u.exec(input);
   if(memberReviewPage){
    const drafts=await service.pendingMemberDrafts(actor),
@@ -283,6 +347,7 @@ export async function whisperOwnerScreen(
    if(page>0)nav.push(btn('⬅️ السابق','wh:1:l:'+(page-1)));
    if(page+1<pages)nav.push(btn('التالي ➡️','wh:1:l:'+(page+1)));
    if(nav.length)buttons.push(nav);
+   buttons.push([btn('🧭 دليل إنشاء همسة حسب النوع','wh:1:b:0')]);
    buttons.push([btn('📝 مسودات الطلاب بانتظار المراجعة','wh:1:t:0')]);
    buttons.push([btn('⚙️ إدارة المجموعات ومسودات الطلاب','wh:1:f:0')]);
    buttons.push([home]);
