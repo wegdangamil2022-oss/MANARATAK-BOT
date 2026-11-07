@@ -218,10 +218,12 @@ export function topicMonitorStats(s:BotState,p:Policy,owner:string,
  g:string,t:number,now:number):
  {matches:number;clear:number;byRule:{index:number;count:number}[];latestAt:number|null}|null{
  const current=ownerTopicMonitor(s,p,owner,g,t,now);
- if(!current||!time(now))return null;
+ const registration=registeredForumTopic(s,g,t,now);
+ if(!current||!registration||!time(now))return null;
  const marker=':forum-monitor:'+g+':'+t,keys=new Set<string>();
+ const since=Math.max(now-86_400_000,registration.registeredAt);
  const all=s.audit.filter(x=>x.updateKey.endsWith(marker)&&
-  x.at>=now-86_400_000&&x.at<=now);
+  x.at>=since&&x.at<=now);
  if(all.length>10_000)return null;
  let matches=0,clear=0,latestAt:number|null=null;
  const counts=new Map<number,number>();
