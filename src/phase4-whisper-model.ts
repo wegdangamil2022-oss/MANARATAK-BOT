@@ -2,7 +2,7 @@
  * A reservation never proves private delivery or a read receipt. An announcement
  * stores no text, user-supplied URL, secret key or outbound retry payload.
  */
-export type WhisperKind='FIRST_N'|'DIRECT'|'EVERYONE';
+export type WhisperKind='FIRST_N'|'DIRECT'|'EVERYONE'|'ADMINS';
 export interface WhisperMessage{
  id:string;chatId:string;chatVersion:number;creatorId:string;
  kind:WhisperKind;seats:number;recipientId?:string;text?:string;
@@ -81,9 +81,9 @@ export function validWhisperMessage(raw:unknown):raw is WhisperMessage{
   ['recipientId','text','approvedAt','closedAt','submittedByMember','approvedBy']))return false;
  const x=raw;
  if(!validId(x.id)||!validChat(x.chatId)||!validRevision(x.chatVersion)||
-  !validUser(x.creatorId)||!['FIRST_N','DIRECT','EVERYONE'].includes(String(x.kind))||
+  !validUser(x.creatorId)||!['FIRST_N','DIRECT','EVERYONE','ADMINS'].includes(String(x.kind))||
   !Number.isSafeInteger(x.seats)||
-  (x.kind==='EVERYONE'?x.seats!==0:
+  (x.kind==='EVERYONE'||x.kind==='ADMINS'?x.seats!==0:
     !(Number(x.seats)>=1&&Number(x.seats)<=20))||
   !validTime(x.createdAt)||!validTime(x.expiresAt)||
   Number(x.expiresAt)<=Number(x.createdAt)||
@@ -137,7 +137,7 @@ export function validWhisperState(raw:unknown):raw is WhisperState{
   new Set(reservations.map(c=>c.messageId+':'+c.memberId)).size!==reservations.length)return false;
  for(const m of messages){
   const claims=reservations.filter(c=>c.messageId===m.id);
-  if((m.kind!=='EVERYONE'&&claims.length>m.seats)||
+  if((m.kind!=='EVERYONE'&&m.kind!=='ADMINS'&&claims.length>m.seats)||
    m.status==='DRAFT'&&claims.length||
    claims.some(c=>m.approvedAt===undefined||c.at<m.approvedAt||c.at>m.expiresAt||
     m.status==='CLOSED'&&m.closedAt!==undefined&&c.at>m.closedAt||
