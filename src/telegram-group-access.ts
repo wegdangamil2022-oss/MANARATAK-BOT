@@ -50,5 +50,8 @@ export function privateGroupEpochDigest(state:BotState,scope:string):string{
   // An optional private welcome must be revoked if the owner changes its
   // source greeting or disables the feature before Telegram delivery.
   .update(JSON.stringify(state.phase4Community?.configs.filter(c=>c.chatId===scope)??[]))
+  // The private guide exposes an approved community-folder URL. Retract any
+  // queued guide when that published URL is disabled/replaced before dispatch.
+  .update(JSON.stringify(state.communityFolders?.filter(f=>f.chatId===scope)??[]))
   .digest('hex');
 }

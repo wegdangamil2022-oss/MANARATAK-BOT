@@ -668,15 +668,28 @@ export class TelegramUpdateApplication {
      try{denied=await this.authorizePrivateGroupBrowse(guidanceMemberCommand.chatId,actorId);}
      catch{return {status:'DENIED',reason:'PHASE4_GUIDANCE_MEMBERSHIP_UNAVAILABLE'};}
      if(denied!==null)return {status:'DENIED',reason:'PHASE4_GUIDANCE_'+denied};
+     // Private group material must retain its source/entitlement epoch
+     // through the durable outbox, not merely pass a planning-time check.
+     const scope=guidanceMemberCommand.chatId;
+     const beforeGuide=await this.opts.store.snapshot();
+     if(!this.opts.policy.canUseChat(beforeGuide,scope,'navigation'))
+      return {status:'DENIED',reason:'PHASE4_GUIDANCE_CHAT_REVOKED'};
+     const sourceEpoch=privateGroupEpochDigest(beforeGuide,scope);
      const html=await new Phase4GuidanceService(this.opts.store,this.opts.policy,
-      this.opts.community).member(guidanceMemberCommand.chatId,
-      guidanceMemberCommand.kind,guidanceMemberCommand.kind==='FAQ'?
+      this.opts.community).member(scope,guidanceMemberCommand.kind,
+      guidanceMemberCommand.kind==='FAQ'?
        guidanceMemberCommand.faqId:undefined,
       guidanceMemberCommand.kind==='FAQ_INDEX'||guidanceMemberCommand.kind==='NOTES_INDEX'?
        guidanceMemberCommand.page:undefined);
      if(!html)return {status:'DENIED',reason:'PHASE4_GUIDANCE_SOURCE_UNAVAILABLE'};
+     const afterGuide=await this.opts.store.snapshot(),now=this.clock();
+     if(privateGroupEpochDigest(afterGuide,scope)!==sourceEpoch||
+       !this.opts.policy.canUseChat(afterGuide,scope,'navigation')||
+       !Number.isSafeInteger(now)||now<0||now>8_640_000_000_000_000-120000)
+      return {status:'DENIED',reason:'PHASE4_GUIDANCE_SOURCE_CHANGED'};
      return {status:'APPLIED',reason:'PHASE4_GUIDANCE_MEMBER',
-      plan:this.plan(chatId,html)};
+      plan:this.plan(chatId,html),
+      privateGroupAccess:{actorId,scope,epoch:sourceEpoch,expiresAt:now+120000}};
     }
     // Stage 4 / 09:06 — the recipient's PRIVATE self-service preferences
     // and local seat requests. No Telegram group post, secret delivery or
