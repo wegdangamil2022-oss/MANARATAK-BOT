@@ -3,14 +3,16 @@ import type {BotStore,BotState} from './store.js';
 import type {Policy} from './policy.js';
 import type {OwnerInlineScreen} from './telegram-inline-owner.js';
 import {forumTopicGroupAccess,localForumTopics,
- forumTopicRegistrationProof,registerLocalForumTopic,validForumTopicTitle}
+ forumTopicRegistrationProof,registerLocalForumTopic,validForumTopicTitle,
+ forumTopicNote,forumTopicNoteProof,saveLocalForumTopicNote,validForumTopicNote}
  from './group-forum-topics.js';
 
 /** 01-05: local-only topic registration with private owner consent.
  * No Bot API send, createForumTopic, closeForumTopic or permission mutation.
  * The owner must confirm existence/permissions later via Telegram.
  */
-const PREFIX='group-forum:preview:',TTL=120_000,SIZE=8;
+const PREFIX='group-forum:preview:',NOTE_PREFIX='group-forum:note-preview:',
+ TTL=120_000,SIZE=8;
 const chat='(-[1-9][0-9]{0,15})',thread='([1-9][0-9]{0,9})',
  page='(0|[1-9][0-9]{0,2})',token='([A-Za-z0-9_-]{24})';
 const HOME=new RegExp('^ft:1:h:'+page+'$','u');
@@ -18,6 +20,8 @@ const GROUP=new RegExp('^ft:1:g:'+chat+':'+page+'$','u');
 const DETAIL=new RegExp('^ft:1:d:'+chat+':'+thread+'$','u');
 const CONFIRM=new RegExp('^ft:1:c:'+token+'$','u');
 const CANCEL=new RegExp('^ft:1:x:'+token+'$','u');
+const NOTE_CONFIRM=new RegExp('^ft:1:n:'+token+'$','u');
+const NOTE_CANCEL=new RegExp('^ft:1:z:'+token+'$','u');
 const clock=(t:unknown):t is number=>typeof t==='number'&&
  Number.isSafeInteger(t)&&t>=0&&t<=8_640_000_000_000_000-TTL;
 const person=(v:unknown):v is string=>typeof v==='string'&&
@@ -48,10 +52,29 @@ function parse(value:unknown):Pending|null{
   return null;
  return v as unknown as Pending;
 }
+interface PendingNote{
+ readonly group:string;readonly thread:number;readonly note:string;
+ readonly proof:string;readonly createdAt:number;readonly version:number;
+}
+function parseNote(value:unknown):PendingNote|null{
+ if(typeof value!=='string'||!value.startsWith(NOTE_PREFIX))return null;
+ let raw:unknown;
+ try{raw=JSON.parse(value.slice(NOTE_PREFIX.length));}catch{return null;}
+ if(!raw||typeof raw!=='object'||Array.isArray(raw))return null;
+ const p=raw as Record<string,unknown>;
+ if(Object.keys(p).sort().join(',')!=='createdAt,group,note,proof,thread,version'||
+  !id(p.group)||typeof p.thread!=='number'||!topicId(p.thread)||
+  !validForumTopicNote(p.note)||typeof p.proof!=='string'||
+  !/^[a-f0-9]{64}$/u.test(p.proof)||!clock(p.createdAt)||
+  typeof p.version!=='number'||!Number.isSafeInteger(p.version)||
+  p.version<1)return null;
+ return p as unknown as PendingNote;
+}
 export function validOwnerForumTopicRoute(value:unknown):boolean{
  return typeof value==='string'&&Buffer.byteLength(value,'utf8')<=64&&
   (HOME.test(value)||GROUP.test(value)||DETAIL.test(value)||
-   CONFIRM.test(value)||CANCEL.test(value));
+   CONFIRM.test(value)||CANCEL.test(value)||
+   NOTE_CONFIRM.test(value)||NOTE_CANCEL.test(value));
 }
 export class OwnerForumTopicEditor{
  constructor(private readonly store:BotStore,private readonly policy:Policy,
@@ -113,12 +136,17 @@ export class OwnerForumTopicEditor{
   const topics=localForumTopics(s,this.policy,actor,g,now);
   const topic=topics?.find(x=>x.threadId===t);
   if(!topic)return null;
+  const note=forumTopicNote(s,this.policy,actor,g,t,now);
+  if(note===null)return null;
   return ui('<b>🧩 بيانات موضوع محلي</b>\n'+
    'المجموعة: <code>'+g+'</code>\n'+
    'رقم الموضوع: <code>'+topic.threadId+'</code>\n'+
    'العنوان: '+esc(topic.title)+'\n'+
    'إصدار اعتماد المجموعة: '+topic.groupVersion+'\n'+
    'التسجيل (UTC): '+new Date(topic.registeredAt).toISOString().slice(0,16).replace('T',' ')+
+   '\nالملاحظة التحريرية: '+(note?esc(note.text):'لم تُعتمد ملاحظة بعد.')+
+   (note?'\nمراجعة الملاحظة المحلية: '+note.revision:'')+
+   '\nلإضافة ملاحظة: <code>/topicnote '+g+' '+t+' النص_التحريري</code>'+
    '\nلا يسمح هذا السجل بإرسال رسائل أو فرض سياسات مستقلة؛ يلزم التأكد من نوع المجموعة وصلاحية الموضوع الحية.',
    [[btn('↩️ مواضيع المجموعة','ft:1:g:'+g+':0)],
     [btn('🏠 لوحة المالك','mi:1:h')]]);
