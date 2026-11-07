@@ -15,6 +15,7 @@ import {TelegramRuleActions} from './telegram-rule-actions.js';
 import {validProtectionUsername} from './protection-rules.js';
 import {TelegramAdminRoomLinks} from './telegram-admin-room-links.js';
 import {OwnerForumTopicEditor} from './telegram-owner-forum-topics.js';
+import {TelegramForumTopicBroadcast} from './telegram-forum-topic-broadcast.js';
 import {forumTopicEducationMode} from './group-forum-topic-policy.js';
 import {publishedForumTopicNote} from './group-forum-note-publication.js';
 import {TelegramOncall,validOncallRoute} from './telegram-oncall.js';
@@ -713,6 +714,20 @@ export class TelegramUpdateApplication {
      return view?{status:'APPLIED',reason:'OWNER_FORUM_LOCAL_INVENTORY',
       plan:this.plan(event.actorId,view.text,undefined,view.keyboard)}:
       {status:'DENIED',reason:'OWNER_FORUM_UNAVAILABLE'};
+    }
+    if(event.kind==='private'&&event.actorId===event.chatId&&
+     !event.callbackData&&event.text.startsWith('/topicbroadcast')){
+     if(!this.opts.policy.isOwner(event.actorId)||event.edited||event.forwarded)
+      return {status:'DENIED',reason:'OWNER_FORUM_PRIVATE_ORIGINAL_ONLY'};
+     const parsed=/^\/topicbroadcast (-[1-9][0-9]{0,15}) ([1-9][0-9]{0,9}) ([A-Za-z0-9][A-Za-z0-9_-]{0,63})$/u.exec(event.text);
+     if(!parsed)return {status:'DENIED',reason:'OWNER_FORUM_BROADCAST_INVALID'};
+     const screen=await new TelegramForumTopicBroadcast(
+      this.opts.store,this.opts.policy,this.opts.moderationRights?.gateway,
+      this.opts.moderationRights?.safety,this.clock
+     ).prepare(event.actorId,parsed[1]!,Number(parsed[2]),parsed[3]!);
+     return screen?{status:'APPLIED',reason:'OWNER_FORUM_BROADCAST_PREVIEW',
+      plan:this.plan(event.actorId,screen.text,undefined,screen.keyboard)}:
+      {status:'DENIED',reason:'OWNER_FORUM_BROADCAST_UNAVAILABLE'};
     }
     if(event.kind==='private'&&event.actorId===event.chatId&&
      !event.callbackData&&event.text.startsWith('/topicnote')){
@@ -1995,7 +2010,8 @@ export class TelegramUpdateApplication {
      /^(?:mi:1:|ac:1:|oi:1:|ou:1:|sc:1:|cf:1:|ec:1:|oc:1:|od:1:|gw:1:|gt:1:|gs:1:|gb:1:|nw:1:|ft:1:|gp:1:|of:1:|ol:1:|st:1:|ps:1:|pr:1:|pd:1:|pq:1:|mr:1:|mp:1:|c_)/u.test(callback)||
      event.text==='/ownerinline'||event.text==='/ownerlegacy'||event.text==='/ownerrecover'||
      event.text==='/topics'||event.text.startsWith('/topicregister')||
-     event.text.startsWith('/topicnote')||isOwnerMenuText(event.text)||(event.document!==undefined&&handled.plan?.inlineMarkup!==undefined)||
+     event.text.startsWith('/topicnote')||
+     event.text.startsWith('/topicbroadcast')||isOwnerMenuText(event.text)||(event.document!==undefined&&handled.plan?.inlineMarkup!==undefined)||
      handled.reason==='CATEGORY_TEXT_PREVIEW'||handled.reason==='NETWORK_TEXT_PREVIEW'||handled.reason==='DELEGATION_TEXT_PREVIEW'||handled.reason==='STUDIO_DRAFT_SAVED');
     if(ownerScreen&&handled.plan&&!handled.adminUIAccess){
      const state=await this.opts.store.snapshot(),now=this.clock(),epoch=studioInput?studioPreviewEpoch(state,this.opts.policy,event.actorId,now):protectionUIEpoch(state,this.opts.policy,event.actorId,now);
