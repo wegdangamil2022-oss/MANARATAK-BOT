@@ -3,6 +3,7 @@ import {validAdminUIAccess,protectionUIEpoch,ADMIN_UI_TTL_MS} from './protection
 import {createHash,randomUUID} from 'node:crypto';
 import {BotStore,type BotState,type TelegramReplyJob} from './store.js';
 import {Policy} from './policy.js';
+import {forumTopicEducationMode} from './group-forum-topic-policy.js';
 import type {TelegramReplyPlan} from './telegram-transport.js';
 import {isValidTelegramReplyKeyboard} from './telegram-menu.js';
 import {isValidTelegramInlineKeyboard} from './telegram-inline-owner.js';
@@ -149,6 +150,15 @@ const validManualReview=(v:unknown):boolean=>{
   typeof r.reviewedAt==='number'&&Number.isSafeInteger(r.reviewedAt)&&r.reviewedAt>=0;
 };
 
+/** Only the approved inline library UI carries gl:1 callbacks.
+ * Other forum rules, moderation and subscription replies are unaffected. */
+function isForumEducationalLibraryReply(job:TelegramReplyJob):boolean{
+ const plan=job.plan;
+ return !!plan&&plan.chatId.startsWith('-')&&
+  plan.messageThreadId!==undefined&&
+  plan.inlineMarkup?.inline_keyboard.some(row=>row.some(b=>
+   b.callback_data.startsWith('gl:1:')))===true;
+}
 const validGroupReplyAccess=(v:unknown):v is NonNullable<TelegramReplyJob['groupQuestionAccess']>=>{
  if(!v||typeof v!=='object'||Array.isArray(v))return false;
  const r=v as Record<string,unknown>;
@@ -364,6 +374,10 @@ export class TelegramReplyDispatcher {
    job.plan!.chatId,actor=access.actorId;
   let allowed=false;
   try{
+   const mode=isForumEducationalLibraryReply(job)?
+    forumTopicEducationMode(snap,this.policy,groupId,
+     job.plan!.messageThreadId!,this.clock()):'INHERIT';
+   if(mode!=='INHERIT')return {access,kind,allowed:false};
    if(this.clock()<access.expiresAt&&
       (kind==='FAQ'?this.policy.mayAskGroup(snap,groupId,actor,true):
        this.policy.canUseChat(snap,groupId,'navigation'))&&
@@ -447,7 +461,12 @@ export class TelegramReplyDispatcher {
    const community=job.communityAccess;
    const communityDenied=Boolean(community&&(community.actorId!==plan.chatId||!Number.isSafeInteger(job.queuedAt)||now<job.queuedAt!||now>=community.expiresAt||community.expiresAt>job.queuedAt!+ADMIN_UI_TTL_MS||communityFolderEpoch(s,this.policy,community.actorId)!==community.epoch));
    const closeDenied=Boolean(job.communityClose&&!matchesCommunityClose(s,this.policy,job.communityClose,now));
-   const forbidden=closeDenied||noGroupProof||noPrivateProvenance||adminDenied||libraryDenied||communityDenied||(!!access&&(
+   // Revalidate inside the exclusive durable claim, after asynchronous
+   // subscription checks, before queuing any Telegram send.
+   const forumEducationDenied=isForumEducationalLibraryReply(job)&&
+    forumTopicEducationMode(s,this.policy,plan.chatId,
+     plan.messageThreadId!,now)!=='INHERIT';
+   const forbidden=forumEducationDenied||closeDenied||noGroupProof||noPrivateProvenance||adminDenied||libraryDenied||communityDenied||(!!access&&(
     !groupPrecheck?.allowed||
     groupPrecheck.kind!==accessKind||
     groupPrecheck.access.actorId!==access.actorId||
