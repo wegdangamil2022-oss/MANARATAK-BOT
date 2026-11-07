@@ -1,4 +1,5 @@
 import {Phase4WhisperService,type WhisperDraftInput} from './phase4-whispers.js';
+import {validWhisperGiftResourceUrl} from './phase4-whisper-model.js';
 import type {OwnerInlineScreen,TelegramInlineKeyboard} from './telegram-inline-owner.js';
 
 const hex='[a-f0-9]{24}';
@@ -29,6 +30,20 @@ export function parseWhisperOwnerCommand(text:string):WhisperOwnerCommand|null{
   enabled:policy[2]==='on'};
  const reports=/^\/whisperreports (-[1-9][0-9]{0,15})$/u.exec(text);
  if(reports&&group(reports[1]!))return {kind:'REPORTS',chatId:reports[1]!};
+ const question=/^\/whisperquestion (-[1-9][0-9]{0,15}) ([1-9]|1[0-9]|20) ([1-9]|[1-5][0-9]|60) ([^\r\n|]{1,800}) \| ([^\r\n|]{1,800})$/u.exec(text);
+ if(question&&group(question[1]!))
+  return {kind:'CREATE',chatId:question[1]!,input:{
+   kind:'FIRST_N',seats:Number(question[2]),durationMinutes:Number(question[3]),
+   purpose:'QUESTION',text:question[4]!.trim(),answerText:question[5]!.trim()
+  }};
+ const gift=/^\/whispergift (-[1-9][0-9]{0,15}) ([1-9]|1[0-9]|20) ([1-9]|[1-5][0-9]|60) ([^\r\n|]{1,400}) \| (https:\/\/[^\r\n|\s]{1,350}) \| ([^\r\n|]{3,120}) \| (CC0-1\.0|CC-BY-4\.0|CC-BY-SA-4\.0)$/u.exec(text);
+ if(gift&&group(gift[1]!)&&validWhisperGiftResourceUrl(gift[5]))
+  return {kind:'CREATE',chatId:gift[1]!,input:{
+   kind:'FIRST_N',seats:Number(gift[2]),durationMinutes:Number(gift[3]),
+   purpose:'GIFT',text:gift[4]!.trim(),
+   gift:{resourceUrl:gift[5]!,credit:gift[6]!.trim(),
+    license:gift[7]! as 'CC0-1.0'|'CC-BY-4.0'|'CC-BY-SA-4.0'}
+  }};
  const first=/^\/whisperfirst (-[1-9][0-9]{0,15}) ([0-9]{1,2}) ([0-9]{1,2}) ([^\r\n]{1,800})$/u.exec(text);
  if(first&&group(first[1]!)&&Number(first[2])>=1&&Number(first[2])<=20&&
   Number(first[3])>=1&&Number(first[3])<=60)
@@ -65,15 +80,25 @@ async function detail(service:Phase4WhisperService,actor:string,id:string):
   row.kind==='ADMINS'?'لمشرفي Telegram المعتمدين فقط':
   'إلى مستلم واحد مُحدد';
  const publication=await service.announcementStatus(actor,id);
+ const educational=row.purpose==='QUESTION'?'❓ سؤال تعليمي مع إجابة خاصة لاحقة':
+  row.purpose==='GIFT'?'🎁 مورد تعليمي؛ الترخيص إقرار من المالك':'💌 رسالة عادية';
  const text='<b>💌 معاينة همسة خاصة للمالك فقط</b>\n'+
   'المنشئ: '+(row.submittedByMember?'✉️ طالب، بانتظار مراجعتك':'🛡️ المالك')+
   (row.submittedByMember?' · <code>'+row.creatorId+'</code>':'')+'\n'+
   'المجموعة: <code>'+row.chatId+'</code>\n'+
   'الوضع: '+type+'\n'+
+  'الغرض: '+educational+'\n'+
   'الحالة: '+names[row.status]+'\n'+
   'تاريخ الانتهاء: '+new Date(row.expiresAt).toISOString()+'\n'+
   (row.status==='DRAFT'?
-   '\n<b>نص المسودة:</b>\n'+escape(row.text??'')+'\n':
+   '\n<b>نص المسودة:</b>\n'+escape(row.text??'')+'\n'+
+   (row.purpose==='QUESTION'?
+    '\n<b>نموذج الإجابة الخاص:</b>\n'+escape(row.answerText??'')+'\n':'')+
+   (row.purpose==='GIFT'&&row.gift?
+    '\n<b>المورد:</b> '+escape(row.gift.resourceUrl)+
+    '\n<b>النسب:</b> '+escape(row.gift.credit)+
+    '\n<b>ترخيص صرّح به المالك:</b> '+row.gift.license+
+    '\n⚠️ لم يجر تحقق مستقل من حق نشر هذا المورد.\n':'') :
    '\nتم إخفاء النص عن صفحات الحالة؛ لا يظهر في رسالة مجموعة.\n')+
   '\nحالة إعلان Telegram: '+(publication==='NOT_POSTED'?'لم يُطلب النشر':
    publication==='QUEUED'?'بانتظار الإرسال':publication==='SENDING'?
@@ -252,6 +277,8 @@ export async function whisperOwnerScreen(
     '<code>/whisperdirect -1001234 200 10 نص الهمسة</code>\n'+
     '<code>/whispereveryone -1001234 10 نص تعليمي عام</code>\n'+
     '<code>/whisperadmins -1001234 10 تنبيه للمشرفين</code>\n'+
+    '<code>/whisperquestion -1001234 3 10 السؤال؟ | الإجابة</code>\n'+
+    '<code>/whispergift -1001234 3 10 هدية تعليمية | https://example.org/open | نسب المصدر | CC-BY-4.0</code>\n'+
     'الأرقام: معرّف مجموعة · المقاعد أو المستلم حسب النوع · مدة بالدقائق (1–60).\n'+
     'نمط «للجميع» ليس سريًا بين الأعضاء؛ يفتح كل شخص نسخته في الخاص.\n'+
     'وللمشرفين لا يكفي اللقب؛ يجب التحقق من صفة الإدارة في Telegram.\n'+
@@ -272,12 +299,16 @@ export async function whisperOwnerScreen(
      message.kind==='EVERYONE'?'جميع المؤهلين، وليس سرًا بين الجميع':
      message.kind==='ADMINS'?'مشرفو Telegram المعتمدون فقط':
      'أول '+message.seats)+
+    '\nالغرض: '+(message.purpose==='QUESTION'?'سؤال وإجابة خاصة':
+     message.purpose==='GIFT'?'هدية تعليمية برابط وترخيص مُصرح به':'رسالة عادية')+
     '\nموعد الانتهاء: '+new Date(message.expiresAt).toISOString()+
     (message.kind==='EVERYONE'?
       '\n⚠️ قد يفتحها جميع أعضاء المجموعة المؤهلين فرديًا؛ محدد فقط بسعة التشغيل.':
      message.kind==='ADMINS'?
       '\n🛡️ يُعاد التحقق من صلاحية المشرف عبر Telegram عند الفتح وعند الإرسال.':'')+
     '\n\nسيُنشر ملصق بلا أي نص سري أو هوية مستلم، وزر فتح ينقل إلى خاص البوت. '+
+    (message.purpose==='GIFT'?
+     '⚠️ إقرار الترخيص من المالك؛ لم نتحقق آليًا من حقوق المورد. ':'')+
     'يتحقق البوت هناك من العضوية والموافقة قبل كشف المحتوى. '+
     'نتيجة إرسال Telegram غير مضمونة؛ لا نعيد إرسال العملية إذا كانت نتيجتها مجهولة.',
     [[btn('✅ الموافقة وطلب إعلان Telegram','wh:1:s:'+message.id)],

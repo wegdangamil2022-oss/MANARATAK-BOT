@@ -7,8 +7,11 @@ export type WhisperPostResult=WhisperAnnouncement['status']|'NOT_FOUND'|'PAUSED'
 const idOk=(s:string)=>/^[a-f0-9]{24}$/u.test(s);
 const groupOk=(s:string)=>/^-[1-9]\d{0,15}$/u.test(s)&&Number.isSafeInteger(Number(s));
 const clockOk=(n:number)=>Number.isSafeInteger(n)&&n>=0&&n<8_640_000_000_000_000-600000;
-const label=(kind:string,seats:number,expiresAt:number):string=>
- '<b>💌 همسة خاصة في مجموعة منارتك</b>\n'+
+const label=(kind:string,seats:number,expiresAt:number,
+ purpose?:'QUESTION'|'GIFT'):string=>
+ '<b>'+(purpose==='QUESTION'?'❓ همسة سؤال تعليمي':
+   purpose==='GIFT'?'🎁 هدية مورد تعليمي':'💌 همسة خاصة')+
+ ' في مجموعة منارتك</b>\n'+
  (kind==='DIRECT'?'📩 لمستلم محدد':
   kind==='EVERYONE'?'🌐 متاحة لكل أعضاء المجموعة المؤهلين؛ يفتحها كل شخص في الخاص بنفسه':
   kind==='ADMINS'?'🛡️ للمشرفين الفعليين على المجموعة بعد تحقق Telegram':
@@ -17,6 +20,8 @@ const label=(kind:string,seats:number,expiresAt:number):string=>
  '\n🔒 النص لا يظهر في المجموعة؛ يلزم فتح الخاص والتحقق من العضوية والموافقة.'+
  (kind==='EVERYONE'?'\n⚠️ ليست رسالة سرية لمستلم واحد؛ قد يفتحها جميع المؤهلين، ضمن السعة التقنية للخدمة.':
    kind==='ADMINS'?'\n🛡️ اسم المشرف أو لقبه لا يكفي؛ يلزم تحقق Telegram من الصفة.':'')+
+ (purpose==='QUESTION'?'\n💡 الإجابة لا تُرسل إلا بطلب خاص مستقل من المستلم المؤهل.':
+   purpose==='GIFT'?'\n📚 رابط المورد ونسبه ورخصته المعلنة تظهر في الخاص فقط.':'')+
  '\nلا تعدّ المقاعد دليلًا على قراءة أو تسليم، ولا يضمن النظام منع لقطات الشاشة.';
 
 export interface WhisperAnnouncementGateway{
@@ -156,7 +161,7 @@ export class Phase4WhisperAnnouncementDispatcher{
    if(!rights){item.status='FAILED_CONFIRMED';return {status:'FAILED_CONFIRMED' as const};}
    item.status='SENDING';item.attemptId=randomBytes(12).toString('hex');
    return {status:'SEND' as const,chatId:item.chatId,messageId:item.messageId,
-    body:label(m!.kind,m!.seats,m!.expiresAt),attemptId:item.attemptId};
+    body:label(m!.kind,m!.seats,m!.expiresAt,m!.purpose),attemptId:item.attemptId};
   });
   if(claim.status!=='SEND')return claim.status;
   let response:Awaited<ReturnType<WhisperAnnouncementGateway['post']>>=
