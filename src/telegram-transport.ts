@@ -1982,7 +1982,15 @@ export class TelegramUpdateApplication {
      handled.plan?.chatId===event.chatId&&
      handled.plan.editMessageId===undefined&&
      handled.plan.messageThreadId===undefined){
-     handled={...handled,plan:{...handled.plan,messageThreadId:event.topicId}};
+     // The durable reply schema requires a validated GENERAL-group access
+     // witness for a thread destination. Never create an unsendable plan.
+     if(handled.groupMenuAccess&&!handled.groupQuestionAccess)
+      handled={...handled,plan:{...handled.plan,messageThreadId:event.topicId}};
+     else{
+      const {plan:discarded,...withoutPlan}=handled;
+      handled={...withoutPlan,status:'DENIED',
+       reason:'FORUM_TOPIC_ROUTING_PROOF_MISSING'};
+     }
     }
     const audit:AuditRecord={updateKey:key,decision:handled.status==='APPLIED'?'ALLOW':handled.status==='DENIED'?'DENY':'NOOP',reason:handled.reason,policyVersion:0,at:this.clock()};
     // Commit the decision and outbound reply intent in one durable transaction.
