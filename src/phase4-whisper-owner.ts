@@ -2,7 +2,7 @@ import {Phase4WhisperService,type WhisperDraftInput} from './phase4-whispers.js'
 import type {OwnerInlineScreen,TelegramInlineKeyboard} from './telegram-inline-owner.js';
 
 const hex='[a-f0-9]{24}';
-const route=new RegExp('^wh:1:(?:h|l:(?:0|[1-9][0-9]?)|[vaxps]:'+hex+'|c:'+hex+':[12]|r:-[1-9][0-9]{0,15}|[zy]:'+hex+')$','u');
+const route=new RegExp('^wh:1:(?:h|l:(?:0|[1-9][0-9]?)|[vaxps]:'+hex+'|c:'+hex+':[12]|r:-[1-9][0-9]{0,15}|[zykj]:'+hex+'|f:(?:0|[1-9][0-9]?)|g:-[1-9][0-9]{0,15}|o:-[1-9][0-9]{0,15}:[01])$','u');
 export const validWhisperOwnerRoute=(s:unknown):s is string=>
  typeof s==='string'&&Buffer.byteLength(s,'utf8')<=64&&route.test(s);
 const escape=(s:string)=>s.replace(/&/gu,'&amp;').replace(/</gu,'&lt;')
@@ -16,13 +16,17 @@ const list=btn('📋 قائمة الهمسات','wh:1:h');
 export type WhisperOwnerCommand=
  |{kind:'CREATE';chatId:string;input:WhisperDraftInput}
  |{kind:'LIST'}
- |{kind:'REPORTS';chatId:string};
+ |{kind:'REPORTS';chatId:string}
+ |{kind:'SETTINGS';chatId:string;enabled:boolean};
 const user=(value:string)=>/^[1-9][0-9]{0,15}$/u.test(value)&&
  Number.isSafeInteger(Number(value));
 const group=(value:string)=>/^-[1-9][0-9]{0,15}$/u.test(value)&&
  Number.isSafeInteger(Number(value));
 export function parseWhisperOwnerCommand(text:string):WhisperOwnerCommand|null{
  if(text==='/whispers')return {kind:'LIST'};
+ const policy=/^\/whispermembers (-[1-9][0-9]{0,15}) (on|off)$/u.exec(text);
+ if(policy&&group(policy[1]!))return {kind:'SETTINGS',chatId:policy[1]!,
+  enabled:policy[2]==='on'};
  const reports=/^\/whisperreports (-[1-9][0-9]{0,15})$/u.exec(text);
  if(reports&&group(reports[1]!))return {kind:'REPORTS',chatId:reports[1]!};
  const first=/^\/whisperfirst (-[1-9][0-9]{0,15}) ([0-9]{1,2}) ([0-9]{1,2}) ([^\r\n]{1,800})$/u.exec(text);
@@ -49,6 +53,8 @@ async function detail(service:Phase4WhisperService,actor:string,id:string):
   'إلى مستلم واحد مُحدد';
  const publication=await service.announcementStatus(actor,id);
  const text='<b>💌 معاينة همسة خاصة للمالك فقط</b>\n'+
+  'المنشئ: '+(row.submittedByMember?'✉️ طالب، بانتظار مراجعتك':'🛡️ المالك')+
+  (row.submittedByMember?' · <code>'+row.creatorId+'</code>':'')+'\n'+
   'المجموعة: <code>'+row.chatId+'</code>\n'+
   'الوضع: '+type+'\n'+
   'الحالة: '+names[row.status]+'\n'+
@@ -84,6 +90,71 @@ export async function whisperOwnerScreen(
    return detail(service,actor,d.id);
   }
   if(cmd?.kind==='REPORTS')input='wh:1:r:'+cmd.chatId;
+  if(cmd?.kind==='SETTINGS')input='wh:1:o:'+cmd.chatId+':'+(cmd.enabled?'1':'0');
+  const groupPage=/^wh:1:f:(0|[1-9][0-9]?)$/u.exec(input);
+  if(groupPage){
+   const groups=await service.ownerGroups(actor),page=Number(groupPage[1]),
+    pages=Math.max(1,Math.ceil(groups.length/8));
+   if(page>=pages)return null;
+   const buttons=groups.slice(page*8,page*8+8).map(id=>[
+    btn('👥 مجموعة '+id,'wh:1:g:'+id)]);
+   const nav:{text:string;callback_data:string}[]=[];
+   if(page>0)nav.push(btn('⬅️ السابق','wh:1:f:'+(page-1)));
+   if(page+1<pages)nav.push(btn('التالي ➡️','wh:1:f:'+(page+1)));
+   if(nav.length)buttons.push(nav);
+   buttons.push([list],[home]);
+   return ui('<b>⚙️ إعدادات الهمسات للمجموعات</b>\n'+
+    'المجموعات المعتمدة: '+groups.length+' · صفحة '+(page+1)+'/'+pages+
+    '\nمسودات الطلاب مغلقة افتراضيًا، ولا تنشر رسالة دون مراجعة المالك.',
+    buttons);
+  }
+  const groupSettings=/^wh:1:g:(-[1-9][0-9]{0,15})$/u.exec(input);
+  if(groupSettings){
+   const groupId=groupSettings[1]!,settings=await service.groupSettings(actor,groupId);
+   if(!settings)return null;
+   return ui('<b>💌 09:06 — إعدادات المجموعة</b>\n'+
+    'المجموعة: <code>'+groupId+'</code>\n'+
+    'إنشاء مسودات الهمسات من الطلاب: '+
+    (settings.memberDraftsEnabled?'✅ مفعّل':'⛔ متوقف')+
+    '\nنسخة السياسة: '+settings.version+
+    '\n\nعند التفعيل: يسمح فقط بمسودات DIRECT أو لأول 1–3، حتى 500 حرف و10 دقائق،'+
+    ' بحد 2 لكل طالب و12 لكل مجموعة في الساعة.\n'+
+    'لا نشر قبل مراجعة المالك واعتماد إعلان منفصل.\n'+
+    'إيقاف الميزة يسحب نصوص مسودات الطلاب غير المعتمدة.\n\n'+
+    'أوامر الطلاب في الخاص: /whispersend و/whisperfirstsend',
+    [[btn(settings.memberDraftsEnabled?'⛔ معاينة إيقاف مسودات الطلاب':
+      '✅ معاينة تفعيل مسودات الطلاب',
+      'wh:1:o:'+groupId+':'+(settings.memberDraftsEnabled?'0':'1'))],
+     [btn('🚩 البلاغات','wh:1:r:'+groupId)],
+     [btn('↩️ المجموعات','wh:1:f:0')],[list]]);
+  }
+  const settingPreview=/^wh:1:o:(-[1-9][0-9]{0,15}):([01])$/u.exec(input);
+  if(settingPreview){
+   const groupId=settingPreview[1]!,enabled=settingPreview[2]==='1',
+    settings=await service.groupSettings(actor,groupId);
+   if(!settings||settings.memberDraftsEnabled===enabled)return null;
+   const id=await service.prepareGroupSettings(actor,groupId,enabled);
+   return ui('<b>🔐 تأكيد مستقل لتغيير استقبال همسات الطلاب</b>\n'+
+    'المجموعة: <code>'+groupId+'</code>\n'+
+    'التغيير: '+(enabled?'تفعيل المسودات المدققة':'إيقاف قبول المسودات الجديدة')+
+    '\nالقرار ينتهي بعد دقيقتين وتُراجع صلاحية المجموعة والإصدار من جديد.'+
+    (enabled?'\nكل مسودة طالب تحتاج مراجعة المالك ثم موافقة ثانية للنشر.':
+    '\nسيُحذف محتوى المسودات الطلابية غير المعتمدة في هذه المجموعة.'),
+    [[btn('✅ اعتماد سياسة المجموعة','wh:1:k:'+id)],
+     [btn('❌ إلغاء دون تغيير','wh:1:j:'+id)],
+     [btn('↩️ إعدادات المجموعة','wh:1:g:'+groupId)]]);
+  }
+  const settingDecision=/^wh:1:([kj]):([a-f0-9]{24})$/u.exec(input);
+  if(settingDecision){
+   if(settingDecision[1]==='j'){
+    const cancelled=await service.cancelGroupSettings(actor,settingDecision[2]!);
+    return cancelled?ui('أُلغي طلب الإعداد دون أي تغيير.',[[list]]):null;
+   }
+   const done=await service.confirmGroupSettings(actor,settingDecision[2]!);
+   return ui('✅ حُفظ إعداد مسودات الطلاب للمجموعة <code>'+done.chatId+'</code>\n'+
+    (done.memberDraftsEnabled?'الاستقبال مفعل مع مراجعة المالك.':'استقبال المسودات متوقف.'),
+    [[btn('↩️ إعدادات المجموعة','wh:1:g:'+done.chatId)],[list]]);
+  }
   const reportsInput=/^wh:1:r:(-[1-9][0-9]{0,15})$/u.exec(input);
   if(reportsInput){
    const reports=await service.reports(actor,reportsInput[1]!);
@@ -138,6 +209,7 @@ export async function whisperOwnerScreen(
    if(page>0)nav.push(btn('⬅️ السابق','wh:1:l:'+(page-1)));
    if(page+1<pages)nav.push(btn('التالي ➡️','wh:1:l:'+(page+1)));
    if(nav.length)buttons.push(nav);
+   buttons.push([btn('⚙️ إدارة المجموعات ومسودات الطلاب','wh:1:f:0')]);
    buttons.push([home]);
    return ui('<b>💌 الهمسات الخاصة — القسم 09:06</b>\n'+
     'إنشاء المسودة من خاص المالك فقط:\n'+
