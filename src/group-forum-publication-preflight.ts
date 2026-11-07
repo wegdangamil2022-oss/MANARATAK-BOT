@@ -14,6 +14,7 @@ export interface ForumTopicEducationalSourcePreview{
  readonly groupVersion:number;readonly topicPaused:boolean;
  readonly categoryCount:number;readonly resourceCount:number;
  readonly approvedForBroadcastCount:number;
+ readonly page:number;readonly pages:number;
  readonly titles:readonly string[];
  readonly sources:readonly {id:string;title:string;approvedForBroadcast:boolean}[];
  readonly epoch:string;readonly ownerAuthorized:boolean;
@@ -27,9 +28,10 @@ const allowedText=(s:string)=>Array.from(s.replace(
  /[\u0000-\u001f\u007f-\u009f\u202a-\u202e\u2066-\u2069]/gu,' ')
  ).slice(0,80).join('');
 export function previewForumTopicEducationalSources(s:BotState,p:Policy,
- owner:string,chat:string,thread:number,now:number):
+ owner:string,chat:string,thread:number,now:number,page=0):
  ForumTopicEducationalSourcePreview|null{
- if(!validTime(now)||!validTopic(thread))return null;
+ if(!validTime(now)||!validTopic(thread)||!Number.isSafeInteger(page)||
+  page<0||page>999)return null;
  const topics=localForumTopics(s,p,owner,chat,now);
  const topic=topics?.find(x=>x.threadId===thread);
  if(!topic||!p.canUseChat(s,chat,'navigation')||
@@ -58,8 +60,10 @@ export function previewForumTopicEducationalSources(s:BotState,p:Policy,
   r.publicationText.trim().length>=4&&
   typeof r.publicationTextReviewedBy==='string'&&
   /^[1-9][0-9]{0,15}$/u.test(r.publicationTextReviewedBy);
+ const pages=Math.max(1,Math.ceil(resources.length/8));
+ if(page>=pages)return null;
  const selected=resources.sort((a,b)=>a.title.localeCompare(b.title)||
-  a.id.localeCompare(b.id)).slice(0,8);
+  a.id.localeCompare(b.id)).slice(page*8,(page+1)*8);
  const titles=selected.map(r=>allowedText(r.title));
  const sources=selected.map(r=>({id:r.id,title:allowedText(r.title),
   approvedForBroadcast:approvedForBroadcast(r)}));
@@ -67,7 +71,8 @@ export function previewForumTopicEducationalSources(s:BotState,p:Policy,
   groupVersion:topic.groupVersion,topicPaused:mode==='PAUSED',
   categoryCount:available.length,resourceCount:resources.length,
   approvedForBroadcastCount:resources.filter(approvedForBroadcast).length,
-  titles,sources,epoch:groupMenuEpochDigest(s,chat,thread),ownerAuthorized:true,
+  titles,sources,page,pages,
+  epoch:groupMenuEpochDigest(s,chat,thread),ownerAuthorized:true,
   locallyEligible:mode==='INHERIT'&&resources.length>0,
   disclaimer:'NO_TELEGRAM_DESTINATION_PROOF'};
 }
