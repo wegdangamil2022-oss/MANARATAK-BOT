@@ -750,7 +750,8 @@ export class TelegramUpdateApplication {
         reservationId:secret.reservationId,
         messageRevision:secret.messageRevision,
         consentRevision:secret.consentRevision,
-        chatVersion:secret.chatVersion,expiresAt:secret.expiresAt}};
+        chatVersion:secret.chatVersion,expiresAt:secret.expiresAt,
+        view:secret.view}};
      }
      return {status:'APPLIED',reason:'WHISPER_MEMBER_SELF_SERVICE',
       plan:this.plan(chatId,screen.text)};

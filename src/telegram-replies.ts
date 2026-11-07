@@ -161,9 +161,10 @@ const validPrivateGroupAccess=(v:unknown):v is NonNullable<TelegramReplyJob['pri
 const validWhisperAccess=(v:unknown):v is NonNullable<TelegramReplyJob['whisperAccess']>=>{
  if(!v||typeof v!=='object'||Array.isArray(v))return false;
  const a=v as Record<string,unknown>;
- return Object.keys(a).length===6&&
+ return Object.keys(a).length===(a.view===undefined?6:7)&&
   Object.keys(a).every(k=>['whisperId','reservationId','messageRevision',
-    'consentRevision','chatVersion','expiresAt'].includes(k))&&
+    'consentRevision','chatVersion','expiresAt','view'].includes(k))&&
+  (a.view===undefined||['CONTENT','ANSWER'].includes(String(a.view)))&&
   typeof a.whisperId==='string'&&/^[a-f0-9]{24}$/u.test(a.whisperId)&&
   typeof a.reservationId==='string'&&/^[a-f0-9]{24}$/u.test(a.reservationId)&&
   ['messageRevision','consentRevision','chatVersion'].every(k=>
@@ -449,6 +450,11 @@ export class TelegramReplyDispatcher {
      now>=whisper.expiresAt||m.chatId!==whisperScope||
      m.chatVersion!==whisper.chatVersion||
      m.revision!==whisper.messageRevision||
+     (whisper.view==='ANSWER'&&
+       (m.purpose!=='QUESTION'||!m.answerText))||
+     (whisper.view==='CONTENT'&&
+       (m.purpose==='QUESTION'&&!m.answerText||
+        m.purpose==='GIFT'&&!m.gift))||
      announcements.length!==1||consents.length!==1||
      !consents[0]!.enabled||consents[0]!.revision!==whisper.consentRevision||
      consents[0]!.chatVersion!==whisper.chatVersion||

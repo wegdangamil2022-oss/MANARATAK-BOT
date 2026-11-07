@@ -142,7 +142,8 @@ export interface TelegramReplyJob {
   * Always deleted together with the private plan before Bot API send.
   */
  whisperAccess?:{whisperId:string;reservationId:string;messageRevision:number;
-  consentRevision:number;chatVersion:number;expiresAt:number};
+  consentRevision:number;chatVersion:number;expiresAt:number;
+  view?:'CONTENT'|'ANSWER'};
  /** Ephemeral administrative view witness, removed before any outbound attempt. */
  adminUIAccess?:AdminUIAccess;
  /** Short-lived witness for private inline library contents. */
