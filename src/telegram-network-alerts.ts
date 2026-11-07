@@ -166,7 +166,7 @@ export class TelegramNetworkAlertEditor{
    'حالة الاشتراكات: بلاغات '+status(data.subscriptions.w)+
    '، مراجعات '+status(data.subscriptions.r)+
    '، نسخ '+status(data.subscriptions.s)+'\n'+
-   'الصمت الحالي: '+(data.silenceUntil>now?'حتى '+new Date(data.silenceUntil).toISOString().slice(0,16)+' UTC':'غير مفعّل')+'\n'+
+   'الصمت الحالي: '+(data.silenceUntil>now?'حتى '+new Date(data.silenceUntil).toISOString().slice(0,16)+' UTC':'غير مفعّل')+'\n'+   'الصمت اليومي المتكرر: '+dailyQuietLabel(data.dailyQuiet)+'\n'+
    'هذه أحدث حالات الأحداث المحلية المرئية، وليست تاريخ جميع انتقالاتها. '+
    'لا يعرض الملخص هويات الطلاب أو الأدلة أو تفاصيل المخالفات ولا يرسل أي رسالة تلقائيًا.',
    [[btn('🔄 تحديث الملخص','na:1:q:'+network+':'+chat+':'+hours)],
