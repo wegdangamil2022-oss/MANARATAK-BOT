@@ -1,11 +1,12 @@
 import {randomBytes} from 'node:crypto';
 import {BotStore,type BotState} from './store.js';
 import {Policy} from './policy.js';
-import {emptyWhisperState,type WhisperKind,type WhisperMessage,
- type WhisperState} from './phase4-whisper-model.js';
+import {emptyWhisperState,validWhisperGift,type WhisperGift,type WhisperPurpose,
+ type WhisperKind,type WhisperMessage,type WhisperState} from './phase4-whisper-model.js';
 
 export type WhisperDraftInput={
- kind:WhisperKind;seats?:number;recipientId?:string;durationMinutes:number;text:string
+ kind:WhisperKind;seats?:number;recipientId?:string;durationMinutes:number;text:string;
+ purpose?:WhisperPurpose;answerText?:string;gift?:WhisperGift
 };
 export type WhisperReserveResult={status:'HELD'|'ALREADY_HELD'|'FULL'|
  'CLOSED'|'EXPIRED'|'STALE'|'NOT_RECIPIENT'|'CONSENT_REQUIRED'|
@@ -69,7 +70,18 @@ export class Phase4WhisperService{
    input.kind==='DIRECT'&&(input.seats!==undefined&&input.seats!==1||
     !isUser(input.recipientId??'')||input.recipientId===actor)||
    (input.kind==='EVERYONE'||input.kind==='ADMINS')&&
-    (input.seats!==undefined||input.recipientId!==undefined))
+    (input.seats!==undefined||input.recipientId!==undefined)||
+   input.purpose!==undefined&&!['QUESTION','GIFT'].includes(input.purpose)||
+   input.purpose!==undefined&&input.kind!=='FIRST_N'||
+   input.purpose==='QUESTION'&&(
+     typeof input.answerText!=='string'||input.answerText.length<1||
+     input.answerText.length>800||input.answerText.trim()!==input.answerText||
+     /[\u0000-\u001f\u007f\u202a-\u202e\u2066-\u2069]/u.test(input.answerText)||
+     input.gift!==undefined)||
+   input.purpose==='GIFT'&&(!validWhisperGift(input.gift)||
+     input.answerText!==undefined)||
+   input.purpose===undefined&&
+     (input.answerText!==undefined||input.gift!==undefined))
    throw Error('WHISPER_INPUT_INVALID');
   return this.store.transaction(s=>{
    const version=this.scope(s,actor,chatId);
@@ -86,6 +98,9 @@ export class Phase4WhisperService{
     kind:input.kind,seats:input.kind==='DIRECT'?1:
      (input.kind==='EVERYONE'||input.kind==='ADMINS')?0:input.seats!,
     ...(input.kind==='DIRECT'?{recipientId:input.recipientId!}:{}),
+    ...(input.purpose?{purpose:input.purpose}:{}),
+    ...(input.answerText?{answerText:input.answerText}:{}),
+    ...(input.gift?{gift:structuredClone(input.gift)}:{}),
     text:input.text,status:'DRAFT',revision:1,
     createdAt:now,expiresAt:now+input.durationMinutes*60_000
    };
@@ -146,7 +161,7 @@ export class Phase4WhisperService{
    if(!draft.memberDraftsEnabled)for(const m of data.messages){
     if(m.chatId===draft.chatId&&m.submittedByMember===true&&m.status==='DRAFT'){
      m.status='CLOSED';m.closedAt=Math.max(now,m.createdAt);
-     m.revision=2;delete m.text;
+     m.revision=2;delete m.text;delete m.answerText;delete m.gift;
     }
    }
    data.settingsDrafts=data.settingsDrafts!.filter(x=>x.id!==id);
@@ -280,7 +295,8 @@ export class Phase4WhisperService{
       found[0]!.status==='CLOSED')return false;
    const row=found[0]!;
    row.status='CLOSED';row.closedAt=Math.max(row.createdAt,now);
-   row.revision=row.approvedAt===undefined?2:3;delete row.text;
+   row.revision=row.approvedAt===undefined?2:3;
+   delete row.text;delete row.answerText;delete row.gift;
    s.phase4Whispers=data;return true;
   });
  }
@@ -357,7 +373,7 @@ export class Phase4WhisperService{
     throw Error('WHISPER_DENIED');
    row.closedAt=Math.max(row.createdAt,now);
    row.revision=row.status==='DRAFT'?2:3;
-   row.status='CLOSED';delete row.text;
+   row.status='CLOSED';delete row.text;delete row.answerText;delete row.gift;
    s.phase4Whispers=data;
    return true;
   });
@@ -668,7 +684,8 @@ export class Phase4WhisperService{
    for(const row of data.messages){
     if(row.status==='CLOSED'||now<row.expiresAt)continue;
     row.revision=row.status==='DRAFT'?2:3;
-    row.status='CLOSED';row.closedAt=now;delete row.text;total++;
+    row.status='CLOSED';row.closedAt=now;
+    delete row.text;delete row.answerText;delete row.gift;total++;
    }
    // Redacted tombstones are retained for only 24 hours. There is no
    // provider receipt to retry; deleting old HELD seats cannot authorize

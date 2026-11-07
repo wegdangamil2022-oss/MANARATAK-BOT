@@ -131,10 +131,12 @@ export function validWhisperMessage(raw:unknown):raw is WhisperMessage{
  if(x.purpose!==undefined&&!['QUESTION','GIFT'].includes(String(x.purpose)))return false;
  if(x.purpose==='QUESTION'&&(
     x.kind!=='FIRST_N'||x.submittedByMember===true||
-    !validText(x.answerText)||x.gift!==undefined))return false;
+    (x.status==='CLOSED'?x.answerText!==undefined:!validText(x.answerText))||
+    x.gift!==undefined))return false;
  if(x.purpose==='GIFT'&&(
     x.kind!=='FIRST_N'||x.submittedByMember===true||
-    !validWhisperGift(x.gift)||x.answerText!==undefined))return false;
+    (x.status==='CLOSED'?x.gift!==undefined:!validWhisperGift(x.gift))||
+    x.answerText!==undefined))return false;
  if(x.purpose===undefined&&
     (x.answerText!==undefined||x.gift!==undefined))return false;
  if(x.submittedByMember!==undefined&&x.submittedByMember!==true)return false;
