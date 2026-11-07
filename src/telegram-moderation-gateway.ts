@@ -30,6 +30,10 @@ const JSON_TYPE=/^application\/json(?:\s*;.*)?$/iu;
 type ObjectValue=Record<string,unknown>;
 export type BotAdminRight='GRANTED'|'DENIED'|'UNKNOWN';
 export type BotAdminRights={restrict:BotAdminRight;delete:BotAdminRight;invite:BotAdminRight;pin:BotAdminRight;changeInfo:BotAdminRight;promote:BotAdminRight;manageTopics:BotAdminRight};
+/** Transient Telegram observation only. Never store the group's title as authorization. */
+export interface TelegramGroupProfile{
+ chatId:string;title:string;kind:'GROUP'|'SUPERGROUP';
+}
 const object=(v:unknown):v is ObjectValue=>
  v!==null&&typeof v==='object'&&!Array.isArray(v);
 type Member={status:string;user:ObjectValue;is_member?:boolean;can_restrict_members?:boolean};
@@ -81,6 +85,23 @@ export class TelegramBotApiModerationGateway implements ModerationGateway{
    prototype.kickMember===officialGatewayMethods.kickMember&&adapter.kickMember===officialGatewayMethods.kickMember&&
    !('allowed' in adapter)&&!('call' in adapter)&&
    !('getMember' in adapter);
+ }
+ /** Only the original getChat reader may supply a verified group title/type.
+  * Proves the adapter method is unchanged, not that a remote observation
+  * remains current after its response.
+  */
+ static usesOfficialGroupProfileRead(gateway:unknown):boolean{
+  try{
+   if(typeof gateway!=='object'||gateway===null||
+      !(#officialAdapterBrand in gateway))return false;
+   const adapter=gateway as TelegramBotApiModerationGateway;
+   const proto=TelegramBotApiModerationGateway.prototype;
+   return Object.isFrozen(TelegramBotApiModerationGateway)&&
+    Object.getPrototypeOf(adapter)===proto&&
+    proto.inspectGroupProfile===officialGatewayMethods.inspectGroupProfile&&
+    adapter.inspectGroupProfile===officialGatewayMethods.inspectGroupProfile&&
+    !('call' in adapter)&&!('getMember' in adapter);
+  }catch{return false;}
  }
  /** Advisory read-only identity check, distinct from dispatch provenance.
   * Typescript structural probes, subclass overrides and mutable public
@@ -192,6 +213,23 @@ export class TelegramBotApiModerationGateway implements ModerationGateway{
   if(response.status>=400&&response.status<500&&v.ok===false)
    return {status:'CLIENT_DENIED'};
   return {status:'UNKNOWN'};
+ }
+ /** One fresh, bounded getChat observation for an already locally authorized
+  * group. The response is not persisted and never grants moderation rights.
+  */
+ async inspectGroupProfile(chatId:string):Promise<TelegramGroupProfile|null>{
+  if(!validGroup(chatId))return null;
+  const read=await this.#call('getChat',{chat_id:chatId});
+  if(read.status!=='HTTP_OK'||!object(read.value))return null;
+  const data=read.value;
+  if(data.id!==Number(chatId)||'migrated_to_chat_id' in data||
+     data.type!=='group'&&data.type!=='supergroup'||typeof data.title!=='string')
+   return null;
+  const title=data.title;
+  if(title.trim().length<1||Array.from(title).length>255||
+     Buffer.byteLength(title,'utf8')>1024||
+     /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/u.test(title))return null;
+  return {chatId,title,kind:data.type==='group'?'GROUP':'SUPERGROUP'};
  }
  /** Read-only Telegram getChat probe: verify exact numeric chat identity
   * and supported group topology, rejecting channels/private chats and
@@ -477,7 +515,8 @@ const officialGatewayMethods=Object.freeze({
  inspectBotAdminRights:TelegramBotApiModerationGateway.prototype.inspectBotAdminRights,
  inspectTrialGroupKind:TelegramBotApiModerationGateway.prototype.inspectTrialGroupKind,
  observeRestriction:TelegramBotApiModerationGateway.prototype.observeRestriction,
- inspectRoomPrivacy:TelegramBotApiModerationGateway.prototype.inspectRoomPrivacy
+ inspectRoomPrivacy:TelegramBotApiModerationGateway.prototype.inspectRoomPrivacy,
+ inspectGroupProfile:TelegramBotApiModerationGateway.prototype.inspectGroupProfile
 });
 // Prevent rebinding the static origin-check functions after their definition.
 Object.freeze(TelegramBotApiModerationGateway);
