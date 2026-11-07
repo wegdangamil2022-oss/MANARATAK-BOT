@@ -117,6 +117,21 @@ export class TelegramBotApiModerationGateway implements ModerationGateway{
     adapter.inspectForumStatus===officialGatewayMethods.inspectForumStatus;
   }catch{return false;}
  }
+ /** Provenance of original read/write methods needed for one-shot topic
+  * management. Never accept a structural duck-type or modified prototype. */
+ static usesOfficialTopicControl(gateway:unknown):boolean{
+  try{
+   if(!this.usesOfficialForumStatusRead(gateway)||
+    !this.usesOfficialRightsRead(gateway))return false;
+   const a=gateway as TelegramBotApiModerationGateway;
+   const proto=TelegramBotApiModerationGateway.prototype;
+   return proto.inspectForumActorRights===officialGatewayMethods.inspectForumActorRights&&
+    a.inspectForumActorRights===officialGatewayMethods.inspectForumActorRights&&
+    proto.applyForumTopicAction===officialGatewayMethods.applyForumTopicAction&&
+    a.applyForumTopicAction===officialGatewayMethods.applyForumTopicAction&&
+    !('allowed' in a)&&!('call' in a)&&!('getMember' in a);
+  }catch{return false;}
+ }
  static usesOfficialGroupLinkRead(gateway:unknown):boolean{
   try{
    if(!this.usesOfficialGroupProfileRead(gateway))return false;
@@ -354,6 +369,65 @@ export class TelegramBotApiModerationGateway implements ModerationGateway{
      bot.status==='kicked')return 'DENIED';
   return 'UNKNOWN';
  }
+ /** Read-only current Telegram permissions for the human owner.
+  * A local owner role alone never authorizes closing or reopening a topic. */
+ async inspectForumActorRights(chatId:string,actorId:string):
+ Promise<BotAdminRight>{
+  if(!validGroup(chatId)||!validUser(actorId)||Number(actorId)===this.#botId)
+   return 'UNKNOWN';
+  const user=await this.#getMember(chatId,actorId);
+  if(!user||user.user.is_bot!==false)return 'UNKNOWN';
+  if(user.status==='creator')return 'GRANTED';
+  if(user.status==='administrator'){
+   const permission=(user as unknown as Record<string,unknown>).can_manage_topics;
+   return permission===true?'GRANTED':
+    permission===false?'DENIED':'UNKNOWN';
+  }
+  if(['member','restricted','left','kicked'].includes(user.status))
+   return 'DENIED';
+  return 'UNKNOWN';
+ }
+ /**
+  * One external close/reopen attempt after an owner-private, durable start
+  * receipt has been committed by the caller. The callback revalidates the
+  * exact operation inside fresh storage; it does NOT grant a retry.
+  *
+  * Telegram has no getForumTopic endpoint; successful HTTP true is the
+  * operation acknowledgement, not evidence of prior thread state.
+  */
+ async applyForumTopicAction(chatId:string,threadId:number,
+  actorId:string,command:'CLOSE'|'REOPEN',
+  current:()=>Promise<boolean>):Promise<RestrictionOutcome>{
+  if(!validGroup(chatId)||!Number.isSafeInteger(threadId)||
+   threadId<=1||threadId>2147483647||!validUser(actorId)||
+   Number(actorId)===this.#botId||
+   (command!=='CLOSE'&&command!=='REOPEN')||
+   typeof current!=='function')return 'FAILED_CONFIRMED';
+  const allowed=async()=>this.#allowed();
+  if(!await allowed())return 'FAILED_CONFIRMED';
+  if(await this.inspectForumStatus(chatId)!=='FORUM')return 'FAILED_CONFIRMED';
+  if((await this.inspectBotAdminRights(chatId)).manageTopics!=='GRANTED'||
+   await this.inspectForumActorRights(chatId,actorId)!=='GRANTED')
+   return 'FAILED_CONFIRMED';
+  let local=false;
+  try{local=await current()===true;}catch{return 'FAILED_CONFIRMED';}
+  if(!local||!await allowed())return 'FAILED_CONFIRMED';
+  // Read after the storage callback, then recheck the callback again before
+  // the actual API write. Every failure before the POST is a definite deny.
+  if(await this.inspectForumStatus(chatId)!=='FORUM'||
+   (await this.inspectBotAdminRights(chatId)).manageTopics!=='GRANTED'||
+   await this.inspectForumActorRights(chatId,actorId)!=='GRANTED')
+   return 'FAILED_CONFIRMED';
+  try{if(!await current()||!await allowed())return 'FAILED_CONFIRMED';}
+  catch{return 'FAILED_CONFIRMED';}
+  const method=command==='CLOSE'?'closeForumTopic':'reopenForumTopic';
+  const response=await this.#call(method,{
+   chat_id:chatId,message_thread_id:threadId
+  });
+  if(response.status==='HTTP_OK'&&response.value===true)return 'CONFIRMED';
+  if(response.status==='CLIENT_DENIED')return 'FAILED_CONFIRMED';
+  return 'UNKNOWN_OUTCOME';
+ }
  async inspectBotAdminRights(chatId:string):Promise<BotAdminRights>{
   const fields={restrict:'can_restrict_members',delete:'can_delete_messages',invite:'can_invite_users',pin:'can_pin_messages',changeInfo:'can_change_info',promote:'can_promote_members',manageTopics:'can_manage_topics'} as const;
   const result:BotAdminRights={restrict:'UNKNOWN',delete:'UNKNOWN',invite:'UNKNOWN',pin:'UNKNOWN',changeInfo:'UNKNOWN',promote:'UNKNOWN',manageTopics:'UNKNOWN'};
@@ -572,6 +646,8 @@ const officialGatewayMethods=Object.freeze({
  inspectRoomPrivacy:TelegramBotApiModerationGateway.prototype.inspectRoomPrivacy,
  inspectGroupProfile:TelegramBotApiModerationGateway.prototype.inspectGroupProfile,
  inspectForumStatus:TelegramBotApiModerationGateway.prototype.inspectForumStatus,
+ inspectForumActorRights:TelegramBotApiModerationGateway.prototype.inspectForumActorRights,
+ applyForumTopicAction:TelegramBotApiModerationGateway.prototype.applyForumTopicAction,
  inspectGroupLinkEligibility:TelegramBotApiModerationGateway.prototype.inspectGroupLinkEligibility
 });
 // Prevent rebinding the static origin-check functions after their definition.
