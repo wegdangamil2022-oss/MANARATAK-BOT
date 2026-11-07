@@ -90,6 +90,153 @@ export class Phase4WhisperService{
    return structuredClone(record);
   });
  }
+ /** Member submissions are disabled until the owner approves a 2-minute
+  * settings draft. Disabling also redacts pending, unreviewed member content.
+  */
+ async prepareGroupSettings(actor:string,chatId:string,enabled:boolean):Promise<string>{
+  const now=this.clock();
+  if(!validClock(now)||!isGroup(chatId)||typeof enabled!=='boolean')
+   throw Error('WHISPER_SETTINGS_INVALID');
+  return this.store.transaction(s=>{
+   const chatVersion=this.scope(s,actor,chatId);
+   if(chatVersion===null)throw Error('WHISPER_SETTINGS_DENIED');
+   const data=clone(s),rows=(data.settings??[]).filter(x=>x.chatId===chatId);
+   if(rows.length>1)throw Error('WHISPER_SETTINGS_DUPLICATE');
+   if(rows[0]?.memberDraftsEnabled===enabled)throw Error('WHISPER_SETTINGS_UNCHANGED');
+   data.settingsDrafts=(data.settingsDrafts??[]).filter(x=>
+    x.expiresAt>now&&x.actorId!==actor&&x.chatId!==chatId);
+   if(data.settingsDrafts.length>=50)throw Error('WHISPER_SETTINGS_PREVIEW_LIMIT');
+   const id=newId(data.settingsDrafts);
+   data.settingsDrafts.push({id,actorId:actor,chatId,chatVersion,
+    settingsVersion:rows[0]?.version??0,memberDraftsEnabled:enabled,
+    createdAt:now,expiresAt:now+120000});
+   s.phase4Whispers=data;return id;
+  });
+ }
+ async confirmGroupSettings(actor:string,id:string):Promise<
+  {chatId:string;memberDraftsEnabled:boolean}>{
+  if(!/^[a-f0-9]{24}$/u.test(id))throw Error('WHISPER_SETTINGS_ID_INVALID');
+  return this.store.transaction(s=>{
+   const now=this.clock(),data=clone(s),previews=(data.settingsDrafts??[])
+    .filter(x=>x.id===id),draft=previews[0];
+   if(!validClock(now)||previews.length!==1||!draft||
+      draft.actorId!==actor||now<draft.createdAt||now>=draft.expiresAt)
+    throw Error('WHISPER_SETTINGS_PREVIEW_EXPIRED');
+   const version=this.scope(s,actor,draft.chatId);
+   const settings=(data.settings??[]).filter(x=>x.chatId===draft.chatId);
+   if(version===null||version!==draft.chatVersion||settings.length>1||
+     (settings[0]?.version??0)!==draft.settingsVersion||
+     (settings[0]?.version??0)>=9_999_999_999)
+    throw Error('WHISPER_SETTINGS_CHANGED');
+   data.settings??=[];
+   if(settings.length){
+    const setting=settings[0]!;
+    setting.version++;setting.memberDraftsEnabled=draft.memberDraftsEnabled;
+    setting.updatedAt=now;setting.chatVersion=version;
+   }else data.settings.push({chatId:draft.chatId,chatVersion:version,
+    version:1,memberDraftsEnabled:draft.memberDraftsEnabled,updatedAt:now});
+   if(!draft.memberDraftsEnabled)for(const m of data.messages){
+    if(m.chatId===draft.chatId&&m.submittedByMember===true&&m.status==='DRAFT'){
+     m.status='CLOSED';m.closedAt=Math.max(now,m.createdAt);
+     m.revision=2;delete m.text;
+    }
+   }
+   data.settingsDrafts=data.settingsDrafts!.filter(x=>x.id!==id);
+   s.phase4Whispers=data;
+   return {chatId:draft.chatId,memberDraftsEnabled:draft.memberDraftsEnabled};
+  });
+ }
+ async cancelGroupSettings(actor:string,id:string):Promise<boolean>{
+  if(!/^[a-f0-9]{24}$/u.test(id)||!this.policy.isOwner(actor))return false;
+  return this.store.transaction(s=>{
+   const data=clone(s),current=(data.settingsDrafts??[])
+    .filter(x=>x.id===id&&x.actorId===actor);
+   if(current.length!==1)return false;
+   data.settingsDrafts=data.settingsDrafts!.filter(x=>x.id!==id);
+   s.phase4Whispers=data;return true;
+  });
+ }
+ async groupSettings(actor:string,chatId:string):Promise<
+  {memberDraftsEnabled:boolean;version:number}|null>{
+  const s=await this.store.snapshot();
+  if(this.scope(s,actor,chatId)===null)return null;
+  const rows=(clone(s).settings??[]).filter(x=>x.chatId===chatId);
+  if(rows.length>1)return null;
+  const enabled=rows[0]?.chatVersion===getChat(s,chatId)?.version&&
+   rows[0]?.memberDraftsEnabled===true;
+  return {memberDraftsEnabled:enabled,version:rows[0]?.version??0};
+ }
+ /** Private student submission. No group post, DM or content exposure until
+  * the owner explicitly reviews and separately approves announcement posting.
+  * Remote membership is verified before the local atomic submit transaction.
+  */
+ async submitMemberDraft(memberId:string,chatId:string,input:WhisperDraftInput):
+ Promise<string|null>{
+  const started=this.clock();
+  if(!validClock(started)||!isUser(memberId)||!isGroup(chatId)||!input||
+     !['FIRST_N','DIRECT'].includes(input.kind)||
+     input.kind==='FIRST_N'&&(!Number.isSafeInteger(input.seats)||
+       input.seats===undefined||input.seats<1||input.seats>3||
+       input.recipientId!==undefined)||
+     input.kind==='DIRECT'&&(!isUser(input.recipientId??'')||
+       input.recipientId===memberId||
+       input.seats!==undefined&&input.seats!==1)||
+     !Number.isSafeInteger(input.durationMinutes)||input.durationMinutes<1||
+     input.durationMinutes>10||typeof input.text!=='string'||
+     !input.text.trim()||input.text!==input.text.trim()||
+     input.text.length>500||
+     /[\u0000-\u001f\u007f\u202a-\u202e\u2066-\u2069]/u.test(input.text))
+   return null;
+  const before=await this.store.snapshot(),chat=approvedChat(before,this.policy,chatId);
+  const oldSettings=(clone(before).settings??[]).filter(x=>x.chatId===chatId);
+  if(!chat||oldSettings.length!==1||
+     oldSettings[0]!.chatVersion!==chat.version||
+     !oldSettings[0]!.memberDraftsEnabled)return null;
+  let verified=false;
+  try{verified=await this.verifyMember(chatId,memberId)==='VERIFIED';}
+  catch{return null;}
+  if(!verified)return null;
+  return this.store.transaction(s=>{
+   const now=this.clock(),fresh=approvedChat(s,this.policy,chatId);
+   const data=clone(s),settings=(data.settings??[]).filter(x=>x.chatId===chatId);
+   if(!validClock(now)||now<started||!fresh||
+      fresh.version!==chat.version||settings.length!==1||
+      settings[0]!.version!==oldSettings[0]!.version||
+      settings[0]!.memberDraftsEnabled!==true||
+      settings[0]!.chatVersion!==chat.version||
+      data.messages.length>=200)return null;
+   if(data.messages.filter(m=>m.creatorId===memberId&&m.chatId===chatId&&
+      m.createdAt<=now&&now-m.createdAt<3600000).length>=2||
+      data.messages.filter(m=>m.chatId===chatId&&m.submittedByMember===true&&
+       m.createdAt<=now&&now-m.createdAt<3600000).length>=12)return null;
+   if(input.kind==='DIRECT'&&(data.blocks??[]).some(b=>
+      b.chatId===chatId&&b.memberId===input.recipientId&&
+      b.senderId===memberId&&b.enabled))return null;
+   const id=newId(data.messages);
+   data.messages.push({id,chatId,chatVersion:chat.version,
+    creatorId:memberId,submittedByMember:true,kind:input.kind,
+    seats:input.kind==='DIRECT'?1:input.seats!,
+    ...(input.kind==='DIRECT'?{recipientId:input.recipientId!}:{}),
+    text:input.text,status:'DRAFT',revision:1,createdAt:now,
+    expiresAt:now+input.durationMinutes*60000});
+   s.phase4Whispers=data;return id;
+  });
+ }
+ async withdrawOwn(memberId:string,id:string):Promise<boolean>{
+  const now=this.clock();
+  if(!validClock(now)||!isUser(memberId)||!/^[a-f0-9]{24}$/u.test(id))
+   return false;
+  return this.store.transaction(s=>{
+   const data=clone(s),found=data.messages.filter(m=>m.id===id);
+   if(found.length!==1||found[0]!.creatorId!==memberId||
+      found[0]!.submittedByMember!==true||
+      found[0]!.status==='CLOSED')return false;
+   const row=found[0]!;
+   row.status='CLOSED';row.closedAt=Math.max(row.createdAt,now);
+   row.revision=row.approvedAt===undefined?2:3;delete row.text;
+   s.phase4Whispers=data;return true;
+  });
+ }
  async approve(actor:string,id:string):Promise<WhisperMessage>{
   const now=this.clock();if(!validClock(now))throw Error('WHISPER_CLOCK_INVALID');
   return this.store.transaction(s=>{
