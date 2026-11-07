@@ -15,8 +15,21 @@ export interface WhisperReservation{
 export interface WhisperConsent{
  chatId:string;chatVersion:number;memberId:string;enabled:boolean;revision:number;updatedAt:number;
 }
+/** Member-controlled suppression: only the member may add/remove a block.
+ * No public author/blocklist query is provided. */
+export interface WhisperBlock{
+ chatId:string;chatVersion:number;memberId:string;senderId:string;
+ enabled:boolean;revision:number;updatedAt:number;
+}
+/** A private abuse report. No secret text, files or Telegram provider payload. */
+export interface WhisperReport{
+ id:string;messageId:string;reporterId:string;reportedAt:number;
+ reason:'SPAM'|'HARASSMENT'|'PERSONAL_DATA'|'OTHER';
+ status:'OPEN'|'REVIEWED';reviewedAt?:number;reviewedBy?:string;
+}
 export interface WhisperState{
  messages:WhisperMessage[];reservations:WhisperReservation[];consents:WhisperConsent[];
+ blocks?:WhisperBlock[];reports?:WhisperReport[];
 }
 export const emptyWhisperState=():WhisperState=>({
  messages:[],reservations:[],consents:[]
@@ -71,10 +84,12 @@ export function validWhisperMessage(raw:unknown):raw is WhisperMessage{
   Number(x.closedAt)>=Number(x.approvedAt);
 }
 export function validWhisperState(raw:unknown):raw is WhisperState{
- if(!record(raw)||!exact(raw,['messages','reservations','consents'])||
+ if(!record(raw)||!exact(raw,['messages','reservations','consents'],['blocks','reports'])||
   !Array.isArray(raw.messages)||raw.messages.length>200||
   !Array.isArray(raw.reservations)||raw.reservations.length>2000||
-  !Array.isArray(raw.consents)||raw.consents.length>2000)return false;
+  !Array.isArray(raw.consents)||raw.consents.length>2000||
+  (raw.blocks!==undefined&&(!Array.isArray(raw.blocks)||raw.blocks.length>2000))||
+  (raw.reports!==undefined&&(!Array.isArray(raw.reports)||raw.reports.length>500)))return false;
  if(raw.messages.some(m=>!validWhisperMessage(m)))return false;
  const messages=raw.messages as WhisperMessage[];
  if(new Set(messages.map(m=>m.id)).size!==messages.length)return false;
@@ -98,5 +113,37 @@ export function validWhisperState(raw:unknown):raw is WhisperState{
   !validUser(c.memberId)||typeof c.enabled!=='boolean'||
   !validRevision(c.revision)||!validTime(c.updatedAt)))return false;
  const consents=raw.consents as WhisperConsent[];
- return new Set(consents.map(c=>c.chatId+':'+c.memberId)).size===consents.length;
+ if(new Set(consents.map(c=>c.chatId+':'+c.memberId)).size!==consents.length)return false;
+ const blocks=raw.blocks??[];
+ if(blocks.some(x=>!record(x)||!exact(x,
+   ['chatId','chatVersion','memberId','senderId','enabled','revision','updatedAt'])||
+   !validChat(x.chatId)||!validRevision(x.chatVersion)||!validUser(x.memberId)||
+   !validUser(x.senderId)||x.memberId===x.senderId||
+   typeof x.enabled!=='boolean'||!validRevision(x.revision)||
+   !validTime(x.updatedAt)))return false;
+ if(new Set((blocks as WhisperBlock[]).map(x=>
+   x.chatId+':'+x.memberId+':'+x.senderId)).size!==blocks.length)return false;
+ const reports=raw.reports??[];
+ if(reports.some(x=>!record(x)||!exact(x,
+  ['id','messageId','reporterId','reportedAt','reason','status'],
+  ['reviewedAt','reviewedBy'])||
+  !validId(x.id)||!validId(x.messageId)||!validUser(x.reporterId)||
+  !validTime(x.reportedAt)||!['SPAM','HARASSMENT','PERSONAL_DATA','OTHER'].includes(String(x.reason))||
+  !['OPEN','REVIEWED'].includes(String(x.status))||
+  (x.status==='OPEN'&&(x.reviewedAt!==undefined||x.reviewedBy!==undefined))||
+  (x.status==='REVIEWED'&&(!validTime(x.reviewedAt)||!validUser(x.reviewedBy)||
+     Number(x.reviewedAt)<Number(x.reportedAt)))))return false;
+ if(new Set((reports as WhisperReport[]).map(x=>x.id)).size!==reports.length||
+   new Set((reports as WhisperReport[]).map(x=>
+    x.messageId+':'+x.reporterId)).size!==reports.length)return false;
+ for(const report of reports as WhisperReport[]){
+  const messages=raw.messages as WhisperMessage[];
+  const matching=messages.filter(x=>x.id===report.messageId);
+  if(matching.length!==1||!matching[0]||matching[0].creatorId===report.reporterId)
+   return false;
+  // Only a recipient who actually acquired a seat can report its message.
+  if(!(raw.reservations as WhisperReservation[]).some(x=>
+     x.messageId===report.messageId&&x.memberId===report.reporterId))return false;
+ }
+ return true;
 }
