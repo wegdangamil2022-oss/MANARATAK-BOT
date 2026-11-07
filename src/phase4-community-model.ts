@@ -156,8 +156,24 @@ export function validCommunityProfileTitle(value:unknown):value is string{
   Array.from(value).length>=1&&Array.from(value).length<=128&&
   !/[\u0000-\u001f\u007f\u202a-\u202e\u2066-\u2069]/u.test(value);
 }
+export type CommunityGuidePostStatus='QUEUED'|'SENDING'|'CONFIRMED'|
+ 'FAILED_CONFIRMED'|'UNKNOWN_OUTCOME'|'SKIPPED';
+/** Owner review never publishes immediately. A digest binds the visible guide,
+ * its approved sources and the group settings, without storing student data. */
+export interface CommunityGuidePostDraft{
+ id:string;actorId:string;chatId:string;chatVersion:number;configVersion:number;
+ contentDigest:string;createdAt:number;expiresAt:number;
+}
+/** At-most-once group publication receipt. No message text is stored. */
+export interface CommunityGuidePostJob{
+ id:string;actorId:string;chatId:string;chatVersion:number;configVersion:number;
+ contentDigest:string;approvedAt:number;status:CommunityGuidePostStatus;
+ attemptId?:string;messageId?:number;
+}
 export interface CommunityAutomationState{
  configs:CommunityConfig[];drafts:CommunityDraft[];receipts:CommunityReceipt[];
+ /** 09:02 manual, owner-approved guide publications (off until requested). */
+ guidePostDrafts?:CommunityGuidePostDraft[];guidePostJobs?:CommunityGuidePostJob[];
  /** Owner approved edits, at most once; raw title is only kept while QUEUED. */
  profileJobs?:CommunityProfileJob[];
  /** Opaque arrival witnesses when editing is enabled, not visible in audit UI. */
@@ -345,7 +361,52 @@ export function validCommunityState(value:unknown):value is CommunityAutomationS
   (v.privateWelcomes!==undefined&&(!Array.isArray(v.privateWelcomes)||v.privateWelcomes.length>2500))||
   (v.profileJobs!==undefined&&(!Array.isArray(v.profileJobs)||v.profileJobs.length>500))||
   (v.profileObservations!==undefined&&(!Array.isArray(v.profileObservations)||v.profileObservations.length>1000))||
-  (v.profileRevisions!==undefined&&(!Array.isArray(v.profileRevisions)||v.profileRevisions.length>500)))return false;
+  (v.profileRevisions!==undefined&&(!Array.isArray(v.profileRevisions)||v.profileRevisions.length>500))||
+  (v.guidePostDrafts!==undefined&&(!Array.isArray(v.guidePostDrafts)||v.guidePostDrafts.length>50))||
+  (v.guidePostJobs!==undefined&&(!Array.isArray(v.guidePostJobs)||v.guidePostJobs.length>250)))return false;
+ const guideId=/^[a-f0-9]{24}$/u,guideHash=/^[a-f0-9]{64}$/u;
+ const guideDraftIds=new Set<string>();
+ for(const row of v.guidePostDrafts??[]){
+  if(!row||typeof row!=='object'||Array.isArray(row)||
+     Object.keys(row).some(k=>!['id','actorId','chatId','chatVersion','configVersion',
+       'contentDigest','createdAt','expiresAt'].includes(k))||
+     !guideId.test(row.id)||guideDraftIds.has(row.id)||!validActor(row.actorId)||
+     !validGroup(row.chatId)||!Number.isSafeInteger(row.chatVersion)||
+     row.chatVersion<1||!Number.isSafeInteger(row.configVersion)||
+     row.configVersion<0||row.configVersion>2_000_000_000||
+     !guideHash.test(row.contentDigest)||!validClock(row.createdAt)||
+     !validClock(row.expiresAt)||row.expiresAt<=row.createdAt||
+     row.expiresAt-row.createdAt>120000)return false;
+  guideDraftIds.add(row.id);
+ }
+ const guideJobs=new Set<string>(),activeGroups=new Set<string>();
+ const statuses=new Set<CommunityGuidePostStatus>(['QUEUED','SENDING',
+  'CONFIRMED','FAILED_CONFIRMED','UNKNOWN_OUTCOME','SKIPPED']);
+ for(const row of v.guidePostJobs??[]){
+  if(!row||typeof row!=='object'||Array.isArray(row)||
+    Object.keys(row).some(k=>!['id','actorId','chatId','chatVersion','configVersion',
+      'contentDigest','approvedAt','status','attemptId','messageId'].includes(k))||
+    !guideId.test(row.id)||guideDraftIds.has(row.id)||guideJobs.has(row.id)||
+    !validActor(row.actorId)||!validGroup(row.chatId)||
+    !Number.isSafeInteger(row.chatVersion)||row.chatVersion<1||
+    !Number.isSafeInteger(row.configVersion)||row.configVersion<0||
+    row.configVersion>2_000_000_000||!guideHash.test(row.contentDigest)||
+    !validClock(row.approvedAt)||!statuses.has(row.status)||
+    (row.attemptId!==undefined&&!guideId.test(row.attemptId))||
+    (row.messageId!==undefined&&(!Number.isSafeInteger(row.messageId)||
+      row.messageId<1||row.messageId>2147483647))||
+    (row.status==='QUEUED'&&(row.attemptId!==undefined||row.messageId!==undefined))||
+    (row.status==='SENDING'&&!row.attemptId)||
+    (row.status==='CONFIRMED'&&(!row.attemptId||row.messageId===undefined))||
+    (row.status==='UNKNOWN_OUTCOME'&&!row.attemptId)||
+    (row.status!=='CONFIRMED'&&row.messageId!==undefined))return false;
+  guideJobs.add(row.id);
+  if(['QUEUED','SENDING','UNKNOWN_OUTCOME'].includes(row.status)){
+   if(activeGroups.has(row.chatId))return false;
+   activeGroups.add(row.chatId);
+  }
+ }
+
  if(v.profileRevisions){
   const ids=new Set<string>();
   for(const row of v.profileRevisions){
