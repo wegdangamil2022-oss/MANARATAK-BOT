@@ -24,12 +24,16 @@ const esc=(v:string)=>v.replace(/&/gu,'&amp;').replace(/</gu,'&lt;')
  .replace(/>/gu,'&gt;').replace(/"/gu,'&quot;').replace(/'/gu,'&#39;');
 export interface NetworkReviewGroupCounts{
  chatId:string;watchPending:number;watchWatched:number;watchClosed:number;
+ watchOlder24h:number;watchOlder72h:number;
  sanctionsPending:number;sanctionsReviewed:number;sanctionsClosed:number;
+ sanctionsOlder24h:number;sanctionsOlder72h:number;
 }
 export interface NetworkReviewOverview{
  networkId:string;networkName:string;groups:NetworkReviewGroupCounts[];
  watchPending:number;watchWatched:number;watchClosed:number;
+ watchOlder24h:number;watchOlder72h:number;
  sanctionsPending:number;sanctionsReviewed:number;sanctionsClosed:number;
+ sanctionsOlder24h:number;sanctionsOlder72h:number;
 }
 /** All status counters are limited to the currently approved group revisions.
  * Source and destination must both be authorized: network membership alone
@@ -59,7 +63,9 @@ export function networkReviewOverview(s:BotState,policy:Policy,actor:string,
  const groups:NetworkReviewGroupCounts[]=[...approved.keys()]
   .sort((a,b)=>a.localeCompare(b)).map(chatId=>({
    chatId,watchPending:0,watchWatched:0,watchClosed:0,
-   sanctionsPending:0,sanctionsReviewed:0,sanctionsClosed:0
+   watchOlder24h:0,watchOlder72h:0,
+   sanctionsPending:0,sanctionsReviewed:0,sanctionsClosed:0,
+   sanctionsOlder24h:0,sanctionsOlder72h:0
   }));
  const mapped=new Map<string,NetworkReviewGroupCounts>(groups.map(x=>[x.chatId,x]));
  for(const c of s.networkWatchCases??[]){
@@ -68,7 +74,11 @@ export function networkReviewOverview(s:BotState,policy:Policy,actor:string,
    c.submittedAt>now||
    (c.reviewedAt!==undefined&&c.reviewedAt>now)||
    (c.clearedAt!==undefined&&c.clearedAt>now))continue;
-  if(c.status==='PENDING')target.watchPending++;
+  if(c.status==='PENDING'){
+   target.watchPending++;
+   if(now-c.submittedAt>=86_400_000)target.watchOlder24h++;
+   if(now-c.submittedAt>=259_200_000)target.watchOlder72h++;
+  }
   else if(c.status==='WATCHED')target.watchWatched++;
   else target.watchClosed++;
  }
@@ -80,7 +90,11 @@ export function networkReviewOverview(s:BotState,policy:Policy,actor:string,
    row.requestedAt>now||
    (row.reviewedAt!==undefined&&row.reviewedAt>now)||
    (row.closedAt!==undefined&&row.closedAt>now))continue;
-  if(row.status==='PENDING')target.sanctionsPending++;
+  if(row.status==='PENDING'){
+   target.sanctionsPending++;
+   if(now-row.requestedAt>=86_400_000)target.sanctionsOlder24h++;
+   if(now-row.requestedAt>=259_200_000)target.sanctionsOlder72h++;
+  }
   else if(row.status==='REVIEWED_ONLY')target.sanctionsReviewed++;
   else target.sanctionsClosed++;
  }
@@ -88,9 +102,13 @@ export function networkReviewOverview(s:BotState,policy:Policy,actor:string,
   watchPending:groups.reduce((t,x)=>t+x.watchPending,0),
   watchWatched:groups.reduce((t,x)=>t+x.watchWatched,0),
   watchClosed:groups.reduce((t,x)=>t+x.watchClosed,0),
+  watchOlder24h:groups.reduce((t,x)=>t+x.watchOlder24h,0),
+  watchOlder72h:groups.reduce((t,x)=>t+x.watchOlder72h,0),
   sanctionsPending:groups.reduce((t,x)=>t+x.sanctionsPending,0),
   sanctionsReviewed:groups.reduce((t,x)=>t+x.sanctionsReviewed,0),
-  sanctionsClosed:groups.reduce((t,x)=>t+x.sanctionsClosed,0)
+  sanctionsClosed:groups.reduce((t,x)=>t+x.sanctionsClosed,0),
+  sanctionsOlder24h:groups.reduce((t,x)=>t+x.sanctionsOlder24h,0),
+  sanctionsOlder72h:groups.reduce((t,x)=>t+x.sanctionsOlder72h,0)
  };
 }
 export function validNetworkReviewInboxRoute(v:unknown):boolean{
@@ -113,9 +131,11 @@ export class OwnerNetworkReviewInbox{
     'الشبكة: '+esc(view.networkName)+'\n'+
     'المجموعة: <code>'+g.chatId+'</code>\n'+
     'بلاغات تنتظر مراجعة بشرية: '+g.watchPending+'\n'+
+    '↳ منها أكثر من يوم: '+g.watchOlder24h+' · أكثر من 3 أيام: '+g.watchOlder72h+'\n'+
     'بلاغات مراجَعة معلوماتيًا: '+g.watchWatched+'\n'+
     'بلاغات مرفوضة أو مغلقة: '+g.watchClosed+'\n'+
     'اقتراحات عقوبات تنتظر قرارًا: '+g.sanctionsPending+'\n'+
+    '↳ منها أكثر من يوم: '+g.sanctionsOlder24h+' · أكثر من 3 أيام: '+g.sanctionsOlder72h+'\n'+
     'اقتراحات راجعها إنسان دون تنفيذ: '+g.sanctionsReviewed+'\n'+
     'اقتراحات مرفوضة أو مغلقة: '+g.sanctionsClosed+'\n'+
     'هذا عرض إجمالي لمجموعة معتمدة حاليًا، ولا يمثل ترخيصًا بعقوبة.\n'+
@@ -142,9 +162,11 @@ export class OwnerNetworkReviewInbox{
    'مجموعات مخوّلة حاليًا: '+view.groups.length+
    ' · صفحة '+(p+1)+'/'+pages+'\n'+
    'بلاغات تنتظر: '+view.watchPending+
+   ' (أكثر من 3 أيام: '+view.watchOlder72h+')'+
    ' · تحت متابعة معلوماتية: '+view.watchWatched+
    ' · مغلقة: '+view.watchClosed+'\n'+
    'اقتراحات إجراءات تنتظر: '+view.sanctionsPending+
+   ' (أكثر من 3 أيام: '+view.sanctionsOlder72h+')'+
    ' · روجعت دون تنفيذ: '+view.sanctionsReviewed+
    ' · مغلقة: '+view.sanctionsClosed+'\n'+
    'كل عدد يعكس الحالة الحالية لسجل مؤهل، وليس دليلًا على مخالفة.\n'+
