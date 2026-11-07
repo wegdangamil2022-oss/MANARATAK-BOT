@@ -35,6 +35,11 @@ export function parseWhisperOwnerCommand(text:string):WhisperOwnerCommand|null{
   return {kind:'CREATE',chatId:first[1]!,input:{
    kind:'FIRST_N',seats:Number(first[2]),durationMinutes:Number(first[3]),text:first[4]!
   }};
+ const admin=/^\/whisperadmins (-[1-9][0-9]{0,15}) ([0-9]{1,2}) ([^\r\n]{1,800})$/u.exec(text);
+ if(admin&&group(admin[1]!)&&Number(admin[2])>=1&&Number(admin[2])<=60)
+  return {kind:'CREATE',chatId:admin[1]!,input:{
+   kind:'ADMINS',durationMinutes:Number(admin[2]),text:admin[3]!
+  }};
  const everyone=/^\/whispereveryone (-[1-9][0-9]{0,15}) ([0-9]{1,2}) ([^\r\n]{1,800})$/u.exec(text);
  if(everyone&&group(everyone[1]!)&&Number(everyone[2])>=1&&
     Number(everyone[2])<=60)
@@ -57,6 +62,7 @@ async function detail(service:Phase4WhisperService,actor:string,id:string):
   CLOSED:'🔒 مغلقة ومحذوف محتواها'} as const;
  const type=row.kind==='FIRST_N'?'أول '+row.seats+' مستلمين مؤهلين':
   row.kind==='EVERYONE'?'للجميع المؤهلين (يفتحون بشكل فردي فقط)':
+  row.kind==='ADMINS'?'لمشرفي Telegram المعتمدين فقط':
   'إلى مستلم واحد مُحدد';
  const publication=await service.announcementStatus(actor,id);
  const text='<b>💌 معاينة همسة خاصة للمالك فقط</b>\n'+
@@ -230,7 +236,7 @@ export async function whisperOwnerScreen(
    const buttons=rows.slice(page*8,page*8+8).map(m=>[btn(
     (m.status==='DRAFT'?'📝 ':m.status==='OPEN'?'✅ ':'🔒 ')+
      (m.kind==='FIRST_N'?'أول '+m.seats:m.kind==='EVERYONE'?
-      'كل المؤهلين':'شخص محدد')+' · '+m.chatId,
+      'كل المؤهلين':m.kind==='ADMINS'?'المشرفون':'شخص محدد')+' · '+m.chatId,
     'wh:1:v:'+m.id
    )]);
    const nav:{text:string;callback_data:string}[]=[];
@@ -245,6 +251,7 @@ export async function whisperOwnerScreen(
     '<code>/whisperfirst -1001234 3 10 نص الهمسة</code>\n'+
     '<code>/whisperdirect -1001234 200 10 نص الهمسة</code>\n'+
     '<code>/whispereveryone -1001234 10 نص تعليمي عام</code>\n'+
+    '<code>/whisperadmins -1001234 10 تنبيه للمشرفين</code>\n'+
     'الأرقام: معرّف مجموعة · عدد المقاعد أو المستلم · مدة بالدقائق (1–60).\n'+
     '🔐 المسودة لا تُنشر تلقائيًا. بعد الاعتماد المحلي، راجع زر إعلان المجموعة مستقلًا.\n'+
     'رابط الإعلان لا يحمل النص، والمستلم لا يراه إلا في الخاص بعد التحقق.\n'+
@@ -261,11 +268,13 @@ export async function whisperOwnerScreen(
     'المجموعة: <code>'+message.chatId+'</code>\n'+
     'نوع الهمسة: '+(message.kind==='DIRECT'?'مستلم محدد':
      message.kind==='EVERYONE'?'جميع المؤهلين، وليس سرًا بين الجميع':
+     message.kind==='ADMINS'?'مشرفو Telegram المعتمدون فقط':
      'أول '+message.seats)+
     '\nموعد الانتهاء: '+new Date(message.expiresAt).toISOString()+
     (message.kind==='EVERYONE'?
       '\n⚠️ قد يفتحها جميع أعضاء المجموعة المؤهلين فرديًا؛ محدد فقط بسعة التشغيل.':
-      '')+
+     message.kind==='ADMINS'?
+      '\n🛡️ يُعاد التحقق من صلاحية المشرف عبر Telegram عند الفتح وعند الإرسال.':'')+
     '\n\nسيُنشر ملصق بلا أي نص سري أو هوية مستلم، وزر فتح ينقل إلى خاص البوت. '+
     'يتحقق البوت هناك من العضوية والموافقة قبل كشف المحتوى. '+
     'نتيجة إرسال Telegram غير مضمونة؛ لا نعيد إرسال العملية إذا كانت نتيجتها مجهولة.',
