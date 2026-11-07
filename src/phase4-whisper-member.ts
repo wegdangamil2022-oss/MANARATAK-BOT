@@ -137,6 +137,8 @@ export async function whisperMemberScreen(
    const opened=await service.open(actor,request.id,
     request.kind==='ANSWER'?'ANSWER':'CONTENT');
    if(opened.status!=='READY'){
+    const consentGroup=opened.status==='CONSENT_REQUIRED'?
+     await service.consentHint(actor,request.id):null;
     const errors:Record<string,string>={
      NOT_ANNOUNCED:'إعلان الهمسة لم يؤكده Telegram؛ لا يمكن فتح المحتوى حتى النشر المؤكد.',
      FULL:'انتهت المقاعد المحددة أو بلغت الخدمة حدود السعة التشغيلية.',
@@ -145,6 +147,10 @@ export async function whisperMemberScreen(
      EXPIRED:'انتهت صلاحية الهمسة.',CLOSED:'أغلقت الهمسة.'
     };
     return {text:'🔒 '+(errors[opened.status]??'هذه الهمسة غير متاحة لك حاليًا أو تغيّرت صلاحياتها.')+
+     (consentGroup?
+      '\n✅ ثبتت عضويتك. لتفعيل استقبال همسات المجموعة أرسل في الخاص:'+
+      '\n<code>/whisperon '+consentGroup+'</code>'+
+      '\nثم أعد فتح الهمسة. لا تُفعّل الموافقة تلقائيًا.':'')+
      '\nلا يكفي امتلاك رابطها لإثبات الأهلية.'};
    }
    const escaped=opened.text.replace(/&/gu,'&amp;').replace(/</gu,'&lt;')

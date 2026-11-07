@@ -636,6 +636,34 @@ export class Phase4WhisperService{
   * The existing Telegram reply ledger independently rechecks this witness
   * at the irrevocable outbound-send boundary.
   */
+ /** Safe private opt-in hint for a real group member: a public whisper ID
+  * is not authorization to discover private group identifiers. Membership
+  * and the current mandatory subscription are checked by the same provider
+  * port before displaying any group-scoped command.
+  */
+ async consentHint(memberId:string,id:string):Promise<string|null>{
+  const now=this.clock();
+  if(!isUser(memberId)||!/^[a-f0-9]{24}$/u.test(id)||!validClock(now))return null;
+  const s=await this.store.snapshot(),rows=clone(s).messages.filter(m=>m.id===id),
+   m=rows[0];
+  if(rows.length!==1||!m||m.status!=='OPEN'||m.creatorId===memberId||
+     now>=m.expiresAt||!approvedChat(s,this.policy,m.chatId)||
+     !(clone(s).announcements??[]).some(a=>
+       a.messageId===id&&a.status==='CONFIRMED')||
+     m.kind==='DIRECT'&&m.recipientId!==memberId||
+     m.kind==='TEAM'&&!m.recipientIds?.includes(memberId))
+   return null;
+  try{
+   if(await this.verifyMember(m.chatId,memberId)!=='VERIFIED')return null;
+   if(m.kind==='ADMINS'&&
+      await this.verifyAdmin(m.chatId,memberId)!=='VERIFIED')return null;
+  }catch{return null;}
+  const latest=await this.store.snapshot(),current=clone(latest).messages.filter(x=>x.id===id);
+  if(current.length!==1||current[0]!.revision!==m.revision||
+     current[0]!.status!=='OPEN'||this.clock()>=current[0]!.expiresAt||
+     !approvedChat(latest,this.policy,m.chatId))return null;
+  return m.chatId;
+ }
  async open(memberId:string,id:string,view:'CONTENT'|'ANSWER'='CONTENT'):Promise<
   {status:'READY';text:string;purpose:'MESSAGE'|'QUESTION'|'GIFT';
    view:'CONTENT'|'ANSWER';scope:string;reservationId:string;
