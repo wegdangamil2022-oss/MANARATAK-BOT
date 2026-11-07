@@ -1,3 +1,4 @@
+import {recordTopicMonitor} from './group-forum-topic-monitor.js';
 import {warningActive} from './group-rule-warning-policy.js';
 import {createHash} from 'node:crypto';
 import {advanceFloodWindow} from './protection-flood.js';
@@ -108,15 +109,21 @@ export class GroupProtectionPolicyService{
  }
  /** Record-only incoming TEXT monitor. Authorization precedes body/entity
   * evaluation; observations retain no sender identity or message contents. */
- async observeIncomingText(member:string,chat:string,text:string,entities:unknown,updateKey:string,countTraffic=true,delivery?:ProtectionDelivery,displayName?:string,username?:string):Promise<string>{
-  return this.observeIncomingMessage({chatId:chat,memberId:member,type:'TEXT',text,...(displayName?{displayName}:{}),...(username?{username}:{})},entities,updateKey,countTraffic,delivery);
+ async observeIncomingText(member:string,chat:string,text:string,entities:unknown,updateKey:string,countTraffic=true,delivery?:ProtectionDelivery,displayName?:string,username?:string,
+  topicId?:number):Promise<string>{
+  return this.observeIncomingMessage({chatId:chat,memberId:member,type:'TEXT',text,...(displayName?{displayName}:{}),...(username?{username}:{})},entities,updateKey,countTraffic,delivery,topicId);
  }
- async observeIncomingMessage(message:ProtectionMessage,entities:unknown,updateKey:string,countTraffic=true,delivery?:ProtectionDelivery):Promise<string>{
+ async observeIncomingMessage(message:ProtectionMessage,entities:unknown,updateKey:string,
+  countTraffic=true,delivery?:ProtectionDelivery,topicId?:number):Promise<string>{
   const {chatId:chat,memberId:member}=message;
   if(!/^b3-webhook:[A-Za-z0-9_-]{1,80}:[0-9]+$/u.test(updateKey))return 'DENIED';
   const prepared=await this.store.transaction(state=>{
    const now=this.clock();
    if(!clockValid(now)||!this.policy.canUseChat(state,chat,'moderation'))return 'DENIED';
+   // Independent topical MONITOR ONLY. It neither substitutes nor overrides
+   // the existing group-wide enforcement and its exemption/sanction rules.
+   if(topicId!==undefined)
+    recordTopicMonitor(state,this.policy,message,topicId,updateKey,now);
    const record=state.protectionPolicies?.find(r=>r.policy.chatId===chat);
    if(!record||record.policy.mode==='OFF')return 'DISABLED';
    if(record.policy.mode==='ENFORCE'&&!this.canEnforce(record.policy))return 'ENFORCEMENT_NOT_CONNECTED';
