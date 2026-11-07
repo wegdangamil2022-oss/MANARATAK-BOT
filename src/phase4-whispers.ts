@@ -647,11 +647,13 @@ export class Phase4WhisperService{
   const s=await this.store.snapshot(),rows=clone(s).messages.filter(m=>m.id===id),
    m=rows[0];
   if(rows.length!==1||!m||m.status!=='OPEN'||m.creatorId===memberId||
-     now>=m.expiresAt||!approvedChat(s,this.policy,m.chatId)||
+     now>=m.expiresAt||approvedChat(s,this.policy,m.chatId)?.version!==m.chatVersion||
      !(clone(s).announcements??[]).some(a=>
        a.messageId===id&&a.status==='CONFIRMED')||
      m.kind==='DIRECT'&&m.recipientId!==memberId||
-     m.kind==='TEAM'&&!m.recipientIds?.includes(memberId))
+     m.kind==='TEAM'&&!m.recipientIds?.includes(memberId)||
+     (clone(s).blocks??[]).some(b=>b.chatId===m.chatId&&
+       b.memberId===memberId&&b.senderId===m.creatorId&&b.enabled))
    return null;
   try{
    if(await this.verifyMember(m.chatId,memberId)!=='VERIFIED')return null;
@@ -661,7 +663,10 @@ export class Phase4WhisperService{
   const latest=await this.store.snapshot(),current=clone(latest).messages.filter(x=>x.id===id);
   if(current.length!==1||current[0]!.revision!==m.revision||
      current[0]!.status!=='OPEN'||this.clock()>=current[0]!.expiresAt||
-     !approvedChat(latest,this.policy,m.chatId))return null;
+     approvedChat(latest,this.policy,m.chatId)?.version!==m.chatVersion||
+     (clone(latest).blocks??[]).some(b=>b.chatId===m.chatId&&
+       b.memberId===memberId&&b.senderId===m.creatorId&&b.enabled))
+   return null;
   return m.chatId;
  }
  async open(memberId:string,id:string,view:'CONTENT'|'ANSWER'='CONTENT'):Promise<
@@ -701,6 +706,10 @@ export class Phase4WhisperService{
     c.chatVersion===chat.version);
   const seats=d.reservations.filter(r=>r.messageId===id&&r.memberId===memberId);
   if(consent.length!==1||seats.length!==1)return {status:'CONSENT_REQUIRED'};
+  if(item.kind==='TEAM'&&!item.recipientIds?.includes(memberId))
+   return {status:'DENIED'};
+  if(item.kind==='DIRECT'&&item.recipientId!==memberId)
+   return {status:'DENIED'};
   if((d.blocks??[]).some(b=>b.chatId===item.chatId&&
      b.memberId===memberId&&b.senderId===item.creatorId&&b.enabled))
    return {status:'DENIED'};
