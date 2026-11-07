@@ -359,6 +359,64 @@ export class Phase4WhisperService{
    return announcementId;
   });
  }
+ /** Owner can safely cancel a QUEUED group teaser before the irreversible
+  * sender claim. Never treat SENDING, CONFIRMED or UNKNOWN as cancellable.
+  * There is no implicit requeue after cancellation.
+  */
+ async cancelQueuedAnnouncement(actor:string,messageId:string):Promise<boolean>{
+  const now=this.clock();
+  if(!validClock(now)||!/^[a-f0-9]{24}$/u.test(messageId))return false;
+  return this.store.transaction(s=>{
+   const data=clone(s),matches=data.messages.filter(m=>m.id===messageId);
+   if(matches.length!==1||this.scope(s,actor,matches[0]!.chatId)!==
+      matches[0]!.chatVersion)return false;
+   const pending=(data.announcements??[]).filter(a=>
+     a.messageId===messageId);
+   if(pending.length!==1||pending[0]!.status!=='QUEUED')return false;
+   pending[0]!.status='SKIPPED';
+   s.phase4Whispers=data;
+   return true;
+  });
+ }
+ /** Counts only, no whisper bodies, recipient IDs, complaint reporters or
+  * delivery identity. Intended for a single authorized group's owner panel.
+  */
+ async groupDiagnostics(actor:string,chatId:string):Promise<{
+  total:number;drafts:number;open:number;closed:number;
+  studentDrafts:number;questions:number;gifts:number;team:number;
+  queued:number;sending:number;confirmed:number;unknown:number;
+  providerRejected:number;skipped:number;seats:number;
+  privateSendsAccepted:number;openReports:number;reviewedReports:number;
+  activeBlocks:number;
+ }|null>{
+  const snap=await this.store.snapshot();
+  if(!isGroup(chatId)||this.scope(snap,actor,chatId)===null)return null;
+  const data=clone(snap),items=data.messages.filter(m=>m.chatId===chatId);
+  const ids=new Set(items.map(m=>m.id));
+  const posts=(data.announcements??[]).filter(a=>a.chatId===chatId&&ids.has(a.messageId));
+  const reports=(data.reports??[]).filter(r=>ids.has(r.messageId));
+  return {
+   total:items.length,
+   drafts:items.filter(m=>m.status==='DRAFT').length,
+   open:items.filter(m=>m.status==='OPEN').length,
+   closed:items.filter(m=>m.status==='CLOSED').length,
+   studentDrafts:items.filter(m=>m.submittedByMember===true&&m.status==='DRAFT').length,
+   questions:items.filter(m=>m.purpose==='QUESTION').length,
+   gifts:items.filter(m=>m.purpose==='GIFT').length,
+   team:items.filter(m=>m.kind==='TEAM').length,
+   queued:posts.filter(a=>a.status==='QUEUED').length,
+   sending:posts.filter(a=>a.status==='SENDING').length,
+   confirmed:posts.filter(a=>a.status==='CONFIRMED').length,
+   unknown:posts.filter(a=>a.status==='UNKNOWN_OUTCOME').length,
+   providerRejected:posts.filter(a=>a.status==='FAILED_CONFIRMED').length,
+   skipped:posts.filter(a=>a.status==='SKIPPED').length,
+   seats:data.reservations.filter(r=>ids.has(r.messageId)).length,
+   privateSendsAccepted:(data.deliveries??[]).filter(d=>ids.has(d.messageId)).length,
+   openReports:reports.filter(r=>r.status==='OPEN').length,
+   reviewedReports:reports.filter(r=>r.status==='REVIEWED').length,
+   activeBlocks:(data.blocks??[]).filter(b=>b.chatId===chatId&&b.enabled).length
+  };
+ }
  /** Privately read an announcement receipt's current status. It never
   * represents the recipient's message delivery or whether anyone read it.
   */
