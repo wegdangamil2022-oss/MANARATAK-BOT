@@ -80,12 +80,21 @@ export class TelegramOwnerGroupLink{
   private readonly safety:()=>Promise<boolean>,
   private readonly clock:()=>number=Date.now){}
  private async safe():Promise<boolean>{try{return await this.safety()===true;}catch{return false;}}
- private async eligible(id:string,actor:string):Promise<TelegramGroupProfile|null>{
+ private async eligible(id:string,actor:string,scopes:readonly GroupScope[]):Promise<TelegramGroupProfile|null>{
   if(!this.gateway||
      !TelegramBotApiModerationGateway.usesOfficialGroupLinkRead(this.gateway)||
      !await this.safe())return null;
   let profile:TelegramGroupProfile|null=null;
   try{profile=await this.gateway.inspectGroupLinkEligibility(id,actor);}catch{/* unknown */}
+  if(profile&&scopes.includes('moderation')){
+   // A chat administrator need not have the separate right to delete or
+   // restrict. Do not issue even a *local* moderation scope without evidence.
+   if(!TelegramBotApiModerationGateway.usesOfficialRightsRead(this.gateway))return null;
+   try{
+    const rights=await this.gateway.inspectBotAdminRights(id);
+    if(rights.delete!=='GRANTED'||rights.restrict!=='GRANTED')return null;
+   }catch{return null;}
+  }
   if(!await this.safe()||
      !TelegramBotApiModerationGateway.usesOfficialGroupLinkRead(this.gateway))return null;
   return profile;
@@ -109,7 +118,7 @@ export class TelegramOwnerGroupLink{
   const now=this.clock(),before=await this.store.snapshot(),
    epoch=authEpoch(before,this.policy,actor,command.id,now);
   if(!epoch)return null;
-  const profile=await this.eligible(command.id,actor);
+  const profile=await this.eligible(command.id,actor,command.scopes);
   if(!profile)return null;
   const after=await this.store.snapshot(),at=this.clock();
   if(!validTime(at)||at<now||at>=now+TTL||
@@ -135,6 +144,8 @@ export class TelegramOwnerGroupLink{
     'النوع: '+(profile.kind==='GROUP'?'مجموعة':'مجموعة فائقة')+'\n'+
     'المشرفون: جرى التحقق من أن البوت وصاحب الطلب يديران هذه المجموعة وقت الفحص.\n'+
     'النطاقات المحلية المطلوبة: '+command.scopes.map(x=>labels[x]).join('، ')+'\n'+
+   (command.scopes.includes('moderation')?
+    'حقوق البوت للإشراف: تم رصد الحذف والتقييد وقت الفحص، وقد تتغير لاحقًا.\n':'')+
     'النتيجة: اعتماد محلي فقط؛ لا تُرقّى حسابات ولا تُنفذ عقوبات.\n'+
     'تأكيد واحد خلال دقيقتين، مع إعادة فحص صلاحيات Telegram لحظة التأكيد.',
     [[button('✅ تأكيد ربط المجموعة','og:1:c:'+token)],
@@ -170,7 +181,7 @@ export class TelegramOwnerGroupLink{
       [button('🏠 لوحة المالك','mi:1:h')]]);
    });
   }
-  const profile=await this.eligible(attempt.payload.id,actor);
+  const profile=await this.eligible(attempt.payload.id,actor,attempt.payload.scopes);
   if(!profile||sha(profile)!==attempt.payload.profileHash||!await this.safe())return null;
   const result=await this.store.transaction(s=>{
    const now=this.clock(),current=this.pending(s,actor,token,now);
