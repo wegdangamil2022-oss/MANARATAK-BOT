@@ -1,7 +1,7 @@
 import {Phase4CommunityService,type DraftRequest} from './phase4-community.js';
-import {normalizeCommunityMatch,type CommunityReplyRule,type CommunityConfig} from './phase4-community-model.js';
+import type {CommunityReplyRule,CommunityConfig} from './phase4-community-model.js';
 import {validCommunityRulesUrl} from './phase4-community-model.js';
-import type {OwnerInlineScreen,TelegramInlineKeyboard} from './telegram-inline-owner.js';
+import type {OwnerInlineScreen} from './telegram-inline-owner.js';
 
 const G='-[1-9][0-9]{0,15}',R='[a-f0-9]{12}',P='(?:0|[1-9][0-9]?)',D='[a-f0-9]{24}';
 const ROUTE=new RegExp('^r5:1:(?:h|p:'+P+'|g:'+G+'|l:'+G+':'+P+
