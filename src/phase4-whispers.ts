@@ -5,7 +5,8 @@ import {emptyWhisperState,validWhisperGift,type WhisperGift,type WhisperPurpose,
  type WhisperKind,type WhisperMessage,type WhisperState} from './phase4-whisper-model.js';
 
 export type WhisperDraftInput={
- kind:WhisperKind;seats?:number;recipientId?:string;durationMinutes:number;text:string;
+ kind:WhisperKind;seats?:number;recipientId?:string;recipientIds?:string[];
+ durationMinutes:number;text:string;
  purpose?:WhisperPurpose;answerText?:string;gift?:WhisperGift
 };
 export type WhisperReserveResult={status:'HELD'|'ALREADY_HELD'|'FULL'|
@@ -63,14 +64,22 @@ export class Phase4WhisperService{
    input.text.trim()!==input.text||input.text.length<1||input.text.length>800||
    /[\u0000-\u001f\u007f\u202a-\u202e\u2066-\u2069]/u.test(input.text)||
    !Number.isSafeInteger(input.durationMinutes)||input.durationMinutes<1||
-   input.durationMinutes>60||!['FIRST_N','DIRECT','EVERYONE','ADMINS'].includes(input.kind)||
+   input.durationMinutes>60||!['FIRST_N','DIRECT','EVERYONE','ADMINS','TEAM'].includes(input.kind)||
    input.kind==='FIRST_N'&&(!Number.isSafeInteger(input.seats)||
     input.seats===undefined||input.seats<1||input.seats>20||
     input.recipientId!==undefined)||
    input.kind==='DIRECT'&&(input.seats!==undefined&&input.seats!==1||
     !isUser(input.recipientId??'')||input.recipientId===actor)||
    (input.kind==='EVERYONE'||input.kind==='ADMINS')&&
-    (input.seats!==undefined||input.recipientId!==undefined)||
+    (input.seats!==undefined||input.recipientId!==undefined||
+     input.recipientIds!==undefined)||
+   input.kind==='TEAM'&&(
+     input.seats!==undefined||input.recipientId!==undefined||
+     !Array.isArray(input.recipientIds)||input.recipientIds.length<1||
+     input.recipientIds.length>20||
+     input.recipientIds.some(v=>!isUser(v)||v===actor)||
+     new Set(input.recipientIds).size!==input.recipientIds.length)||
+   input.kind!=='TEAM'&&input.recipientIds!==undefined||
    input.purpose!==undefined&&!['QUESTION','GIFT'].includes(input.purpose)||
    input.purpose!==undefined&&input.kind!=='FIRST_N'||
    input.purpose==='QUESTION'&&(
@@ -96,8 +105,9 @@ export class Phase4WhisperService{
    const record:WhisperMessage={
     id:newId(data.messages),chatId,chatVersion:version,creatorId:actor,
     kind:input.kind,seats:input.kind==='DIRECT'?1:
-     (input.kind==='EVERYONE'||input.kind==='ADMINS')?0:input.seats!,
+     (input.kind==='EVERYONE'||input.kind==='ADMINS'||input.kind==='TEAM')?0:input.seats!,
     ...(input.kind==='DIRECT'?{recipientId:input.recipientId!}:{}),
+    ...(input.kind==='TEAM'?{recipientIds:[...input.recipientIds!].sort()}:{}),
     ...(input.purpose?{purpose:input.purpose}:{}),
     ...(input.answerText?{answerText:input.answerText}:{}),
     ...(input.gift?{gift:structuredClone(input.gift)}:{}),
@@ -296,7 +306,7 @@ export class Phase4WhisperService{
    const row=found[0]!;
    row.status='CLOSED';row.closedAt=Math.max(row.createdAt,now);
    row.revision=row.approvedAt===undefined?2:3;
-   delete row.text;delete row.answerText;delete row.gift;
+   delete row.text;delete row.answerText;delete row.gift;delete row.recipientIds;
    s.phase4Whispers=data;return true;
   });
  }
@@ -373,7 +383,8 @@ export class Phase4WhisperService{
     throw Error('WHISPER_DENIED');
    row.closedAt=Math.max(row.createdAt,now);
    row.revision=row.status==='DRAFT'?2:3;
-   row.status='CLOSED';delete row.text;delete row.answerText;delete row.gift;
+   row.status='CLOSED';delete row.text;delete row.answerText;
+   delete row.gift;delete row.recipientIds;
    s.phase4Whispers=data;
    return true;
   });
@@ -460,6 +471,8 @@ export class Phase4WhisperService{
   if(!chat||chat.version!==whisper.chatVersion)return deny('STALE');
   if(whisper.creatorId===memberId)return deny('DENIED');
   if(whisper.kind==='DIRECT'&&whisper.recipientId!==memberId)return deny('NOT_RECIPIENT');
+  if(whisper.kind==='TEAM'&&!whisper.recipientIds?.includes(memberId))
+   return deny('NOT_RECIPIENT');
   const initialBlocks=clone(before).blocks?.filter(b=>
    b.chatId===whisper.chatId&&b.memberId===memberId&&
    b.senderId===whisper.creatorId)??[];
@@ -496,6 +509,8 @@ export class Phase4WhisperService{
    if(!current||current.version!==row.chatVersion)return deny('STALE');
    if(row.creatorId===memberId)return deny('DENIED');
    if(row.kind==='DIRECT'&&row.recipientId!==memberId)return deny('NOT_RECIPIENT');
+   if(row.kind==='TEAM'&&!row.recipientIds?.includes(memberId))
+    return deny('NOT_RECIPIENT');
    const latestBlock=(data.blocks??[]).filter(b=>
      b.chatId===row.chatId&&b.memberId===memberId&&b.senderId===row.creatorId);
    if(latestBlock.length>1||latestBlock.some(b=>b.enabled)||
@@ -509,7 +524,7 @@ export class Phase4WhisperService{
    if(consent[0]!.revision!==consentRevision)return deny('CONSENT_CHANGED');
    const duplicates=data.reservations.filter(x=>x.messageId===id&&x.memberId===memberId);
    if(duplicates.length!==0)return deny('ALREADY_HELD');
-   if((row.kind!=='EVERYONE'&&row.kind!=='ADMINS'&&
+   if((row.kind!=='EVERYONE'&&row.kind!=='ADMINS'&&row.kind!=='TEAM'&&
        data.reservations.filter(x=>x.messageId===id).length>=row.seats)||
     data.reservations.length>=2000)return deny('FULL');
    const reserved={id:newId(data.reservations),messageId:id,
@@ -697,7 +712,8 @@ export class Phase4WhisperService{
     if(row.status==='CLOSED'||now<row.expiresAt)continue;
     row.revision=row.status==='DRAFT'?2:3;
     row.status='CLOSED';row.closedAt=now;
-    delete row.text;delete row.answerText;delete row.gift;total++;
+    delete row.text;delete row.answerText;delete row.gift;
+    delete row.recipientIds;total++;
    }
    // Redacted tombstones are retained for only 24 hours. There is no
    // provider receipt to retry; deleting old HELD seats cannot authorize
@@ -740,8 +756,9 @@ export class Phase4WhisperService{
    throw Error('WHISPER_DENIED');
   const used=clone(s).reservations.filter(c=>c.messageId===id).length;
   return '💌 همسة '+row.kind+' · '+row.status+' · '+
-   (row.kind==='EVERYONE'||row.kind==='ADMINS'?
-    (row.kind==='ADMINS'?'للمشرفين الموثّقين':'للجميع المؤهلين')+
+   (row.kind==='EVERYONE'||row.kind==='ADMINS'||row.kind==='TEAM'?
+    (row.kind==='ADMINS'?'للمشرفين الموثّقين':
+      row.kind==='TEAM'?'لفريق حسابات معتمد':'للجميع المؤهلين')+
     '؛ الفتحات المحجوزة: '+used+'، لا سقف مقاعد مصطنع':
     'المقاعد المتبقية: '+Math.max(0,row.seats-used)+'/'+row.seats)+
    ' · الإعلان: '+((clone(s).announcements??[])
