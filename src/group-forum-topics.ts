@@ -175,6 +175,18 @@ export function forumTopicNote(s:BotState,p:Policy,actor:string,g:string,
  if(matching.some(x=>x.registration!==topic.reference))return null;
  return matching.at(-1);
 }
+/** Owner-only, bounded editorial history. Current chat permission and
+ * exact registration witness are checked again for every read. */
+export function localForumTopicNoteHistory(s:BotState,p:Policy,actor:string,
+ g:string,t:number,now:number):LocalForumTopicNote[]|null{
+ const topics=localForumTopics(s,p,actor,g,now);
+ const topic=topics?.find(x=>x.threadId===t),allNotes=notes(s,now);
+ if(!topic||!allNotes)return null;
+ const records=allNotes.filter(x=>x.group===g&&
+  x.groupVersion===topic.groupVersion&&x.thread===t);
+ if(records.some(x=>x.registration!==topic.reference))return null;
+ return [...records].sort((a,b)=>b.revision-a.revision).slice(0,60);
+}
 export function forumTopicNoteProof(s:BotState,p:Policy,actor:string,
  g:string,t:number,note:string,now:number):string|null{
  if(!validForumTopicNote(note))return null;
