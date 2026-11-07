@@ -70,6 +70,11 @@ export class Phase4WhisperService{
    if(version===null)throw Error('WHISPER_DENIED');
    const data=clone(s);
    if(data.messages.length>=200)throw Error('WHISPER_CAPACITY');
+   // Owner-only publishing is not a bulk messaging loophole. Including
+   // closed tombstones makes rapid create/close cycles count toward abuse limits.
+   if(data.messages.filter(x=>x.chatId===chatId&&x.creatorId===actor&&
+      x.createdAt<=now&&now-x.createdAt<3600000).length>=5)
+    throw Error('WHISPER_GROUP_HOURLY_LIMIT');
    const record:WhisperMessage={
     id:newId(data.messages),chatId,chatVersion:version,creatorId:actor,
     kind:input.kind,seats:input.kind==='DIRECT'?1:input.seats!,
@@ -195,6 +200,11 @@ export class Phase4WhisperService{
   if(!chat||chat.version!==whisper.chatVersion)return deny('STALE');
   if(whisper.creatorId===memberId)return deny('DENIED');
   if(whisper.kind==='DIRECT'&&whisper.recipientId!==memberId)return deny('NOT_RECIPIENT');
+  const initialBlocks=clone(before).blocks?.filter(b=>
+   b.chatId===whisper.chatId&&b.memberId===memberId&&
+   b.senderId===whisper.creatorId)??[];
+  if(initialBlocks.length>1||initialBlocks.some(b=>b.enabled))return deny('DENIED');
+  const blockRevision=initialBlocks[0]?.revision??0;
   const initial=clone(before).consents.filter(c=>
    c.chatId===whisper.chatId&&c.memberId===memberId);
   if(initial.length!==1||initial[0]!.chatVersion!==chat.version||
@@ -220,6 +230,10 @@ export class Phase4WhisperService{
    if(!current||current.version!==row.chatVersion)return deny('STALE');
    if(row.creatorId===memberId)return deny('DENIED');
    if(row.kind==='DIRECT'&&row.recipientId!==memberId)return deny('NOT_RECIPIENT');
+   const latestBlock=(data.blocks??[]).filter(b=>
+     b.chatId===row.chatId&&b.memberId===memberId&&b.senderId===row.creatorId);
+   if(latestBlock.length>1||latestBlock.some(b=>b.enabled)||
+      (latestBlock[0]?.revision??0)!==blockRevision)return deny('CONSENT_CHANGED');
    const consent=data.consents.filter(c=>c.chatId===row.chatId&&c.memberId===memberId);
    if(consent.length!==1||!consent[0]!.enabled||
     consent[0]!.chatVersion!==current.version||consent[0]!.updatedAt>now)
@@ -236,6 +250,88 @@ export class Phase4WhisperService{
    data.reservations.push(reserved);
    s.phase4Whispers=data;
    return {status:'HELD',reservationId:reserved.id};
+  });
+ }
+ /** Member-owned sender block. No provider membership check is required to
+  * protect the member: opt-out and block must remain available after leaving.
+  * A new block releases unsent seat holds before future reservations.
+  */
+ async block(memberId:string,chatId:string,senderId:string,enabled:boolean):Promise<boolean>{
+  const now=this.clock();
+  if(!isUser(memberId)||!isGroup(chatId)||!isUser(senderId)||
+    senderId===memberId||typeof enabled!=='boolean'||!validClock(now))
+   return false;
+  return this.store.transaction(s=>{
+   const data=clone(s),rows=(data.blocks??[]).filter(x=>
+    x.chatId===chatId&&x.memberId===memberId&&x.senderId===senderId);
+   if(rows.length>1||!rows.length&&(data.blocks?.length??0)>=2000)return false;
+   const row=rows[0];
+   if(row){
+    if(now<row.updatedAt||row.revision>=9_999_999_999)return false;
+    row.revision++;row.updatedAt=now;row.enabled=enabled;
+   }else{
+    const chat=getChat(s,chatId);
+    if(!chat||chat.version<1)return false;
+    data.blocks??=[];
+    data.blocks.push({chatId,chatVersion:chat.version,memberId,
+     senderId,enabled,revision:1,updatedAt:now});
+   }
+   if(enabled){
+    const whispers=new Set(data.messages.filter(m=>
+      m.chatId===chatId&&m.creatorId===senderId).map(m=>m.id));
+    data.reservations=data.reservations.filter(r=>
+      r.memberId!==memberId||!whispers.has(r.messageId));
+   }
+   s.phase4Whispers=data;return true;
+  });
+ }
+ /** Abuse evidence is bounded to an opaque reason code, not a copied secret.
+  * Only a member with an actual reserved seat may report this message.
+  */
+ async report(memberId:string,id:string,reason:'SPAM'|'HARASSMENT'|'PERSONAL_DATA'|'OTHER'):
+ Promise<boolean>{
+  const now=this.clock();
+  if(!isUser(memberId)||!isUser(memberId)||!validClock(now)||
+     !/^[a-f0-9]{24}$/u.test(id)||
+     !['SPAM','HARASSMENT','PERSONAL_DATA','OTHER'].includes(reason))
+   return false;
+  return this.store.transaction(s=>{
+   const data=clone(s),rows=data.messages.filter(m=>m.id===id);
+   if(rows.length!==1||rows[0]!.creatorId===memberId||
+      !data.reservations.some(r=>r.memberId===memberId&&r.messageId===id)||
+      (data.reports??[]).some(r=>r.messageId===id&&r.reporterId===memberId)||
+      (data.reports?.length??0)>=500)return false;
+   data.reports??=[];
+   data.reports.push({id:newId(data.reports),messageId:id,reporterId:memberId,
+    reportedAt:now,reason,status:'OPEN'});
+   s.phase4Whispers=data;return true;
+  });
+ }
+ async reports(actor:string,chatId:string):Promise<Array<
+  {id:string;messageId:string;reportedAt:number;reason:string;status:string}>>{
+  const s=await this.store.snapshot();
+  if(this.scope(s,actor,chatId)===null)return [];
+  const ids=new Set(clone(s).messages.filter(m=>m.chatId===chatId).map(m=>m.id));
+  return (clone(s).reports??[]).filter(r=>ids.has(r.messageId))
+   .sort((a,b)=>b.reportedAt-a.reportedAt).slice(0,30).map(r=>({
+    id:r.id,messageId:r.messageId,reportedAt:r.reportedAt,
+    reason:r.reason,status:r.status
+   }));
+ }
+ async reviewReport(actor:string,id:string):Promise<boolean>{
+  const now=this.clock();
+  if(!validClock(now)||!/^[a-f0-9]{24}$/u.test(id))return false;
+  return this.store.transaction(s=>{
+   const data=clone(s),reports=(data.reports??[]).filter(r=>r.id===id);
+   if(reports.length!==1||reports[0]!.status!=='OPEN')return false;
+   const rows=data.messages.filter(m=>m.id===reports[0]!.messageId);
+   if(rows.length!==1||this.scope(s,actor,rows[0]!.chatId)!==rows[0]!.chatVersion)
+    return false;
+   const item=reports[0]!;
+   if(now<item.reportedAt)return false;
+   item.status='REVIEWED';item.reviewedAt=now;item.reviewedBy=actor;
+   s.phase4Whispers=data;
+   return true;
   });
  }
  async expire():Promise<number>{
@@ -255,7 +351,18 @@ export class Phase4WhisperService{
     row.closedAt===undefined||now-row.closedAt<=86_400_000);
    const kept=new Set(data.messages.map(row=>row.id));
    data.reservations=data.reservations.filter(row=>kept.has(row.messageId));
-   if(total||data.messages.length!==before)s.phase4Whispers=data;
+   // Privacy: report references cannot retain old secret/message identity
+   // longer than its redacted tombstone; no unbounded evidence archive.
+   data.reports=(data.reports??[]).filter(r=>
+    kept.has(r.messageId)&&r.reportedAt<=now&&
+    now-r.reportedAt<=86_400_000);
+   // Disabled blocks and old reviewed reports are pruned regularly.
+   data.blocks=(data.blocks??[]).filter(b=>
+    b.updatedAt<=now&&(b.enabled||now-b.updatedAt<86400000));
+   if(total||data.messages.length!==before||
+      (data.reports?.length??0)!==(s.phase4Whispers?.reports?.length??0)||
+      (data.blocks?.length??0)!==(s.phase4Whispers?.blocks?.length??0))
+    s.phase4Whispers=data;
    return total;
   });
  }
