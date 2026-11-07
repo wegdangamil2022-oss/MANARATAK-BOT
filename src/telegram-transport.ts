@@ -112,6 +112,7 @@ import {parseB6ExplicitMention} from './b6-telegram-mention.js';
 import type {ModerationService} from './moderation.js';
 import {Phase4CommunityService} from './phase4-community.js';
 import {phase4CommunityScreen,parsePhase4CommunityCommand} from './phase4-community-ui.js';
+import {phase4ReplyOwnerScreen} from './phase4-reply-owner.js';
 import {Phase4CleanupOperations} from './phase4-cleanup-ops.js';
 import {phase4ServiceOpsScreen} from './phase4-service-ops-ui.js';
 import type {CommunityInput,CommunityJoinKind,CommunityLeaveKind,CommunityLanguage} from './phase4-community-model.js';
@@ -1221,6 +1222,22 @@ export class TelegramUpdateApplication {
       if(!screen)return {status:'DENIED',reason:'SERVICE_OPS_STALE_OR_DENIED'};
       return {status:'APPLIED',reason:'PHASE4_SERVICE_OPS_OWNER',
         plan:this.plan(chatId,screen.text,undefined,screen.keyboard,event.callbackMessageId)};
+    }
+    // 09:05 owns a focused group/rule dashboard; individual edits still use
+    // the shared community approval engine, never a second copy of policy.
+    const replyOwnerInput=kind==='private'&&!!this.opts.community&&(
+     event.callbackData==='mi:1:i:09:05'||
+     event.callbackData?.startsWith('r5:1:')||
+     text==='/replyadmin'||/^\/replyadmin -[1-9][0-9]{0,15}$/u.test(text));
+    if(replyOwnerInput){
+     if(!this.opts.policy.isOwner(actorId)||actorId!==chatId||
+        event.edited||event.forwarded||!this.opts.community)
+      return {status:'DENIED',reason:'PHASE4_REPLY_OWNER_PRIVATE_ONLY'};
+     const screen=await phase4ReplyOwnerScreen(this.opts.community,actorId,
+      event.callbackData??text);
+     if(!screen)return {status:'DENIED',reason:'PHASE4_REPLY_OWNER_STALE_OR_DENIED'};
+     return {status:'APPLIED',reason:'PHASE4_REPLY_OWNER',
+      plan:this.plan(chatId,screen.text,undefined,screen.keyboard,event.callbackMessageId)};
     }
     const communityCommand=kind==='private'?parsePhase4CommunityCommand(text):null;
     if(kind==='private'&&(communityCommand||event.callbackData?.startsWith('p4c:1:')||

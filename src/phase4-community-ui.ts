@@ -370,6 +370,7 @@ export async function phase4CommunityScreen(service:Phase4CommunityService,actor
     [btn('👋 '+(c.welcome.enabled?'إيقاف':'تفعيل')+' الترحيب','p4c:1:t:'+id+':w:'+(c.welcome.enabled?'0':'1'))],
     [btn('👋 '+(c.farewell.enabled?'إيقاف':'تفعيل')+' الوداع','p4c:1:t:'+id+':f:'+(c.farewell.enabled?'0':'1'))],
     [btn('🤖 '+(c.repliesEnabled?'إيقاف':'تفعيل')+' الردود','p4c:1:t:'+id+':r:'+(c.repliesEnabled?'0':'1'))],
+    [btn('🤖 إدارة الردود التلقائية','r5:1:g:'+id)],
     [btn('📋 قائمة الردود','p4c:1:r:'+id+':0')],
     [btn('📚 مراجع FAQ المعتمدة','p4c:1:f:'+id+':0')],
     [btn('🚦 سقف الإعلانات الآلية','p4c:1:i:'+id),
