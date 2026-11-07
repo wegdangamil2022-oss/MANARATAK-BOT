@@ -234,6 +234,9 @@ export class Phase4GuidanceService{
     throw Error('GUIDE_PUBLISH_MESSAGE_TOO_LONG');
    const state=s.phase4Community??=emptyCommunityState();
    const existing=state.guidePostJobs??[];
+   if(existing.some(j=>j.chatId===chatId&&j.status==='CONFIRMED'&&
+     now>=j.approvedAt&&now-j.approvedAt<600000))
+    throw Error('GUIDE_PUBLISH_TOO_FREQUENT');
    if(existing.some(j=>j.chatId===chatId&&
      ['QUEUED','SENDING','UNKNOWN_OUTCOME'].includes(j.status)))
     throw Error('GUIDE_PUBLISH_PENDING_REVIEW');
@@ -271,6 +274,9 @@ export class Phase4GuidanceService{
      guideHash(visible)!==draft.contentDigest)
     throw Error('GUIDE_PUBLISH_CONTENT_CHANGED');
    const active=st!.guidePostJobs??[];
+   if(active.some(j=>j.chatId===draft.chatId&&j.status==='CONFIRMED'&&
+      now>=j.approvedAt&&now-j.approvedAt<600000))
+    throw Error('GUIDE_PUBLISH_TOO_FREQUENT');
    if(active.some(j=>j.chatId===draft.chatId&&
      ['QUEUED','SENDING','UNKNOWN_OUTCOME'].includes(j.status)))
     throw Error('GUIDE_PUBLISH_PENDING_REVIEW');

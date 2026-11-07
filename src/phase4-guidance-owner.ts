@@ -72,8 +72,17 @@ async function groups(service:Phase4GuidanceService,actor:string,
   ' -1001234</code>',rows);
 }
 function welcome(d:GuidanceData):OwnerInlineScreen{
+ const full=renderGuidanceWelcome(d);
+ // The owner's control panel has extra instructions and must remain under
+ // Telegram's 4096-byte ceiling even when the student guide is lengthy.
+ const abbreviated=Buffer.byteLength(full,'utf8')>2100?
+  '<b>نبذة مختصرة عن الدليل:</b>\n'+
+   guidanceEscape((d.config.guideIntro??'مرحبًا بك في مجتمع منارتك التعليمي').slice(0,150))+
+   '\n\nالمجالات: '+guidanceEscape((d.config.guideTopics??d.educationTopics.join('، ')).slice(0,130))+
+   '\n\nلرؤية النص الكامل كما سيظهر في المجموعة اختر «معاينة نشر الدليل».':
+  full;
  return ui('<b>👁️ معاينة المالك — دليل العضو الجديد 09:02</b>\n\n'+
-  renderGuidanceWelcome(d)+'\n\n'+
+  abbreviated+'\n\n'+
   'هذا الدليل للعرض عند طلب الطالب المتحقق من عضويته، ولا يُرسل عند الانضمام تلقائيًا.\n\n'+
   'لإعداد تعريف المجموعة: <code>/guideset '+d.chatId+' تعريف خاص بالمجموعة</code>\n'+
   'لتحديد المجالات: <code>/guidetopics '+d.chatId+' المنح، الدورات، الاختبارات</code>\n'+
