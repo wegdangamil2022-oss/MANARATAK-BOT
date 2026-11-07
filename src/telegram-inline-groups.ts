@@ -7,6 +7,7 @@ import {ambiguousModerationChatIds} from './moderation-review-integrity.js';
 import {delegationGroupEntry} from './telegram-inline-delegation-edit.js';
 import {isValidGroupProtectionRecord} from './protection-rules.js';
 import {validGroupNetwork} from './group-network-model.js';
+import type {TelegramGroupProfile} from './telegram-moderation-gateway.js';
 
 /** Read-only owner group browser. The selector is NEVER a permission token.
  * All screens are rebuilt from current durable state after checking the owner.
@@ -14,12 +15,12 @@ import {validGroupNetwork} from './group-network-model.js';
  */
 export type OwnerInlineGroupRoute={kind:'list';page:number}|{kind:'summary';page:number}|
  {kind:'alerts';page:number}|{kind:'modes';page:number}|
- {kind:'details'|'subscription'|'access'|'info';chatId:string;version:number;page:number}|
+ {kind:'details'|'subscription'|'access'|'info'|'live';chatId:string;version:number;page:number}|
  {kind:'reversal';chatId:string;version:number;page:number;digest:string};
 const id='(-[1-9][0-9]{0,18})';
 const ver='([1-9][0-9]{0,9})';
 const page='(0|[1-9][0-9]{0,2})';
-const groupRoute=new RegExp('^mi:1:g:(d|u|a|i):'+id+':'+ver+':'+page+'$','u');
+const groupRoute=new RegExp('^mi:1:g:(d|u|a|i|l):'+id+':'+ver+':'+page+'$','u');
 const pageRoute=new RegExp('^mi:1:g:p:'+page+'$','u');
 const summaryRoute=new RegExp('^mi:1:g:s:'+page+'$','u');
 const alertsRoute=new RegExp('^mi:1:g:n:'+page+'$','u');
@@ -40,7 +41,7 @@ export function parseOwnerInlineGroupRoute(input:string):OwnerInlineGroupRoute|n
   page:Number(r[3]),digest:r[4]!};
  const m=groupRoute.exec(input);
  if(!m||m[0]!==input)return null;
- const kind=m[1]==='d'?'details':m[1]==='u'?'subscription':m[1]==='i'?'info':'access';
+ const kind=m[1]==='d'?'details':m[1]==='u'?'subscription':m[1]==='i'?'info':m[1]==='l'?'live':'access';
  return {kind,chatId:m[2]!,version:Number(m[3]),page:Number(m[4])};
 }
 type Button={readonly text:string;readonly callback_data:string};
@@ -54,6 +55,7 @@ const alertsKey=(p:number)=>'mi:1:g:n:'+p;
 const modesKey=(p:number)=>'mi:1:g:o:'+p;
 const detailKey=(chat:Chat,p:number)=>'mi:1:g:d:'+chat.id+':'+chat.version+':'+p;
 const infoKey=(chat:Chat,p:number)=>'mi:1:g:i:'+chat.id+':'+chat.version+':'+p;
+const liveKey=(chat:Chat,p:number)=>'mi:1:g:l:'+chat.id+':'+chat.version+':'+p;
 const accessKey=(chat:Chat,p:number)=>'mi:1:g:a:'+chat.id+':'+chat.version+':'+p;
 const subKey=(chat:Chat,p:number)=>'mi:1:g:u:'+chat.id+':'+chat.version+':'+p;
 const reversalKey=(chat:Chat,p:number,digest:string)=>
@@ -115,13 +117,13 @@ export function ownerGroupCardLink(state:BotState,chatId:string):string|null{
  * implementation panel. Other inherited owner callbacks keep their routes.
  */
 export async function renderOwnerInlineGroups(store:BotStore,policy:Policy,actorId:string,
- data:string):Promise<OwnerInlineScreen|null>{
+ data:string,observed?:TelegramGroupProfile):Promise<OwnerInlineScreen|null>{
  if(!policy.isOwner(actorId))return null;
  const route=data==='mi:1:i:01:01'?{kind:'list' as const,page:0}:
   data==='mi:1:i:01:09'?{kind:'alerts' as const,page:0}:
   data==='mi:1:i:01:10'?{kind:'summary' as const,page:0}:
   data==='mi:1:i:01:11'?{kind:'modes' as const,page:0}:parseOwnerInlineGroupRoute(data);
- if(!route)return null;
+ if(!route||route.kind==='live')return null; // external reads have a separate provenance and safety gate.
  const state=await store.snapshot();
  // This defensive second check follows the durable await; it is not the sole
  // authorization gate (Telegram's private identity check lives upstream).
@@ -239,6 +241,10 @@ export async function renderOwnerInlineGroups(store:BotStore,policy:Policy,actor
   // Approval data has no title/type/language/timezone fields. Never
   // fabricate a Telegram API observation from the local "present" flag.
   const now=Date.now();
+  const live=observed?.chatId===chat.id&&
+   (observed.kind==='GROUP'||observed.kind==='SUPERGROUP')&&
+   typeof observed.title==='string'&&observed.title.trim().length>0&&
+   Array.from(observed.title).length<=255?observed:null;
   const networks=(state.groupNetworks??[]).filter(n=>validGroupNetwork(n)&&
    n.members.some(m=>m.chatId===chat.id&&m.version===chat.version));
   const activeGrants=state.grants.filter(g=>g.chatId===chat.id&&!g.revoked&&
@@ -253,8 +259,10 @@ export async function renderOwnerInlineGroups(store:BotStore,policy:Policy,actor
   const scopes=chat.scopes.map(x=>scopeNames[x]??x);
   const body='<b>ℹ️ معلومات المجموعة — سجل منارتك المحلي</b>\n'+
    'معرّف Telegram المحفوظ: <code>'+safe(chat.id)+'</code>\n'+
-   'الاسم: غير محفوظ في سجل الاعتماد\n'+
-   'نوع المحادثة: يتطلب قراءة موثّقة من Telegram\n'+
+   (live?'الاسم وقت استعلام Telegram: '+safe(live.title)+'\n':
+    'الاسم: غير محفوظ في سجل الاعتماد\n')+
+   (live?'النوع وقت استعلام Telegram: '+(live.kind==='GROUP'?'مجموعة':'مجموعة فائقة')+'\n':
+    'نوع المحادثة: يتطلب قراءة موثّقة من Telegram\n')+
    'حالة الاعتماد: معتمدة محليًا · الإصدار '+chat.version+'\n'+
    'حالة اتصال البوت: '+(chat.present?
     'مسجّل كموجود، دون تأكيد حي':'غير مؤكدة، وقد تكون المجموعة غير متصلة')+'\n'+
@@ -267,8 +275,12 @@ export async function renderOwnerInlineGroups(store:BotStore,policy:Policy,actor
    'شبكات مرتبطة بالإصدار الحالي: '+networks.length+'\n'+
    'تفويضات محلية سارية بحسب السجل: '+activeGrants.length+'\n'+
    'محاولات إشراف غير محسومة في السجل: '+pendingOperations.length+'\n'+
-   'هذا العرض للقراءة فقط، ولا يثبت حالة Telegram الحية أو يمنح صلاحيات.';
+   (live?'الاسم والنوع نتيجة استعلام حديث لا تضمن بقاءهما دون تغيير.\n':
+    'لم يجر استعلام Telegram ناجحًا عن الاسم والنوع في هذه الشاشة.\n')+
+   'هذا العرض للقراءة فقط ولا يمنح صلاحيات.';
   return {text:body,keyboard:markup([
+   ...( /^-[1-9][0-9]{0,15}$/u.test(chat.id)&&Number.isSafeInteger(Number(chat.id))?
+    [[button('🔄 قراءة اسم ونوع المجموعة من Telegram',liveKey(chat,route.page))]]:[]),
    [button('🔍 فحص حقوق البوت من Telegram','tr:1:p:0')],
    [button('🔐 صلاحيات منارتك المحلية',accessKey(chat,route.page)),
     button('📋 اشتراكات المجموعة',subKey(chat,route.page))],
