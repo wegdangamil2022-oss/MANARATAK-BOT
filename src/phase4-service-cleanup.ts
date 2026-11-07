@@ -94,6 +94,21 @@ export class Phase4ServiceCleanupDispatcher{
   if(job.status!=='QUEUED')return job.status==='SENDING'?'UNKNOWN_OUTCOME':job.status;
   const now=this.clock();
   if(!Number.isSafeInteger(now)||now<0||now>8_640_000_000_000_000)return 'PAUSED';
+  if(now<job.observedAt)return 'PAUSED';
+  // Expired service messages are *never* worth a remote getChatMember call.
+  // Record a local skip, without attempting to delete anything.
+  if(now-job.observedAt>2*3600000){
+   return this.store.transaction(state=>{
+    const found=state.phase4Community?.cleanupJobs?.filter(j=>j.key===key)??[];
+    if(found.length!==1)throw Error('COMMUNITY_CLEANUP_AMBIGUOUS_KEY');
+    if(found[0]!.status==='QUEUED'){
+     const current=this.clock();
+     if(current>=found[0]!.observedAt&&current-found[0]!.observedAt>2*3600000)
+      found[0]!.status='SKIPPED';
+    }
+    return found[0]!.status==='SENDING'?'UNKNOWN_OUTCOME':found[0]!.status;
+   });
+  }
   if(now<job.dueAt)return 'NOT_DUE';
   if(!await this.allowedBySafety())return 'PAUSED';
   let canDelete=false;
@@ -160,7 +175,7 @@ export class Phase4ServiceCleanupDispatcher{
    .filter(j=>j.status==='QUEUED'&&j.observedAt<=now&&
      now-j.observedAt>2*3600000).slice(0,40).map(j=>j.key);
   const oldFinal=(initial.phase4Community?.cleanupJobs??[])
-   .filter(j=>!['QUEUED','SENDING','UNKNOWN_OUTCOME'].includes(j.status)&&
+   .filter(j=>j.status!=='QUEUED'&&
      j.observedAt<=now&&now-j.observedAt>=7*86400000)
    .slice(0,40).map(j=>j.key);
   if(expired.length||oldFinal.length){
@@ -174,7 +189,7 @@ export class Phase4ServiceCleanupDispatcher{
       job.observedAt<=current&&current-job.observedAt>2*3600000)
      job.status='SKIPPED';
     state.phase4Community!.cleanupJobs=jobs.filter(j=>
-      !prune.has(j.key)||['QUEUED','SENDING','UNKNOWN_OUTCOME'].includes(j.status)||
+      !prune.has(j.key)||j.status==='QUEUED'||
       j.observedAt>current||current-j.observedAt<7*86400000);
    });
   }
