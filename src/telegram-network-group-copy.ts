@@ -96,11 +96,17 @@ export class OwnerNetworkGroupCopy{
   source:string,p:number):OwnerInlineScreen|null{
   const network=this.network(s,id,now),members=this.eligible(s,actor,now,id);
   if(!network||!members||!members.some(c=>c.id===source))return null;
-  const options=members.filter(c=>c.id!==source),
-   pages=Math.max(1,Math.ceil(options.length/SIZE));
+  const variants:NetworkCopyPart[]=['b','r','f'];
+  const candidates=members.filter(c=>c.id!==source)
+   .map(chat=>({chat,kinds:variants.filter(kind=>
+    previewNetworkGroupCopy(s,this.policy,actor,now,id,source,chat.id,kind)!==null)}))
+   .filter(x=>x.kinds.length>0);
+  const pages=Math.max(1,Math.ceil(candidates.length/SIZE));
   if(p>=pages)return null;
-  const rows=options.slice(p*SIZE,(p+1)*SIZE)
-   .map(c=>[btn('📥 الوجهة '+c.id,'nw:1:cv:'+id+':'+source+':'+c.id+':b')]);
+  const rows=candidates.slice(p*SIZE,(p+1)*SIZE)
+   .map(({chat,kinds})=>kinds.map(kind=>btn(
+    (kind==='r'?'📑':kind==='f'?'🌊':'📦')+chat.id+' · '+labels[kind],
+    'nw:1:cv:'+id+':'+source+':'+chat.id+':'+kind)));
   const nav:{text:string;callback_data:string}[]=[];
   if(p)nav.push(btn('⬅️ السابق','nw:1:ct:'+id+':'+source+':'+(p-1)));
   if(p+1<pages)nav.push(btn('➡️ التالي','nw:1:ct:'+id+':'+source+':'+(p+1)));
