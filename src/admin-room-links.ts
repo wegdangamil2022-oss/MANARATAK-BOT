@@ -127,6 +127,12 @@ export function adminRoomLinkHistory(s:BotState,p:Policy,actor:string,
    return null;
   events.push({kind:'REVOKED',at:revoke.at,currentlyVerified:true});
  }
+ // A recorded room approval before the group approval is not a valid
+ // two-party approval sequence. No settings may follow a finalized revoke.
+ const ga=events.find(e=>e.kind==='GROUP_APPROVAL');
+ const ra=events.find(e=>e.kind==='ROOM_APPROVAL');
+ if(ra&&(!ga||ra.at<ga.at))return null;
+ if(revoke&&events.some(e=>e.kind!=='REVOKED'&&e.at>revoke.at))return null;
  events.sort((a,b)=>b.at-a.at||a.kind.localeCompare(b.kind));
  return {id,group:r.group,room:r.room,mode:r.mode,
   active:active(s,p,r,now),revoked:!!revoke,total:events.length,
