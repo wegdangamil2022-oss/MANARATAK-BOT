@@ -131,7 +131,8 @@ export class Phase4CommunityService{
      throw Error('COMMUNITY_FAREWELL_VARIANT_MISSING');
    }
    if(kind==='REPLY_ADD'&&current.rules.length>=30)throw Error('COMMUNITY_RULE_CAPACITY');
-   if(['REPLY_REMOVE','REPLY_ENABLE','REPLY_DISABLE','REPLY_COOLDOWN'].includes(kind)&&
+   if(['REPLY_REMOVE','REPLY_ENABLE','REPLY_DISABLE','REPLY_COOLDOWN',
+      'REPLY_PHOTO_SET','REPLY_PHOTO_CLEAR','REPLY_BUTTON_ADD','REPLY_BUTTONS_CLEAR'].includes(kind)&&
       (!request.ruleId||!current.rules.some(r=>r.id===request.ruleId)))
     throw Error('COMMUNITY_RULE_MISSING');
    if(kind==='AUTO_LIMIT_SET'&&(!Number.isInteger(request.autoMessagesPerMinute)||
@@ -198,6 +199,23 @@ export class Phase4CommunityService{
     throw Error('COMMUNITY_COMMAND_INVALID');
    if((kind==='WELCOME_PHOTO_SET'||kind==='FAREWELL_PHOTO_SET')&&
      !validCommunityPhotoId(request.photoFileId))throw Error('COMMUNITY_PHOTO_ID_INVALID');
+   if(kind==='REPLY_PHOTO_SET'&&!validCommunityPhotoId(request.photoFileId))
+    throw Error('COMMUNITY_REPLY_PHOTO_INVALID');
+   if(kind==='REPLY_PHOTO_CLEAR'&&
+      !current.rules.some(r=>r.id===request.ruleId&&r.photoFileId))
+    throw Error('COMMUNITY_REPLY_PHOTO_MISSING');
+   if(kind==='REPLY_BUTTON_ADD'){
+    if(!validCommunityLinkButtons([{text:request.buttonText??'',url:request.buttonUrl??''}]))
+     throw Error('COMMUNITY_REPLY_BUTTON_INVALID');
+    const target=current.rules.find(r=>r.id===request.ruleId)!;
+    if((target.buttons?.length??0)>=3)throw Error('COMMUNITY_REPLY_BUTTON_CAPACITY');
+    if(target.buttons?.some(b=>b.url===request.buttonUrl||
+       b.text.normalize('NFKC').trim()===request.buttonText?.normalize('NFKC').trim()))
+     throw Error('COMMUNITY_REPLY_BUTTON_DUPLICATE');
+   }
+   if(kind==='REPLY_BUTTONS_CLEAR'&&
+      !current.rules.some(r=>r.id===request.ruleId&&r.buttons?.length))
+    throw Error('COMMUNITY_REPLY_BUTTONS_MISSING');
    if(kind==='WELCOME_BUTTON_ADD'||kind==='FAREWELL_BUTTON_ADD'){
     const target=kind==='WELCOME_BUTTON_ADD'?current.welcome:current.farewell;
     if(!validCommunityLinkButtons([{text:request.buttonText??'',url:request.buttonUrl??''}]))
@@ -396,6 +414,24 @@ export class Phase4CommunityService{
     case 'REPLY_ENABLE':config.rules.find(r=>r.id===draft.ruleId)!.enabled=true;break;
     case 'REPLY_DISABLE':config.rules.find(r=>r.id===draft.ruleId)!.enabled=false;break;
     case 'REPLY_COOLDOWN':config.rules.find(r=>r.id===draft.ruleId)!.cooldownMs=draft.cooldownMs!;break;
+    case 'REPLY_PHOTO_SET':
+     if(!validCommunityPhotoId(draft.photoFileId))throw Error('COMMUNITY_REPLY_PHOTO_INVALID');
+     config.rules.find(r=>r.id===draft.ruleId)!.photoFileId=draft.photoFileId!;
+     break;
+    case 'REPLY_PHOTO_CLEAR':
+     delete config.rules.find(r=>r.id===draft.ruleId)!.photoFileId;
+     break;
+    case 'REPLY_BUTTON_ADD':{
+     const rule=config.rules.find(r=>r.id===draft.ruleId)!;
+     const button={text:draft.buttonText!,url:draft.buttonUrl!};
+     if(!validCommunityLinkButtons([...rule.buttons??[],button]))
+      throw Error('COMMUNITY_REPLY_BUTTON_DUPLICATE');
+     rule.buttons=[...rule.buttons??[],button];
+     break;
+    }
+    case 'REPLY_BUTTONS_CLEAR':
+     delete config.rules.find(r=>r.id===draft.ruleId)!.buttons;
+     break;
     case 'QUIET_HOURS_SET':config.quietHours={startMinute:draft.startMinute!,endMinute:draft.endMinute!};break;
     case 'QUIET_HOURS_CLEAR':delete config.quietHours;break;
     case 'TOPIC_COOLDOWN_SET':{
@@ -697,6 +733,9 @@ export class Phase4CommunityService{
     const resolved=resolvedCommunityReply(s,config,rule,input.topicId);
     if(!resolved){record('SOURCE_UNAVAILABLE',rule.id);return null;}
     template=resolved.template;preEscaped=resolved.escaped===true;ruleId=rule.id;
+    // Media and links belong to the reviewed rule, not to the student's text.
+    photoFileId=rule.photoFileId;
+    communityLinks=communityLinkKeyboard(rule.buttons);
    }
    const actorDigest=hex('P4:ACTOR:'+input.chatId+':'+input.actorId);
    const existing=stateOf(s).receipts;
@@ -831,6 +870,21 @@ export class Phase4CommunityService{
   if(draft.kind==='REPLY_REMOVE')return 'مراجعة حذف القاعدة: '+clean(draft.ruleId??'');
   if(draft.kind==='REPLY_ENABLE'||draft.kind==='REPLY_DISABLE')
    return 'مراجعة '+(draft.kind==='REPLY_ENABLE'?'تفعيل':'إيقاف')+' القاعدة: '+clean(draft.ruleId??'');
+  if(draft.kind==='REPLY_PHOTO_SET')
+   return '<b>📷 صورة رد آلي</b>\nالقاعدة: <code>'+clean(draft.ruleId??'')+
+    '</code>\nمصدر الصورة: معرف ملف Telegram وصل من المالك؛ لا يُعرض معرف الملف للطلاب. '+
+    'يجب ألا تتجاوز التسمية النصية 1024 بايت بعد تحويل HTML.';
+  if(draft.kind==='REPLY_PHOTO_CLEAR')
+   return 'مراجعة حذف صورة الرد الآلي من القاعدة '+clean(draft.ruleId??'')+
+    '. لا تُحذف صورة من رسائل Telegram السابقة.';
+  if(draft.kind==='REPLY_BUTTON_ADD')
+   return '<b>🔗 إضافة رابط للرد</b>\nالقاعدة: <code>'+clean(draft.ruleId??'')+
+    '</code>\nالنص: '+clean(draft.buttonText??'')+
+    '\nالرابط المعتمد: '+clean(draft.buttonUrl??'')+
+    '\nالرابط HTTPS مباشر، ولا يرسل بيانات عن الطلاب أو يحوّل إلى callback.';
+  if(draft.kind==='REPLY_BUTTONS_CLEAR')
+   return 'مراجعة إزالة جميع أزرار الروابط من رد القاعدة '+clean(draft.ruleId??'')+
+    '. لا تغيّر الرسائل القديمة.';
   if(draft.kind==='REPLY_COOLDOWN')return 'مراجعة فاصل الرد للقاعدة '+clean(draft.ruleId??'')+
     ': '+(draft.cooldownMs!/1000)+' ثانية';
   if(draft.kind==='QUIET_HOURS_SET')return 'ساعات الهدوء للردود التلقائية: '+
