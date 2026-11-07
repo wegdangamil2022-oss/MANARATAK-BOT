@@ -124,6 +124,17 @@ export function ownerForumNotePublication(s:BotState,p:Policy,actor:string,
 export function publishedForumTopicNote(s:BotState,p:Policy,g:string,t:number,
  now:number):LocalForumTopicNote|null|undefined{
  if(forumTopicEducationMode(s,p,g,t,now)!=='INHERIT')return null;
+ // A correctly registered topic may not yet have an editorial note.
+ // Distinguish that from corrupt note/publication evidence so a request
+ // can receive a harmless "no approved note" response in its own thread.
+ const note=registeredForumTopicNote(s,g,t,now);
+ if(note===undefined){
+  const current=registeredForumTopic(s,g,t,now),ledger=receipts(s,now);
+  if(!current||!ledger||ledger.some(x=>x.group===g&&x.thread===t&&
+   x.groupVersion===current.groupVersion))return null;
+  return undefined;
+ }
+ if(note===null)return null;
  const state=localState(s,p,g,t,now);
  if(!state)return null;
  return state.published?state.note:undefined;
@@ -134,7 +145,9 @@ export function forumNotePublicationProof(s:BotState,p:Policy,actor:string,
  if(!action(next))return null;
  const state=ownerForumNotePublication(s,p,actor,g,t,now);
  if(!state||state.eventRevision>=100||
-  (next==='PUBLISH'?state.published:!state.published))return null;
+  (next==='PUBLISH'?state.published:!state.published)||
+  (next==='PUBLISH'&&forumTopicEducationMode(s,p,g,t,now)!=='INHERIT'))
+  return null;
  return sha([actor,g,t,next,state,
   s.chats.filter(x=>x.id===g),s.grants.filter(x=>x.chatId===g&&x.actor===actor),
   s.privateFeatures,s.privateSettingsRevision??0,
