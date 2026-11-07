@@ -232,7 +232,7 @@ export class TelegramForumTopicBroadcast{
   const pages=Math.max(1,Math.ceil(list.length/8));
   if(page>=pages)return null;
   const items=list.slice(page*8,(page+1)*8).map(x=>
-   '▫️ المورد '+x.resource+' · '+status(x.outcome)+' · '+
+   '▫️ المورد '+x.resource+' · <code>'+x.id+'</code> · '+status(x.outcome)+' · '+
    new Date(x.startedAt).toISOString().slice(0,16).replace('T',' ')+' UTC');
   const nav:{text:string;callback_data:string}[]=[];
   if(page>0)nav.push(b('⬅️ السابق','ft:1:6:'+g+':'+t+':'+(page-1)));
