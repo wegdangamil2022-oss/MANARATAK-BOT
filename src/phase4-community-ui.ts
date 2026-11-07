@@ -302,6 +302,8 @@ export async function phase4CommunityScreen(service:Phase4CommunityService,actor
    diagnostic.status==='RULE_DISABLED'?'القاعدة المطابقة <code>'+diagnostic.ruleId+'</code> معطّلة.':
    diagnostic.status==='TOPIC_MISMATCH'?'القاعدة المطابقة <code>'+diagnostic.ruleId+'</code> مخصصة لموضوع Forum آخر.':
    diagnostic.status==='SOURCE_UNAVAILABLE'?'مصدر الرد المعتمد غير متاح حاليًا (سؤال FAQ أو منشوره أو رابط القوانين). لم يُرسل رد.':
+   diagnostic.status==='CAPTION_LIMIT'?'الرد يتجاوز حد وصف صورة Telegram (1024 بايت). لم يُرسل.':
+   diagnostic.status==='TEMPLATE_INVALID'?'القالب غير صالح أو تجاوز حد Telegram. لم يُرسل.':
    'لا توجد قاعدة ترد على هذه الرسالة في هذا الموضوع.';
   return {text:'<b>🧪 تشخيص الردود دون إرسال</b>\n'+text+
    '\nلا تحسب هذه المعاينة حدود المعدّل أو عضوية الطلاب.',

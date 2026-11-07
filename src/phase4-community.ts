@@ -24,7 +24,8 @@ export interface CommunitySendProposal{
  readonly photoFileId?:string;readonly communityLinks?:CommunityLinkKeyboard;
 }
 /** Read-only administrative explanation, never stored with student text. */
-export type CommunityDiagnostic={status:'REPLIES_DISABLED'|'NO_MATCH'|'QUIET_HOURS'|'SOURCE_UNAVAILABLE'|'LECTURE_MODE'}|
+export type CommunityDiagnostic={status:'REPLIES_DISABLED'|'NO_MATCH'|'QUIET_HOURS'|
+ 'SOURCE_UNAVAILABLE'|'LECTURE_MODE'|'CAPTION_LIMIT'|'TEMPLATE_INVALID'}|
  {status:'RULE_DISABLED'|'TOPIC_MISMATCH';ruleId:string}|
  {status:'MATCH';ruleId:string;preview:string};
 const isGroup=(s:string):boolean=>/^-[1-9]\d{0,15}$/u.test(s)&&Number.isSafeInteger(Number(s));
@@ -660,12 +661,17 @@ export class Phase4CommunityService{
    messageText:sample,...(topicId!==undefined?{topicId}:{})};
   const resolved=resolvedCommunityReply(state,config,rule,topicId);
   if(!resolved)return {status:'SOURCE_UNAVAILABLE'};
-  return {status:'MATCH',ruleId:rule.id,
-   preview:resolved.escaped?resolved.template:
+  let preview:string;
+  try{
+   preview=resolved.escaped?resolved.template:
     renderCommunityTemplate(resolved.template,input,
      now+(config.timeZone?0:config.utcOffsetMinutes*60000),config.rulesUrl??'',
      {language:config.language??'ar',clockFormat:config.clockFormat??'24',
-      calendar:config.calendar??'gregorian',...(config.timeZone?{timeZone:config.timeZone}:{})})};
+      calendar:config.calendar??'gregorian',...(config.timeZone?{timeZone:config.timeZone}:{})});
+  }catch{return {status:'TEMPLATE_INVALID'};}
+  if(rule.photoFileId&&Buffer.byteLength(preview,'utf8')>1024)
+   return {status:'CAPTION_LIMIT'};
+  return {status:'MATCH',ruleId:rule.id,preview};
  }
  /** Atomically applies quotas and reserves an outbound event exactly once.
   * A reservation is at-most-once: its provider outcome is managed separately
