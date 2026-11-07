@@ -92,9 +92,8 @@ export class TelegramOwnerGroupLink{
  }
  async home(actor:string):Promise<OwnerInlineScreen|null>{
   const state=await this.store.snapshot(),now=this.clock();
-  if(!authEpoch(state,this.policy,actor,'-1000000000000',now)&&
-     (!validTime(now)||!this.policy.isOwner(actor)||
-      !this.policy.privateFeature(state,'owner.dashboard',actor)))return null;
+  if(!validTime(now)||!isActor(actor)||!this.policy.isOwner(actor)||
+     !this.policy.privateFeature(state,'owner.dashboard',actor))return null;
   return ui('<b>➕ ربط مجموعة بمنارتك</b>\n'+
    'أضف البوت مشرفًا في المجموعة، ويجب أن تكون أنت منشئ المجموعة أو مشرفًا لديها صلاحية إدارة المحادثة.\n'+
    'أرسل في خاص البوت الأمر:\n<code>/linkgroup -1001234567890</code>\n'+
@@ -115,6 +114,7 @@ export class TelegramOwnerGroupLink{
   const after=await this.store.snapshot(),at=this.clock();
   if(!validTime(at)||at<now||at>=now+TTL||
      authEpoch(after,this.policy,actor,command.id,at)!==epoch)return null;
+  if(!await this.safe())return null;
   const proof=sha(profile);
   return this.store.transaction(s=>{
    const checked=this.clock();
@@ -171,7 +171,7 @@ export class TelegramOwnerGroupLink{
    });
   }
   const profile=await this.eligible(attempt.payload.id,actor);
-  if(!profile||sha(profile)!==attempt.payload.profileHash)return null;
+  if(!profile||sha(profile)!==attempt.payload.profileHash||!await this.safe())return null;
   const result=await this.store.transaction(s=>{
    const now=this.clock(),current=this.pending(s,actor,token,now);
    if(!current||!validTime(now)||now<start||now>=start+TTL||
@@ -182,6 +182,9 @@ export class TelegramOwnerGroupLink{
    let chat:Chat;
    if(records.length===1){
     chat=records[0]!;
+    // Reapproval must never revive a legacy, unversioned staff grant.
+    // This is a fresh authorization epoch, not an undo of old privileges.
+    for(const grant of s.grants)if(grant.chatId===chat.id)grant.revoked=true;
     if(!Number.isSafeInteger(chat.version)||chat.version<1||chat.version>=9_999_999_999)return null;
     chat.version++;chat.approved=true;chat.present=true;
     chat.scopes=[...current.payload.scopes];chat.groupAI='OFF';
