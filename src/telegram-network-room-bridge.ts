@@ -19,7 +19,7 @@ const escape=(x:string)=>x.replace(/&/gu,'&amp;').replace(/</gu,'&lt;')
 const names:Record<NetworkRoomBridgeRow['status'],string>={
  ACTIVE:'غرفة إشعارات معتمدة مع إرسال غير موقوف محليًا',
  QUIET:'غرفة إشعارات معتمدة لكنها في وضع الصمت الخاص بالغرفة',
- UNLINKED:'لا يوجد رابط إشعارات معتمد ونشط لهذه المجموعة',
+ UNLINKED:'لا يوجد رابط إشعارات نشط قابل للتحقق لهذه المجموعة',
  ROOM_NOT_AUTHORIZED:'يوجد رابط إشعارات لكن لا تملك حق إدارة الغرفة أو أن الدليل غير صالح'
 };
 const marker:Record<NetworkRoomBridgeRow['status'],string>={
@@ -49,6 +49,7 @@ export class OwnerNetworkRoomBridge{
     'الحالة: '+names[row.status]+'\n'+
     (row.roomId!==null?'الغرفة المخوّل بإدارتها: <code>'+row.roomId+'</code>\n':
      'لا نعرض معرّف أي غرفة لا تملك صلاحية إدارتها الحالية.\n')+
+    (row.pendingReviews!==null?'حالات تنتظر مراجعة بشرية: '+row.pendingReviews+'\n':'')+
     (row.events24h!==null?
      'أحداث إدارية محلية مرئية آخر 24 ساعة: '+row.events24h+'\n':'')+
     (row.truncated?'⚠️ حد العرض 200 حدث؛ العدد قد يكون جزئيًا.\n':'')+
@@ -57,6 +58,7 @@ export class OwnerNetworkRoomBridge{
     'هذه قراءة محلية، ولا تثبت صلاحيات Telegram الحية، '+
     'ولا ترسل بلاغات أو بيانات طلاب إلى الغرفة.',
     [[btn('🏢 إدارة روابط الغرف','al:1:h:0')],
+     [btn('➕ طلب ربط إشعارات جديد','al:1:n:notifications')],
      [btn('🔔 أحداث المجموعة في الشبكة','nw:1:ev:'+id+':0')],
      [btn('↩️ غرف الشبكة','nw:1:rl:'+id+':0)]]);
   }
@@ -71,11 +73,13 @@ export class OwnerNetworkRoomBridge{
   if(pageNo)nav.push(btn('⬅️ السابق','nw:1:rl:'+id+':'+(pageNo-1)));
   if(pageNo+1<pages)nav.push(btn('➡️ التالي','nw:1:rl:'+id+':'+(pageNo+1)));
   if(nav.length)rows.push(nav);
+  rows.push([btn('➕ ربط غرفة إشعارات','al:1:n:notifications')]);
   rows.push([btn('🏢 إدارة الغرف','al:1:h:0'),
    btn('🔔 أحداث الشبكة','nw:1:ev:'+id+':0')]);
   rows.push([btn('↩️ بطاقة الشبكة','nw:1:d:'+id)]);
   return ui('<b>🏢 تكامل الشبكة وغرف الإدارة</b>\n'+
    'الشبكة: '+escape(report.networkName)+' · الإصدار '+report.networkRevision+'\n'+
+   (report.networkStopped?'⛔ الشبكة موقوفة طارئًا؛ لا تصدر منها ملخصات شبكة تلقائية.\n':'')+
    'المجموعات ذات الصلاحية المحلية: '+report.eligibleGroups+
    ' · صفحة '+(pageNo+1)+'/'+pages+'\n'+
    'غرفة إشعارات فعالة: '+report.linked+
