@@ -163,18 +163,18 @@ export class NetworkRoomRelayDispatcher{
     return intact(s,this.policy,job,now)&&await this.safe();
    };
    let result:'CONFIRMED'|'FAILED_CONFIRMED'|'UNKNOWN_OUTCOME'|'NOT_SENT'='NOT_SENT';
-   if(TelegramBotApiModerationGateway.usesOfficialRoomPrivacyRead(this.gateway)&&
-    await current()){
-    let privacy:'NO_PUBLIC_USERNAME'|'PUBLIC_USERNAME'|'NOT_GROUP'|'UNKNOWN'='UNKNOWN';
-    try{privacy=await this.gateway.inspectRoomPrivacy(job.room);}catch{/* no assumption */}
-    if(privacy==='NO_PUBLIC_USERNAME'&&
-     TelegramBotApiModerationGateway.usesOfficialRoomPrivacyRead(this.gateway)&&
-     await current()){
-     result=await this.sender.sendNetworkReview(job.pref.group,job.room,job.kind,
-      async()=>await current()&&
-       TelegramBotApiModerationGateway.usesOfficialRoomPrivacyRead(this.gateway)&&
-       await current());
-    }
+   const roomPrivate=async():Promise<boolean>=>{
+    if(!TelegramBotApiModerationGateway.usesOfficialRoomPrivacyRead(this.gateway))
+     return false;
+    try{return await this.gateway.inspectRoomPrivacy(job.room)===
+     'NO_PUBLIC_USERNAME';}catch{return false;}
+   };
+   if(await current()&&await roomPrivate()&&await current()){
+    // The official privacy proof must be fresh at the sender boundary too.
+    // Revocation, a public username, unknown visibility, or loss of source
+    // authority vetoes the send; never retry the reserved event blindly.
+    result=await this.sender.sendNetworkReview(job.pref.group,job.room,job.kind,
+     async()=>await current()&&await roomPrivate()&&await current());
    }
    await this.store.transaction(s=>{
     const now=this.clock();
