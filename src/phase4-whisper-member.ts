@@ -115,7 +115,7 @@ export async function whisperMemberScreen(
    if(opened.status!=='READY'){
     const errors:Record<string,string>={
      NOT_ANNOUNCED:'إعلان الهمسة لم يؤكده Telegram؛ لا يمكن فتح المحتوى حتى النشر المؤكد.',
-     FULL:'انتهت المقاعد المحددة لهذه الهمسة.',
+     FULL:'انتهت المقاعد المحددة أو بلغت الخدمة حدود السعة التشغيلية.',
      CONSENT_REQUIRED:'يلزم تفعيل موافقتك على همسات المجموعة في الخاص أولًا.',
      VERIFICATION_REQUIRED:'تعذّر التحقق من عضويتك واشتراكاتك المطلوبة حاليًا.',
      EXPIRED:'انتهت صلاحية الهمسة.',CLOSED:'أغلقت الهمسة.'
@@ -143,7 +143,7 @@ export async function whisperMemberScreen(
   switch(reservation.status){
    case 'HELD':return {text:'💌 تم حجز مقعد مبدئي لك. لا يعني ذلك إرسال الهمسة أو قراءة محتواها. هذه الوظيفة لا تكشف محتوى الرسالة بعد.'};
    case 'ALREADY_HELD':return {text:'💌 سبق حجز مقعد مبدئي لهذا الحساب. لا توجد رسالة خاصة تم تسليمها.'};
-   case 'FULL':return {text:'⏳ لا توجد مقاعد متاحة حاليًا، ولم تُكشف أي رسالة.'};
+   case 'FULL':return {text:'⏳ لا توجد مقاعد أو سعة حفظ متاحة حاليًا، ولم يُكشف أي محتوى.'};
    case 'CONSENT_REQUIRED':return {text:'🔒 يلزم تفعيل موافقتك الخاصة على استقبال همسات المجموعة أولًا.'};
    case 'VERIFICATION_REQUIRED':return {text:'🔒 تعذّر التحقق من عضويتك حاليًا. لم يُحجز أي مقعد.'};
    case 'EXPIRED':
