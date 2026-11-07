@@ -53,14 +53,24 @@ export function networkGroupCopyHistory(s:BotState,p:Policy,actor:string,
  if(networks.length!==1||!validGroupNetwork(networks[0])||
   networks[0]!.updatedAt>now)return null;
  const out:NetworkCopyHistoryEntry[]=[];
+ // Pre-index once: historical review should remain bounded even with large
+ // audit journals, while duplicate keys still fail closed.
+ const count=new Map<string,number>();
+ for(const row of s.audit)if(key.test(row.updateKey))
+  count.set(row.updateKey,(count.get(row.updateKey)??0)+1);
+ const receiptMap=new Map<string,BotState['callbacks']>();
+ for(const c of s.callbacks)if(c.ref.startsWith('c_')){
+  const rows=receiptMap.get(c.ref)??[];
+  rows.push(c);receiptMap.set(c.ref,rows);
+ }
  for(const a of s.audit){
   if(a.reason!==AUDIT)continue;
   const m=key.exec(a.updateKey);if(!m||m[0]!==a.updateKey||
    a.decision!=='ALLOW'||a.actorId!==actor||
    !rev(a.policyVersion)||!clock(a.at)||a.at>now||
-   s.audit.filter(x=>x.updateKey===a.updateKey).length!==1)continue;
+   count.get(a.updateKey)!==1)continue;
   // The private one-shot receipt and audit entry must agree exactly.
-  const matching=s.callbacks.filter(c=>c.ref==='c_'+m[1]);
+  const matching=receiptMap.get('c_'+m[1])??[];
   if(matching.length!==1)continue;
   const c=matching[0]!;
   if(!c.oneShot||!c.used||c.revoked||c.actorId!==actor||
