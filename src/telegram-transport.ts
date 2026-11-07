@@ -763,7 +763,8 @@ export class TelegramUpdateApplication {
       event.callbackData?.startsWith('wh:1:')||
       /^\/whispers(?:$|\s)|^\/whisper(?:first|direct|reports|members|everyone|admins)(?:$|\s)/u.test(text));
     if(whisperInput){
-     if(!this.opts.policy.isOwner(actorId)||actorId!==chatId)
+     if(!this.opts.policy.isOwner(actorId)||actorId!==chatId||
+        event.forwarded||event.edited)
       return {status:'DENIED',reason:'WHISPER_OWNER_ONLY'};
      const screen=await whisperOwnerScreen(
       new Phase4WhisperService(this.opts.store,this.opts.policy,this.clock),
