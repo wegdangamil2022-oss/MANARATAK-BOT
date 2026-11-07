@@ -20,6 +20,7 @@ import {ModerationService,FakeModerationGateway} from './moderation.js';
 import {readTelegramSafetySwitch,createTelegramSafetyGate} from './telegram-safety-switch.js';
 import {ModerationReportNoticeDispatcher} from './moderation-report-notices.js';
 import {NetworkEventAlertDispatcher} from './network-event-alerts.js';
+import {NetworkDailyDigestDispatcher} from './network-daily-digest-dispatch.js';
 import {RuleNoticeDispatcher} from './group-rule-notices.js';
 import {SubscriptionChangeAlertDispatcher} from './subscription-change-alert.js';
 import {SubscriptionRightsMonitor} from './subscription-rights-monitor.js';
@@ -251,6 +252,9 @@ export async function createLiveTelegramServer(config:LiveTelegramConfig,
  const notices=phase3?new ModerationReportNoticeDispatcher(store,policy,new TelegramBotApiTextSender(check.token,request),Date.now,safetyGate):undefined;
  const networkAlerts=phase3&&check.phase3TimersEnabled===true?
   new NetworkEventAlertDispatcher(store,policy,new TelegramBotApiTextSender(check.token,request),Date.now,safetyGate):undefined;
+ const dailyNetworkDigests=phase3&&check.phase3TimersEnabled===true?
+  new NetworkDailyDigestDispatcher(store,policy,
+   new TelegramBotApiTextSender(check.token,request),Date.now,safetyGate):undefined;
  const ruleNotices=phase3&&check.phase3TimersEnabled===true?new RuleNoticeDispatcher(store,policy,phase3.moderation,new TelegramBotApiTextSender(check.token,request),Date.now,safetyGate):undefined;
  const subscriptionChangeAlerts=phase3&&check.phase3TimersEnabled===true?new SubscriptionChangeAlertDispatcher(store,policy,new TelegramBotApiTextSender(check.token,request),Date.now,safetyGate):undefined;
  const subscriptionRightsMonitor=phase3&&check.phase3TimersEnabled===true?new SubscriptionRightsMonitor(store,policy,membership,Date.now,safetyGate):undefined;
@@ -272,6 +276,7 @@ export async function createLiveTelegramServer(config:LiveTelegramConfig,
    if(welcomeFarewell&&check.phase3TimersEnabled===true){await welcomeFarewell.drain();await welcomeFarewell.cleanup();}
    if(notices)await notices.drain();
    if(networkAlerts)await networkAlerts.drain();
+   if(dailyNetworkDigests)await dailyNetworkDigests.drain();
    if(ruleNotices)await ruleNotices.drain();
    if(subscriptionRightsMonitor)await subscriptionRightsMonitor.tick();
    if(subscriptionChangeAlerts)await subscriptionChangeAlerts.drain();
