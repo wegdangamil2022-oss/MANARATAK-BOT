@@ -244,7 +244,7 @@ export class TelegramForumTopicControl{
   if(page>=pages)return null;
   const rows=items.slice(page*8,(page+1)*8).map(item=>
    '▫️ '+(item.action==='CLOSE'?'إغلاق':'إعادة فتح')+' · '+
-   state(item.outcome)+' · '+new Date(item.startedAt).toISOString()
+   state(item.outcome)+' · <code>'+item.id+'</code> · '+new Date(item.startedAt).toISOString()
     .slice(0,16).replace('T',' ')+' UTC');
   const nav:{text:string;callback_data:string}[]=[];
   if(page>0)nav.push(b('⬅️ السابق','ft:1:9:'+g+':'+t+':'+(page-1)));
