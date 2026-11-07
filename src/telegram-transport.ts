@@ -14,6 +14,7 @@ import {CaptchaRuleGate} from './captcha-rules.js';
 import {TelegramRuleActions} from './telegram-rule-actions.js';
 import {validProtectionUsername} from './protection-rules.js';
 import {TelegramAdminRoomLinks} from './telegram-admin-room-links.js';
+import {OwnerForumTopicEditor} from './telegram-owner-forum-topics.js';
 import {TelegramOncall,validOncallRoute} from './telegram-oncall.js';
 import {TelegramRuleWarningPolicy} from './telegram-rule-warning-policy.js';
 import {TelegramRoomControl} from './telegram-room-control.js';
@@ -688,6 +689,28 @@ export class TelegramUpdateApplication {
     if(event.kind==='private'&&!event.callbackData?.startsWith('oc:1:c:'))await new TelegramOncall(this.opts.store,this.opts.policy,this.clock).cancel(event.actorId);
     if(event.kind==='private'&&event.text.startsWith('/oncall ')){const view=await new TelegramOncall(this.opts.store,this.opts.policy,this.clock).command(event.actorId,event.text);return view?{status:'APPLIED',reason:'ONCALL_VIEW',adminUIAccess:view.access,plan:this.plan(event.actorId,view.text,undefined,view.keyboard)}:{status:'DENIED',reason:'ONCALL_UNAVAILABLE'};}
     if(event.kind==='private'&&event.text.startsWith('/adminlink ')){const view=await new TelegramAdminRoomLinks(this.opts.store,this.opts.policy,this.clock).create(event.actorId,event.text);return view?{status:'APPLIED',reason:'ADMIN_ROOM_VIEW',adminUIAccess:view.access,plan:this.plan(event.actorId,view.text,undefined,view.keyboard)}:{status:'DENIED',reason:'ADMIN_ROOM_UNAVAILABLE'};}
+    if(event.kind==='private'&&event.actorId===event.chatId&&
+     !event.callbackData&&event.text==='/topics'){
+     if(!this.opts.policy.isOwner(event.actorId)||event.edited||event.forwarded)
+      return {status:'DENIED',reason:'OWNER_FORUM_PRIVATE_ORIGINAL_ONLY'};
+     const view=await new OwnerForumTopicEditor(this.opts.store,this.opts.policy,this.clock)
+      .handle(event.actorId,'ft:1:h:0');
+     return view?{status:'APPLIED',reason:'OWNER_FORUM_LOCAL_INVENTORY',
+      plan:this.plan(event.actorId,view.text,undefined,view.keyboard)}:
+      {status:'DENIED',reason:'OWNER_FORUM_UNAVAILABLE'};
+    }
+    if(event.kind==='private'&&event.actorId===event.chatId&&
+     !event.callbackData&&event.text.startsWith('/topicregister')){
+     if(!this.opts.policy.isOwner(event.actorId)||event.edited||event.forwarded)
+      return {status:'DENIED',reason:'OWNER_FORUM_PRIVATE_ORIGINAL_ONLY'};
+     const m=/^\/topicregister (-[1-9][0-9]{0,15}) ([1-9][0-9]{0,9}) (.+)$/u.exec(event.text);
+     if(!m)return {status:'DENIED',reason:'OWNER_FORUM_REGISTRATION_INVALID'};
+     const view=await new OwnerForumTopicEditor(this.opts.store,this.opts.policy,this.clock)
+      .prepare(event.actorId,m[1]!,Number(m[2]),m[3]!);
+     return view?{status:'APPLIED',reason:'OWNER_FORUM_REGISTRATION_PREVIEW',
+      plan:this.plan(event.actorId,view.text,undefined,view.keyboard)}:
+      {status:'DENIED',reason:'OWNER_FORUM_REGISTRATION_UNAVAILABLE'};
+    }
     if(event.kind==='private'&&event.text==='/adminlinks'){const view=await new TelegramAdminRoomLinks(this.opts.store,this.opts.policy,this.clock).handle(event.actorId,'al:1:h:0');return view?{status:'APPLIED',reason:'ADMIN_ROOM_VIEW',adminUIAccess:view.access,plan:this.plan(event.actorId,view.text,undefined,view.keyboard)}:{status:'DENIED',reason:'ADMIN_ROOM_UNAVAILABLE'};}
     if(event.kind==='private'&&event.text.startsWith('/exemptrule')){const view=await new TelegramRuleExemptions(this.opts.store,this.opts.policy,this.clock).preview(event.actorId,event.text);return view?{status:'APPLIED',reason:'RULE_EXEMPTION_PREVIEW',adminUIAccess:view.access,plan:this.plan(event.actorId,view.text,undefined,view.keyboard)}:{status:'DENIED',reason:'RULE_EXEMPTION_UNAVAILABLE'};}
     const rulesCommand=/^\/rules(?:@[A-Za-z0-9_]+)?(?: ([a-z]{2}(?:-[A-Z]{2})?))?$/u.exec(event.text),rulesHead=event.text.split(' ')[0]!.toLowerCase();
@@ -849,6 +872,14 @@ export class TelegramUpdateApplication {
      const centralSelection=/^rc:1:([sv]):([A-Za-z0-9_-]{24})(?::([1-8]))?$/u.exec(event.callbackData);if(centralSelection?.[0]===event.callbackData&&((centralSelection[1]==='s')===(centralSelection[3]!==undefined))){const view=await new TelegramRoomControl(this.opts.store,this.opts.policy,this.opts.moderation,this.clock,this.opts.moderationRights?.gateway,this.opts.moderationRights?.safety).selection(actorId,centralSelection[2]!,centralSelection[3]===undefined?undefined:Number(centralSelection[3]));return view?{status:'APPLIED',reason:'ROOM_CENTRAL_SELECTION',adminUIAccess:view.access,plan:this.plan(actorId,view.text,undefined,view.keyboard,event.callbackMessageId)}:{status:'DENIED',reason:'ROOM_CENTRAL_UNAVAILABLE'};}
      if(/^rc:1:c:[A-Za-z0-9_-]{24}$/u.exec(event.callbackData)?.[0]===event.callbackData){const view=await new TelegramRoomControl(this.opts.store,this.opts.policy,this.opts.moderation,this.clock,this.opts.moderationRights?.gateway,this.opts.moderationRights?.safety).confirm(actorId,event.callbackData.slice(7));return view?{status:'APPLIED',reason:'ROOM_CONTROL_RESULT',adminUIAccess:view.access,plan:this.plan(actorId,view.text,undefined,view.keyboard,event.callbackMessageId)}:{status:'DENIED',reason:'ROOM_CONTROL_UNAVAILABLE'};}
      if(validOncallRoute(event.callbackData)){const view=await new TelegramOncall(this.opts.store,this.opts.policy,this.clock).handle(actorId,event.callbackData);return view?{status:'APPLIED',reason:'ONCALL_VIEW',adminUIAccess:view.access,plan:this.plan(actorId,view.text,undefined,view.keyboard,event.callbackMessageId)}:{status:'DENIED',reason:'ONCALL_UNAVAILABLE'};}
+     if(event.callbackData.startsWith('ft:1:')||
+      event.callbackData==='mi:1:i:01:05'){
+      const view=await new OwnerForumTopicEditor(this.opts.store,this.opts.policy,this.clock)
+       .handle(actorId,event.callbackData);
+      return view?{status:'APPLIED',reason:'OWNER_FORUM_LOCAL_INVENTORY',
+       plan:this.plan(actorId,view.text,undefined,view.keyboard,event.callbackMessageId)}:
+       {status:'DENIED',reason:'OWNER_FORUM_UNAVAILABLE'};
+     }
      if(event.callbackData.startsWith('al:1:')||event.callbackData==='mi:1:i:01:04'){const view=await new TelegramAdminRoomLinks(this.opts.store,this.opts.policy,this.clock,this.opts.moderationRights?.gateway,this.opts.moderationRights?.safety).handle(actorId,event.callbackData);return view?{status:'APPLIED',reason:'ADMIN_ROOM_VIEW',adminUIAccess:view.access,plan:this.plan(actorId,view.text,undefined,view.keyboard,event.callbackMessageId)}:{status:'DENIED',reason:'ADMIN_ROOM_UNAVAILABLE'};}
      if(event.callbackData.startsWith('rf:1:')){
       const view=await new TelegramModerationRateEditor(this.opts.store,this.opts.policy,this.clock).handle(actorId,event.callbackData);
