@@ -7,12 +7,16 @@ import {forumTopicGroupAccess,localForumTopics,
  forumTopicNote,forumTopicNoteProof,saveLocalForumTopicNote,validForumTopicNote,
  localForumTopicNoteHistory}
  from './group-forum-topics.js';
+import {ownerForumTopicEducationPolicy,forumTopicEducationProof,
+ setForumTopicEducationPolicy,forumTopicEducationHistory,
+ type ForumTopicEducationMode} from './group-forum-topic-policy.js';
 
 /** 01-05: local-only topic registration with private owner consent.
  * No Bot API send, createForumTopic, closeForumTopic or permission mutation.
  * The owner must confirm existence/permissions later via Telegram.
  */
 const PREFIX='group-forum:preview:',NOTE_PREFIX='group-forum:note-preview:',
+ POLICY_PREFIX='group-forum:education-preview:',
  TTL=120_000,SIZE=8;
 const chat='(-[1-9][0-9]{0,15})',thread='([1-9][0-9]{0,9})',
  page='(0|[1-9][0-9]{0,2})',token='([A-Za-z0-9_-]{24})';
@@ -24,6 +28,10 @@ const CONFIRM=new RegExp('^ft:1:c:'+token+'$','u');
 const CANCEL=new RegExp('^ft:1:x:'+token+'$','u');
 const NOTE_CONFIRM=new RegExp('^ft:1:n:'+token+'$','u');
 const NOTE_CANCEL=new RegExp('^ft:1:z:'+token+'$','u');
+const POLICY_CHOICE=new RegExp('^ft:1:p:'+chat+':'+thread+':([01])$','u');
+const POLICY_CONFIRM=new RegExp('^ft:1:e:'+token+'$','u');
+const POLICY_CANCEL=new RegExp('^ft:1:k:'+token+'$','u');
+const POLICY_HISTORY=new RegExp('^ft:1:j:'+chat+':'+thread+':'+page+'$','u');
 const clock=(t:unknown):t is number=>typeof t==='number'&&
  Number.isSafeInteger(t)&&t>=0&&t<=8_640_000_000_000_000-TTL;
 const person=(v:unknown):v is string=>typeof v==='string'&&
@@ -72,12 +80,32 @@ function parseNote(value:unknown):PendingNote|null{
   p.version<1)return null;
  return p as unknown as PendingNote;
 }
+interface PendingPolicy{
+ readonly group:string;readonly thread:number;readonly mode:ForumTopicEducationMode;
+ readonly proof:string;readonly createdAt:number;readonly version:number;
+}
+function parsePolicy(value:unknown):PendingPolicy|null{
+ if(typeof value!=='string'||!value.startsWith(POLICY_PREFIX))return null;
+ let raw:unknown;
+ try{raw=JSON.parse(value.slice(POLICY_PREFIX.length));}catch{return null;}
+ if(!raw||typeof raw!=='object'||Array.isArray(raw))return null;
+ const p=raw as Record<string,unknown>;
+ if(Object.keys(p).sort().join(',')!=='createdAt,group,mode,proof,thread,version'||
+  !id(p.group)||typeof p.thread!=='number'||!topicId(p.thread)||
+  (p.mode!=='INHERIT'&&p.mode!=='PAUSED')||
+  typeof p.proof!=='string'||!/^[a-f0-9]{64}$/u.test(p.proof)||
+  !clock(p.createdAt)||typeof p.version!=='number'||
+  !Number.isSafeInteger(p.version)||p.version<1)return null;
+ return p as unknown as PendingPolicy;
+}
 export function validOwnerForumTopicRoute(value:unknown):boolean{
  return typeof value==='string'&&Buffer.byteLength(value,'utf8')<=64&&
   (HOME.test(value)||GROUP.test(value)||DETAIL.test(value)||
    HISTORY.test(value)||
    CONFIRM.test(value)||CANCEL.test(value)||
-   NOTE_CONFIRM.test(value)||NOTE_CANCEL.test(value));
+   NOTE_CONFIRM.test(value)||NOTE_CANCEL.test(value)||
+   POLICY_CHOICE.test(value)||POLICY_CONFIRM.test(value)||
+   POLICY_CANCEL.test(value)||POLICY_HISTORY.test(value));
 }
 export class OwnerForumTopicEditor{
  constructor(private readonly store:BotStore,private readonly policy:Policy,
@@ -141,17 +169,25 @@ export class OwnerForumTopicEditor{
   if(!topic)return null;
   const note=forumTopicNote(s,this.policy,actor,g,t,now);
   if(note===null)return null;
+  const education=ownerForumTopicEducationPolicy(s,this.policy,actor,g,t,now);
+  if(!education)return null;
   return ui('<b>🧩 بيانات موضوع محلي</b>\n'+
    'المجموعة: <code>'+g+'</code>\n'+
    'رقم الموضوع: <code>'+topic.threadId+'</code>\n'+
    'العنوان: '+esc(topic.title)+'\n'+
    'إصدار اعتماد المجموعة: '+topic.groupVersion+'\n'+
    'التسجيل (UTC): '+new Date(topic.registeredAt).toISOString().slice(0,16).replace('T',' ')+
+   '\nالتصفح التعليمي لهذا الموضوع: '+
+   (education.mode==='PAUSED'?'متوقف محليًا':'يتبع سياسة المجموعة')+
+   ' · المراجعة '+education.revision+
    '\nالملاحظة التحريرية: '+(note?esc(note.text):'لم تُعتمد ملاحظة بعد.')+
    (note?'\nمراجعة الملاحظة المحلية: '+note.revision:'')+
    '\nلإضافة ملاحظة: <code>/topicnote '+g+' '+t+' النص_التحريري</code>'+
    '\nلا يسمح هذا السجل بإرسال رسائل أو فرض سياسات مستقلة؛ يلزم التأكد من نوع المجموعة وصلاحية الموضوع الحية.',
-   [[btn('🕘 سجل مراجعات الملاحظة','ft:1:v:'+g+':'+t+':0')],
+   [[btn(education.mode==='PAUSED'?'▶️ استئناف تصفح الموضوع':'⏸ إيقاف التصفح في الموضوع',
+      'ft:1:p:'+g+':'+t+':'+(education.mode==='PAUSED'?'0':'1'))],
+    [btn('🕘 سجل مراجعات سياسة التصفح','ft:1:j:'+g+':'+t+':0')],
+    [btn('🕘 سجل مراجعات الملاحظة','ft:1:v:'+g+':'+t+':0')],
     [btn('↩️ مواضيع المجموعة','ft:1:g:'+g+':0)],
     [btn('🏠 لوحة المالك','mi:1:h')]]);
  }
