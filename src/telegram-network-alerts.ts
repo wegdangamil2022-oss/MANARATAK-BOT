@@ -8,6 +8,9 @@ import {networkAlertScope,networkAlertEnabled,networkAlertConsentProof,
 import {networkAlertSilenceUntil,networkAlertSilenceProof,setNetworkAlertSilence}
  from './network-alert-silence.js';
 import {networkManagerDigest,type NetworkDigestHours} from './network-manager-digest.js';
+import {networkDailyQuietCurrent} from './network-alert-daily-quiet.js';
+import {TelegramNetworkDailyQuietEditor,validNetworkDailyQuietRoute,dailyQuietLabel}
+ from './telegram-network-daily-quiet.js';
 
 /** Private-chat-only caller. Each recipient consents for *their own* managed
  * group; neither an owner choice nor membership in a network grants access. */
@@ -36,7 +39,8 @@ const names:Record<NetworkAlertKind,string>={
 };
 export function validNetworkAlertRoute(value:unknown):boolean{
  return typeof value==='string'&&Buffer.byteLength(value,'utf8')<=64&&
- [HOME,GROUPS,DETAIL,DIGEST,PREVIEW,CONFIRM,CANCEL,SILENCE,SILENCE_CONFIRM,SILENCE_CANCEL].some(x=>x.test(value));
+ [HOME,GROUPS,DETAIL,DIGEST,PREVIEW,CONFIRM,CANCEL,SILENCE,SILENCE_CONFIRM,SILENCE_CANCEL].some(x=>x.test(value))||
+ validNetworkDailyQuietRoute(value);
 }
 interface Preview {network:string;chat:string;kind:NetworkAlertKind;
  proof:string;createdAt:number;enabled:boolean;}
@@ -112,9 +116,11 @@ export class TelegramNetworkAlertEditor{
    'عدد المجموعات: '+groups.length+' · صفحة '+(p+1)+'/'+pages,rows);
  }
  private detail(s:BotState,actor:string,now:number,network:string,chat:string):OwnerInlineScreen|null{
-  if(!networkAlertScope(s,this.policy,actor,network,chat,now))return null;
+  const scope=networkAlertScope(s,this.policy,actor,network,chat,now);
+  if(!scope)return null;
   const silence=networkAlertSilenceUntil(s,this.policy,actor,network,chat,now);
-  if(silence===null)return null;
+  const quiet=networkDailyQuietCurrent(s,actor,network,chat,now,scope);
+  if(silence===null||!quiet)return null;
   const rows=(Object.keys(names) as NetworkAlertKind[]).map(kind=>[
    btn((networkAlertEnabled(s,this.policy,actor,network,chat,kind,now)?
     '🔔 مفعّلة · ':'🔕 متوقفة · ')+names[kind],
@@ -122,6 +128,7 @@ export class TelegramNetworkAlertEditor{
   rows.push([btn('🔕 صمت ساعة','na:1:z:'+network+':'+chat+':1'),
    btn('🌙 صمت 8 ساعات','na:1:z:'+network+':'+chat+':8')]);
   if(silence>now)rows.push([btn('🔔 إلغاء الصمت','na:1:z:'+network+':'+chat+':0')]);
+  rows.push([btn('🌙 جدول الصمت اليومي','na:1:qh:'+network+':'+chat)]);
   rows.push([btn('🧾 ملخص 6 ساعات','na:1:q:'+network+':'+chat+':6'),
    btn('📊 ملخص 24 ساعة','na:1:q:'+network+':'+chat+':24')]);
   rows.push([btn('↩️ مجموعات الشبكة','na:1:g:'+network+':0')]);
@@ -131,6 +138,7 @@ export class TelegramNetworkAlertEditor{
   return ui('<b>🔔 تفضيلات إشعارات الشبكة</b>\n'+
    'المجموعة: <code>'+escape(chat)+'</code>\n'+statuses+'\n'+
    'الصمت المؤقت: '+(silence>now?'مفعّل حتى '+new Date(silence).toISOString().slice(0,16)+' UTC':'غير مفعّل')+'\n'+
+   'الصمت اليومي: '+dailyQuietLabel(quiet)+'\n'+
    'استلام الرسائل اختياري وشخصي، ولا يُرسل نص البلاغ أو هوية الطالب.\n'+
    'أوقف النوع أو فعّل الصمت المؤقت في أي وقت. لا تُرسل أحداث سابقة لتفعيلك.',rows);
  }
@@ -239,6 +247,8 @@ export class TelegramNetworkAlertEditor{
  }
  async handle(actor:string,data:string):Promise<OwnerInlineScreen|null>{
   if(!person(actor)||!validNetworkAlertRoute(data))return null;
+  if(validNetworkDailyQuietRoute(data))
+   return new TelegramNetworkDailyQuietEditor(this.store,this.policy,this.clock).handle(actor,data);
   const zc=SILENCE_CONFIRM.exec(data);if(zc)return this.resolveSilence(actor,zc[1]!,true);
   const zx=SILENCE_CANCEL.exec(data);if(zx)return this.resolveSilence(actor,zx[1]!,false);
   const z=SILENCE.exec(data);if(z)return this.silencePreview(actor,z[1]!,z[2]!,Number(z[3]) as 0|1|8);
