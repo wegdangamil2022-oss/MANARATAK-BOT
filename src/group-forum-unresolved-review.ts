@@ -3,7 +3,7 @@ import type {BotState} from './store.js';
 import type {Policy} from './policy.js';
 import {forumTopicActionHistory} from './group-forum-topic-control.js';
 import {forumBroadcastHistory} from './group-forum-topic-broadcast.js';
-import {forumTopicGroupAccess} from './group-forum-topics.js';
+import {forumTopicGroupAccess,localForumTopics} from './group-forum-topics.js';
 
 /** For human triage ONLY: no replay and no withdrawal of the quarantine.
  * Even an acknowledgement cannot turn UNKNOWN into CONFIRMED.
@@ -91,9 +91,14 @@ export function forumUnresolvedReviewHistory(s:BotState,p:Policy,actor:string,
  g:string,t:number,now:number):ForumUnresolvedReview[]|null{
  if(forumTopicGroupAccess(s,p,actor,g,now)===null||
   !thread(t)||!time(now))return null;
+ const current=localForumTopics(s,p,actor,g,now)?.find(x=>x.threadId===t);
  const rows=ledger(s,now);
- if(!rows)return null;
- return rows.filter(x=>x.group===g&&x.thread===t).sort((a,b)=>b.at-a.at);
+ if(!current||!rows)return null;
+ const scoped=rows.filter(x=>x.group===g&&x.thread===t&&
+  x.groupVersion===current.groupVersion);
+ if(scoped.some(x=>x.registration!==current.reference))return null;
+ return scoped.filter(x=>x.registration===current.reference).
+  sort((a,b)=>b.at-a.at);
 }
 export function forumUnresolvedReviewProof(s:BotState,p:Policy,actor:string,
  g:string,t:number,k:ForumUnresolvedKind,attempt:string,
