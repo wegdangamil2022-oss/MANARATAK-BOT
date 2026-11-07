@@ -558,6 +558,10 @@ export class Phase4WhisperService{
     x.chatId===chatId&&x.memberId===memberId&&x.senderId===senderId);
    if(rows.length>1||!rows.length&&(data.blocks?.length??0)>=2000)return false;
    const row=rows[0];
+   // Do not let an unrecognized /whisperunblock command create an inert
+   // record for an arbitrary sender. That would let any member fill the
+   // global 2,000-block budget without ever receiving a whisper.
+   if(!row&&!enabled)return false;
    if(row){
     if(now<row.updatedAt||row.revision>=9_999_999_999)return false;
     if(!row.id)row.id=newId(data.blocks??[]);
