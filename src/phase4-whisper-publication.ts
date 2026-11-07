@@ -128,7 +128,7 @@ export class Phase4WhisperAnnouncementDispatcher{
    const authorized=clockOk(now)&&now>=item.createdAt&&
     now-item.createdAt<=180000&&m&&messages.length===1&&
     m.status==='OPEN'&&m.text!==undefined&&m.approvedAt!==undefined&&
-    now<m.expiresAt&&m.creatorId===item.ownerId&&
+    now<m.expiresAt&&(m.approvedBy??m.creatorId)===item.ownerId&&
     m.chatId===item.chatId&&m.chatVersion===item.chatVersion&&
     this.policy.isOwner(item.ownerId)&&
     this.policy.has(s,item.ownerId,'chat.manage',item.chatId,now)&&
