@@ -18,6 +18,7 @@ const EVENT_KIND:Record<NetworkAlertKind,NetworkAdministrativeEventKind>={
 const PREF='network:event:pref:',SEND='network:event:send:';
 const KEY=/^network:event:pref:([A-Za-z0-9_-]{24})$/u;
 const SEND_KEY=/^network:event:send:([a-f0-9]{64})$/u;
+const DIGEST_SEND_KEY=/^network:digest:send:[a-f0-9]{64}$/u;
 const actorId=(v:unknown):v is string=>typeof v==='string'&&
  /^[1-9][0-9]{0,15}$/u.test(v)&&Number.isSafeInteger(Number(v));
 const chatId=(v:unknown):v is string=>typeof v==='string'&&
@@ -157,14 +158,15 @@ export class NetworkEventAlertDispatcher{
     // Only newest current consent for each actor/group/type can deliver.
     for(const pref of sorted){
      if(latest(prefs,pref.actor,pref.network,pref.chat,pref.kind)?.key!==pref.key)continue;
-     if(s.audit.some(a=>SEND_KEY.test(a.updateKey)&&a.actorId===pref.actor&&
+     if(s.audit.some(a=>(SEND_KEY.test(a.updateKey)||DIGEST_SEND_KEY.test(a.updateKey))&&a.actorId===pref.actor&&
        a.decision==='ALLOW'&&a.at<=now&&a.at>now-60_000))continue;
      const e=event(s,this.policy,pref,now);
      if(!e)continue;
      const key=SEND+hash([pref.key,e.id,e.at]);
      if(s.audit.some(a=>a.updateKey===key||a.updateKey===key+':outcome'))continue;
      // Bound total outbound volume; an audit journal is not a blank cheque.
-     if(s.audit.filter(a=>SEND_KEY.test(a.updateKey)&&a.at<=now&&a.at>now-60_000).length>=100)return null;
+     if(s.audit.filter(a=>(SEND_KEY.test(a.updateKey)||DIGEST_SEND_KEY.test(a.updateKey))&&
+       a.at<=now&&a.at>now-60_000).length>=100)return null;
      s.audit.push({updateKey:key,actorId:pref.actor,decision:'ALLOW',
       reason:'NETWORK_EVENT_ALERT_STARTED:'+hash([pref,e.id,e.at,e.label]),
       policyVersion:pref.chatVersion,at:now});
