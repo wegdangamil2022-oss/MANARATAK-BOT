@@ -15,6 +15,7 @@ import {TelegramRuleActions} from './telegram-rule-actions.js';
 import {validProtectionUsername} from './protection-rules.js';
 import {TelegramAdminRoomLinks} from './telegram-admin-room-links.js';
 import {OwnerForumTopicEditor} from './telegram-owner-forum-topics.js';
+import {forumTopicEducationMode} from './group-forum-topic-policy.js';
 import {TelegramOncall,validOncallRoute} from './telegram-oncall.js';
 import {TelegramRuleWarningPolicy} from './telegram-rule-warning-policy.js';
 import {TelegramRoomControl} from './telegram-room-control.js';
@@ -521,6 +522,18 @@ export class TelegramUpdateApplication {
      if(this.opts.serviceCleanup)await this.opts.serviceCleanup.observeService(event.chatId,event.serviceKind,event.messageId,
       'b3-webhook:'+this.opts.botId+':'+event.updateId,event.sentAt);
      return {status:'IGNORED',reason:'GROUP_SERVICE_NOTICE_OBSERVED'};
+    }
+    // TOPIC-001: explicitly paused educational browsing applies only to
+    // this Telegram-provided forum thread. Moderation, rules, CAPTCHA,
+    // subscriptions and administrative commands are unaffected.
+    // Invalid local scope/policy proof is not treated as an allowance.
+    if(event.kind==='group'&&event.topicId!==undefined&&
+     (event.callbackData?.startsWith('gl:1:')||
+      /^\/(?:categories|resources|resource)(?:\s|$)/u.test(event.text))){
+     const snapshot=await this.opts.store.snapshot();
+     if(forumTopicEducationMode(snapshot,this.opts.policy,
+       event.chatId,event.topicId,this.clock())!=='INHERIT')
+      return {status:'DENIED',reason:'FORUM_TOPIC_EDUCATION_PAUSED_OR_UNAVAILABLE'};
     }
     const captcha=new CaptchaService(this.opts.store,this.opts.policy,this.opts.membership,this.clock),captchaEnforcement=new CaptchaEnforcement(this.opts.store,this.opts.policy,captcha,this.opts.moderation,this.opts.moderationRights,this.clock,this.opts.subscription),captchaRules=new CaptchaRuleGate(this.opts.store,this.opts.policy,captcha,this.opts.membership,this.clock);
     if(event.kind==='private'&&!event.callbackData?.startsWith('cr:1:')&&!event.callbackData?.startsWith('cp:1:')&&(event.callbackData!==undefined||!['/start','/captcha'].includes(event.text)))await captchaRules.cancel(event.actorId);
