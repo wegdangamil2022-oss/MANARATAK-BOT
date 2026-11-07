@@ -125,11 +125,11 @@ export class OwnerNetworkGroupCopy{
    if(!this.allowed(s,actor,now)||!network||!selected)return null;
    const token=randomBytes(18).toString('base64url');
    const ref='c_'+token;
-   const pending=s.callbacks.filter(c=>c.actorId===actor&&
+   const previousPending=s.callbacks.filter(c=>c.actorId===actor&&
     c.action.startsWith(PREFIX)&&c.used===false&&c.revoked===false&&c.expiresAt>now);
-   if(s.callbacks.some(c=>c.ref===ref)||pending.length>=100)return null;
+   if(s.callbacks.some(c=>c.ref===ref)||previousPending.length>=100)return null;
    // Choosing another field set invalidates the former confirmation receipt.
-   for(const old of pending)old.revoked=true;
+   for(const old of previousPending)old.revoked=true;
    const pending:Pending={netId,sourceId,targetId,parts,networkRevision:selected.networkRevision,
     sourceRevision:selected.sourceRevision,targetRevision:selected.targetRevision,proof:selected.proof};
    s.callbacks.push({ref,action:PREFIX+JSON.stringify(pending),
