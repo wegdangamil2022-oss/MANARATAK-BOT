@@ -27,9 +27,19 @@ export interface WhisperReport{
  reason:'SPAM'|'HARASSMENT'|'PERSONAL_DATA'|'OTHER';
  status:'OPEN'|'REVIEWED';reviewedAt?:number;reviewedBy?:string;
 }
+/** Separate public announcement intent: NO whisper content or recipient IDs.
+ * A confirmed post is the only evidence that Telegram accepted the teaser.
+ */
+export interface WhisperAnnouncement{
+ id:string;messageId:string;chatId:string;chatVersion:number;ownerId:string;
+ createdAt:number;status:'QUEUED'|'SENDING'|'CONFIRMED'|
+  'FAILED_CONFIRMED'|'UNKNOWN_OUTCOME'|'SKIPPED';
+ attemptId?:string;telegramMessageId?:number;
+}
 export interface WhisperState{
  messages:WhisperMessage[];reservations:WhisperReservation[];consents:WhisperConsent[];
  blocks?:WhisperBlock[];reports?:WhisperReport[];
+ announcements?:WhisperAnnouncement[];
 }
 export const emptyWhisperState=():WhisperState=>({
  messages:[],reservations:[],consents:[]
@@ -89,7 +99,9 @@ export function validWhisperState(raw:unknown):raw is WhisperState{
   !Array.isArray(raw.reservations)||raw.reservations.length>2000||
   !Array.isArray(raw.consents)||raw.consents.length>2000||
   (raw.blocks!==undefined&&(!Array.isArray(raw.blocks)||raw.blocks.length>2000))||
-  (raw.reports!==undefined&&(!Array.isArray(raw.reports)||raw.reports.length>500)))return false;
+  (raw.reports!==undefined&&(!Array.isArray(raw.reports)||raw.reports.length>500))||
+  (raw.announcements!==undefined&&(!Array.isArray(raw.announcements)||
+    raw.announcements.length>200)))return false;
  if(raw.messages.some(m=>!validWhisperMessage(m)))return false;
  const messages=raw.messages as WhisperMessage[];
  if(new Set(messages.map(m=>m.id)).size!==messages.length)return false;
@@ -123,6 +135,32 @@ export function validWhisperState(raw:unknown):raw is WhisperState{
    !validTime(x.updatedAt)))return false;
  if(new Set((blocks as WhisperBlock[]).map(x=>
    x.chatId+':'+x.memberId+':'+x.senderId)).size!==blocks.length)return false;
+ const announced=raw.announcements??[];
+ if(announced.some(a=>!record(a)||!exact(a,
+   ['id','messageId','chatId','chatVersion','ownerId','createdAt','status'],
+   ['attemptId','telegramMessageId'])||
+   !validId(a.id)||!validId(a.messageId)||!validChat(a.chatId)||
+   !validRevision(a.chatVersion)||!validUser(a.ownerId)||
+   !validTime(a.createdAt)||
+   !['QUEUED','SENDING','CONFIRMED','FAILED_CONFIRMED','UNKNOWN_OUTCOME','SKIPPED'].includes(String(a.status))||
+   (a.attemptId!==undefined&&!validId(a.attemptId))||
+   ((a.status==='SENDING'||a.status==='UNKNOWN_OUTCOME'||a.status==='CONFIRMED')&&
+    !validId(a.attemptId))||
+   (a.telegramMessageId!==undefined&&(!Number.isSafeInteger(a.telegramMessageId)||
+     Number(a.telegramMessageId)<1||Number(a.telegramMessageId)>2147483647))||
+   (a.status==='CONFIRMED'&&a.telegramMessageId===undefined)||
+   (a.status!=='CONFIRMED'&&a.telegramMessageId!==undefined)))return false;
+ if(new Set((announced as WhisperAnnouncement[]).map(x=>x.id)).size!==announced.length||
+   new Set((announced as WhisperAnnouncement[]).map(x=>x.messageId)).size!==announced.length)
+  return false;
+ for(const item of announced as WhisperAnnouncement[]){
+  const matches=(raw.messages as WhisperMessage[]).filter(x=>x.id===item.messageId);
+  if(matches.length!==1||matches[0]!.chatId!==item.chatId||
+    matches[0]!.creatorId!==item.ownerId||
+    matches[0]!.chatVersion!==item.chatVersion||
+    matches[0]!.status==='DRAFT'||item.createdAt<matches[0]!.approvedAt!)
+   return false;
+ }
  const reports=raw.reports??[];
  if(reports.some(x=>!record(x)||!exact(x,
   ['id','messageId','reporterId','reportedAt','reason','status'],
