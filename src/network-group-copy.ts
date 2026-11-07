@@ -3,6 +3,7 @@ import type {BotState,Chat} from './store.js';
 import type {Policy} from './policy.js';
 import {validGroupNetwork} from './group-network-model.js';
 import {networkEmergencyStopped,validNetworkEmergencyControls} from './network-emergency-stop.js';
+import {portableNetworkProtectionRules} from './network-policy-portability.js';
 import {validNetworkInheritanceLinks} from './network-inheritance-model.js';
 import {isValidGroupProtectionRecord,isValidProtectionPolicy,
  type ProtectionPolicy,type GroupProtectionRecord} from './protection-rules.js';
@@ -33,7 +34,6 @@ const digest=(x:unknown):string=>createHash('sha256').update(JSON.stringify(x)).
 const validClock=(x:number)=>Number.isSafeInteger(x)&&x>=0&&x<=8_640_000_000_000_000-120_000;
 const id=(x:string)=>/^-[1-9][0-9]{0,15}$/u.test(x)&&Number.isSafeInteger(Number(x));
 const network=(x:string)=>/^[a-f0-9]{12}$/u.test(x);
-const safeKinds=new Set(['WORD','PHRASE','LOOKALIKE','TYPE','LINK','FORWARD','HIDDEN','PHONE','LIMIT']);
 const same=(a:unknown,b:unknown)=>JSON.stringify(a)===JSON.stringify(b);
 const proof=(s:BotState,net:string,source:string,target:string,part:NetworkCopyPart)=>digest([
  net,source,target,part,s.groupNetworks??[],s.chats,s.grants,
@@ -84,8 +84,8 @@ export function previewNetworkGroupCopy(
  if(ruleChange&&(
     // Identity, fraud, and trusted-account rules depend on local people or
     // external proof. Replacing such rules silently would drop safeguards.
-    rules.some(r=>!safeKinds.has(r.kind))||
-    to.policy.rules.some(r=>!safeKinds.has(r.kind))||
+    !portableNetworkProtectionRules(from.policy)||
+    !portableNetworkProtectionRules(to.policy)||
     (to.policy.ruleExemptions?.length??0)!==0
  ))return null;
  const fields:NetworkCopyField[]=wanted.filter(field=>
