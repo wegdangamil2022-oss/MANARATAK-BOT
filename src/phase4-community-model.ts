@@ -25,6 +25,8 @@ export interface CommunityReplyRule{
  source?:CommunityReplySource;sourceFaqId?:string;
  /** Owner-reviewed Telegram file_id, never a URL or user-uploaded message. */
  photoFileId?:string;
+ /** Optional daily active window using the group's reviewed clock/zone. */
+ activeHours?:CommunityQuietHours;
  /** Optional strictly validated HTTPS buttons, no arbitrary callback routes. */
  buttons?:CommunityLinkButton[];
 }
@@ -92,6 +94,7 @@ export type CommunityDraftKind='WELCOME_TEXT'|'FAREWELL_TEXT'|'REPLY_ADD'|'REPLY
  'GROUP_PROFILE_ON'|'GROUP_PROFILE_OFF'|'GROUP_TITLE_SET'|'GROUP_PHOTO_SET'|'GROUP_PHOTO_REMOVE'|
  'REPLY_ENABLE'|'REPLY_DISABLE'|'REPLY_COOLDOWN'|'AUTO_LIMIT_SET'|
  'REPLY_PHOTO_SET'|'REPLY_PHOTO_CLEAR'|'REPLY_BUTTON_ADD'|'REPLY_BUTTONS_CLEAR'|
+ 'REPLY_HOURS_SET'|'REPLY_HOURS_CLEAR'|
  'QUIET_HOURS_SET'|'QUIET_HOURS_CLEAR'|'TOPIC_COOLDOWN_SET'|'TOPIC_COOLDOWN_CLEAR'|
  'CHANGE_LOG_ON'|'CHANGE_LOG_OFF'|'DECISION_LOG_ON'|'DECISION_LOG_OFF'|'SERVICE_CLEANUP_ON'|'SERVICE_CLEANUP_OFF'|'SERVICE_CLEANUP_DELAY'|
  'SERVICE_JOIN_ON'|'SERVICE_JOIN_OFF'|'SERVICE_LEAVE_ON'|'SERVICE_LEAVE_OFF'|
@@ -125,7 +128,8 @@ export interface CommunityReceipt{
 export type CommunityDecisionReason=
  'RESERVED'|'WELCOME_DISABLED'|'FAREWELL_DISABLED'|'REPLIES_DISABLED'|'QUIET_HOURS'|
  'NO_MATCH'|'CLOCK_SKEW'|'GROUP_LIMIT'|'TOPIC_COOLDOWN'|'GROUP_COOLDOWN'|'REMOVAL_SUPPRESSED'|
- 'ACTOR_COOLDOWN'|'TEMPLATE_INVALID'|'CAPTION_LIMIT'|'SOURCE_UNAVAILABLE'|'LECTURE_MODE';
+ 'ACTOR_COOLDOWN'|'TEMPLATE_INVALID'|'CAPTION_LIMIT'|'SOURCE_UNAVAILABLE'|'LECTURE_MODE'|
+ 'RULE_OUTSIDE_HOURS';
 export interface CommunityDecision {
  key:string;chatId:string;at:number;kind:CommunityEventKind;configVersion:number;
  reason:CommunityDecisionReason;ruleId?:string;
@@ -287,6 +291,7 @@ const kinds=new Set<CommunityDraftKind>(['WELCOME_TEXT','FAREWELL_TEXT','REPLY_A
  'GROUP_PROFILE_ON','GROUP_PROFILE_OFF','GROUP_TITLE_SET','GROUP_PHOTO_SET','GROUP_PHOTO_REMOVE','FAREWELL_ON','FAREWELL_OFF','REPLIES_ON','REPLIES_OFF',
  'REPLY_ENABLE','REPLY_DISABLE','REPLY_COOLDOWN','AUTO_LIMIT_SET',
  'REPLY_PHOTO_SET','REPLY_PHOTO_CLEAR','REPLY_BUTTON_ADD','REPLY_BUTTONS_CLEAR',
+ 'REPLY_HOURS_SET','REPLY_HOURS_CLEAR',
  'QUIET_HOURS_SET','QUIET_HOURS_CLEAR','TOPIC_COOLDOWN_SET','TOPIC_COOLDOWN_CLEAR',
  'CHANGE_LOG_ON','CHANGE_LOG_OFF','DECISION_LOG_ON','DECISION_LOG_OFF','SERVICE_CLEANUP_ON','SERVICE_CLEANUP_OFF','SERVICE_CLEANUP_DELAY',
  'SERVICE_JOIN_ON','SERVICE_JOIN_OFF','SERVICE_LEAVE_ON','SERVICE_LEAVE_OFF',
@@ -375,6 +380,10 @@ export function validCommunityConfig(value:unknown):value is CommunityConfig{
    (rule.topicId!==undefined&&!validTopic(rule.topicId))||
    (rule.source!==undefined&&!['NOTE','RULES','FAQ'].includes(rule.source))||
    (rule.source==='FAQ'?!validCommunityFAQId(rule.sourceFaqId):rule.sourceFaqId!==undefined)||
+   (rule.activeHours!==undefined&&(!rule.activeHours||
+     !validMinute(rule.activeHours.startMinute)||
+     !validMinute(rule.activeHours.endMinute)||
+     rule.activeHours.startMinute===rule.activeHours.endMinute))||
    (rule.photoFileId!==undefined&&!validCommunityPhotoId(rule.photoFileId))||
    (rule.buttons!==undefined&&!validCommunityLinkButtons(rule.buttons)))return false;
   const triggerKey=JSON.stringify([rule.topicId??0,normalizeCommunityMatch(rule.trigger),rule.match]);
@@ -565,7 +574,7 @@ export function validCommunityState(value:unknown):value is CommunityAutomationS
  }
  const validReasons=new Set<CommunityDecisionReason>(['RESERVED','WELCOME_DISABLED','FAREWELL_DISABLED',
   'REPLIES_DISABLED','QUIET_HOURS','NO_MATCH','CLOCK_SKEW','GROUP_LIMIT','TOPIC_COOLDOWN',
-  'GROUP_COOLDOWN','ACTOR_COOLDOWN','TEMPLATE_INVALID','CAPTION_LIMIT','REMOVAL_SUPPRESSED','SOURCE_UNAVAILABLE','LECTURE_MODE']);
+  'GROUP_COOLDOWN','ACTOR_COOLDOWN','TEMPLATE_INVALID','CAPTION_LIMIT','REMOVAL_SUPPRESSED','SOURCE_UNAVAILABLE','LECTURE_MODE','RULE_OUTSIDE_HOURS']);
  if(v.decisionLog){
   const keys=new Set<string>();
   for(const entry of v.decisionLog){
@@ -680,9 +689,12 @@ export function validCommunityState(value:unknown):value is CommunityAutomationS
    d.kind==='REPLY_ADD'&&(!d.trigger||!d.match||
       (d.source===undefined||d.source==='NOTE')&&!validTemplate(d.text))||
    (['REPLY_REMOVE','REPLY_ENABLE','REPLY_DISABLE','REPLY_COOLDOWN',
-      'REPLY_PHOTO_SET','REPLY_PHOTO_CLEAR','REPLY_BUTTON_ADD','REPLY_BUTTONS_CLEAR'] as string[]).includes(d.kind)&&!d.ruleId||
+      'REPLY_PHOTO_SET','REPLY_PHOTO_CLEAR','REPLY_BUTTON_ADD','REPLY_BUTTONS_CLEAR',
+      'REPLY_HOURS_SET','REPLY_HOURS_CLEAR'] as string[]).includes(d.kind)&&!d.ruleId||
    d.kind==='REPLY_PHOTO_SET'&&!validCommunityPhotoId(d.photoFileId)||
    d.kind==='REPLY_BUTTON_ADD'&&!validCommunityLinkButtons([{text:d.buttonText??'',url:d.buttonUrl??''}])||
+   d.kind==='REPLY_HOURS_SET'&&(!validMinute(d.startMinute)||
+     !validMinute(d.endMinute)||d.startMinute===d.endMinute)||
    d.kind==='REPLY_COOLDOWN'&&d.cooldownMs===undefined||
    d.kind==='AUTO_LIMIT_SET'&&d.autoMessagesPerMinute===undefined||
    d.kind==='QUIET_HOURS_SET'&&(!validMinute(d.startMinute)||!validMinute(d.endMinute)||d.startMinute===d.endMinute)||
@@ -835,7 +847,7 @@ export function renderCommunityTemplate(template:string,input:CommunityInput,now
  * early broad global CONTAINS rule from swallowing later specific rules.
  * Never bypasses the group-wide or topic-wide quotas.
  */
-export function selectCommunityRule(config:CommunityConfig,text:string,topicId?:number):CommunityReplyRule|undefined{
+export function selectCommunityRule(config:CommunityConfig,text:string,topicId?:number,now?:number):CommunityReplyRule|undefined{
  if(!config.repliesEnabled||!text.trim()||
    /^@\w+/u.test(text.trimStart()))return;
  const command=text.trimStart().startsWith('/');
@@ -843,7 +855,9 @@ export function selectCommunityRule(config:CommunityConfig,text:string,topicId?:
   value==='WORD'?1:value==='COMMAND'?0:2;
  const candidates=config.rules.filter(rule=>rule.enabled&&
   (command?rule.match==='COMMAND':rule.match!=='COMMAND')&&
-  (rule.topicId===undefined||rule.topicId===topicId)&&matchCommunityRule(rule,text));
+  (rule.topicId===undefined||rule.topicId===topicId)&&matchCommunityRule(rule,text)&&
+  (rule.activeHours===undefined||now===undefined||
+    !inCommunityQuietHours(rule.activeHours,now,config.utcOffsetMinutes,config.timeZone)));
  candidates.sort((a,b)=>
   Number(b.topicId!==undefined)-Number(a.topicId!==undefined)||
   rank(a.match)-rank(b.match)||
