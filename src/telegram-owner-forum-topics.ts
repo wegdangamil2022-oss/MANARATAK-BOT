@@ -23,6 +23,8 @@ import {TelegramForumTopicBroadcast,validForumBroadcastRoute}
  from './telegram-forum-topic-broadcast.js';
 import {TelegramOwnerForumMonitor,validOwnerForumMonitorRoute}
  from './telegram-owner-forum-monitor.js';
+import {TelegramOwnerForumReview,validOwnerForumReviewRoute}
+ from './telegram-owner-forum-review.js';
 
 /** 01-05: local-only topic registration with private owner consent.
  * No Bot API send, createForumTopic, closeForumTopic or permission mutation.
@@ -148,7 +150,7 @@ export function validOwnerForumTopicRoute(value:unknown):boolean{
    PUB_CHOICE.test(value)||PUB_CONFIRM.test(value)||
    PUB_CANCEL.test(value)||PUB_HISTORY.test(value)||
    validForumTopicControlRoute(value)||validForumBroadcastRoute(value)||
-   validOwnerForumMonitorRoute(value));
+   validOwnerForumMonitorRoute(value)||validOwnerForumReviewRoute(value));
 }
 export class OwnerForumTopicEditor{
  constructor(private readonly store:BotStore,private readonly policy:Policy,
@@ -256,6 +258,8 @@ export class OwnerForumTopicEditor{
     ...(note?[[btn('🕘 سجل اعتماد نشر الملاحظات',
      'ft:1:b:'+g+':'+t+':0')]]:[]),
     [btn('🛡 مراقبة محتوى الموضوع','ft:1:t:'+g+':'+t)],
+    ...(t>1?[[btn('📋 مراجعات المحاولات المجهولة',
+     'ft:1:C:'+g+':'+t+':0')]]:[]),
     [btn('📚 معاينة مصادر النشر للموضوع','ft:1:m:'+g+':'+t+':0')],
     [btn('🔎 فحص صلاحيات Telegram الحية','ft:1:f:'+g+':'+t)],
     [btn(education.mode==='PAUSED'?'▶️ استئناف تصفح الموضوع':'⏸ إيقاف التصفح في الموضوع',
@@ -633,6 +637,9 @@ export class OwnerForumTopicEditor{
     this.gateway,this.safety,this.clock).handle(actor,data);
   if(validOwnerForumMonitorRoute(data))
    return new TelegramOwnerForumMonitor(this.store,this.policy,this.clock)
+    .handle(actor,data);
+  if(validOwnerForumReviewRoute(data))
+   return new TelegramOwnerForumReview(this.store,this.policy,this.clock)
     .handle(actor,data);
   const pub=PUB_CONFIRM.exec(data);
   if(pub)return this.decidePublication(actor,pub[1]!,true);
