@@ -66,6 +66,73 @@ function dailyState(s:BotState,r:Request,now:number):{enabled:boolean;witness:st
  ordered.sort((a,b)=>Number(a.part)-Number(b.part));if(ordered.some((v,i)=>Number(v.part)!==i+1||i>0&&v.a.at<ordered[i-1]!.a.at))return null;const last=ordered.at(-1)?.a;
  return {enabled:last?.reason==='ADMIN_ROOM_DAILY_ON',witness:ordered.length?createHash('sha256').update(JSON.stringify(ordered.map(x=>x.a))).digest('hex'):'0',sequence:ordered.length,since:last?.at??0};
 }
+/** ADMINLINK-006/010 — bounded local audit of ONE link, never an
+ * authorization or Telegram proof. Historical actors, student identifiers
+ * and private message bodies are not returned to presentation clients.
+ * Both current group and room management rights are mandatory to read.
+ */
+export type AdminRoomLinkHistoryEventKind=
+ 'REQUEST'|'GROUP_APPROVAL'|'ROOM_APPROVAL'|'QUIET_ON'|'QUIET_OFF'|
+ 'DAILY_ON'|'DAILY_OFF'|'REVOKED';
+export interface AdminRoomLinkHistoryEvent{
+ readonly kind:AdminRoomLinkHistoryEventKind;
+ readonly at:number;readonly currentlyVerified:boolean;
+}
+export interface AdminRoomLinkHistory{
+ readonly id:string;readonly group:string;readonly room:string;
+ readonly mode:AdminRoomMode;readonly active:boolean;readonly revoked:boolean;
+ readonly total:number;readonly events:readonly AdminRoomLinkHistoryEvent[];
+}
+export function adminRoomLinkHistory(s:BotState,p:Policy,actor:string,
+ id:string,now:number):AdminRoomLinkHistory|null{
+ if(!person(actor)||!idValid(id)||!timeValid(now))return null;
+ const r=read(s,id);
+ if(!r||!current(s,p,r,now)||
+  !allowed(s,p,actor,r.group,now)||!allowed(s,p,actor,r.room,now))
+  return null;
+ const events:AdminRoomLinkHistoryEvent[]=[
+  {kind:'REQUEST',at:r.createdAt,currentlyVerified:true}];
+ const approvals:[AdminRoomSide,AdminRoomLinkHistoryEventKind][]=[
+  ['GROUP','GROUP_APPROVAL'],['ROOM','ROOM_APPROVAL']];
+ for(const [side,kind] of approvals){
+  const rows=s.audit.filter(a=>a.updateKey===ROOT+id+':'+side);
+  if(rows.length>1)return null;
+  if(!rows.length)continue;
+  const a=rows[0]!;
+  if(a.decision!=='ALLOW'||!person(a.actorId)||
+   a.policyVersion!==(side==='GROUP'?r.groupVersion:r.roomVersion)||
+   !Number.isSafeInteger(a.at)||a.at<r.createdAt||
+   a.at>=r.expiresAt||a.at>now||
+   !a.reason.startsWith('ADMIN_ROOM_APPROVED:'+side+':'))return null;
+  events.push({kind,at:a.at,
+   currentlyVerified:approval(s,p,r,side,now)});
+ }
+ const q=s.audit.filter(a=>a.updateKey.startsWith(QUIET+id+':'));
+ const d=s.audit.filter(a=>a.updateKey.startsWith(DAILY+id+':'));
+ if(r.mode!=='NOTIFICATIONS'&&(q.length||d.length))return null;
+ if(q.length>1000||d.length>1000)return null;
+ if(r.mode==='NOTIFICATIONS'&&(!quietState(s,r,now)||!dailyState(s,r,now)))
+  return null;
+ for(const a of q)events.push({kind:a.reason==='ADMIN_ROOM_QUIET_ON'?
+  'QUIET_ON':'QUIET_OFF',at:a.at,currentlyVerified:true});
+ for(const a of d)events.push({kind:a.reason==='ADMIN_ROOM_DAILY_ON'?
+  'DAILY_ON':'DAILY_OFF',at:a.at,currentlyVerified:true});
+ const revokedRows=s.audit.filter(a=>a.updateKey===ROOT+id+':revoked');
+ if(revokedRows.length>1)return null;
+ const revoke=revokedRows[0];
+ if(revoke){
+  if(revoke.decision!=='ALLOW'||revoke.reason!=='ADMIN_ROOM_REVOKED'||
+   !person(revoke.actorId)||revoke.policyVersion!==r.groupVersion||
+   !Number.isSafeInteger(revoke.at)||revoke.at<r.createdAt||revoke.at>now)
+   return null;
+  events.push({kind:'REVOKED',at:revoke.at,currentlyVerified:true});
+ }
+ events.sort((a,b)=>b.at-a.at||a.kind.localeCompare(b.kind));
+ return {id,group:r.group,room:r.room,mode:r.mode,
+  active:active(s,p,r,now),revoked:!!revoke,total:events.length,
+  events:events.slice(0,48)};
+}
+
 /** The unique current notifications grant only; other modes never imply it. */
 export function adminRoomNotificationTarget(s:BotState,p:Policy,group:string,now:number,includeQuiet=false):{id:string;room:string;setting:string}|null{
  if(!chat(group)||!timeValid(now))return null;
