@@ -599,7 +599,7 @@ export function validCommunityState(value:unknown):value is CommunityAutomationS
     !statuses.has(row.status)||
     (row.attemptId!==undefined&&(typeof row.attemptId!=='string'||!/^[a-f0-9]{24}$/u.test(row.attemptId)))||
     (row.status==='QUEUED'&&row.attemptId!==undefined)||
-    (['SENDING','UNKNOWN_OUTCOME','REVIEWED_UNKNOWN'].includes(row.status)&&!row.attemptId))return false;
+    (['SENDING','REVIEWED_UNKNOWN'].includes(row.status)&&!row.attemptId))return false;
    keys.add(row.key);
   }
  }
