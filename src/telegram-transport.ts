@@ -734,6 +734,18 @@ export class TelegramUpdateApplication {
       plan:this.plan(event.actorId,view.text,undefined,view.keyboard)}
       :{status:'DENIED',reason:'OWNER_GROUP_LINK_UNAVAILABLE'};
     }
+    if(event.kind==='private'&&event.actorId===event.chatId&&
+     event.text.startsWith('/networkcopy')&&!event.callbackData){
+     if(!this.opts.policy.isOwner(event.actorId)||event.edited||event.forwarded)
+      return {status:'DENIED',reason:'OWNER_NETWORK_COPY_PRIVATE_ORIGINAL_ONLY'};
+     const match=/^\/networkcopy ([a-f0-9]{12})$/u.exec(event.text);
+     if(!match)return {status:'DENIED',reason:'OWNER_NETWORK_COPY_COMMAND_INVALID'};
+     const view=await new OwnerNetworkEditor(this.opts.store,this.opts.policy,this.clock)
+      .handle(event.actorId,'nw:1:cl:'+match[1]+':0');
+     return view?{status:'APPLIED',reason:'OWNER_NETWORK_GROUP_COPY_VIEW',
+      plan:this.plan(event.actorId,view.text,undefined,view.keyboard)}
+      :{status:'DENIED',reason:'OWNER_NETWORK_GROUP_COPY_UNAVAILABLE'};
+    }
     const verification=/^\/verify(?:@([A-Za-z][A-Za-z0-9_]{4,31}))?(?: (-[1-9][0-9]{0,15}))?$/u.exec(event.text);
     if(verification&&(!verification[1]||verification[1].toLowerCase()===this.opts.botUsername.toLowerCase())){
      const group=verification[2]??(event.kind==='group'?event.chatId:undefined);return group?this.subscriptionVerification(event,group):{status:'APPLIED',reason:'SUBSCRIPTION_VERIFICATION_HELP',plan:this.plan(event.actorId,'للتحقق من حسابك فقط، أرسل /verify ثم رقم المجموعة، أو استخدم زر التحقق في رسالة المجموعة.')};
