@@ -214,8 +214,10 @@ export class OwnerNetworkEditor{
     actorId:actor,chatId:'private',policyVersion:0,oneShot:true,used:false,
     revoked:false,expiresAt:now+TTL});
    return ui('<b>🔎 معاينة متابعة سياسة شبكة</b>\nالمصدر: <code>'+sourceId+'</code>'+
-    '\nالمجموعات المستهدفة: '+targets.length+
-    '\nالنمط: مراقبة محلية فقط، دون عقوبات Telegram أو نسخ الاستثناءات والقوائم الخاصة.\n'+
+    '\nالمجموعات المستهدفة: '+targets.length+'\n'+
+    targets.map(t=>'• <code>'+t.id+'</code>').join('\n')+'\n'+
+    'هذا الخيار يشمل جميع المجموعات المدرجة؛ للانتقاء الفردي استخدم «🎯 اختيار مجموعة».\n'+
+    'النمط: مراقبة محلية فقط، دون عقوبات Telegram أو نسخ الاستثناءات والقوائم الخاصة.\n'+
     'أي تعديل للمجموعة المستهدفة أو تغير اعتماد الشبكة يوقف متابعتها.\n'+
     'المتابعة تبدأ فقط بعد التأكيد، ولا تفعّل إنفاذ أي عقوبة.',
     [[btn('✅ تأكيد متابعة المصدر','nw:1:c:'+ref.slice(2))],
