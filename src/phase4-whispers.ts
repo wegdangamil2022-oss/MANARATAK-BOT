@@ -106,7 +106,9 @@ export class Phase4WhisperService{
    if(chatVersion===null)throw Error('WHISPER_SETTINGS_DENIED');
    const data=clone(s),rows=(data.settings??[]).filter(x=>x.chatId===chatId);
    if(rows.length>1)throw Error('WHISPER_SETTINGS_DUPLICATE');
-   if(rows[0]?.memberDraftsEnabled===enabled)throw Error('WHISPER_SETTINGS_UNCHANGED');
+   if(rows[0]?.chatVersion===chatVersion&&
+      rows[0]?.memberDraftsEnabled===enabled)
+    throw Error('WHISPER_SETTINGS_UNCHANGED');
    data.settingsDrafts=(data.settingsDrafts??[]).filter(x=>
     x.expiresAt>now&&x.actorId!==actor&&x.chatId!==chatId);
    if(data.settingsDrafts.length>=50)throw Error('WHISPER_SETTINGS_PREVIEW_LIMIT');
@@ -133,6 +135,8 @@ export class Phase4WhisperService{
      (settings[0]?.version??0)>=9_999_999_999)
     throw Error('WHISPER_SETTINGS_CHANGED');
    data.settings??=[];
+   if(!settings.length&&data.settings.length>=200)
+    throw Error('WHISPER_SETTINGS_CAPACITY');
    if(settings.length){
     const setting=settings[0]!;
     setting.version++;setting.memberDraftsEnabled=draft.memberDraftsEnabled;
