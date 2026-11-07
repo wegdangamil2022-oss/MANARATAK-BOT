@@ -58,6 +58,8 @@ export function forumBroadcastHistory(s:BotState,p:Policy,
  owner:string,g:string,t:number,now:number):ForumBroadcastStart[]|null{
  if(forumTopicGroupAccess(s,p,owner,g,now)===null||!thread(t)||!validTime(now))
   return null;
+ const registration=localForumTopics(s,p,owner,g,now)?.find(x=>x.threadId===t);
+ if(!registration)return null;
  const relevant=s.audit.filter(a=>a.updateKey.startsWith(ROOT));
  if(relevant.length>2000)return null;
  const start=new Map<string,ForumBroadcastStart>(),
@@ -107,8 +109,10 @@ export function forumBroadcastHistory(s:BotState,p:Policy,
     return null;
   }
  }
- return history.filter(x=>x.group===g&&x.thread===t).
-  sort((a,b)=>b.startedAt-a.startedAt);
+ const scoped=history.filter(x=>x.group===g&&x.thread===t&&
+  x.groupVersion===registration.groupVersion);
+ if(scoped.some(x=>x.registration!==registration.reference))return null;
+ return scoped.sort((a,b)=>b.startedAt-a.startedAt);
 }
 function prepared(s:BotState,p:Policy,owner:string,g:string,t:number,
  resourceId:string,now:number):Omit<ForumBroadcastStart,'id'|'actor'|'startedAt'>|null{
