@@ -14,6 +14,7 @@ export interface NetworkManagerDigest{
  readonly networkId:string;readonly chatId:string;readonly hours:NetworkDigestHours;
  readonly at:number;readonly since:number;
  readonly watch:number;readonly sanction:number;readonly snapshots:number;
+ readonly settingsCopy:number;
  readonly total:number;readonly truncated:boolean;
  readonly subscriptions:Readonly<Record<NetworkAlertKind,boolean>>;
  readonly silenceUntil:number;
@@ -44,9 +45,10 @@ export function networkManagerDigest(s:BotState,p:Policy,actor:string,
  const watch=accepted.filter(e=>e.kind==='WATCH_CASE').length;
  const sanction=accepted.filter(e=>e.kind==='SANCTION_REVIEW').length;
  const snapshots=accepted.filter(e=>e.kind==='SNAPSHOT').length;
- if(watch+sanction+snapshots!==accepted.length)return null;
+ const settingsCopy=accepted.filter(e=>e.kind==='SETTINGS_COPY').length;
+ if(watch+sanction+snapshots+settingsCopy!==accepted.length)return null;
  return {networkId:net,chatId:group,hours,at:now,since,
-  watch,sanction,snapshots,total:accepted.length,truncated:results.length===200,
+  watch,sanction,snapshots,settingsCopy,total:accepted.length,truncated:results.length===200,
   subscriptions:{
    w:networkAlertEnabled(s,p,actor,net,group,'w',now),
    r:networkAlertEnabled(s,p,actor,net,group,'r',now),
