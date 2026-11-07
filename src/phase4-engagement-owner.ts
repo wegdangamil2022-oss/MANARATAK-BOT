@@ -1,6 +1,6 @@
 import {Phase4EngagementReportsService,
  REPORT_WINDOWS,type EngagementWindow,type EngagementReport,
- type EngagementMetric} from './phase4-engagement-reports.js';
+ type EngagementMetric,type EngagementMetricKey} from './phase4-engagement-reports.js';
 import type {OwnerInlineScreen,TelegramInlineKeyboard} from './telegram-inline-owner.js';
 const ROUTE=/^er:1:(?:h|p:[0-9]|g:-[1-9][0-9]{0,15}:(?:DAY|WEEK|MONTH))$/u;
 const CHAT=/^-[1-9][0-9]{0,15}$/u;
@@ -36,7 +36,20 @@ function reportScreen(report:EngagementReport):OwnerInlineScreen{
    btn('30 يومًا','er:1:g:'+report.chatId+':MONTH')],
   [home],[back]
  ];
+ const headings:Partial<Record<EngagementMetricKey,string>>={
+  welcomeReservations:'👋 الترحيب والرسائل الثابتة',
+  whisperAnnouncementsConfirmed:'💌 الهمسات — دون بيانات خاصة',
+  discussionQuestions:'💬 النقاشات والأسئلة',
+  pollsOpened:'📊 الاستطلاعات',
+  eventsOpened:'🗓️ الفعاليات',
+  expertSessionsOpened:'🎤 جلسات الخبراء',
+  studyCirclesOpened:'👥 زملاء الدراسة',
+  badgesAwarded:'🏅 التقدير',
+  reactionTargetsOpened:'❤️ تفاعل المنشورات',
+  lectureStarts:'🌙 وضع المحاضرة'
+ };
  const lines=report.metrics.map(x=>
+  (headings[x.key]?'\n<b>'+headings[x.key]+'</b>\n':'')+
   '◾ '+x.label+': <b>'+privacyCount(x)+'</b> ('+evidence[x.evidence]+')');
  return ui('<b>📈 تقارير التفاعل — 09:15</b>\n'+
   'المجموعة: <code>'+report.chatId+'</code>\n'+
@@ -48,6 +61,7 @@ function reportScreen(report:EngagementReport):OwnerInlineScreen{
   '• الرقم 0 يعني عدم وجود سجل محفوظ ضمن المدة، وليس انعدام التفاعل.\n'+
   '• «أقل من 5» نتيجة منقّحة لحماية الخصوصية.\n'+
   '• حجوزات رسائل البوت لا تثبت تسليم Telegram؛ والتسجيلات لا تثبت الحضور.\n'+
+  '• تأكيد النشر/التثبيت لا يعني المشاهدة، وتسليم الهمسة لا يعني القراءة.\n'+
   '• سجل كتم المحاضرات اختياري، والسجلات القديمة قد تُحذف تلقائيًا.\n'+
   '• لا توجد أرقام مشاهدة/وصول، أو حساب أشخاص فريدين، أو ترتيب للطلاب.\n'+
   '• إيصالات الترحيب/الردود قد تشمل فترات سابقة لاعتماد المجموعة.\n'+

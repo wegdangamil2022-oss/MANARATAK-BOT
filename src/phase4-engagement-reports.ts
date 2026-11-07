@@ -10,6 +10,8 @@ export const REPORT_WINDOWS={DAY:86_400_000,WEEK:7*86_400_000,
 export type EngagementWindow=keyof typeof REPORT_WINDOWS;
 export type EngagementMetricKey=
  'welcomeReservations'|'farewellReservations'|'automaticReplyReservations'|
+ 'guidePostsConfirmed'|'fixedPostsConfirmed'|'fixedPinsConfirmed'|
+ 'whisperAnnouncementsConfirmed'|'whisperPrivateSendsConfirmed'|
  'discussionQuestions'|'questionsReviewed'|'pollsOpened'|'pollBallotsActive'|
  'eventsOpened'|'eventRegistrationsActive'|'expertSessionsOpened'|
  'expertVotesActive'|'studyCirclesOpened'|'studyMembersActive'|
@@ -92,6 +94,33 @@ export class Phase4EngagementReportsService{
   add('automaticReplyReservations','حجوزات الردود التلقائية',
    receipts.filter(x=>x.kind==='TEXT').length,'LOCAL_RESERVATION',
    'حجز رد بعد مطابقة قاعدة؛ قد يفشل الإرسال أو تُمنع الرسالة');
+  // Verified publications; request creation time, not Telegram viewing time.
+  const community=s.phase4Community;
+  const guideJobs=(community?.guidePostJobs??[]).filter(x=>
+   local(x.chatId,x.chatVersion)&&within(x.approvedAt));
+  add('guidePostsConfirmed','منشورات دليل العضو المؤكدة',
+   guideJobs.filter(x=>x.status==='CONFIRMED').length,'LOCAL_RECORD',
+   'إقرار Telegram لنشر الدليل، وليس مشاهدة الطالب',0);
+  const fixedJobs=(community?.fixedPostJobs??[]).filter(x=>
+   local(x.chatId,x.chatVersion)&&within(x.approvedAt));
+  add('fixedPostsConfirmed','منشورات القوانين الثابتة المؤكدة',
+   fixedJobs.filter(x=>x.status==='CONFIRMED').length,'LOCAL_RECORD',
+   'إقرار Telegram لنشر رسالة ثابتة، وليس عدد القراء',0);
+  add('fixedPinsConfirmed','تثبيتات المنشورات المؤكدة',
+   fixedJobs.filter(x=>x.status==='CONFIRMED'&&x.pinStatus==='CONFIRMED').length,
+   'LOCAL_RECORD','تثبيت أقره Telegram ولا يثبت بقاء التثبيت الآن',0);
+  // No student identity, whisper content, recipient or secret is exposed.
+  const announcements=(s.phase4Whispers?.announcements??[]).filter(x=>
+   local(x.chatId,x.chatVersion)&&within(x.createdAt));
+  add('whisperAnnouncementsConfirmed','إعلانات الهمسات العامة المؤكدة',
+   announcements.filter(x=>x.status==='CONFIRMED').length,'LOCAL_RECORD',
+   'إعلان أقره Telegram، وليس فتحًا أو قراءةً للهمسة',0);
+  const whisperIds=new Set((s.phase4Whispers?.messages??[]).filter(x=>
+   local(x.chatId,x.chatVersion)).map(x=>x.id));
+  add('whisperPrivateSendsConfirmed','تأكيدات إرسال الهمسات في الخاص',
+   (s.phase4Whispers?.deliveries??[]).filter(x=>
+    whisperIds.has(x.messageId)&&within(x.confirmedAt)).length,
+   'LOCAL_RECORD','إقرارات Telegram للمحتوى أو الإجابة، لا تثبت قراءتها وقد تنقص بعد تنظيف الرسائل المرجعية');
   const discussions=(s.phase4Discussions?.sessions??[]).filter(x=>
    local(x.chatId,x.chatVersion));
   const discussionIds=new Set(discussions.map(x=>x.id));
@@ -170,6 +199,8 @@ export class Phase4EngagementReportsService{
    notes:[
     'تقرير محلي عند الطلب من حالة التخزين المعتمدة؛ الأرقام ليست مشاهدات أو وصولًا أو حضورًا أو عدد أشخاص فريدين في Telegram.',
     'الترحيب والوداع والردود تُحصى كحجوزات إرسال محلية لا كتسليمات مؤكدة. إيصالاتها لا تحمل إصدار اعتماد المجموعة وقد تشمل فترات اعتماد سابقة.',
+    'منشورات الدليل والقوانين وإعلانات الهمسات المؤكدة تملك إقرار Telegram لا مشاهدة الطالب؛ يحتسب التقرير تاريخ طلب النشر.',
+    'إرسال الهمسات في الخاص لا يثبت قراءتها، ولا تُدرج هويات أو نصوص أو روابط كشف ضمن التقرير.',
     'سجل قرارات الإسكات اختياري. غيابه أو ظهور صفر في أي بند يعني عدم وجود سجلات محفوظة ضمن النافذة، لا عدم وقوع نشاط.',
     'السجلات تخضع لتنظيف الخصوصية وإلغاء التسجيل وسحب التأييد والحد الأقصى للتخزين. الفترات الطويلة قد تكون ناقصة ولا تصلح للمقارنة الدقيقة.',
     'تُحجب النتائج الفردية الصغيرة (1–4) في عرض لوحة المالك حيث قد تكشف مشاركة في مجموعة صغيرة. لا تظهر أسماء أو أرقام الأعضاء أو تفاصيل أسئلتهم.',
