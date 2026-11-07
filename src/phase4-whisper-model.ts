@@ -2,7 +2,7 @@
  * A reservation never proves private delivery or a read receipt. An announcement
  * stores no text, user-supplied URL, secret key or outbound retry payload.
  */
-export type WhisperKind='FIRST_N'|'DIRECT'|'EVERYONE'|'ADMINS';
+export type WhisperKind='FIRST_N'|'DIRECT'|'EVERYONE'|'ADMINS'|'TEAM';
 /** QUESTION is a privately revealed prompt with a second explicit answer view.
  * GIFT is a source-linked learning resource; no money, files, or rewards.
  * Undefined purpose is the original simple MESSAGE for old stored rows.
@@ -14,7 +14,8 @@ export interface WhisperGift{
 }
 export interface WhisperMessage{
  id:string;chatId:string;chatVersion:number;creatorId:string;
- kind:WhisperKind;seats:number;recipientId?:string;text?:string;
+ kind:WhisperKind;seats:number;recipientId?:string;recipientIds?:string[];
+ text?:string;
  /** Private member submission: owner explicitly reviews before publication. */
  submittedByMember?:true;approvedBy?:string;
  /** Educational extensions are owner-authored only, never auto-licensed. */
@@ -117,12 +118,12 @@ export function validWhisperMessage(raw:unknown):raw is WhisperMessage{
  if(!record(raw)||!exact(raw,
   ['id','chatId','chatVersion','creatorId','kind','seats','status',
    'revision','createdAt','expiresAt'],
-  ['recipientId','text','approvedAt','closedAt','submittedByMember','approvedBy','purpose','answerText','gift']))return false;
+  ['recipientId','recipientIds','text','approvedAt','closedAt','submittedByMember','approvedBy','purpose','answerText','gift']))return false;
  const x=raw;
  if(!validId(x.id)||!validChat(x.chatId)||!validRevision(x.chatVersion)||
-  !validUser(x.creatorId)||!['FIRST_N','DIRECT','EVERYONE','ADMINS'].includes(String(x.kind))||
+  !validUser(x.creatorId)||!['FIRST_N','DIRECT','EVERYONE','ADMINS','TEAM'].includes(String(x.kind))||
   !Number.isSafeInteger(x.seats)||
-  (x.kind==='EVERYONE'||x.kind==='ADMINS'?x.seats!==0:
+  (x.kind==='EVERYONE'||x.kind==='ADMINS'||x.kind==='TEAM'?x.seats!==0:
     !(Number(x.seats)>=1&&Number(x.seats)<=20))||
   !validTime(x.createdAt)||!validTime(x.expiresAt)||
   Number(x.expiresAt)<=Number(x.createdAt)||
@@ -144,8 +145,19 @@ export function validWhisperMessage(raw:unknown):raw is WhisperMessage{
  if(x.submittedByMember===true&&x.approvedBy===x.creatorId)return false;
  if(x.kind==='DIRECT'){
   if(x.seats!==1||!validUser(x.recipientId)||
-    x.recipientId===x.creatorId)return false;
+    x.recipientId===x.creatorId||x.recipientIds!==undefined)return false;
  }else if(x.recipientId!==undefined)return false;
+ if(x.kind==='TEAM'){
+  if(x.submittedByMember===true)return false;
+  if(x.status==='CLOSED'){
+   if(x.recipientIds!==undefined)return false;
+  }else{
+   if(!Array.isArray(x.recipientIds)||x.recipientIds.length<1||
+      x.recipientIds.length>20||
+      x.recipientIds.some(i=>!validUser(i)||i===x.creatorId)||
+      new Set(x.recipientIds).size!==x.recipientIds.length)return false;
+  }
+ }else if(x.recipientIds!==undefined)return false;
  if(x.status==='DRAFT')
   return x.revision===1&&validText(x.text)&&
    x.approvedAt===undefined&&x.closedAt===undefined&&
@@ -188,7 +200,7 @@ export function validWhisperState(raw:unknown):raw is WhisperState{
   new Set(reservations.map(c=>c.messageId+':'+c.memberId)).size!==reservations.length)return false;
  for(const m of messages){
   const claims=reservations.filter(c=>c.messageId===m.id);
-  if((m.kind!=='EVERYONE'&&m.kind!=='ADMINS'&&claims.length>m.seats)||
+  if((m.kind!=='EVERYONE'&&m.kind!=='ADMINS'&&m.kind!=='TEAM'&&claims.length>m.seats)||
    m.status==='DRAFT'&&claims.length||
    claims.some(c=>m.approvedAt===undefined||c.at<m.approvedAt||c.at>m.expiresAt||
     m.status==='CLOSED'&&m.closedAt!==undefined&&c.at>m.closedAt||
