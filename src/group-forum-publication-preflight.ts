@@ -46,13 +46,11 @@ export function previewForumTopicEducationalSources(s:BotState,p:Policy,
  const categoryIds=new Set(available.map(c=>c.id));
  const resources=s.educationResources.filter(r=>r.scope===chat&&
   r.status==='PUBLISHED'&&categoryIds.has(r.categoryId));
- const resourceIds=new Set<string>();
- for(const r of resources){
-  if(resourceIds.has(r.id))return null;
-  resourceIds.add(r.id);
-  if(s.educationResources.some(other=>other!==r&&other.id===r.id))
-   return null;
- }
+ const globalIds=new Map<string,number>();
+ for(const r of s.educationResources)
+  globalIds.set(r.id,(globalIds.get(r.id)??0)+1);
+ for(const r of resources)
+  if(globalIds.get(r.id)!==1)return null;
  const titles=resources.sort((a,b)=>a.title.localeCompare(b.title)||
   a.id.localeCompare(b.id)).slice(0,8).map(r=>allowedText(r.title));
  return {group:chat,thread,topicTitle:allowedText(topic.title),
