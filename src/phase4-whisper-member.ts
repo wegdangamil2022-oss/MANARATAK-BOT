@@ -141,6 +141,7 @@ export async function whisperMemberScreen(
      await service.consentHint(actor,request.id):null;
     const errors:Record<string,string>={
      NOT_ANNOUNCED:'إعلان الهمسة لم يؤكده Telegram؛ لا يمكن فتح المحتوى حتى النشر المؤكد.',
+     QUESTION_NOT_SENT:'يجب إرسال نص السؤال إلى خاصك أولًا. افتح همسة السؤال، ثم اطلب الإجابة. لا نعتبر رسالة غامضة النتيجة مُسلّمة.',
      FULL:'انتهت المقاعد المحددة أو بلغت الخدمة حدود السعة التشغيلية.',
      CONSENT_REQUIRED:'يلزم تفعيل موافقتك على همسات المجموعة في الخاص أولًا.',
      VERIFICATION_REQUIRED:'تعذّر التحقق من عضويتك واشتراكاتك المطلوبة حاليًا.',
@@ -159,7 +160,7 @@ export async function whisperMemberScreen(
     opened.purpose==='QUESTION'?'❓ همسة سؤال تعليمي':
     opened.purpose==='GIFT'?'🎁 هدية مورد تعليمي':'💌 محتوى الهمسة في الخاص فقط';
    const answerHint=opened.purpose==='QUESTION'&&opened.view==='CONTENT'?
-    '\n\nلعرض نموذج الإجابة بعد الاطلاع على السؤال: <code>/whisperanswer '+
+    '\n\nلعرض نموذج الإجابة بعد تأكيد Telegram إرسال السؤال إلى خاصك (لا يثبت القراءة): <code>/whisperanswer '+
       request.id+'</code>':'';
    const body='<b>'+heading+'</b>\n'+escaped+answerHint+
     '\n\n🔐 لا يضمن هذا العرض منع النسخ أو لقطة الشاشة، وليس مشفّرًا طرفيًا.'+

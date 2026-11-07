@@ -683,7 +683,7 @@ export class Phase4WhisperService{
   {status:'READY';text:string;purpose:'MESSAGE'|'QUESTION'|'GIFT';
    view:'CONTENT'|'ANSWER';scope:string;reservationId:string;
    messageRevision:number;consentRevision:number;chatVersion:number;expiresAt:number}|
-  {status:WhisperReserveResult['status']|'NOT_ANNOUNCED'}>{
+  {status:WhisperReserveResult['status']|'NOT_ANNOUNCED'|'QUESTION_NOT_SENT'}>{
   const now=this.clock();
   if(!validClock(now)||!isUser(memberId)||!/^[a-f0-9]{24}$/u.test(id)||
      !['CONTENT','ANSWER'].includes(view))
@@ -695,6 +695,12 @@ export class Phase4WhisperService{
   // seat. Validate the purpose BEFORE the atomic reservation transaction.
   if(view==='ANSWER'&&(rows[0]!.purpose!=='QUESTION'||!rows[0]!.answerText))
    return {status:'DENIED'};
+  // An answer is available only after Telegram ACKNOWLEDGES a separate
+  // private send of the question to this exact account. It is NOT a read
+  // receipt; an UNKNOWN_OUTCOME send does not satisfy this proof.
+  if(view==='ANSWER'&&!(clone(first).deliveries??[]).some(x=>
+     x.messageId===id&&x.memberId===memberId&&x.view==='CONTENT'))
+   return {status:'QUESTION_NOT_SENT'};
   if(!(clone(first).announcements??[]).some(a=>
      a.messageId===id&&a.status==='CONFIRMED'))return {status:'NOT_ANNOUNCED'};
   const result=await this.reserve(memberId,id);
@@ -707,6 +713,9 @@ export class Phase4WhisperService{
    return {status:'EXPIRED'};
   if(view==='ANSWER'&&(item.purpose!=='QUESTION'||!item.answerText))
    return {status:'DENIED'};
+  if(view==='ANSWER'&&!(d.deliveries??[]).some(x=>
+    x.messageId===id&&x.memberId===memberId&&x.view==='CONTENT'))
+   return {status:'QUESTION_NOT_SENT'};
   const chat=approvedChat(after,this.policy,item.chatId);
   if(!chat||chat.version!==item.chatVersion)return {status:'STALE'};
   if(!(d.announcements??[]).some(a=>a.messageId===id&&a.status==='CONFIRMED'))
@@ -774,6 +783,8 @@ export class Phase4WhisperService{
     row.closedAt===undefined||now-row.closedAt<=86_400_000);
    const kept=new Set(data.messages.map(row=>row.id));
    data.reservations=data.reservations.filter(row=>kept.has(row.messageId));
+   const deliveriesBefore=data.deliveries?.length??0;
+   data.deliveries=(data.deliveries??[]).filter(d=>kept.has(d.messageId));
    data.announcements=(data.announcements??[]).filter(a=>kept.has(a.messageId));
    // Privacy: report references cannot retain old secret/message identity
    // longer than its redacted tombstone; no unbounded evidence archive.
@@ -785,6 +796,7 @@ export class Phase4WhisperService{
     b.updatedAt<=now&&(b.enabled||now-b.updatedAt<86400000));
    if(total||redacted||data.messages.length!==before||
       (data.settingsDrafts?.length??0)!==draftCount||
+      deliveriesBefore!==data.deliveries.length||
       (data.reports?.length??0)!==(s.phase4Whispers?.reports?.length??0)||
       (data.blocks?.length??0)!==(s.phase4Whispers?.blocks?.length??0)||
       (data.announcements?.length??0)!==(s.phase4Whispers?.announcements?.length??0))

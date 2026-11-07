@@ -36,6 +36,13 @@ export interface WhisperBlock{
  enabled:boolean;revision:number;updatedAt:number;
 }
 /** A private abuse report. No secret text, files or Telegram provider payload. */
+/** Telegram-acknowledged private send, not evidence of reading.
+ * This minimal receipt deliberately does not retain any message body or
+ * the target Telegram DM message_id.
+ */
+export interface WhisperDeliveryReceipt{
+ messageId:string;memberId:string;view:'CONTENT'|'ANSWER';confirmedAt:number;
+}
 export interface WhisperReport{
  id:string;messageId:string;reporterId:string;reportedAt:number;
  reason:'SPAM'|'HARASSMENT'|'PERSONAL_DATA'|'OTHER';
@@ -62,6 +69,8 @@ export interface WhisperSettingsDraft{
 export interface WhisperState{
  messages:WhisperMessage[];reservations:WhisperReservation[];consents:WhisperConsent[];
  blocks?:WhisperBlock[];reports?:WhisperReport[];
+ /** Optional; pre-09:06 records remain valid without this collection. */
+ deliveries?:WhisperDeliveryReceipt[];
  announcements?:WhisperAnnouncement[];
  settings?:WhisperGroupSettings[];
  settingsDrafts?:WhisperSettingsDraft[];
@@ -178,12 +187,14 @@ export function validWhisperMessage(raw:unknown):raw is WhisperMessage{
   Number(x.closedAt)>=Number(x.approvedAt);
 }
 export function validWhisperState(raw:unknown):raw is WhisperState{
- if(!record(raw)||!exact(raw,['messages','reservations','consents'],['blocks','reports','announcements','settings','settingsDrafts'])||
+ if(!record(raw)||!exact(raw,['messages','reservations','consents'],['blocks','reports','announcements','settings','settingsDrafts','deliveries'])||
   !Array.isArray(raw.messages)||raw.messages.length>200||
   !Array.isArray(raw.reservations)||raw.reservations.length>2000||
   !Array.isArray(raw.consents)||raw.consents.length>2000||
   (raw.blocks!==undefined&&(!Array.isArray(raw.blocks)||raw.blocks.length>2000))||
   (raw.reports!==undefined&&(!Array.isArray(raw.reports)||raw.reports.length>500))||
+  (raw.deliveries!==undefined&&(!Array.isArray(raw.deliveries)||
+    raw.deliveries.length>2000))||
   (raw.announcements!==undefined&&(!Array.isArray(raw.announcements)||
     raw.announcements.length>200))||
   (raw.settings!==undefined&&(!Array.isArray(raw.settings)||raw.settings.length>200))||
@@ -244,6 +255,25 @@ export function validWhisperState(raw:unknown):raw is WhisperState{
   Number(x.expiresAt)>Number(x.createdAt)+120000)||
   new Set((settingsDrafts as WhisperSettingsDraft[]).map(x=>x.id)).size!==settingsDrafts.length)
   return false;
+ const deliveries=raw.deliveries??[];
+ if(deliveries.some(x=>!record(x)||!exact(x,
+  ['messageId','memberId','view','confirmedAt'])||
+  !validId(x.messageId)||!validUser(x.memberId)||
+  !['CONTENT','ANSWER'].includes(String(x.view))||
+  !validTime(x.confirmedAt))||
+  new Set((deliveries as WhisperDeliveryReceipt[]).map(x=>
+    x.messageId+':'+x.memberId+':'+x.view)).size!==deliveries.length)
+  return false;
+ for(const proof of deliveries as WhisperDeliveryReceipt[]){
+  const messagesForProof=messages.filter(m=>m.id===proof.messageId);
+  if(messagesForProof.length!==1||!messagesForProof[0]||
+     messagesForProof[0].status==='DRAFT'||
+     messagesForProof[0].approvedAt===undefined||
+     proof.memberId===messagesForProof[0].creatorId||
+     proof.confirmedAt<messagesForProof[0].approvedAt||
+     (proof.view==='ANSWER'&&messagesForProof[0].purpose!=='QUESTION'))
+   return false;
+ }
  const announced=raw.announcements??[];
  if(announced.some(a=>!record(a)||!exact(a,
    ['id','messageId','chatId','chatVersion','ownerId','createdAt','status'],
