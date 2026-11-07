@@ -152,6 +152,10 @@ export function topicMonitorProof(s:BotState,p:Policy,owner:string,g:string,
  t:number,change:TopicMonitorChange,now:number):string|null{
  const old=ownerTopicMonitor(s,p,owner,g,t,now);
  if(!old||old.revision>=100||!changeState(old,change))return null;
+ // Prevent two committed revisions with the same timestamp from corrupting
+ // the monotonic local history after two fast owner clicks.
+ const history=topicMonitorHistory(s,p,owner,g,t,now);
+ if(!history||history[0]&&history[0].at>=now)return null;
  return digest([owner,g,t,old,change,s.chats.filter(x=>x.id===g),
   s.grants.filter(x=>x.chatId===g&&x.actor===owner),
   s.privateFeatures,s.privateSettingsRevision??0,
@@ -201,7 +205,8 @@ export function evaluateTopicMonitor(s:BotState,p:Policy,
  const normalized=normalizeProtectionText(body),wrapped=' '+normalized+' ';
  const rules=current.rules.flatMap((rule,index)=>{
   const matched=rule.kind==='FORWARD'?message.forwarded===true:
-   rule.kind==='LINK'?/(?:https?:\/\/|www\.|t\.me\/)/iu.test(body):
+   rule.kind==='LINK'?/(?:https?:\/\/|www\.|t\.me\/)/iu.test(body)||
+    Boolean(message.links?.length):
    rule.kind==='WORD'?wrapped.includes(' '+normalizeProtectionText(rule.value)+' '):
    wrapped.includes(' '+normalizeProtectionText(rule.value)+' ');
   return matched?[String(index+1)]:[];
@@ -209,6 +214,37 @@ export function evaluateTopicMonitor(s:BotState,p:Policy,
  return {status:rules.length?'MATCH':'CLEAR',ruleIds:rules,
   revision:current.revision};
 }
+export function topicMonitorStats(s:BotState,p:Policy,owner:string,
+ g:string,t:number,now:number):
+ {matches:number;clear:number;byRule:{index:number;count:number}[];latestAt:number|null}|null{
+ const current=ownerTopicMonitor(s,p,owner,g,t,now);
+ if(!current||!time(now))return null;
+ const marker=':forum-monitor:'+g+':'+t,keys=new Set<string>();
+ const all=s.audit.filter(x=>x.updateKey.endsWith(marker)&&
+  x.at>=now-86_400_000&&x.at<=now);
+ if(all.length>10_000)return null;
+ let matches=0,clear=0,latestAt:number|null=null;
+ const counts=new Map<number,number>();
+ for(const row of all){
+  if(keys.has(row.updateKey)||row.decision!=='NOOP'||!time(row.at))
+   return null;
+  keys.add(row.updateKey);
+  latestAt=latestAt===null?row.at:Math.max(latestAt,row.at);
+  if(/^TOPIC_MONITOR_CLEAR:revision=\d+$/u.test(row.reason)){clear++;continue;}
+  const matched=/^TOPIC_MONITOR_MATCH:revision=(\d+);rules=([1-9][0-9]?(?:,[1-9][0-9]?){0,23})$/u.exec(row.reason);
+  if(!matched)return null;
+  matches++;
+  for(const n of matched[2]!.split(',')){
+   const index=Number(n);
+   if(!Number.isSafeInteger(index)||index<1||index>24)return null;
+   counts.set(index,(counts.get(index)??0)+1);
+  }
+ }
+ return {matches,clear,byRule:[...counts.entries()].
+  map(([index,count])=>({index,count})).
+  sort((a,b)=>b.count-a.count||a.index-b.index),latestAt};
+}
+
 /** Must run inside the same update-protection transaction. No raw text,
  * member identifier, URL or message is persisted in the audit entry. */
 export function recordTopicMonitor(s:BotState,p:Policy,message:ProtectionMessage,
