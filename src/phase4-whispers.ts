@@ -285,13 +285,26 @@ export class Phase4WhisperService{
    s.phase4Whispers=data;return true;
   });
  }
+ /** Block the author of a particular reserved whisper without disclosing
+  * that author's Telegram ID to the member. No matching seat means deny.
+  */
+ async blockWhisper(memberId:string,id:string):Promise<boolean>{
+  if(!isUser(memberId)||!/^[a-f0-9]{24}$/u.test(id))return false;
+  const state=await this.store.snapshot(),data=clone(state);
+  const messages=data.messages.filter(m=>m.id===id);
+  if(messages.length!==1||
+     !data.reservations.some(r=>r.memberId===memberId&&r.messageId===id))
+   return false;
+  const row=messages[0]!;
+  return this.block(memberId,row.chatId,row.creatorId,true);
+ }
  /** Abuse evidence is bounded to an opaque reason code, not a copied secret.
   * Only a member with an actual reserved seat may report this message.
   */
  async report(memberId:string,id:string,reason:'SPAM'|'HARASSMENT'|'PERSONAL_DATA'|'OTHER'):
  Promise<boolean>{
   const now=this.clock();
-  if(!isUser(memberId)||!isUser(memberId)||!validClock(now)||
+  if(!isUser(memberId)||!validClock(now)||
      !/^[a-f0-9]{24}$/u.test(id)||
      !['SPAM','HARASSMENT','PERSONAL_DATA','OTHER'].includes(reason))
    return false;
