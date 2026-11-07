@@ -215,8 +215,9 @@ export class OwnerForumTopicEditor{
    (education.mode==='PAUSED'?'متوقف محليًا':'يتبع سياسة المجموعة')+
    ' · المراجعة '+education.revision+
    '\nحالة عرض الملاحظة للطلاب: '+
-   (publication?.published?'معتمدة للعرض عند طلبها من هذا الموضوع':
-    'غير منشورة')+
+   (publication?.published?
+    education.mode==='PAUSED'?'معتمدة لكن التصفح متوقف في هذا الموضوع':
+     'معتمدة للعرض عند طلبها من هذا الموضوع':'غير منشورة')+
    '\nالملاحظة التحريرية: '+(note?esc(note.text):'لم تُعتمد ملاحظة بعد.')+
    (note?'\nمراجعة الملاحظة المحلية: '+note.revision:'')+
    '\nلإضافة ملاحظة: <code>/topicnote '+g+' '+t+' النص_التحريري</code>'+
@@ -224,7 +225,8 @@ export class OwnerForumTopicEditor{
    [...(note?[[btn(publication?.published?
       '🛑 سحب إتاحة الملاحظة':'✅ اعتماد الملاحظة للعرض',
       'ft:1:q:'+g+':'+t+':'+(publication?.published?'0':'1'))]]:[]),
-    [btn('🕘 سجل اعتماد نشر الملاحظات','ft:1:b:'+g+':'+t+':0')],
+    ...(note?[[btn('🕘 سجل اعتماد نشر الملاحظات',
+     'ft:1:b:'+g+':'+t+':0')]]:[]),
     [btn('🔎 فحص صلاحيات Telegram الحية','ft:1:f:'+g+':'+t)],
     [btn(education.mode==='PAUSED'?'▶️ استئناف تصفح الموضوع':'⏸ إيقاف التصفح في الموضوع',
       'ft:1:p:'+g+':'+t+':'+(education.mode==='PAUSED'?'0':'1'))],
