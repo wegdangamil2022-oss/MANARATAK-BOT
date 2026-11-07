@@ -640,8 +640,14 @@ export class Phase4WhisperService{
    return false;
   return this.store.transaction(s=>{
    const data=clone(s),rows=data.messages.filter(m=>m.id===id);
+   // Reporting after blocking is still possible when Telegram confirmed
+   // a private send. The block intentionally releases unsent reservations;
+   // an acknowledged delivery is separate proof of the member's standing.
+   const held=data.reservations.some(r=>r.memberId===memberId&&r.messageId===id);
+   const acknowledged=(data.deliveries??[]).some(r=>
+     r.memberId===memberId&&r.messageId===id&&r.view==='CONTENT');
    if(rows.length!==1||rows[0]!.creatorId===memberId||
-      !data.reservations.some(r=>r.memberId===memberId&&r.messageId===id)||
+      !(held||acknowledged)||
       (data.reports??[]).some(r=>r.messageId===id&&r.reporterId===memberId)||
       (data.reports?.length??0)>=500)return false;
    data.reports??=[];

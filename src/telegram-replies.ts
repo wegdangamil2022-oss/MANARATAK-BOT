@@ -541,7 +541,7 @@ export class TelegramReplyDispatcher {
      row=messages[0];
     if(Number.isSafeInteger(now)&&now>=0&&
        now<=8_640_000_000_000_000-600000&&
-       messages.length===1&&row?.purpose==='QUESTION'&&
+       messages.length===1&&row&&
        row.status==='OPEN'&&row.approvedAt!==undefined&&
        now>=row.approvedAt&&now<row.expiresAt&&
        (claim.whisperDelivery.view==='CONTENT'||
