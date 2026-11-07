@@ -9,9 +9,12 @@ const groupOk=(s:string)=>/^-[1-9]\d{0,15}$/u.test(s)&&Number.isSafeInteger(Numb
 const clockOk=(n:number)=>Number.isSafeInteger(n)&&n>=0&&n<8_640_000_000_000_000-600000;
 const label=(kind:string,seats:number,expiresAt:number):string=>
  '<b>💌 همسة خاصة في مجموعة منارتك</b>\n'+
- (kind==='DIRECT'?'📩 لمستلم محدد':'🎟️ أول '+seats+' أعضاء مؤهلين')+
+ (kind==='DIRECT'?'📩 لمستلم محدد':
+  kind==='EVERYONE'?'🌐 متاحة لكل أعضاء المجموعة المؤهلين؛ يفتحها كل شخص في الخاص بنفسه':
+   '🎟️ أول '+seats+' أعضاء مؤهلين')+
  '\n🕘 تنتهي: '+new Date(expiresAt).toISOString().slice(0,16).replace('T',' ')+' UTC'+
  '\n🔒 النص لا يظهر في المجموعة؛ يلزم فتح الخاص والتحقق من العضوية والموافقة.'+
+ (kind==='EVERYONE'?'\n⚠️ ليست رسالة سرية لمستلم واحد؛ قد يفتحها جميع المؤهلين، ضمن السعة التقنية للخدمة.':'')+
  '\nلا تعدّ المقاعد دليلًا على قراءة أو تسليم، ولا يضمن النظام منع لقطات الشاشة.';
 
 export interface WhisperAnnouncementGateway{

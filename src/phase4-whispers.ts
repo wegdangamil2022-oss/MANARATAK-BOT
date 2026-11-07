@@ -61,12 +61,14 @@ export class Phase4WhisperService{
    input.text.trim()!==input.text||input.text.length<1||input.text.length>800||
    /[\u0000-\u001f\u007f\u202a-\u202e\u2066-\u2069]/u.test(input.text)||
    !Number.isSafeInteger(input.durationMinutes)||input.durationMinutes<1||
-   input.durationMinutes>60||!['FIRST_N','DIRECT'].includes(input.kind)||
+   input.durationMinutes>60||!['FIRST_N','DIRECT','EVERYONE'].includes(input.kind)||
    input.kind==='FIRST_N'&&(!Number.isSafeInteger(input.seats)||
     input.seats===undefined||input.seats<1||input.seats>20||
     input.recipientId!==undefined)||
    input.kind==='DIRECT'&&(input.seats!==undefined&&input.seats!==1||
-    !isUser(input.recipientId??'')||input.recipientId===actor))
+    !isUser(input.recipientId??'')||input.recipientId===actor)||
+   input.kind==='EVERYONE'&&(input.seats!==undefined||
+    input.recipientId!==undefined))
    throw Error('WHISPER_INPUT_INVALID');
   return this.store.transaction(s=>{
    const version=this.scope(s,actor,chatId);
@@ -80,7 +82,8 @@ export class Phase4WhisperService{
     throw Error('WHISPER_GROUP_HOURLY_LIMIT');
    const record:WhisperMessage={
     id:newId(data.messages),chatId,chatVersion:version,creatorId:actor,
-    kind:input.kind,seats:input.kind==='DIRECT'?1:input.seats!,
+    kind:input.kind,seats:input.kind==='DIRECT'?1:
+     input.kind==='EVERYONE'?0:input.seats!,
     ...(input.kind==='DIRECT'?{recipientId:input.recipientId!}:{}),
     text:input.text,status:'DRAFT',revision:1,
     createdAt:now,expiresAt:now+input.durationMinutes*60_000
@@ -448,7 +451,8 @@ export class Phase4WhisperService{
    if(consent[0]!.revision!==consentRevision)return deny('CONSENT_CHANGED');
    const duplicates=data.reservations.filter(x=>x.messageId===id&&x.memberId===memberId);
    if(duplicates.length!==0)return deny('ALREADY_HELD');
-   if(data.reservations.filter(x=>x.messageId===id).length>=row.seats||
+   if((row.kind!=='EVERYONE'&&
+       data.reservations.filter(x=>x.messageId===id).length>=row.seats)||
     data.reservations.length>=2000)return deny('FULL');
    const reserved={id:newId(data.reservations),messageId:id,
     memberId,at:commitTime,status:'HELD' as const};
@@ -664,9 +668,12 @@ export class Phase4WhisperService{
   if(rows.length!==1||!row||this.scope(s,actor,row.chatId)!==row.chatVersion)
    throw Error('WHISPER_DENIED');
   const used=clone(s).reservations.filter(c=>c.messageId===id).length;
-  return '💌 همسة '+row.kind+' · '+row.status+' · المقاعد: '+
-   Math.max(0,row.seats-used)+'/'+row.seats+' · الإعلان: '+
-   ((clone(s).announcements??[]).find(x=>x.messageId===id)?.status??'NOT_POSTED');
+  return '💌 همسة '+row.kind+' · '+row.status+' · '+
+   (row.kind==='EVERYONE'?
+    'للجميع المؤهلين؛ الفتحات المحجوزة: '+used+'، لا سقف مقاعد مصطنع':
+    'المقاعد المتبقية: '+Math.max(0,row.seats-used)+'/'+row.seats)+
+   ' · الإعلان: '+((clone(s).announcements??[])
+    .find(x=>x.messageId===id)?.status??'NOT_POSTED');
  }
  async list(actor:string,chatId?:string):Promise<WhisperMessage[]>{
   const s=await this.store.snapshot();
