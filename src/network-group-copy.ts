@@ -10,16 +10,24 @@ import {isValidGroupProtectionRecord,isValidProtectionPolicy,
 /** NETWORK-007: bounded, explicitly reviewed local copy to an EXISTING policy.
  * Never copies chat identity, protected-member IDs, hidden allowlists, trusted
  * account IDs, source mode, Telegram rights, or network credentials. */
-export type NetworkCopyPart='r'|'f'|'b';
+export type NetworkCopyPart='r'|'f'|'b'|'j'|'a'|'e'|'s';
+/** Explicitly portable (non-identity) fields only. In particular the group's
+ * night offset is deliberately excluded: each destination has its own time zone. */
+export type NetworkCopyField='rules'|'flood'|'joinRaid'|'raid'|'escalation';
+export const networkCopyFields:Readonly<Record<NetworkCopyPart,readonly NetworkCopyField[]>>={
+ r:['rules'],f:['flood'],b:['rules','flood'],
+ j:['joinRaid'],a:['raid'],e:['escalation'],
+ s:['rules','flood','joinRaid','raid','escalation']
+};
 export interface NetworkCopyPreview{
  networkId:string;networkRevision:number;sourceId:string;targetId:string;
  sourceRevision:number;targetRevision:number;targetMode:'OFF'|'MONITOR';
- parts:NetworkCopyPart;fields:('rules'|'flood')[];
+ parts:NetworkCopyPart;fields:NetworkCopyField[];
  ruleCount:number;excludedRules:number;pausedLinks:number;proof:string;
 }
 export interface NetworkCopyResult{
  targetId:string;newRevision:number;mode:'OFF'|'MONITOR';
- fields:('rules'|'flood')[];ruleCount:number;pausedLinks:number;
+ fields:NetworkCopyField[];ruleCount:number;pausedLinks:number;
 }
 const digest=(x:unknown):string=>createHash('sha256').update(JSON.stringify(x)).digest('hex');
 const validClock=(x:number)=>Number.isSafeInteger(x)&&x>=0&&x<=8_640_000_000_000_000-120_000;
@@ -56,7 +64,7 @@ export function previewNetworkGroupCopy(
 ):NetworkCopyPreview|null{
  if(!validClock(now)||!p.isOwner(actor)||!p.privateFeature(s,'owner.dashboard',actor)||
   !network(netId)||!id(sourceId)||!id(targetId)||sourceId===targetId||
-  !['r','f','b'].includes(parts)||
+  !Object.prototype.hasOwnProperty.call(networkCopyFields,parts)||
   !validNetworkEmergencyControls(s.networkEmergencyControls??[])||
   !validNetworkInheritanceLinks(s.networkInheritance??[])||
   networkEmergencyStopped(s,netId))return null;
@@ -70,18 +78,18 @@ export function previewNetworkGroupCopy(
  if(!source||!target)return null;
  const from=record(s,source,now),to=record(s,target,now);
  if(!from||!to)return null;
- const copyRules=parts==='r'||parts==='b',copyFlood=parts==='f'||parts==='b';
+ const wanted=networkCopyFields[parts];
  const rules=from.policy.rules;
- if(copyRules&&(
-    // These entries bind a person, account or sensitive fraud claim. They
-    // cannot be transplanted safely to another group.
+ const ruleChange=wanted.includes('rules')&&!same(rules,to.policy.rules);
+ if(ruleChange&&(
+    // Identity, fraud, and trusted-account rules depend on local people or
+    // external proof. Replacing such rules silently would drop safeguards.
     rules.some(r=>!safeKinds.has(r.kind))||
     to.policy.rules.some(r=>!safeKinds.has(r.kind))||
     (to.policy.ruleExemptions?.length??0)!==0
  ))return null;
- const fields:('rules'|'flood')[]=[];
- if(copyRules&&!same(rules,to.policy.rules))fields.push('rules');
- if(copyFlood&&!same(from.policy.flood,to.policy.flood))fields.push('flood');
+ const fields:NetworkCopyField[]=wanted.filter(field=>
+  !same(from.policy[field],to.policy[field]));
  if(!fields.length)return null;
  const pausedLinks=(s.networkInheritance??[]).filter(l=>l.status==='ACTIVE'&&
   (l.sourceChatId===targetId||l.targetChatId===targetId)).length;
@@ -106,6 +114,18 @@ export function applyNetworkGroupCopy(
  if(current.fields.includes('flood')){
   if(from.policy.flood)draft.flood=structuredClone(from.policy.flood);
   else delete draft.flood;
+ }
+ if(current.fields.includes('joinRaid')){
+  if(from.policy.joinRaid)draft.joinRaid=structuredClone(from.policy.joinRaid);
+  else delete draft.joinRaid;
+ }
+ if(current.fields.includes('raid')){
+  if(from.policy.raid)draft.raid=structuredClone(from.policy.raid);
+  else delete draft.raid;
+ }
+ if(current.fields.includes('escalation')){
+  if(from.policy.escalation)draft.escalation=structuredClone(from.policy.escalation);
+  else delete draft.escalation;
  }
  draft.revision=current.targetRevision+1;
  // Preserve destination mode, group-specific allowlists, member exemptions,
