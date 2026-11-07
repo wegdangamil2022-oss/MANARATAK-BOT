@@ -15,6 +15,8 @@ import {OwnerNetworkReviewInbox,validNetworkReviewInboxRoute}
  from './telegram-network-review-inbox.js';
 import {OwnerNetworkHealthEditor,validOwnerNetworkHealthRoute}
  from './telegram-network-health.js';
+import {OwnerNetworkRoomBridge,validNetworkRoomBridgeRoute}
+ from './telegram-network-room-bridge.js';
 import {OwnerNetworkPolicyDiffEditor,validOwnerNetworkPolicyDiffRoute}
  from './telegram-network-differences.js';
 import {OwnerNetworkGroupCopy,validOwnerNetworkGroupCopyRoute}
@@ -82,7 +84,7 @@ export function validOwnerNetworkRoute(data:unknown):boolean{
  return data==='mi:1:i:01:03'||home.test(data)||begin.test(data)||validOwnerNetworkWatchRoute(data)||
    validOwnerNetworkBulkServiceRoute(data)||validOwnerNetworkGroupCopyRoute(data)||
    validOwnerNetworkSelectedFollowRoute(data)||validNetworkReviewInboxRoute(data)||
-   validOwnerNetworkHealthRoute(data)||
+   validOwnerNetworkHealthRoute(data)||validNetworkRoomBridgeRoute(data)||
    validOwnerNetworkPolicyDiffRoute(data)||validOwnerNetworkPolicySnapshotRoute(data)||
    validOwnerNetworkPolicyRestoreRoute(data)||
    validOwnerNetworkSanctionRoute(data)||
@@ -550,7 +552,8 @@ export class OwnerNetworkEditor{
    'المجموعات الفعالة هي المعتمدة بنفس إصدار ارتباطها فقط؛ لا تُنقل إليها حقوق البوت.\n'+
    'لنسخ قواعد مراقبة مختارة محليًا إلى مجموعة في الشبكة: <code>/networkcopy '+n.id+'</code>\n'+
    'لمراجعة عدد البلاغات والقرارات لكل مجموعة: <code>/networkreviews '+n.id+'</code>\n'+
-   'لتشخيص الاعتماد والسياسات والطوارئ محليًا: <code>/networkhealth '+n.id+'</code>',
+   'لتشخيص الاعتماد والسياسات والطوارئ محليًا: <code>/networkhealth '+n.id+'</code>\n'+
+   'لمراجعة ربط غرف الإدارة بالمجموعات: <code>/networkrooms '+n.id+'</code>',
    [[btn('👥 إدارة المجموعات','nw:1:g:'+n.id+':0')],
     [btn('📑 سياسات الشبكة المشتركة','nw:1:y:'+n.id+':0')],
     [btn('⏸️ إدارة المتابعة','nw:1:f:'+n.id+':0')],
@@ -559,6 +562,7 @@ export class OwnerNetworkEditor{
     [btn('🧩 مقارنة إعدادات المجموعات','nw:1:ch:'+n.id)],
     [btn('📸 نسخ السياسات التاريخية','nw:1:ha:'+n.id)],
     [btn('🔔 الأحداث الإدارية للشبكة','nw:1:ev:'+n.id+':0')],
+    [btn('🏢 غرف إدارة المجموعات','nw:1:rl:'+n.id+':0')],
     [btn('🛡️ بلاغات الشبكة المركزية','nw:1:w:'+n.id+':0')],
     ...(stale>0?[[btn('🧹 مراجعة الارتباطات القديمة','nw:1:s:'+n.id+':0')]]:[]),
     [btn('✏️ إعادة تسمية الشبكة','nw:1:e:'+n.id)],
@@ -1334,6 +1338,10 @@ export class OwnerNetworkEditor{
   if(validOwnerNetworkHealthRoute(data)){
    await this.cancelInput(actor);
    return new OwnerNetworkHealthEditor(this.store,this.policy,this.clock).handle(actor,data);
+  }
+  if(validNetworkRoomBridgeRoute(data)){
+   await this.cancelInput(actor);
+   return new OwnerNetworkRoomBridge(this.store,this.policy,this.clock).handle(actor,data);
   }
   if(validOwnerNetworkGroupCopyRoute(data)){
    await this.cancelInput(actor);
