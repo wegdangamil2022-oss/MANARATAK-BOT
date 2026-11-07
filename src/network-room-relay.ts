@@ -2,8 +2,7 @@ import {createHash,randomBytes} from 'node:crypto';
 import type {BotState} from './store.js';
 import type {Policy} from './policy.js';
 import {validGroupNetwork} from './group-network-model.js';
-import {networkEmergencyStopped,validNetworkEmergencyControls}
- from './network-emergency-stop.js';
+import {validNetworkEmergencyControls} from './network-emergency-stop.js';
 import {adminRoomNotificationTarget,adminRoomModeWitness}
  from './admin-room-links.js';
 
@@ -44,8 +43,8 @@ export function networkRoomRelayScope(s:BotState,p:Policy,owner:string,
  netId:string,groupId:string,now:number):NetworkRoomRelayScope|null{
  if(!time(now)||!actor(owner)||!p.isOwner(owner)||
   !p.privateFeature(s,'owner.dashboard',owner)||!network(netId)||!id(groupId)||
-  !validNetworkEmergencyControls(s.networkEmergencyControls??[])||
-  networkEmergencyStopped(s,netId))return null;
+  !validNetworkEmergencyControls(s.networkEmergencyControls??[]))return null;
+ // STOP disables delivery, not the owner's ability to revoke an opt-in.
  const nets=(s.groupNetworks??[]).filter(n=>n.id===netId),n=nets[0];
  if(nets.length!==1||!n||!validGroupNetwork(n)||n.updatedAt>now)return null;
  const memberships=n.members.filter(m=>m.chatId===groupId),m=memberships[0];
