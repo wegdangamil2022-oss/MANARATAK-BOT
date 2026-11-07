@@ -13,7 +13,8 @@ export type WhisperMemberCommand=
  |{kind:'REPORT';id:string;reason:'SPAM'|'HARASSMENT'|'PERSONAL_DATA'|'OTHER'}
  |{kind:'SUBMIT';chatId:string;mode:'FIRST_N'|'DIRECT';seats:number;
    recipientId?:string;durationMinutes:number;text:string}
- |{kind:'WITHDRAW';id:string};
+ |{kind:'WITHDRAW';id:string}
+ |{kind:'STATUS';id:string};
 const chat=/^-[1-9][0-9]{0,15}$/u;
 const canChat=(value:string)=>chat.test(value)&&Number.isSafeInteger(Number(value));
 export function parseWhisperMemberCommand(value:string):WhisperMemberCommand|null{
@@ -29,6 +30,8 @@ export function parseWhisperMemberCommand(value:string):WhisperMemberCommand|nul
   return {kind:'SUBMIT',chatId:memberDirect[1]!,mode:'DIRECT',
    seats:1,recipientId:memberDirect[2]!,durationMinutes:Number(memberDirect[3]),
    text:memberDirect[4]!};
+ const memberStatus=/^\/whisperstatus ([a-f0-9]{24})$/u.exec(value);
+ if(memberStatus)return {kind:'STATUS',id:memberStatus[1]!};
  const memberWithdraw=/^\/whisperrevoke ([a-f0-9]{24})$/u.exec(value);
  if(memberWithdraw)return {kind:'WITHDRAW',id:memberWithdraw[1]!};
  const consent=/^\/whisper(on|off) (-[1-9][0-9]{0,15})$/u.exec(value);
@@ -74,9 +77,26 @@ export async function whisperMemberScreen(
    return {text:id?
     '📝 سُجلت مسودة همستك للمراجعة الخاصة من إدارة المجموعة. لم تُنشر، ولا يوجد تسليم للمستلم.\n'+
     'معرف المسودة لإلغائها: <code>'+id+'</code>\n'+
-    'للإلغاء قبل أو بعد الاعتماد: <code>/whisperrevoke '+id+'</code>\n'+
+    'للإلغاء: <code>/whisperrevoke '+id+'</code>\n'+
+    'لمعرفة الحالة: <code>/whisperstatus '+id+'</code>\n'+
     'مدة الصلاحية تشمل وقت انتظار الإدارة، وقد تنتهي قبل الاعتماد.':
     '🔒 تعذر قبول المسودة. يجب أن يفتح مالك المجموعة هذه الميزة، وتثبت عضويتك، وتكون حدود الإنشاء متاحة. لم تُنشر رسالة.'};
+  }
+  if(request.kind==='STATUS'){
+   const state=await service.ownStatus(actor,request.id);
+   if(!state)return {text:'🔒 لا توجد مسودة همسة تخص حسابك بهذا المعرف.'};
+   const status=state.status==='DRAFT'?'📝 تنتظر مراجعة إدارة المجموعة':
+    state.status==='OPEN'?'✅ اعتمدتها الإدارة محليًا':'🔒 أُغلقت أو انتهت';
+   const poster=state.announcement==='CONFIRMED'?
+    '✅ أكد Telegram إعلان المجموعة':state.announcement==='QUEUED'?
+    '⏳ إعلان بانتظار Telegram':state.announcement==='NOT_POSTED'?
+    'لم يُطلب نشرها':state.announcement==='SENDING'||
+    state.announcement==='UNKNOWN_OUTCOME'?
+    '⚠️ إعلان غير مؤكد؛ لا إعادة تلقائية':
+    'لم يؤكد Telegram نشر الإعلان';
+   return {text:'💌 حالة مسودتك فقط\n'+status+'\nالإعلان: '+poster+
+    '\nتنتهي: '+new Date(state.expiresAt).toISOString()+
+    '\nلا يكشف هذا التقرير هويات من حاولوا فتح الهمسة أو قرأوها.'};
   }
   if(request.kind==='WITHDRAW'){
    const closed=await service.withdrawOwn(actor,request.id);
