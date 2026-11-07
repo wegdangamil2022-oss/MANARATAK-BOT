@@ -1,7 +1,7 @@
 import {createHash,randomBytes} from 'node:crypto';
 import {BotStore,type BotState} from './store.js';
 import {Policy} from './policy.js';
-import {validCommunityConfig,type CommunityCleanupJob,type CommunityCleanupReviewDraft,
+import {defaultCommunityConfig,validCommunityConfig,type CommunityCleanupJob,type CommunityCleanupReviewDraft,
  type CommunityCleanupStatus} from './phase4-community-model.js';
 
 const group=(id:string)=>/^-[1-9]\d{0,15}$/u.test(id)&&Number.isSafeInteger(Number(id));
@@ -34,9 +34,9 @@ export class Phase4CleanupOperations{
   const chats=state.chats.filter(c=>c.id===chatId&&c.approved&&c.present&&
     c.scopes.includes('navigation'));
   const configs=state.phase4Community?.configs.filter(c=>c.chatId===chatId)??[];
-  if(chats.length!==1||configs.length>1||configs.length===0||
-    !validCommunityConfig(configs[0])||configs[0]!.version<1)return null;
-  return {chatVersion:chats[0]!.version,configVersion:configs[0]!.version};
+  if(chats.length!==1||configs.length>1||
+    (configs.length===1&&!validCommunityConfig(configs[0])))return null;
+  return {chatVersion:chats[0]!.version,configVersion:configs[0]?.version??0};
  }
  async groups(actor:string):Promise<string[]>{
   if(!this.policy.isOwner(actor))return [];
@@ -51,7 +51,8 @@ export class Phase4CleanupOperations{
   const s=await this.store.snapshot();
   const access=this.authorized(s,actor,chatId);
   if(!access)return null;
-  const config=s.phase4Community!.configs.find(c=>c.chatId===chatId)!;
+  const config=s.phase4Community?.configs.find(c=>c.chatId===chatId)??
+   defaultCommunityConfig(chatId);
   const jobs=(s.phase4Community?.cleanupJobs??[])
    .filter(x=>x.chatId===chatId)
    .sort((a,b)=>b.observedAt-a.observedAt||b.key.localeCompare(a.key));
@@ -87,7 +88,7 @@ export class Phase4CleanupOperations{
    const now=this.clock();
    if(!validTime(now))throw Error('CLEANUP_CLOCK_UNTRUSTED');
    const access=this.authorized(s,actor,chatId);
-   if(!access)throw Error('CLEANUP_GROUP_UNAVAILABLE');
+   if(!access||access.configVersion<1)throw Error('CLEANUP_GROUP_UNAVAILABLE');
    const jobs=(s.phase4Community?.cleanupJobs??[]).filter(j=>j.chatId===chatId);
    let keys:string[],count=1;
    if(action==='CANCEL_GROUP'){
