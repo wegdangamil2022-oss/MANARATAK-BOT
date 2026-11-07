@@ -47,6 +47,8 @@ const help='للتعديل أرسل في خاص البوت أحد الأوامر
  +'<code>/setruleslink -100123 https://t.me/manaratak_rules</code>\n'
  +'<code>/clearruleslink -100123</code>\n'
  +'<code>/replyrate -100123 معرف_القاعدة 90</code>\n'
+ +'<code>/replyhours -100123 معرف_القاعدة 08:00 18:00</code>\n'
+ +'<code>/replyhoursoff -100123 معرف_القاعدة</code>\n'
  +'<code>/replyquiet -100123 22:00 07:00</code>\n'
  +'<code>/replyquietoff -100123</code>\n'
  +'<code>/replytopicrate -100123 777 10</code>\n'
@@ -234,6 +236,17 @@ export function parsePhase4CommunityCommand(text:string):
  const replyButtonsClear=/^\/clearreplybuttons (-[1-9]\d{0,15}) ([a-f0-9]{12})$/u.exec(text);
  if(replyButtonsClear)return {kind:'EDIT',chatId:replyButtonsClear[1]!,
   request:{kind:'REPLY_BUTTONS_CLEAR',ruleId:replyButtonsClear[2]!}};
+ const ruleHours=/^\/replyhours (-[1-9]\d{0,15}) ([a-f0-9]{12}) ([01]\d|2[0-3]):([0-5]\d) ([01]\d|2[0-3]):([0-5]\d)$/u.exec(text);
+ if(ruleHours){
+  const startMinute=Number(ruleHours[3])*60+Number(ruleHours[4]),
+   endMinute=Number(ruleHours[5])*60+Number(ruleHours[6]);
+  if(startMinute===endMinute)return null;
+  return {kind:'EDIT',chatId:ruleHours[1]!,request:{kind:'REPLY_HOURS_SET',
+   ruleId:ruleHours[2]!,startMinute,endMinute}};
+ }
+ const clearHours=/^\/replyhoursoff (-[1-9]\d{0,15}) ([a-f0-9]{12})$/u.exec(text);
+ if(clearHours)return {kind:'EDIT',chatId:clearHours[1]!,
+  request:{kind:'REPLY_HOURS_CLEAR',ruleId:clearHours[2]!}};
  const rate=/^\/replyrate (-[1-9]\d{0,15}) ([a-f0-9]{12}) (0|[1-9]\d{0,4})$/u.exec(text);
  if(rate){
   const seconds=Number(rate[3]);
@@ -304,6 +317,7 @@ export async function phase4CommunityScreen(service:Phase4CommunityService,actor
    diagnostic.status==='SOURCE_UNAVAILABLE'?'مصدر الرد المعتمد غير متاح حاليًا (سؤال FAQ أو منشوره أو رابط القوانين). لم يُرسل رد.':
    diagnostic.status==='CAPTION_LIMIT'?'الرد يتجاوز حد وصف صورة Telegram (1024 بايت). لم يُرسل.':
    diagnostic.status==='TEMPLATE_INVALID'?'القالب غير صالح أو تجاوز حد Telegram. لم يُرسل.':
+   diagnostic.status==='RULE_OUTSIDE_HOURS'?'مطابقة القاعدة <code>'+diagnostic.ruleId+'</code> موجودة، لكن نافذة تشغيلها الزمنية مغلقة الآن. لم يُرسل رد.':
    'لا توجد قاعدة ترد على هذه الرسالة في هذا الموضوع.';
   return {text:'<b>🧪 تشخيص الردود دون إرسال</b>\n'+text+
    '\nلا تحسب هذه المعاينة حدود المعدّل أو عضوية الطلاب.',

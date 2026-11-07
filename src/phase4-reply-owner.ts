@@ -6,7 +6,8 @@ import type {OwnerInlineScreen,TelegramInlineKeyboard} from './telegram-inline-o
 const G='-[1-9][0-9]{0,15}',R='[a-f0-9]{12}',P='(?:0|[1-9][0-9]?)',D='[a-f0-9]{24}';
 const ROUTE=new RegExp('^r5:1:(?:h|p:'+P+'|g:'+G+'|l:'+G+':'+P+
  '|d:'+G+':'+R+'|e:'+G+':'+R+':[01]|t:'+G+':'+R+':(?:1|5|15|60|300|3600)'+
- '|[fc]:'+G+':'+R+'|[ax]:'+D+')$','u');
+ '|[fc]:'+G+':'+R+'|w:'+G+':'+R+':[men]'+
+ '|u:'+G+':'+R+'|[ax]:'+D+')$','u');
 export const validPhase4ReplyOwnerRoute=(raw:unknown):raw is string=>
  typeof raw==='string'&&Buffer.byteLength(raw,'utf8')<=64&&ROUTE.test(raw);
 const btn=(text:string,callback_data:string)=>({text,callback_data});
@@ -66,6 +67,10 @@ const details=(c:CommunityConfig,r:CommunityReplyRule):OwnerInlineScreen=>{
    btn('⏱️ دقيقة','r5:1:t:'+c.chatId+':'+r.id+':60')],
   [btn('⏱️ 5 دقائق','r5:1:t:'+c.chatId+':'+r.id+':300'),
    btn('⏱️ ساعة','r5:1:t:'+c.chatId+':'+r.id+':3600')],
+  [btn('🌞 08–18','r5:1:w:'+c.chatId+':'+r.id+':m'),
+   btn('🌆 18–23','r5:1:w:'+c.chatId+':'+r.id+':e'),
+   btn('📘 09–15','r5:1:w:'+c.chatId+':'+r.id+':n')],
+  ...(r.activeHours?[[btn('🕘 إزالة نافذة تشغيل القاعدة','r5:1:u:'+c.chatId+':'+r.id)]]:[]),
   [btn('📷 '+(r.photoFileId?'إزالة صورة الرد':'إضافة صورة من الخاص'),
     r.photoFileId?'r5:1:f:'+c.chatId+':'+r.id:detail(c.chatId,r.id))],
   [btn('🔗 '+(r.buttons?.length?'إزالة كل أزرار الروابط':'كيفية إضافة روابط'),
@@ -81,12 +86,20 @@ const details=(c:CommunityConfig,r:CommunityReplyRule):OwnerInlineScreen=>{
   '\nالنطاق: '+(r.topicId===undefined?'المجموعة وجميع الموضوعات':
    'موضوع Forum رقم '+r.topicId)+
   '\nمهلة نفس العضو: '+r.cooldownMs/1000+' ثانية'+
+  '\nنافذة تشغيل القاعدة: '+(r.activeHours?
+   String(Math.floor(r.activeHours.startMinute/60)).padStart(2,'0')+':'+
+   String(r.activeHours.startMinute%60).padStart(2,'0')+' — '+
+   String(Math.floor(r.activeHours.endMinute/60)).padStart(2,'0')+':'+
+   String(r.activeHours.endMinute%60).padStart(2,'0')+
+   ' وفق توقيت المجموعة':'غير محددة؛ تسري ساعات هدوء المجموعة فقط')+
   '\nصورة Telegram: '+(r.photoFileId?'معتمدة':'غير مضافة')+
   '\nأزرار HTTPS: '+(r.buttons?.length??0)+' من 3'+urlStatus+preview+
   '\n\nلإرفاق صورة، أرسل صورة في الخاص مع التعليق:\n'+
   '<code>/replyphoto '+c.chatId+' '+r.id+'</code>'+
   '\nولإضافة زر رابط:\n<code>/replybutton '+c.chatId+' '+r.id+
   ' دليل | https://t.me/StudyinEurope3</code>'+
+  '\nولتحديد ساعات مخصصة:\n<code>/replyhours '+c.chatId+' '+r.id+
+  ' 08:00 18:00</code>'+
   '\nلا تنفذ المعاينة التعديل قبل اعتماد مستقل.',
   actionRows);
 };
@@ -160,6 +173,24 @@ export async function phase4ReplyOwnerScreen(s:Phase4CommunityService,actor:stri
     [[btn('✅ اعتماد إزالة المرفق','r5:1:a:'+draft.id)],
      [btn('❌ إلغاء','r5:1:x:'+draft.id)],
      [btn('↩️ القاعدة',detail(c.chatId,row[0]!.id))]]);
+  }
+  const window=/^r5:1:([wu]):(-[1-9][0-9]{0,15}):([a-f0-9]{12})(?::([men]))?$/u.exec(input);
+  if(window){
+   const c=await s.view(actor,window[2]!),id=window[3]!,
+    matches=c.rules.filter(r=>r.id===id);
+   if(matches.length!==1)return null;
+   const time=window[4],presets:Record<string,[number,number]>={
+    m:[480,1080],e:[1080,1380],n:[540,900]};
+   if(window[1]==='w'&&!time||window[1]==='u'&&time)return null;
+   const values=time?presets[time]:undefined;
+   const req:DraftRequest=window[1]==='u'?
+    {kind:'REPLY_HOURS_CLEAR',ruleId:id}:
+    {kind:'REPLY_HOURS_SET',ruleId:id,startMinute:values![0],endMinute:values![1]};
+   const draft=await s.pending(actor,req,c.chatId);
+   return ui(s.preview(draft)+'\n\nينتهي الاعتماد بعد دقيقتين؛ ولا يغير ساعات هدوء المجموعة.',
+    [[btn('✅ اعتماد ساعات القاعدة','r5:1:a:'+draft.id)],
+     [btn('❌ إلغاء','r5:1:x:'+draft.id)],
+     [btn('↩️ القاعدة',detail(c.chatId,id))]]);
   }
   const enabled=/^r5:1:e:(-[1-9][0-9]{0,15}):([a-f0-9]{12}):([01])$/u.exec(input);
   const time=/^r5:1:t:(-[1-9][0-9]{0,15}):([a-f0-9]{12}):(1|5|15|60|300|3600)$/u.exec(input);
