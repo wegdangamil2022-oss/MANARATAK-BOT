@@ -368,6 +368,8 @@ export async function phase4CommunityScreen(service:Phase4CommunityService,actor
     [btn('🌍 المنطقة الزمنية','p4c:1:n:'+id)],
     [btn('🧹 '+(c.serviceCleanup?.enabled?'إيقاف':'تفعيل')+' تنظيف رسائل الخدمة','p4c:1:t:'+id+':s:'+(c.serviceCleanup?.enabled?'0':'1'))],
     [btn('⚙️ أنواع تنظيف رسائل الخدمة','p4c:1:s:'+id)],
+    [btn('📋 المهام وحالات الحذف','sc4:1:g:'+id)],
+   [btn('📋 سجل مهام الرسائل الخدمية','sc4:1:g:'+id)],
     [btn('🧼 '+(c.replyCleanup?.enabled?'إيقاف':'تفعيل')+' حذف ردود البوت','p4c:1:t:'+id+':b:'+(c.replyCleanup?.enabled?'0':'1'))],
     [btn('📝 '+(c.changeLogEnabled?'إيقاف':'تفعيل')+' سجل تغييرات المجموعة','p4c:1:t:'+id+':g:'+(c.changeLogEnabled?'0':'1'))],
     [btn('🕘 تغييرات اسم/صورة المجموعة','p4c:1:h:'+id)],

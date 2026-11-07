@@ -20,6 +20,7 @@ import {validSubscriptionConfigRoute} from './telegram-inline-subscription-confi
 import {validCommunityFolderRoute} from './telegram-community-folders.js';
 import {validPhase4CommunityRoute} from './phase4-community-ui.js';
 import {validPhase4GuidanceOwnerRoute} from './phase4-guidance-owner.js';
+import {validPhase4ServiceOpsRoute} from './phase4-service-ops-ui.js';
 import {validWhisperOwnerRoute} from './phase4-whisper-owner.js';
 import {validQuizOwnerRoute} from './phase4-quiz-owner.js';
 import {validGameCatalogOwnerRoute} from './phase4-game-catalog-owner.js';
@@ -712,6 +713,7 @@ export function isValidTelegramInlineKeyboard(input:unknown):input is TelegramIn
      // The "gm:1" buttons only navigate after private membership checks.
      !/^gm:1:(?:(?:[gr]:-[1-9][0-9]{0,15})|(?:[fn]:-[1-9][0-9]{0,15}:[1-9][0-9]?)|(?:q:-[1-9][0-9]{0,15}:[a-f0-9]{8}-(?:[a-f0-9]{4}-){3}[a-f0-9]{12}))$/u.test(button.callback_data)&&
      !validPhase4GuidanceOwnerRoute(button.callback_data)&&
+     !validPhase4ServiceOpsRoute(button.callback_data)&&
      !validWhisperOwnerRoute(button.callback_data)&&
      !validQuizOwnerRoute(button.callback_data)&&
      !validGameCatalogOwnerRoute(button.callback_data)&&

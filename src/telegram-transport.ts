@@ -112,6 +112,8 @@ import {parseB6ExplicitMention} from './b6-telegram-mention.js';
 import type {ModerationService} from './moderation.js';
 import {Phase4CommunityService} from './phase4-community.js';
 import {phase4CommunityScreen,parsePhase4CommunityCommand} from './phase4-community-ui.js';
+import {Phase4CleanupOperations} from './phase4-cleanup-ops.js';
+import {phase4ServiceOpsScreen} from './phase4-service-ops-ui.js';
 import type {CommunityInput,CommunityJoinKind,CommunityLeaveKind,CommunityLanguage} from './phase4-community-model.js';
 import {validCommunityPhotoId} from './phase4-community-rich.js';
 import type {ModerationPurgeService} from './moderation-purge.js';
@@ -1203,6 +1205,22 @@ export class TelegramUpdateApplication {
      if(!screen)return {status:'DENIED',reason:'PHASE4_SETTINGS_STALE_OR_DENIED'};
      return {status:'APPLIED',reason:'PHASE4_SETTINGS_OWNER',
       plan:this.plan(chatId,screen.text,undefined,screen.keyboard,event.callbackMessageId)};
+    }
+    // Dedicated 09:04 panel. Old service-cleanup toggles still use the existing
+    // p4c editor, but opening 09:04 now shows actual queue/status controls.
+    const serviceOpsInput=kind==='private'&&(
+      event.callbackData==='mi:1:i:09:04'||
+      event.callbackData?.startsWith('sc4:1:')||
+      text==='/servicejobs');
+    if(serviceOpsInput){
+      if(!this.opts.policy.isOwner(actorId)||actorId!==chatId||
+         event.edited||event.forwarded)
+        return {status:'DENIED',reason:'SERVICE_OPS_OWNER_PRIVATE_ONLY'};
+      const screen=await phase4ServiceOpsScreen(new Phase4CleanupOperations(
+        this.opts.store,this.opts.policy,this.clock),actorId,event.callbackData??text);
+      if(!screen)return {status:'DENIED',reason:'SERVICE_OPS_STALE_OR_DENIED'};
+      return {status:'APPLIED',reason:'PHASE4_SERVICE_OPS_OWNER',
+        plan:this.plan(chatId,screen.text,undefined,screen.keyboard,event.callbackMessageId)};
     }
     const communityCommand=kind==='private'?parsePhase4CommunityCommand(text):null;
     if(kind==='private'&&(communityCommand||event.callbackData?.startsWith('p4c:1:')||
