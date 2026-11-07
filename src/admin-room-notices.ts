@@ -129,6 +129,18 @@ export class TelegramAdminRoomNoticeSender{
 function intact(s:BotState,n:Notice,now:number):boolean{
  const original=notices(s).filter(x=>x.key===n.key),started=s.audit.filter(a=>a.updateKey===n.key+':started'),a=started[0];return original.length===1&&JSON.stringify(original[0])===JSON.stringify(n)&&started.length===1&&!!a&&a.decision==='ALLOW'&&a.reason==='ADMIN_ROOM_NOTICE_STARTED'&&a.policyVersion===n.version&&clockValid(a.at)&&a.at>=n.at&&a.at<=now&&!s.audit.some(x=>x.updateKey===n.key+':outcome'||x.updateKey===n.key+':cancelled');
 }
+/** Official, short-lived visibility observation. Every sender must ask
+ * again inside its final pre-send verifier; a previous private-room check
+ * does not authorize a later send after visibility changes.
+ */
+async function adminRoomPrivateAtSend(gateway:TelegramBotApiModerationGateway,
+ room:string):Promise<boolean>{
+ if(!TelegramBotApiModerationGateway.usesOfficialRoomPrivacyRead(gateway))
+  return false;
+ try{return await gateway.inspectRoomPrivacy(room)==='NO_PUBLIC_USERNAME';}
+ catch{return false;}
+}
+
 export class AdminRoomNoticeDispatcher{
  constructor(private readonly store:BotStore,private readonly policy:Policy,private readonly gateway:TelegramBotApiModerationGateway,private readonly sender:TelegramAdminRoomNoticeSender,private readonly clock:()=>number,private readonly safety:()=>Promise<boolean>){}
  async drain(limit=5):Promise<number>{
@@ -137,9 +149,14 @@ export class AdminRoomNoticeDispatcher{
    if(!await safe())break;const job=await this.store.transaction(s=>{const now=this.clock();if(!clockValid(now))return null;const n=notices(s).find(x=>!s.audit.some(a=>a.updateKey===x.key+':started'||a.updateKey===x.key+':cancelled'||a.updateKey===x.key+':outcome'));if(!n)return null;const ok=eligible(s,this.policy,n,now);s.audit.push({updateKey:n.key+(ok?':started':':cancelled'),decision:ok?'ALLOW':'NOOP',reason:ok?'ADMIN_ROOM_NOTICE_STARTED':'ADMIN_ROOM_NOTICE_CANCELLED',policyVersion:n.version,at:now});return ok?n:'CANCELLED' as const;});if(!job)break;if(job==='CANCELLED')continue;
    const controlState=await this.store.snapshot(),control=job.kind==='REPORT'?adminRoomModeWitness(controlState,this.policy,this.policy.ownerId,job.group,job.room,'CONTROL',this.clock()):null;
    const current=async()=>{const s=await this.store.snapshot(),now=this.clock();return clockValid(now)&&eligible(s,this.policy,job,now)&&intact(s,job,now)&&(!control||adminRoomModeWitness(s,this.policy,this.policy.ownerId,job.group,job.room,'CONTROL',now)===control);};
-   let result:SendResult='NOT_SENT';if(TelegramBotApiModerationGateway.usesOfficialRoomPrivacyRead(this.gateway)&&await safe()&&await current()&&TelegramBotApiModerationGateway.usesOfficialRoomPrivacyRead(this.gateway)){
-    let privacy:'NO_PUBLIC_USERNAME'|'PUBLIC_USERNAME'|'NOT_GROUP'|'UNKNOWN'='UNKNOWN';try{privacy=await this.gateway.inspectRoomPrivacy(job.room);}catch{/* never infer privacy */}
-    if(privacy==='NO_PUBLIC_USERNAME'&&TelegramBotApiModerationGateway.usesOfficialRoomPrivacyRead(this.gateway)&&await safe()&&await current())result=await this.sender.send(job.group,job.room,job.kind,async()=>await safe()&&await current()&&TelegramBotApiModerationGateway.usesOfficialRoomPrivacyRead(this.gateway)&&await safe()&&await current()&&TelegramBotApiModerationGateway.usesOfficialRoomPrivacyRead(this.gateway),control?job.source:undefined);
+   let result:SendResult='NOT_SENT';
+   if(await safe()&&await current()&&
+    await adminRoomPrivateAtSend(this.gateway,job.room)&&
+    await safe()&&await current()){
+    result=await this.sender.send(job.group,job.room,job.kind,
+     async()=>await safe()&&await current()&&
+      await adminRoomPrivateAtSend(this.gateway,job.room)&&
+      await safe()&&await current(),control?job.source:undefined);
    }
    await this.store.transaction(s=>{const now=this.clock();if(s.audit.some(a=>a.updateKey===job.key+':outcome'))return;const consistent=clockValid(now)&&intact(s,job,now)&&eligible(s,this.policy,job,now);s.audit.push({updateKey:job.key+':outcome',decision:'NOOP',reason:'ADMIN_ROOM_NOTICE_'+(consistent?result:'UNKNOWN_OUTCOME'),policyVersion:job.version,at:clockValid(now)?now:job.at});});if(result!=='NOT_SENT')sent++;
   }return sent;
@@ -154,9 +171,14 @@ export class AdminRoomDailyDispatcher{
    if(!await safe())break;const claim=await this.store.transaction(s=>{const now=this.clock(),target=adminRoomDailyTargets(s,this.policy,now).find(t=>{const prefix='admin-room:daily-send:'+t.id+':'+t.sequence+':';return !s.audit.some(a=>{if(!a.updateKey.startsWith(prefix))return false;const part=a.updateKey.slice(prefix.length);return /^[1-9][0-9]{0,8}$/u.test(part)&&Number(part)>=t.slot;});});if(!target)return null;const key='admin-room:daily-send:'+target.id+':'+target.sequence+':'+target.slot;s.audit.push({updateKey:key,decision:'ALLOW',reason:'ADMIN_ROOM_DAILY_STARTED:'+target.setting,policyVersion:target.version,at:now});return {key,target,at:now};});if(!claim)break;
    const intactDaily=(s:BotState,now:number)=>{const rows=s.audit.filter(a=>a.updateKey===claim.key),a=rows[0],targets=adminRoomDailyTargets(s,this.policy,now).filter(t=>t.id===claim.target.id);return clockValid(now)&&now>=claim.at&&now-claim.at<WINDOW&&rows.length===1&&!!a&&a.decision==='ALLOW'&&a.reason==='ADMIN_ROOM_DAILY_STARTED:'+claim.target.setting&&a.policyVersion===claim.target.version&&a.at===claim.at&&targets.length===1&&JSON.stringify(targets[0])===JSON.stringify(claim.target)&&!s.audit.some(x=>x.updateKey===claim.key+':outcome');};
    const current=async()=>intactDaily(await this.store.snapshot(),this.clock());
-   let result:SendResult='NOT_SENT';if(TelegramBotApiModerationGateway.usesOfficialRoomPrivacyRead(this.gateway)&&await safe()&&await current()&&TelegramBotApiModerationGateway.usesOfficialRoomPrivacyRead(this.gateway)){
-    let privacy:'NO_PUBLIC_USERNAME'|'PUBLIC_USERNAME'|'NOT_GROUP'|'UNKNOWN'='UNKNOWN';try{privacy=await this.gateway.inspectRoomPrivacy(claim.target.room);}catch{/* no privacy inference */}
-    if(privacy==='NO_PUBLIC_USERNAME'&&await safe()&&await current()&&TelegramBotApiModerationGateway.usesOfficialRoomPrivacyRead(this.gateway))result=await this.sender.sendDaily(claim.target,async()=>await safe()&&await current()&&await safe()&&await current()&&TelegramBotApiModerationGateway.usesOfficialRoomPrivacyRead(this.gateway));
+   let result:SendResult='NOT_SENT';
+   if(await safe()&&await current()&&
+    await adminRoomPrivateAtSend(this.gateway,claim.target.room)&&
+    await safe()&&await current()){
+    result=await this.sender.sendDaily(claim.target,
+     async()=>await safe()&&await current()&&
+      await adminRoomPrivateAtSend(this.gateway,claim.target.room)&&
+      await safe()&&await current());
    }
    await this.store.transaction(s=>{if(s.audit.some(a=>a.updateKey===claim.key+':outcome'))return;const now=this.clock(),valid=intactDaily(s,now);s.audit.push({updateKey:claim.key+':outcome',decision:'NOOP',reason:'ADMIN_ROOM_DAILY_'+(valid?result:'UNKNOWN_OUTCOME'),policyVersion:claim.target.version,at:clockValid(now)?now:claim.at});});if(result!=='NOT_SENT')sent++;
   }return sent;
