@@ -8,7 +8,7 @@ const ID='-[1-9][0-9]{0,15}',PAGE='(?:0|[1-9][0-9]?)';
 const UUID='[a-f0-9]{8}-(?:[a-f0-9]{4}-){3}[a-f0-9]{12}';
 const ROUTE=new RegExp('^gd:1:(?:[23]:(?:h|p:'+PAGE+'|g:'+ID+
  ')|2:[cxay]:[a-f0-9]{24}|2:z:[a-f0-9]{24}|2:[ts]:'+ID+
- '|3:[rf]:'+ID+':'+PAGE+'|3:d:'+ID+':'+UUID+')$','u');
+ '|2:[rk]:[a-f0-9]{24}|3:[rf]:'+ID+':'+PAGE+'|3:d:'+ID+':'+UUID+')$','u');
 export const validPhase4GuidanceOwnerRoute=(v:unknown):v is string=>
  typeof v==='string'&&Buffer.byteLength(v,'utf8')<=64&&ROUTE.test(v);
 export type GuidanceOwnerCommand=
@@ -200,6 +200,7 @@ export async function phase4GuidanceOwnerScreen(service:Phase4GuidanceService,
     CONFIRMED:'أكد Telegram تسليم المنشور',
     FAILED_CONFIRMED:'فشل مؤكد؛ لا إعادة إرسال تلقائية',
     UNKNOWN_OUTCOME:'النتيجة غير مؤكدة؛ راجع المجموعة قبل أي نشر جديد',
+    REVIEWED_UNKNOWN:'راجع المالك النتيجة غير المؤكدة؛ لا دليل على نجاح أو فشل النشر',
     SKIPPED:'أُلغي/تُرك دون إرسال لتغير الصلاحية أو الإعدادات'};
    return ui('<b>🕘 حالة المنشور التمهيدي — 09:02</b>\n'+
     'المجموعة: <code>'+chatId+'</code>\n'+
@@ -209,7 +210,26 @@ export async function phase4GuidanceOwnerScreen(service:Phase4GuidanceService,
      'لم يطلب المالك نشر دليل لهذه المجموعة بعد.')+
     '\nلا تُحسب حالة الطابور نشرًا ناجحًا.',
     [...(job?.status==='QUEUED'?[[btn('⛔ إلغاء النشر قبل الإرسال','gd:1:2:z:'+job.id)]]:[]),
+     ...(job&&['SENDING','UNKNOWN_OUTCOME'].includes(job.status)&&
+       Date.now()>=job.approvedAt+600000?
+       [[btn('⚠️ مراجعة نتيجة الإرسال غير المؤكدة','gd:1:2:r:'+job.id)]]:[]),
      [btn('↩️ دليل المجموعة',group('2',chatId))]]);
+  }
+  const unknownReview=/^gd:1:2:r:([a-f0-9]{24})$/u.exec(input);
+  if(unknownReview){
+   return ui('<b>⚠️ تأكيد مراجعة منشور بنتيجة غير مؤكدة</b>\n\n'+
+    'تحقق بنفسك من رسائل المجموعة قبل السماح بطلب نشر جديد.\n'+
+    'قد يكون Telegram نشر الدليل بالفعل، وإلغاء حظر الطلبات لا يعني أنه لم يصل.\n'+
+    'لن نعيد إرسال المحاولة السابقة أبدًا.',
+    [[btn('✅ راجعت المجموعة وأقر بالنتيجة غير المؤكدة','gd:1:2:k:'+unknownReview[1])],
+     [btn('❌ رجوع دون تغيير',root('2'))]]);
+  }
+  const finalizeUnknown=/^gd:1:2:k:([a-f0-9]{24})$/u.exec(input);
+  if(finalizeUnknown){
+   const done=await service.reviewUnknownPublication(actor,finalizeUnknown[1]!);
+   return done?ui('سُجلت المراجعة البشرية للنتيجة غير المؤكدة.\n'+
+    'لم نعد محاولة النشر السابقة، ويمكن الآن طلب منشور جديد بعد معاينة وموافقة مستقلة.',
+    [[btn('↩️ اختيار المجموعة',root('2'))]]):null;
   }
   const cancelQueued=/^gd:1:2:z:([a-f0-9]{24})$/u.exec(input);
   if(cancelQueued){

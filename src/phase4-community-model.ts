@@ -157,7 +157,7 @@ export function validCommunityProfileTitle(value:unknown):value is string{
   !/[\u0000-\u001f\u007f\u202a-\u202e\u2066-\u2069]/u.test(value);
 }
 export type CommunityGuidePostStatus='QUEUED'|'SENDING'|'CONFIRMED'|
- 'FAILED_CONFIRMED'|'UNKNOWN_OUTCOME'|'SKIPPED';
+ 'FAILED_CONFIRMED'|'UNKNOWN_OUTCOME'|'REVIEWED_UNKNOWN'|'SKIPPED';
 /** Owner review never publishes immediately. A digest binds the visible guide,
  * its approved sources and the group settings, without storing student data. */
 export interface CommunityGuidePostDraft{
@@ -381,7 +381,7 @@ export function validCommunityState(value:unknown):value is CommunityAutomationS
  }
  const guideJobs=new Set<string>(),activeGroups=new Set<string>();
  const statuses=new Set<CommunityGuidePostStatus>(['QUEUED','SENDING',
-  'CONFIRMED','FAILED_CONFIRMED','UNKNOWN_OUTCOME','SKIPPED']);
+  'CONFIRMED','FAILED_CONFIRMED','UNKNOWN_OUTCOME','REVIEWED_UNKNOWN','SKIPPED']);
  for(const row of v.guidePostJobs??[]){
   if(!row||typeof row!=='object'||Array.isArray(row)||
     Object.keys(row).some(k=>!['id','actorId','chatId','chatVersion','configVersion',
@@ -398,7 +398,7 @@ export function validCommunityState(value:unknown):value is CommunityAutomationS
     (row.status==='QUEUED'&&(row.attemptId!==undefined||row.messageId!==undefined))||
     (row.status==='SENDING'&&!row.attemptId)||
     (row.status==='CONFIRMED'&&(!row.attemptId||row.messageId===undefined))||
-    (row.status==='UNKNOWN_OUTCOME'&&!row.attemptId)||
+    (['UNKNOWN_OUTCOME','REVIEWED_UNKNOWN'].includes(row.status)&&!row.attemptId)||
     (row.status!=='CONFIRMED'&&row.messageId!==undefined))return false;
   guideJobs.add(row.id);
   if(['QUEUED','SENDING','UNKNOWN_OUTCOME'].includes(row.status)){

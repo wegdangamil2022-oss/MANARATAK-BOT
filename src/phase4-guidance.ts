@@ -308,6 +308,27 @@ export class Phase4GuidanceService{
     b.approvedAt-a.approvedAt||b.id.localeCompare(a.id));
   return group.length?structuredClone(group[0]!):null;
  }
+ /** An unknown send is neither certified successful nor certified absent.
+  * After an explicit owner review, unlock NEW approvals without ever replaying
+  * the old attempt. SENDING is treated as unknown only after a 10-min fence. */
+ async reviewUnknownPublication(actor:string,id:string):Promise<boolean>{
+  if(!this.policy.isOwner(actor)||!guideId(id))return false;
+  return this.store.transaction(s=>{
+   const now=Date.now();
+   if(!validClock(now))return false;
+   const jobs=s.phase4Community?.guidePostJobs?.filter(j=>j.id===id)??[];
+   if(jobs.length!==1||!['SENDING','UNKNOWN_OUTCOME'].includes(jobs[0]!.status))
+    return false;
+   const job=jobs[0]!;
+   if(job.actorId!==actor||now<job.approvedAt+600000||
+      !this.policy.has(s,actor,'chat.manage',job.chatId))return false;
+   job.status='REVIEWED_UNKNOWN';
+   s.audit.push({updateKey:'p4-guide-unknown-review:'+job.id,actorId:actor,
+    decision:'ALLOW',reason:'GUIDE_PUBLICATION_OUTCOME_REVIEWED_UNCERTAIN',
+    policyVersion:job.configVersion,at:now});
+   return true;
+  });
+ }
  async cancelQueuedPublication(actor:string,id:string):Promise<boolean>{
   if(!this.policy.isOwner(actor)||!guideId(id))return false;
   return this.store.transaction(s=>{
