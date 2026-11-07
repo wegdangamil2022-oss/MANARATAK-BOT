@@ -4,7 +4,8 @@ import type {Policy} from './policy.js';
 import type {OwnerInlineScreen} from './telegram-inline-owner.js';
 import {forumTopicGroupAccess,localForumTopics,
  forumTopicRegistrationProof,registerLocalForumTopic,validForumTopicTitle,
- forumTopicNote,forumTopicNoteProof,saveLocalForumTopicNote,validForumTopicNote}
+ forumTopicNote,forumTopicNoteProof,saveLocalForumTopicNote,validForumTopicNote,
+ localForumTopicNoteHistory}
  from './group-forum-topics.js';
 
 /** 01-05: local-only topic registration with private owner consent.
@@ -18,6 +19,7 @@ const chat='(-[1-9][0-9]{0,15})',thread='([1-9][0-9]{0,9})',
 const HOME=new RegExp('^ft:1:h:'+page+'$','u');
 const GROUP=new RegExp('^ft:1:g:'+chat+':'+page+'$','u');
 const DETAIL=new RegExp('^ft:1:d:'+chat+':'+thread+'$','u');
+const HISTORY=new RegExp('^ft:1:v:'+chat+':'+thread+':'+page+'$','u');
 const CONFIRM=new RegExp('^ft:1:c:'+token+'$','u');
 const CANCEL=new RegExp('^ft:1:x:'+token+'$','u');
 const NOTE_CONFIRM=new RegExp('^ft:1:n:'+token+'$','u');
@@ -73,6 +75,7 @@ function parseNote(value:unknown):PendingNote|null{
 export function validOwnerForumTopicRoute(value:unknown):boolean{
  return typeof value==='string'&&Buffer.byteLength(value,'utf8')<=64&&
   (HOME.test(value)||GROUP.test(value)||DETAIL.test(value)||
+   HISTORY.test(value)||
    CONFIRM.test(value)||CANCEL.test(value)||
    NOTE_CONFIRM.test(value)||NOTE_CANCEL.test(value));
 }
@@ -148,8 +151,30 @@ export class OwnerForumTopicEditor{
    (note?'\nمراجعة الملاحظة المحلية: '+note.revision:'')+
    '\nلإضافة ملاحظة: <code>/topicnote '+g+' '+t+' النص_التحريري</code>'+
    '\nلا يسمح هذا السجل بإرسال رسائل أو فرض سياسات مستقلة؛ يلزم التأكد من نوع المجموعة وصلاحية الموضوع الحية.',
-   [[btn('↩️ مواضيع المجموعة','ft:1:g:'+g+':0)],
+   [[btn('🕘 سجل مراجعات الملاحظة','ft:1:v:'+g+':'+t+':0')],
+    [btn('↩️ مواضيع المجموعة','ft:1:g:'+g+':0)],
     [btn('🏠 لوحة المالك','mi:1:h')]]);
+ }
+ private history(s:BotState,actor:string,now:number,g:string,t:number,p:number):
+ OwnerInlineScreen|null{
+  const history=localForumTopicNoteHistory(s,this.policy,actor,g,t,now);
+  if(!history)return null;
+  const pages=Math.max(1,Math.ceil(history.length/SIZE));
+  if(p>=pages)return null;
+  const items=history.slice(p*SIZE,(p+1)*SIZE).map(e=>
+   '▫️ مراجعة '+e.revision+' · '+
+   new Date(e.at).toISOString().slice(0,16).replace('T',' ')+' UTC');
+  const rows:{text:string;callback_data:string}[][]=[];
+  const nav:{text:string;callback_data:string}[]=[];
+  if(p>0)nav.push(btn('⬅️ السابق','ft:1:v:'+g+':'+t+':'+(p-1)));
+  if(p+1<pages)nav.push(btn('➡️ التالي','ft:1:v:'+g+':'+t+':'+(p+1)));
+  if(nav.length)rows.push(nav);
+  rows.push([btn('↩️ تفاصيل الموضوع','ft:1:d:'+g+':'+t)]);
+  return ui('<b>🕘 سجل مراجعات ملاحظات الموضوع</b>\n'+
+   'المجموعة: <code>'+g+'</code> · الموضوع: <code>'+t+'</code>\n'+
+   'النسخ المحلية: '+history.length+' · صفحة '+(p+1)+'/'+pages+'\n'+
+   (items.length?items.join('\n'):'لا توجد مراجعات للملاحظات حتى الآن.')+
+   '\nالسجل للمالك فقط. لا يعتبر إثباتًا بأن الموضوع مفتوح على Telegram ولا يرسل محتوى إلى الطلاب.',rows);
  }
  /** Original private message only; transport checks forwards and edits. */
  async prepare(actor:string,g:string,t:number,title:string):Promise<OwnerInlineScreen|null>{
@@ -270,6 +295,8 @@ export class OwnerForumTopicEditor{
   const g=GROUP.exec(data);
   if(g)return this.group(s,actor,now,g[1]!,Number(g[2]));
   const d=DETAIL.exec(data);
-  return d?this.detail(s,actor,now,d[1]!,Number(d[2])):null;
+  if(d)return this.detail(s,actor,now,d[1]!,Number(d[2]));
+  const hst=HISTORY.exec(data);
+  return hst?this.history(s,actor,now,hst[1]!,Number(hst[2]),Number(hst[3])):null;
  }
 }
