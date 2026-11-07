@@ -325,15 +325,15 @@ export class OwnerForumTopicEditor{
   };
   const safe=async()=>{try{return await this.safety()===true;}catch{return false;}};
   const trusted=()=>this.gateway!==undefined&&
-   TelegramBotApiModerationGateway.usesOfficialGroupProfileRead(this.gateway)&&
+   TelegramBotApiModerationGateway.usesOfficialForumStatusRead(this.gateway)&&
    TelegramBotApiModerationGateway.usesOfficialRightsRead(this.gateway);
   if(!trusted()||!await safe()||!await intact())return null;
-  let kind:'GROUP'|'SUPERGROUP'|'UNKNOWN'='UNKNOWN',
+  let forum:'FORUM'|'NOT_FORUM'|'UNKNOWN'='UNKNOWN',
       right:'GRANTED'|'DENIED'|'UNKNOWN'='UNKNOWN';
-  try{const groupProfile=await this.gateway.inspectGroupProfile(g);
-   kind=groupProfile?.kind??'UNKNOWN';}catch{/* unverified */}
+  try{forum=await this.gateway.inspectForumStatus(g);}
+  catch{/* unverified */}
   if(!trusted()||!await safe()||!await intact())return null;
-  if(kind==='SUPERGROUP'){
+  if(forum==='FORUM'){
    try{const grant=await this.gateway.inspectBotAdminRights(g);
     right=grant.manageTopics;}catch{/* unverified */}
   }
@@ -341,8 +341,9 @@ export class OwnerForumTopicEditor{
   return ui('<b>🔎 فحص صلاحيات مواضيع Telegram</b>\n'+
    'المجموعة: <code>'+g+'</code>\n'+
    'رقم الموضوع المحلي: <code>'+t+'</code>\n'+
-   'نوع المجموعة (getChat): '+(kind==='SUPERGROUP'?'مجموعة فائقة':
-    kind==='GROUP'?'مجموعة عادية':'غير مؤكد')+'\n'+
+   'حالة Forum الرسمية (getChat): '+
+   (forum==='FORUM'?'مجموعة Forum مفعلة':
+    forum==='NOT_FORUM'?'ليست مجموعة Forum':'غير مؤكدة')+'\n'+
    'حق البوت في إدارة المواضيع (getChatMember): '+
    (right==='GRANTED'?'متاح لحظة الفحص':
     right==='DENIED'?'غير متاح':'غير مؤكد')+'\n'+
