@@ -749,6 +749,18 @@ export class TelegramUpdateApplication {
       :{status:'DENIED',reason:'OWNER_NETWORK_GROUP_COPY_UNAVAILABLE'};
     }
     if(event.kind==='private'&&event.actorId===event.chatId&&
+     event.text.startsWith('/networkroomalerts')&&!event.callbackData){
+     if(!this.opts.policy.isOwner(event.actorId)||event.edited||event.forwarded)
+      return {status:'DENIED',reason:'NETWORK_ROOM_RELAY_OWNER_PRIVATE_ONLY'};
+     const match=/^\/networkroomalerts ([a-f0-9]{12})$/u.exec(event.text);
+     if(!match)return {status:'DENIED',reason:'NETWORK_ROOM_RELAY_INVALID_COMMAND'};
+     const view=await new OwnerNetworkEditor(this.opts.store,this.opts.policy,this.clock)
+      .handle(event.actorId,'nw:1:rh:'+match[1]+':0');
+     return view?{status:'APPLIED',reason:'NETWORK_ROOM_RELAY_MANAGEMENT',
+      plan:this.plan(event.actorId,view.text,undefined,view.keyboard)}
+      :{status:'DENIED',reason:'NETWORK_ROOM_RELAY_UNAVAILABLE'};
+    }
+    if(event.kind==='private'&&event.actorId===event.chatId&&
      event.text.startsWith('/networkrooms')&&!event.callbackData){
      if(!this.opts.policy.isOwner(event.actorId)||event.edited||event.forwarded)
       return {status:'DENIED',reason:'OWNER_NETWORK_ROOMS_PRIVATE_ORIGINAL_ONLY'};
