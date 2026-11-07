@@ -21,6 +21,8 @@ import {TelegramForumTopicControl,validForumTopicControlRoute}
 import {forumTopicActionHistory} from './group-forum-topic-control.js';
 import {TelegramForumTopicBroadcast,validForumBroadcastRoute}
  from './telegram-forum-topic-broadcast.js';
+import {TelegramOwnerForumMonitor,validOwnerForumMonitorRoute}
+ from './telegram-owner-forum-monitor.js';
 
 /** 01-05: local-only topic registration with private owner consent.
  * No Bot API send, createForumTopic, closeForumTopic or permission mutation.
@@ -145,7 +147,8 @@ export function validOwnerForumTopicRoute(value:unknown):boolean{
    POLICY_CANCEL.test(value)||POLICY_HISTORY.test(value)||
    PUB_CHOICE.test(value)||PUB_CONFIRM.test(value)||
    PUB_CANCEL.test(value)||PUB_HISTORY.test(value)||
-   validForumTopicControlRoute(value)||validForumBroadcastRoute(value));
+   validForumTopicControlRoute(value)||validForumBroadcastRoute(value)||
+   validOwnerForumMonitorRoute(value));
 }
 export class OwnerForumTopicEditor{
  constructor(private readonly store:BotStore,private readonly policy:Policy,
@@ -252,6 +255,7 @@ export class OwnerForumTopicEditor{
       'ft:1:q:'+g+':'+t+':'+(publication?.published?'0':'1'))]]:[]),
     ...(note?[[btn('🕘 سجل اعتماد نشر الملاحظات',
      'ft:1:b:'+g+':'+t+':0')]]:[]),
+    [btn('🛡 مراقبة محتوى الموضوع','ft:1:t:'+g+':'+t)],
     [btn('📚 معاينة مصادر النشر للموضوع','ft:1:m:'+g+':'+t+':0')],
     [btn('🔎 فحص صلاحيات Telegram الحية','ft:1:f:'+g+':'+t)],
     [btn(education.mode==='PAUSED'?'▶️ استئناف تصفح الموضوع':'⏸ إيقاف التصفح في الموضوع',
@@ -627,6 +631,9 @@ export class OwnerForumTopicEditor{
   if(validForumBroadcastRoute(data))
    return new TelegramForumTopicBroadcast(this.store,this.policy,
     this.gateway,this.safety,this.clock).handle(actor,data);
+  if(validOwnerForumMonitorRoute(data))
+   return new TelegramOwnerForumMonitor(this.store,this.policy,this.clock)
+    .handle(actor,data);
   const pub=PUB_CONFIRM.exec(data);
   if(pub)return this.decidePublication(actor,pub[1]!,true);
   const withdraw=PUB_CANCEL.exec(data);
