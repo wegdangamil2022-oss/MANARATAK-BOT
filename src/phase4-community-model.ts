@@ -830,11 +830,24 @@ export function renderCommunityTemplate(template:string,input:CommunityInput,now
  if(Buffer.byteLength(html,'utf8')>4096)throw Error('COMMUNITY_MESSAGE_TOO_LONG');
  return html;
 }
+/** Deterministic priority for intersecting keywords: exact Forum topic first,
+ * then EXACT/WORD/CONTAINS, then longest normalized trigger. This prevents an
+ * early broad global CONTAINS rule from swallowing later specific rules.
+ * Never bypasses the group-wide or topic-wide quotas.
+ */
 export function selectCommunityRule(config:CommunityConfig,text:string,topicId?:number):CommunityReplyRule|undefined{
  if(!config.repliesEnabled||!text.trim()||
    /^@\w+/u.test(text.trimStart()))return;
  const command=text.trimStart().startsWith('/');
- return config.rules.find(rule=>rule.enabled&&
+ const rank=(value:ReplyMatch):number=>value==='EXACT'?0:
+  value==='WORD'?1:value==='COMMAND'?0:2;
+ const candidates=config.rules.filter(rule=>rule.enabled&&
   (command?rule.match==='COMMAND':rule.match!=='COMMAND')&&
   (rule.topicId===undefined||rule.topicId===topicId)&&matchCommunityRule(rule,text));
+ candidates.sort((a,b)=>
+  Number(b.topicId!==undefined)-Number(a.topicId!==undefined)||
+  rank(a.match)-rank(b.match)||
+  normalizeCommunityMatch(b.trigger).length-normalizeCommunityMatch(a.trigger).length||
+  a.id.localeCompare(b.id));
+ return candidates[0];
 }
