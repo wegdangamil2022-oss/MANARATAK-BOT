@@ -6,6 +6,8 @@ export type WhisperKind='FIRST_N'|'DIRECT';
 export interface WhisperMessage{
  id:string;chatId:string;chatVersion:number;creatorId:string;
  kind:WhisperKind;seats:number;recipientId?:string;text?:string;
+ /** Private member submission: owner explicitly reviews before publication. */
+ submittedByMember?:true;approvedBy?:string;
  status:'DRAFT'|'OPEN'|'CLOSED';revision:number;
  createdAt:number;expiresAt:number;approvedAt?:number;closedAt?:number;
 }
@@ -36,10 +38,21 @@ export interface WhisperAnnouncement{
   'FAILED_CONFIRMED'|'UNKNOWN_OUTCOME'|'SKIPPED';
  attemptId?:string;telegramMessageId?:number;
 }
+export interface WhisperGroupSettings{
+ chatId:string;chatVersion:number;version:number;
+ memberDraftsEnabled:boolean;updatedAt:number;
+}
+export interface WhisperSettingsDraft{
+ id:string;actorId:string;chatId:string;chatVersion:number;
+ settingsVersion:number;memberDraftsEnabled:boolean;
+ createdAt:number;expiresAt:number;
+}
 export interface WhisperState{
  messages:WhisperMessage[];reservations:WhisperReservation[];consents:WhisperConsent[];
  blocks?:WhisperBlock[];reports?:WhisperReport[];
  announcements?:WhisperAnnouncement[];
+ settings?:WhisperGroupSettings[];
+ settingsDrafts?:WhisperSettingsDraft[];
 }
 export const emptyWhisperState=():WhisperState=>({
  messages:[],reservations:[],consents:[]
@@ -65,7 +78,7 @@ export function validWhisperMessage(raw:unknown):raw is WhisperMessage{
  if(!record(raw)||!exact(raw,
   ['id','chatId','chatVersion','creatorId','kind','seats','status',
    'revision','createdAt','expiresAt'],
-  ['recipientId','text','approvedAt','closedAt']))return false;
+  ['recipientId','text','approvedAt','closedAt','submittedByMember','approvedBy']))return false;
  const x=raw;
  if(!validId(x.id)||!validChat(x.chatId)||!validRevision(x.chatVersion)||
   !validUser(x.creatorId)||!['FIRST_N','DIRECT'].includes(String(x.kind))||
@@ -74,34 +87,43 @@ export function validWhisperMessage(raw:unknown):raw is WhisperMessage{
   Number(x.expiresAt)<=Number(x.createdAt)||
   Number(x.expiresAt)>Number(x.createdAt)+3_600_000||
   !['DRAFT','OPEN','CLOSED'].includes(String(x.status)))return false;
+ if(x.submittedByMember!==undefined&&x.submittedByMember!==true)return false;
+ if(x.approvedBy!==undefined&&!validUser(x.approvedBy))return false;
+ if(x.submittedByMember===true&&x.approvedBy===x.creatorId)return false;
  if(x.kind==='DIRECT'){
   if(x.seats!==1||!validUser(x.recipientId)||
     x.recipientId===x.creatorId)return false;
  }else if(x.recipientId!==undefined)return false;
  if(x.status==='DRAFT')
   return x.revision===1&&validText(x.text)&&
-   x.approvedAt===undefined&&x.closedAt===undefined;
+   x.approvedAt===undefined&&x.closedAt===undefined&&
+   x.approvedBy===undefined;
  if(x.status==='OPEN')
   return x.revision===2&&validText(x.text)&&validTime(x.approvedAt)&&
+   (x.submittedByMember!==true||validUser(x.approvedBy))&&
    Number(x.approvedAt)>=Number(x.createdAt)&&
    Number(x.approvedAt)<Number(x.expiresAt)&&x.closedAt===undefined;
  if(x.text!==undefined||!validTime(x.closedAt)||
   Number(x.closedAt)<Number(x.createdAt))return false;
- if(x.approvedAt===undefined)return x.revision===2;
+ if(x.approvedAt===undefined)return x.revision===2&&x.approvedBy===undefined;
+ if(x.submittedByMember===true&&!validUser(x.approvedBy))return false;
  return x.revision===3&&validTime(x.approvedAt)&&
   Number(x.approvedAt)>=Number(x.createdAt)&&
   Number(x.approvedAt)<Number(x.expiresAt)&&
   Number(x.closedAt)>=Number(x.approvedAt);
 }
 export function validWhisperState(raw:unknown):raw is WhisperState{
- if(!record(raw)||!exact(raw,['messages','reservations','consents'],['blocks','reports','announcements'])||
+ if(!record(raw)||!exact(raw,['messages','reservations','consents'],['blocks','reports','announcements','settings','settingsDrafts'])||
   !Array.isArray(raw.messages)||raw.messages.length>200||
   !Array.isArray(raw.reservations)||raw.reservations.length>2000||
   !Array.isArray(raw.consents)||raw.consents.length>2000||
   (raw.blocks!==undefined&&(!Array.isArray(raw.blocks)||raw.blocks.length>2000))||
   (raw.reports!==undefined&&(!Array.isArray(raw.reports)||raw.reports.length>500))||
   (raw.announcements!==undefined&&(!Array.isArray(raw.announcements)||
-    raw.announcements.length>200)))return false;
+    raw.announcements.length>200))||
+  (raw.settings!==undefined&&(!Array.isArray(raw.settings)||raw.settings.length>200))||
+  (raw.settingsDrafts!==undefined&&(!Array.isArray(raw.settingsDrafts)||
+    raw.settingsDrafts.length>50)))return false;
  if(raw.messages.some(m=>!validWhisperMessage(m)))return false;
  const messages=raw.messages as WhisperMessage[];
  if(new Set(messages.map(m=>m.id)).size!==messages.length)return false;
@@ -135,6 +157,27 @@ export function validWhisperState(raw:unknown):raw is WhisperState{
    !validTime(x.updatedAt)))return false;
  if(new Set((blocks as WhisperBlock[]).map(x=>
    x.chatId+':'+x.memberId+':'+x.senderId)).size!==blocks.length)return false;
+ const settings=raw.settings??[];
+ if(settings.some(x=>!record(x)||!exact(x,
+  ['chatId','chatVersion','version','memberDraftsEnabled','updatedAt'])||
+  !validChat(x.chatId)||!validRevision(x.chatVersion)||
+  !validRevision(x.version)||typeof x.memberDraftsEnabled!=='boolean'||
+  !validTime(x.updatedAt))||
+  new Set((settings as WhisperGroupSettings[]).map(x=>x.chatId)).size!==settings.length)
+  return false;
+ const settingsDrafts=raw.settingsDrafts??[];
+ if(settingsDrafts.some(x=>!record(x)||!exact(x,
+  ['id','actorId','chatId','chatVersion','settingsVersion','memberDraftsEnabled',
+   'createdAt','expiresAt'])||
+  !validId(x.id)||!validUser(x.actorId)||!validChat(x.chatId)||
+  !validRevision(x.chatVersion)||!Number.isSafeInteger(x.settingsVersion)||
+  Number(x.settingsVersion)<0||
+  typeof x.memberDraftsEnabled!=='boolean'||
+  !validTime(x.createdAt)||!validTime(x.expiresAt)||
+  Number(x.expiresAt)<=Number(x.createdAt)||
+  Number(x.expiresAt)>Number(x.createdAt)+120000)||
+  new Set((settingsDrafts as WhisperSettingsDraft[]).map(x=>x.id)).size!==settingsDrafts.length)
+  return false;
  const announced=raw.announcements??[];
  if(announced.some(a=>!record(a)||!exact(a,
    ['id','messageId','chatId','chatVersion','ownerId','createdAt','status'],
@@ -159,6 +202,7 @@ export function validWhisperState(raw:unknown):raw is WhisperState{
   if(matches.length!==1||matches[0]!.chatId!==item.chatId||
     matches[0]!.creatorId!==item.ownerId||
     matches[0]!.chatVersion!==item.chatVersion||
+    (matches[0]!.approvedBy??matches[0]!.creatorId)!==item.ownerId||
     matches[0]!.approvedAt===undefined||
     item.createdAt<matches[0]!.approvedAt)
    return false;
