@@ -16,6 +16,7 @@ import {validProtectionUsername} from './protection-rules.js';
 import {TelegramAdminRoomLinks} from './telegram-admin-room-links.js';
 import {OwnerForumTopicEditor} from './telegram-owner-forum-topics.js';
 import {forumTopicEducationMode} from './group-forum-topic-policy.js';
+import {publishedForumTopicNote} from './group-forum-note-publication.js';
 import {TelegramOncall,validOncallRoute} from './telegram-oncall.js';
 import {TelegramRuleWarningPolicy} from './telegram-rule-warning-policy.js';
 import {TelegramRoomControl} from './telegram-room-control.js';
@@ -1290,6 +1291,47 @@ export class TelegramUpdateApplication {
      const snap=await this.opts.store.snapshot();
      privateGroupSource={scope,epoch:privateGroupEpochDigest(snap,scope)};
     };
+    // TOPIC-004 — explicit forum-only FAQ request. This never posts a
+    // saved editorial note on its own. A separate owner publication receipt
+    // must match the latest version before any reply is even queued.
+    if(kind==='group'&&cmd==='/topicfaq'){
+     if(event.edited||event.forwarded||event.callbackData||
+      event.topicId===undefined||text!=='/topicfaq')
+      return {status:'DENIED',reason:'TOPIC_FAQ_ORIGINAL_TOPIC_COMMAND_ONLY'};
+     const at=this.clock();
+     if(!Number.isSafeInteger(at)||at<0||at>8640000000000000-120000)
+      return {status:'DENIED',reason:'TOPIC_FAQ_CLOCK_INVALID'};
+     const old=await this.opts.store.snapshot();
+     const proof=groupMenuEpochDigest(old,chatId,event.topicId);
+     const existing=publishedForumTopicNote(old,this.opts.policy,
+      chatId,event.topicId,at);
+     if(existing===null)return {status:'DENIED',reason:'TOPIC_FAQ_SCOPE_OR_EVIDENCE_INVALID'};
+     const requireSub=subscriptionRequirementMode(old,chatId);
+     if(requireSub==='INVALID')return {status:'DENIED',reason:'SUBSCRIPTION_UNAVAILABLE'};
+     if(requireSub==='ACTIVE'){
+      if(!this.opts.subscription)return {status:'DENIED',reason:'SUBSCRIPTION_UNAVAILABLE'};
+      const verified=await this.opts.subscription.verify(chatId,actorId);
+      if(!acceptsActiveSubscriptionEvidence(verified.status,this.opts.policy.isOwner(actorId)))
+       return {status:'DENIED',reason:verified.status==='NOT_MEMBER'?'SUBSCRIPTION_REQUIRED':'SUBSCRIPTION_UNAVAILABLE'};
+     }
+     const current=await this.opts.store.snapshot(),now=this.clock();
+     if(!Number.isSafeInteger(now)||now<at||now>=at+120000||
+      !this.opts.policy.canUseChat(current,chatId,'navigation')||
+      groupMenuEpochDigest(current,chatId,event.topicId)!==proof||
+      subscriptionRequirementMode(current,chatId)!==requireSub)
+      return {status:'DENIED',reason:'TOPIC_FAQ_STALE_OR_UNAVAILABLE'};
+     const note=publishedForumTopicNote(current,this.opts.policy,
+      chatId,event.topicId,now);
+     if(note===null)return {status:'DENIED',reason:'TOPIC_FAQ_SCOPE_OR_EVIDENCE_INVALID'};
+     const body=note?'<b>📚 ملاحظة تعليمية معتمدة لهذا الموضوع</b>\n'+
+       escapeTelegramHtml(note.text)+'\n'+
+       '<i>مراجعة الملاحظة المحلية: '+note.revision+' — ليست إجابة مولدة تلقائيًا.</i>':
+      '<b>📚 ملاحظات هذا الموضوع</b>\n'+
+       'لا توجد ملاحظة معتمدة متاحة للعرض في هذا الموضوع حاليًا.';
+     return {status:'APPLIED',reason:'TOPIC_FAQ_REVIEWED_THREAD_VIEW',
+      groupMenuAccess:{actorId,epoch:proof,expiresAt:now+120000},
+      plan:{...this.plan(chatId,body),messageThreadId:event.topicId}};
+    }
     if(kind==='group'&&event.topicId!==undefined&&(cmd===`/ask@${this.opts.botUsername}`||groupQuestion!==null))return {status:'DENIED',reason:'TOPIC_ASSISTANT_NOT_CONFIGURED'};
     if(kind==='group'&&(cmd===`/ask@${this.opts.botUsername}`||groupQuestion!==null)) {
       const snapshot=await this.opts.store.snapshot();
