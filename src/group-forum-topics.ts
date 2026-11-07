@@ -55,6 +55,23 @@ function all(s:BotState,now:number):LocalForumTopic[]|null{
  }
  return out;
 }
+/** Registered topic lookup that never implies Telegram-side rights.
+ * Public command gates need no owner dashboard capability but do require
+ * the group's current unique approval revision.
+ * null = untrustworthy registry or group, undefined = unregistered thread.
+ */
+export function registeredForumTopic(s:BotState,groupId:string,topicId:number,
+ now:number):LocalForumTopic|null|undefined{
+ if(!chat(groupId)||!thread(topicId)||!clock(now))return null;
+ const chats=s.chats.filter(c=>c.id===groupId),c=chats[0];
+ if(chats.length!==1||!c||!c.approved||!c.present||!version(c.version))
+  return null;
+ const records=all(s,now);
+ if(!records)return null;
+ return records.find(r=>r.chatId===groupId&&r.groupVersion===c.version&&
+  r.threadId===topicId);
+}
+
 export function forumTopicGroupAccess(s:BotState,p:Policy,actor:string,
  groupId:string,now:number):number|null{
  if(!clock(now)||!person(actor)||!p.isOwner(actor)||
