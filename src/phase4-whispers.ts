@@ -621,12 +621,14 @@ export class Phase4WhisperService{
   * The existing Telegram reply ledger independently rechecks this witness
   * at the irrevocable outbound-send boundary.
   */
- async open(memberId:string,id:string):Promise<
-  {status:'READY';text:string;scope:string;reservationId:string;
+ async open(memberId:string,id:string,view:'CONTENT'|'ANSWER'='CONTENT'):Promise<
+  {status:'READY';text:string;purpose:'MESSAGE'|'QUESTION'|'GIFT';
+   view:'CONTENT'|'ANSWER';scope:string;reservationId:string;
    messageRevision:number;consentRevision:number;chatVersion:number;expiresAt:number}|
   {status:WhisperReserveResult['status']|'NOT_ANNOUNCED'}>{
   const now=this.clock();
-  if(!validClock(now)||!isUser(memberId)||!/^[a-f0-9]{24}$/u.test(id))
+  if(!validClock(now)||!isUser(memberId)||!/^[a-f0-9]{24}$/u.test(id)||
+     !['CONTENT','ANSWER'].includes(view))
    return {status:'DENIED'};
   const first=await this.store.snapshot(),rows=clone(first).messages.filter(m=>m.id===id);
   if(rows.length!==1||rows[0]!.status!=='OPEN'||!rows[0]!.text)
@@ -641,6 +643,8 @@ export class Phase4WhisperService{
   if(found.length!==1||!item||item.status!=='OPEN'||!item.text||
      !validClock(current)||current<now||current>=item.expiresAt)
    return {status:'EXPIRED'};
+  if(view==='ANSWER'&&(item.purpose!=='QUESTION'||!item.answerText))
+   return {status:'DENIED'};
   const chat=approvedChat(after,this.policy,item.chatId);
   if(!chat||chat.version!==item.chatVersion)return {status:'STALE'};
   if(!(d.announcements??[]).some(a=>a.messageId===id&&a.status==='CONFIRMED'))
@@ -653,7 +657,15 @@ export class Phase4WhisperService{
   if((d.blocks??[]).some(b=>b.chatId===item.chatId&&
      b.memberId===memberId&&b.senderId===item.creatorId&&b.enabled))
    return {status:'DENIED'};
-  return {status:'READY',text:item.text,scope:item.chatId,
+  const displayed=view==='ANSWER'?item.answerText!:
+   item.purpose==='GIFT'&&item.gift?
+   item.text+'\n\n📚 رابط المورد التعليمي:\n'+item.gift.resourceUrl+
+    '\n🖋️ نسب المحتوى: '+item.gift.credit+
+    '\n📜 ترخيص صرّح به المالك: '+item.gift.license+
+    '\n⚠️ الترخيص مسؤولية ناشر المورد ولم يُتحقق منه تلقائيًا.':
+    item.text;
+  return {status:'READY',text:displayed,
+   view,purpose:item.purpose??'MESSAGE',scope:item.chatId,
    reservationId:seats[0]!.id,messageRevision:item.revision,
    consentRevision:consent[0]!.revision,chatVersion:chat.version,
    expiresAt:Math.min(item.expiresAt,current+30000)};
