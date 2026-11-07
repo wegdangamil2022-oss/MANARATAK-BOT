@@ -119,9 +119,11 @@ export class OwnerNetworkGroupCopy{
    if(!this.allowed(s,actor,now)||!network||!selected)return null;
    const token=randomBytes(18).toString('base64url');
    const ref='c_'+token;
-   if(s.callbacks.some(c=>c.ref===ref)||s.callbacks.filter(c=>c.actorId===actor&&
-     c.action.startsWith(PREFIX)&&c.used===false&&c.revoked===false&&c.expiresAt>now).length>=100)
-    return null;
+   const pending=s.callbacks.filter(c=>c.actorId===actor&&
+    c.action.startsWith(PREFIX)&&c.used===false&&c.revoked===false&&c.expiresAt>now);
+   if(s.callbacks.some(c=>c.ref===ref)||pending.length>=100)return null;
+   // Choosing another field set invalidates the former confirmation receipt.
+   for(const old of pending)old.revoked=true;
    const pending:Pending={netId,sourceId,targetId,parts,networkRevision:selected.networkRevision,
     sourceRevision:selected.sourceRevision,targetRevision:selected.targetRevision,proof:selected.proof};
    s.callbacks.push({ref,action:PREFIX+JSON.stringify(pending),
@@ -138,7 +140,8 @@ export class OwnerNetworkGroupCopy{
     'الوجهة: <code>'+targetId+'</code> · سياسة '+selected.targetRevision+'\n'+
     'اختيار النسخ: '+labels[parts]+'\n'+
     'ستتغير فقط: '+selected.fields.map(x=>x==='rules'?'قواعد الحماية':'حدود الفلود').join('، ')+'\n'+
-    'عدد قواعد المصدر: '+selected.ruleCount+'\n'+
+    'عدد قواعد المصدر: '+selected.ruleCount+'\n'+    (selected.fields.includes('rules')?'تُنقل قائمة القواعد المسموحة كاملةً بدل قواعد الوجهة الحالية؛ لا تُنقل قواعد الأعضاء أو الدفع.\n':'')+
+
     'وضع الوجهة الذي سيبقى: '+selected.targetMode+'\n'+
     'روابط متابعة ستتوقف احترازيًا: '+selected.pausedLinks+'\n'+
     'لا تُنقل القنوات والعضويات الموثوقة والاستثناءات وقوائم السماح ولا أذونات Telegram.\n'+
