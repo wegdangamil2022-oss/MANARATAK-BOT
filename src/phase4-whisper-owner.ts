@@ -2,7 +2,7 @@ import {Phase4WhisperService,type WhisperDraftInput} from './phase4-whispers.js'
 import type {OwnerInlineScreen,TelegramInlineKeyboard} from './telegram-inline-owner.js';
 
 const hex='[a-f0-9]{24}';
-const route=new RegExp('^wh:1:(?:h|l:(?:0|[1-9][0-9]?)|[vax]:'+hex+'|c:'+hex+':[12]|r:-[1-9][0-9]{0,15}|[zy]:'+hex+')$','u');
+const route=new RegExp('^wh:1:(?:h|l:(?:0|[1-9][0-9]?)|[vaxps]:'+hex+'|c:'+hex+':[12]|r:-[1-9][0-9]{0,15}|[zy]:'+hex+')$','u');
 export const validWhisperOwnerRoute=(s:unknown):s is string=>
  typeof s==='string'&&Buffer.byteLength(s,'utf8')<=64&&route.test(s);
 const escape=(s:string)=>s.replace(/&/gu,'&amp;').replace(/</gu,'&lt;')
@@ -47,6 +47,7 @@ async function detail(service:Phase4WhisperService,actor:string,id:string):
   CLOSED:'🔒 مغلقة ومحذوف محتواها'} as const;
  const type=row.kind==='FIRST_N'?'أول '+row.seats+' مستلمين مؤهلين':
   'إلى مستلم واحد مُحدد';
+ const publication=await service.announcementStatus(actor,id);
  const text='<b>💌 معاينة همسة خاصة للمالك فقط</b>\n'+
   'المجموعة: <code>'+row.chatId+'</code>\n'+
   'الوضع: '+type+'\n'+
@@ -55,9 +56,17 @@ async function detail(service:Phase4WhisperService,actor:string,id:string):
   (row.status==='DRAFT'?
    '\n<b>نص المسودة:</b>\n'+escape(row.text??'')+'\n':
    '\nتم إخفاء النص عن صفحات الحالة؛ لا يظهر في رسالة مجموعة.\n')+
-  '\n⚠️ هذه الوحدة لا تنشر همسة في Telegram، ولا تعرض محتواها للأعضاء، ولا تدعي تسليمًا.';
+  '\nحالة إعلان Telegram: '+(publication==='NOT_POSTED'?'لم يُطلب النشر':
+   publication==='QUEUED'?'بانتظار الإرسال':publication==='SENDING'?
+   'بدأ الإرسال، والنتيجة غير مؤكدة':publication==='CONFIRMED'?
+   '✅ أكد Telegram نشر الإعلان':publication==='UNKNOWN_OUTCOME'?
+   '⚠️ نتيجة نشر الإعلان غير مؤكدة؛ لا إعادة تلقائية':
+   publication==='FAILED_CONFIRMED'?'رفض Telegram النشر':'استبعد النظام الإعلان')+
+  '\n⚠️ إعلان المجموعة لا يحتوي نص الهمسة. حجز المقعد لا يثبت التسليم أو القراءة.';
  const actions:{text:string;callback_data:string}[][]=[];
  if(row.status==='DRAFT')actions.push([btn('✅ اعتماد المسودة محليًا','wh:1:a:'+id)]);
+ if(row.status==='OPEN'&&publication==='NOT_POSTED')
+  actions.push([btn('📣 معاينة نشر إعلان المجموعة','wh:1:p:'+id)]);
  if(row.status!=='CLOSED')actions.push([btn('🔒 إغلاق وحذف النص','wh:1:x:'+id)]);
  actions.push([list],[home]);
  return ui(text,actions);
@@ -135,11 +144,32 @@ export async function whisperOwnerScreen(
     '<code>/whisperfirst -1001234 3 10 نص الهمسة</code>\n'+
     '<code>/whisperdirect -1001234 200 10 نص الهمسة</code>\n'+
     'الأرقام: معرّف مجموعة · عدد المقاعد أو المستلم · مدة بالدقائق (1–60).\n'+
-    '🔐 الحفظ والمراجعة محليان فقط. لا يوجد إرسال أو منشور عام في Telegram بعد.\n'+
+    '🔐 المسودة لا تُنشر تلقائيًا. بعد الاعتماد المحلي، راجع زر إعلان المجموعة مستقلًا.\n'+
+    'رابط الإعلان لا يحمل النص، والمستلم لا يراه إلا في الخاص بعد التحقق.\n'+
     'الهمسات المخزنة: '+rows.length+' · صفحة '+(page+1)+'/'+pages+' (8 بكل صفحة).'+
     '\nبلاغات المجموعة: <code>/whisperreports GROUP_ID</code>',buttons);
   }
   if(!validWhisperOwnerRoute(input))return null;
+  const publishPreview=/^wh:1:p:([a-f0-9]{24})$/u.exec(input);
+  if(publishPreview){
+   const message=await service.ownerView(actor,publishPreview[1]!);
+   if(!message||message.status!=='OPEN'||
+      await service.announcementStatus(actor,message.id)!=='NOT_POSTED')return null;
+   return ui('<b>📣 موافقة مستقلة على إعلان الهمسة</b>\n'+
+    'المجموعة: <code>'+message.chatId+'</code>\n'+
+    'نوع الهمسة: '+(message.kind==='DIRECT'?'مستلم محدد':'أول '+message.seats)+
+    '\nموعد الانتهاء: '+new Date(message.expiresAt).toISOString()+
+    '\n\nسيُنشر ملصق بلا أي نص سري أو هوية مستلم، وزر فتح ينقل إلى خاص البوت. '+
+    'يتحقق البوت هناك من العضوية والموافقة قبل كشف المحتوى. '+
+    'نتيجة إرسال Telegram غير مضمونة؛ لا نعيد إرسال العملية إذا كانت نتيجتها مجهولة.',
+    [[btn('✅ الموافقة وطلب إعلان Telegram','wh:1:s:'+message.id)],
+     [btn('❌ العودة دون نشر','wh:1:v:'+message.id)]]);
+  }
+  const publishConfirm=/^wh:1:s:([a-f0-9]{24})$/u.exec(input);
+  if(publishConfirm){
+   await service.queueAnnouncement(actor,publishConfirm[1]!);
+   return detail(service,actor,publishConfirm[1]!);
+  }
   const view=/^wh:1:v:([a-f0-9]{24})$/u.exec(input);
   if(view)return detail(service,actor,view[1]!);
   const approve=/^wh:1:a:([a-f0-9]{24})$/u.exec(input);

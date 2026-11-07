@@ -479,7 +479,8 @@ export class Phase4WhisperService{
    throw Error('WHISPER_DENIED');
   const used=clone(s).reservations.filter(c=>c.messageId===id).length;
   return '💌 همسة '+row.kind+' · '+row.status+' · المقاعد: '+
-   Math.max(0,row.seats-used)+'/'+row.seats+' · لا يوجد نشر Telegram';
+   Math.max(0,row.seats-used)+'/'+row.seats+' · الإعلان: '+
+   ((clone(s).announcements??[]).find(x=>x.messageId===id)?.status??'NOT_POSTED');
  }
  async list(actor:string,chatId?:string):Promise<WhisperMessage[]>{
   const s=await this.store.snapshot();
