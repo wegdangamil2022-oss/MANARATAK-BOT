@@ -4,6 +4,8 @@ import type {Policy} from './policy.js';
 import {TelegramBotApiModerationGateway} from './telegram-moderation-gateway.js';
 import {TelegramAdminRoomNoticeSender} from './admin-room-notices.js';
 import {adminRoomNotificationTarget} from './admin-room-links.js';
+import {validNetworkEmergencyControls,networkEmergencyStopped}
+ from './network-emergency-stop.js';
 import {currentNetworkRoomRelays,type NetworkRoomRelayPreference}
  from './network-room-relay.js';
 import {networkAdministrativeEvents,type NetworkAdministrativeEvent}
@@ -30,7 +32,9 @@ function eligible(s:BotState,p:Policy,pref:NetworkRoomRelayPreference,
  now:number,eventId?:string,eventAt?:number):{
  event:NetworkAdministrativeEvent;room:string
 }|null{
- if(!clock(now)||!p.privateFeature(s,'owner.dashboard',p.ownerId))return null;
+ if(!clock(now)||!p.privateFeature(s,'owner.dashboard',p.ownerId)||
+  !validNetworkEmergencyControls(s.networkEmergencyControls??[])||
+  networkEmergencyStopped(s,pref.network))return null;
  const enabled=currentNetworkRoomRelays(s,p,now);
  if(!enabled||!enabled.some(x=>x.key===pref.key&&
   x.actor===pref.actor&&x.network===pref.network&&x.group===pref.group&&
@@ -80,13 +84,14 @@ export class NetworkRoomRelayDispatcher{
    if(!await this.safe())break;
    const job=await this.store.transaction(s=>{
     const now=this.clock();
-    if(!clock(now))return null;
+    if(!clock(now)||!validNetworkEmergencyControls(s.networkEmergencyControls??[]))return null;
     const prefs=currentNetworkRoomRelays(s,this.policy,now);
     if(!prefs)return null;
     const recent=s.audit.filter(a=>RECEIPT.test(a.updateKey)&&
      a.decision==='ALLOW'&&a.at<=now&&a.at>now-60_000);
     if(recent.length>=60)return null;
     for(const pref of prefs){
+     if(networkEmergencyStopped(s,pref.network))continue;
      if(recent.some(a=>a.actorId===pref.actor)){
       // One network-room notice per owner per minute (other rooms and groups
       // cannot bypass this rate fuse by selecting different destinations).
