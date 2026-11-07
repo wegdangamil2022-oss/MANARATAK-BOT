@@ -10,11 +10,27 @@ export type WhisperMemberCommand=
  |{kind:'OPEN';id:string}
  |{kind:'BLOCK';id:string}
  |{kind:'UNBLOCK';chatId:string;senderId:string}
- |{kind:'REPORT';id:string;reason:'SPAM'|'HARASSMENT'|'PERSONAL_DATA'|'OTHER'};
+ |{kind:'REPORT';id:string;reason:'SPAM'|'HARASSMENT'|'PERSONAL_DATA'|'OTHER'}
+ |{kind:'SUBMIT';chatId:string;mode:'FIRST_N'|'DIRECT';seats:number;
+   recipientId?:string;durationMinutes:number;text:string}
+ |{kind:'WITHDRAW';id:string};
 const chat=/^-[1-9][0-9]{0,15}$/u;
 const canChat=(value:string)=>chat.test(value)&&Number.isSafeInteger(Number(value));
 export function parseWhisperMemberCommand(value:string):WhisperMemberCommand|null{
- if(typeof value!=='string'||value.length>120)return null;
+ if(typeof value!=='string'||value.length>750)return null;
+ const memberFirst=/^\/whisperfirstsend (-[1-9][0-9]{0,15}) ([1-3]) (10|[1-9]) ([^\r\n]{1,500})$/u.exec(value);
+ if(memberFirst&&canChat(memberFirst[1]!))
+  return {kind:'SUBMIT',chatId:memberFirst[1]!,mode:'FIRST_N',
+   seats:Number(memberFirst[2]),durationMinutes:Number(memberFirst[3]),
+   text:memberFirst[4]!};
+ const memberDirect=/^\/whispersend (-[1-9][0-9]{0,15}) ([1-9][0-9]{0,15}) (10|[1-9]) ([^\r\n]{1,500})$/u.exec(value);
+ if(memberDirect&&canChat(memberDirect[1]!)&&
+    Number.isSafeInteger(Number(memberDirect[2])))
+  return {kind:'SUBMIT',chatId:memberDirect[1]!,mode:'DIRECT',
+   seats:1,recipientId:memberDirect[2]!,durationMinutes:Number(memberDirect[3]),
+   text:memberDirect[4]!};
+ const memberWithdraw=/^\/whisperrevoke ([a-f0-9]{24})$/u.exec(value);
+ if(memberWithdraw)return {kind:'WITHDRAW',id:memberWithdraw[1]!};
  const consent=/^\/whisper(on|off) (-[1-9][0-9]{0,15})$/u.exec(value);
  if(consent&&canChat(consent[2]!))
   return {kind:consent[1]==='on'?'ON':'OFF',chatId:consent[2]!};
@@ -50,6 +66,24 @@ export async function whisperMemberScreen(
  const request=parseWhisperMemberCommand(text);
  if(!request)return null;
  try{
+  if(request.kind==='SUBMIT'){
+   const id=await service.submitMemberDraft(actor,request.chatId,{
+    kind:request.mode,seats:request.seats,
+    ...(request.recipientId?{recipientId:request.recipientId}:{}),
+    durationMinutes:request.durationMinutes,text:request.text});
+   return {text:id?
+    '📝 سُجلت مسودة همستك للمراجعة الخاصة من إدارة المجموعة. لم تُنشر، ولا يوجد تسليم للمستلم.\n'+
+    'معرف المسودة لإلغائها: <code>'+id+'</code>\n'+
+    'للإلغاء قبل أو بعد الاعتماد: <code>/whisperrevoke '+id+'</code>\n'+
+    'مدة الصلاحية تشمل وقت انتظار الإدارة، وقد تنتهي قبل الاعتماد.':
+    '🔒 تعذر قبول المسودة. يجب أن يفتح مالك المجموعة هذه الميزة، وتثبت عضويتك، وتكون حدود الإنشاء متاحة. لم تُنشر رسالة.'};
+  }
+  if(request.kind==='WITHDRAW'){
+   const closed=await service.withdrawOwn(actor,request.id);
+   return {text:closed?
+    '🔒 أُلغيت الهمسة وسُحب نصها من التخزين النشط. لا يمكن استرجاع نسخة سبق أن وصلت إلى Telegram.':
+    'تعذّر إلغاء الهمسة؛ قد لا تكون مسودتك، أو أنها أغلقت مسبقًا.'};
+  }
   if(request.kind==='ON'||request.kind==='OFF'){
    const ok=await service.consent(actor,request.chatId,request.kind==='ON');
    if(request.kind==='ON')
