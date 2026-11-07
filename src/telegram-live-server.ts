@@ -25,6 +25,7 @@ import {startPhase4ContestMaintenance} from './phase4-contest-maintenance.js';
 import {Phase4ServiceCleanupDispatcher,TelegramBotApiServiceCleanupGateway} from './phase4-service-cleanup.js';
 import {Phase4GroupProfileDispatcher,TelegramBotApiGroupProfileGateway} from './phase4-group-profile.js';
 import {Phase4GuidePublicationDispatcher,TelegramBotApiGuidePostGateway} from './phase4-guide-publication.js';
+import {Phase4FixedPublicationDispatcher,TelegramBotApiFixedGateway} from './phase4-fixed-dispatcher.js';
 import {startProtectionMaintenance} from './protection-maintenance.js';
 import {createServer,type Server} from 'node:http';
 import {lstat,realpath} from 'node:fs/promises';
@@ -259,6 +260,10 @@ export async function createLiveTelegramServer(config:LiveTelegramConfig,
   // Disabled by default because the group has no approved jobs until then.
   const guidePublisher=new Phase4GuidePublicationDispatcher(store,policy,
    new TelegramBotApiGuidePostGateway(check.token,request),Date.now,safetyGate);
+  // 09:03: no Telegram publication/pinning without independent owner approval.
+  // Both operations are durable, sequential and use separate permission checks.
+  const fixedPublisher=new Phase4FixedPublicationDispatcher(store,policy,
+   new TelegramBotApiFixedGateway(check.token,request),Date.now,safetyGate);
   const profileEditor=check.profileEditsEnabled===true?
    new Phase4GroupProfileDispatcher(store,policy,
     new TelegramBotApiGroupProfileGateway(check.token,request),Date.now,safetyGate):null;
@@ -268,6 +273,7 @@ export async function createLiveTelegramServer(config:LiveTelegramConfig,
    // Explicitly enabled group service deletions only; no retries of unknown API outcomes.
    await serviceCleaner.runDue(4);
    await guidePublisher.runDue(2);
+   await fixedPublisher.runDue(2);
    // Do not create this dispatcher without explicit runtime opt-in.
    // Every individual job still requires owner approval and current bot rights.
    if(profileEditor)await profileEditor.runDue(2);

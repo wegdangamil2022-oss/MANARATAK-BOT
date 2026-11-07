@@ -104,13 +104,25 @@ function welcome(d:GuidanceData):OwnerInlineScreen{
 }
 function fixed(d:GuidanceData):OwnerInlineScreen{
  const full=renderGuidanceRules(d);
+ const protectionLabel:Record<GuidanceData['protectionStatus']['status'],string>={
+  UNCONFIGURED:'لا توجد سياسة حماية محفوظة لهذه المجموعة',
+  STALE:'سياسة الحماية غير متزامنة مع موافقة المجموعة',
+  OFF:'سياسة الحماية متوقفة',MONITOR:'سياسة الحماية للمراقبة',
+  ENFORCE:'سياسة تطلب التنفيذ؛ محرك العقوبات ليس جزءًا من هذه الشاشة'};
+ const protection='\n\n<b>🛡️ ربط المصدر الأصلي (للمالك فقط)</b>\n'+
+  protectionLabel[d.protectionStatus.status]+
+  (d.protectionStatus.revision!==undefined?
+   ' · إصدار '+d.protectionStatus.revision:'')+
+  (d.protectionStatus.totalRules!==undefined?
+   ' · '+d.protectionStatus.totalRules+' قواعد كشف':'')+
+  '\nقواعد الكشف والإجراءات ليست نص قوانين عامًا، ولا تُنشر للطلاب.';
  const summary=Buffer.byteLength(full,'utf8')>2200?
   '<b>ملخص المصادر العامة</b>\n'+
   'رابط القوانين: '+(d.config.rulesUrl?'معتمد':'غير مضاف')+
   '\nالملاحظات: '+d.notes.length+'\nالأسئلة المنشورة: '+d.faqs.length+
   '\nاختر المعاينة قبل النشر لرؤية التفاصيل كاملة.':full;
  return ui('<b>👁️ معاينة المالك — القوانين والرسائل الثابتة 09:03</b>\n\n'+
-  summary+'\n\n'+
+  summary+protection+'\n\n'+
   'محرر العقوبات وقواعد الحماية الأصلية مستقل في قسم الحماية.\n'+
   'المعاينة لا تنشر أو تثبت تلقائيًا.\n'+
   'نشر: <code>/fixedpublish '+d.chatId+'</code>\n'+

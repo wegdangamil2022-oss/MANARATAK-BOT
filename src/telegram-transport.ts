@@ -1159,7 +1159,7 @@ export class TelegramUpdateApplication {
      event.callbackData?.startsWith('gd:1:')||
      text==='/newmemberguide'||text.startsWith('/newmemberguide ')||
      text==='/groupfixed'||text.startsWith('/groupfixed ')||
-     /^\/(?:guideset|guidetopics|guideservices|guideclear|guidetopicsclear|guideservicesclear|guidepublish)(?:$|\s)/u.test(text));
+     /^\/(?:guideset|guidetopics|guideservices|guideclear|guidetopicsclear|guideservicesclear|guidepublish|fixedpublish)(?:$|\s)/u.test(text));
     if(phase4GuidanceInput){
      if(!this.opts.policy.isOwner(actorId)||actorId!==chatId||
       event.edited||event.forwarded||!this.opts.community)

@@ -1,5 +1,6 @@
 import {createHash,randomBytes} from 'node:crypto';
 import {BotStore,type BotState} from './store.js';
+import {isValidGroupProtectionRecord} from './protection-rules.js';
 import {Policy} from './policy.js';
 import {Phase4CommunityService,type DraftRequest} from './phase4-community.js';
 import type {CommunityDraft} from './phase4-community-model.js';
@@ -46,6 +47,9 @@ export interface GuidanceData{
  readonly folderUrl?:string;readonly faqs:readonly GuidanceFAQ[];
  readonly educationTopics:readonly string[];
  readonly notes:readonly CommunityReplyRule[];
+ /** Owner-only summary; never render protection filter values to students. */
+ readonly protectionStatus:Readonly<{status:'UNCONFIGURED'|'STALE'|'OFF'|
+  'MONITOR'|'ENFORCE';revision?:number;totalRules?:number}>;
 }
 /** Read and filter on the *same* snapshot; disabled/unpublished FAQ content
  * and community folders without an ACTIVE verified subscription never leak.
@@ -69,6 +73,16 @@ function context(s:BotState,policy:Policy,chatId:string):GuidanceData|null{
   .slice(0,100).map(x=>({id:x.id,question:x.question.slice(0,160)}));
  const notes=config.rules.filter(rule=>rule.enabled&&rule.source==='NOTE'&&
   rule.topicId===undefined);
+ const protectionRows=s.protectionPolicies?.filter(r=>r.policy.chatId===chatId)??[];
+ const protectionStatus:GuidanceData['protectionStatus']=
+  protectionRows.length===0?{status:'UNCONFIGURED'}:
+  protectionRows.length!==1||!isValidGroupProtectionRecord(protectionRows[0])||
+   !policy.canUseChat(s,chatId,'moderation')||
+   protectionRows[0]!.chatPolicyVersion!==policy.chatRevision(s,chatId)?
+   {status:'STALE'}:
+   {status:protectionRows[0]!.policy.mode,
+    revision:protectionRows[0]!.policy.revision,
+    totalRules:protectionRows[0]!.policy.rules.length};
  const educationTopics=s.educationCategories.filter(cat=>
   cat.scope===chatId&&visibleEducationCategory(s,cat)&&
   s.educationResources.some(x=>x.scope===chatId&&x.categoryId===cat.id&&
@@ -76,7 +90,7 @@ function context(s:BotState,policy:Policy,chatId:string):GuidanceData|null{
   .sort((a,b)=>a.order-b.order||a.title.localeCompare(b.title))
   .slice(0,8).map(x=>x.title.slice(0,60));
  return {chatId,policyVersion:group[0]!.version,config,educationTopics,
-  ...(folderUrl?{folderUrl}:{}),faqs,notes};
+  ...(folderUrl?{folderUrl}:{}),faqs,notes,protectionStatus};
 }
 const link=(label:string,url:string)=>'<a href="'+guidanceEscape(url)+'">'+
  guidanceEscape(label)+'</a>';
