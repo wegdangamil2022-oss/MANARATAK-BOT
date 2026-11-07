@@ -10,6 +10,8 @@ export type WhisperMemberCommand=
  |{kind:'OPEN'|'ANSWER';id:string}
  |{kind:'BLOCK';id:string}
  |{kind:'UNBLOCK';chatId:string;senderId:string}
+ |{kind:'BLOCKS';page:number}
+ |{kind:'UNBLOCK_TOKEN';id:string}
  |{kind:'REPORT';id:string;reason:'SPAM'|'HARASSMENT'|'PERSONAL_DATA'|'OTHER'}
  |{kind:'SUBMIT';chatId:string;mode:'FIRST_N'|'DIRECT';seats:number;
    recipientId?:string;durationMinutes:number;text:string}
@@ -39,6 +41,10 @@ export function parseWhisperMemberCommand(value:string):WhisperMemberCommand|nul
   return {kind:consent[1]==='on'?'ON':'OFF',chatId:consent[2]!};
  const block=/^\/whisperblockid ([a-f0-9]{24})$/u.exec(value);
  if(block)return {kind:'BLOCK',id:block[1]!};
+ const blocks=/^\/whisperblocks(?: (1|[1-9][0-9]{1,2}))?$/u.exec(value);
+ if(blocks)return {kind:'BLOCKS',page:Number(blocks[1]??'1')-1};
+ const unblockToken=/^\/whisperunblockid ([a-f0-9]{24})$/u.exec(value);
+ if(unblockToken)return {kind:'UNBLOCK_TOKEN',id:unblockToken[1]!};
  const unblock=/^\/whisperunblock (-[1-9][0-9]{0,15}) ([1-9][0-9]{0,15})$/u.exec(value);
  if(unblock&&canChat(unblock[1]!)&&Number.isSafeInteger(Number(unblock[2])))
   return {kind:'UNBLOCK',chatId:unblock[1]!,senderId:unblock[2]!};
@@ -120,8 +126,31 @@ export async function whisperMemberScreen(
   if(request.kind==='BLOCK'){
    const ok=await service.blockWhisper(actor,request.id);
    return {text:ok?
-    '🔒 أُضيف مرسل هذه الهمسة إلى المحظورين لديك في المجموعة. لن يحصل على تصريح مراسلتك بهذه الخدمة، وحُررت الحجوزات غير المرسلة.':
+    '🔒 حُظر مرسل هذه الهمسة لديك في المجموعة، وحُررت حجوزاتك غير المرسلة منه.'+
+    '\nلعرض الحظر وفكه لاحقًا دون كشف هوية المرسل: <code>/whisperblocks</code>':
     'تعذّر إثبات أنك حجزت هذه الهمسة أو أن مرسلها متاح للحظر. لم تتغير القائمة.'};
+  }
+  if(request.kind==='BLOCKS'){
+   const result=await service.myBlocks(actor,request.page);
+   if(!result)return {text:'🔒 لا يمكن عرض هذه الصفحة من قائمة الحظر.'};
+   const pages=Math.max(1,Math.ceil(result.total/5));
+   if(request.page>=pages)return {text:'🔒 رقم الصفحة خارج نطاق قائمة حظرك.'};
+   const items=result.entries.map((row,i)=>
+    (request.page*5+i+1)+'. مجموعة <code>'+row.chatId+'</code>؛ حظر منذ '+
+    new Date(row.updatedAt).toISOString().slice(0,10)+
+    '\nلفك الحظر: <code>/whisperunblockid '+row.id+'</code>');
+   return {text:'<b>🔒 محظورو الهمسات لديك فقط</b>\n'+
+    'العدد: '+result.total+' · صفحة '+(request.page+1)+'/'+pages+
+    '\nلا تُعرض حسابات المرسلين أو محتوى الهمسات.\n\n'+
+    (items.length?items.join('\n\n'):'لا يوجد مرسلون محظورون.')+
+    (request.page+1<pages?
+     '\n\nالصفحة التالية: <code>/whisperblocks '+(request.page+2)+'</code>':'')};
+  }
+  if(request.kind==='UNBLOCK_TOKEN'){
+   const ok=await service.unblockOwn(actor,request.id);
+   return {text:ok?
+    '✅ أُلغي حظرك لهذا المرسل، دون كشف هويته. لا يتم حجز أي مقعد تلقائيًا.':
+    '🔒 هذا المعرّف غير موجود ضمن حظرك الحالي أو سبق إلغاء الحظر.'};
   }
   if(request.kind==='UNBLOCK'){
    const ok=await service.block(actor,request.chatId,request.senderId,false);
