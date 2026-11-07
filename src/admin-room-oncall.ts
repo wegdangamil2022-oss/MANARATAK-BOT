@@ -56,6 +56,13 @@ function oncallAcknowledgementLedgerSafe(s:BotState,now:number):boolean{
  if(!time(now))return false;
  const rows=s.audit.filter(a=>a.updateKey.startsWith(ACK));
  if(rows.length>4000)return false;
+ // Index once rather than scanning the entire audit for every ack.
+ const reports=new Map<string,{count:number;row:BotState['audit'][number]}>();
+ for(const entry of s.audit){
+  if(!/^moderation:report:[A-Za-z0-9_-]{24}$/u.test(entry.updateKey))continue;
+  const found=reports.get(entry.updateKey);
+  reports.set(entry.updateKey,{count:(found?.count??0)+1,row:entry});
+ }
  const seen=new Set<string>();
  for(const row of rows){
   const m=/^admin-room:oncall-ack:([A-Za-z0-9_-]{24})$/u.exec(row.updateKey);
@@ -65,11 +72,10 @@ function oncallAcknowledgementLedgerSafe(s:BotState,now:number):boolean{
    row.at<0||row.at>now||
    !Number.isSafeInteger(row.policyVersion)||row.policyVersion<1)return false;
   seen.add(row.updateKey);
-  const reports=s.audit.filter(a=>a.updateKey==='moderation:report:'+m[1]);
-  if(reports.length!==1||reports[0]!.decision!=='ALLOW'||
-   reports[0]!.policyVersion!==row.policyVersion||
-   !Number.isSafeInteger(reports[0]!.at)||
-   reports[0]!.at>row.at)return false;
+  const report=reports.get('moderation:report:'+m[1]);
+  if(!report||report.count!==1||report.row.decision!=='ALLOW'||
+   report.row.policyVersion!==row.policyVersion||
+   !Number.isSafeInteger(report.row.at)||report.row.at>row.at)return false;
  }
  return true;
 }
@@ -159,7 +165,12 @@ export function adminRoomOncallQueueSummary(s:BotState,p:Policy,actor:string,
 export class AdminRoomOncall{
  constructor(private readonly store:BotStore,private readonly policy:Policy,private readonly clock:()=>number){ }
  async acknowledge(actor:string,id:string,witness:string):Promise<boolean>{
-  return this.store.transaction(s=>{const now=this.clock(),assignment=assignments(s,this.policy,now).find(a=>a.id===id&&a.actor===actor&&a.witness.slice(0,16)===witness);if(!assignment)return false;
+  return this.store.transaction(s=>{const now=this.clock();
+   if(!oncallSendLedgerSafe(s,now)||
+    !oncallAcknowledgementLedgerSafe(s,now))return false;
+   const assignment=assignments(s,this.policy,now).find(a=>
+    a.id===id&&a.actor===actor&&a.witness.slice(0,16)===witness);
+   if(!assignment)return false;
    s.audit.push({updateKey:'admin-room:oncall-ack:'+id,actorId:actor,decision:'ALLOW',reason:'ADMIN_ROOM_ONCALL_ACK:'+assignment.witness,policyVersion:this.policy.chatRevision(s,assignment.chat),at:now});return true;});
  }
 }
