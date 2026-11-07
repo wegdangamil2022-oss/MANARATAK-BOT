@@ -34,9 +34,12 @@ const newId=(items:readonly {id:string}[])=>{
  while(items.some(r=>r.id===id));
  return id;
 };
-/** Private content is never stored in an outbound Telegram job. This service
- * may reserve a seat, but CANNOT post a message, reveal the secret or claim
- * it was delivered or read. Real publishing needs independent review. */
+/** The trusted service holds private text, reserves seats and produces short
+ * recipient-verified read witnesses. The separate live announcement worker has
+ * no access to the secret. A private Telegram reply may briefly be queued as
+ * an encrypted-at-rest deployment responsibility; the worker redacts that
+ * plaintext BEFORE the irreversible send and privacy maintenance expires stale
+ * queued copies. No route is a proof of reading or end-to-end encryption. */
 export class Phase4WhisperService{
  constructor(private readonly store:BotStore,private readonly policy:Policy,
   private readonly clock:()=>number=Date.now,

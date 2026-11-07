@@ -1,8 +1,9 @@
 import {Phase4WhisperService} from './phase4-whispers.js';
 
-/** The private portal never reveals a secret, direct recipient identity,
- * reservation ID or a Telegram share link. A seat is NOT delivery.
- * Command text is a user-supplied request, not an authorization token. */
+/** Private-only recipient portal. A public link or a reservation is never
+ * authorization: open() requires provider membership, opt-in and a current
+ * reservation. The resulting private reply still gets a send-time witness.
+ * This helper NEVER exposes content to group chats or to other members. */
 export type WhisperMemberCommand=
  |{kind:'ON'|'OFF';chatId:string}
  |{kind:'RESERVE';id:string}

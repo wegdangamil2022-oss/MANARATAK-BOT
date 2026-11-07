@@ -1,6 +1,6 @@
-/** Phase 4 / 09:06 — OFFLINE whisper reservation evidence.
- * A reservation never proves a Telegram private delivery or a read receipt.
- * This schema intentionally contains no outbound jobs, share tokens or URLs.
+/** Phase 4 / 09:06 — private content and at-most-once announcement metadata.
+ * A reservation never proves private delivery or a read receipt. An announcement
+ * stores no text, user-supplied URL, secret key or outbound retry payload.
  */
 export type WhisperKind='FIRST_N'|'DIRECT';
 export interface WhisperMessage{
@@ -144,6 +144,7 @@ export function validWhisperState(raw:unknown):raw is WhisperState{
    !validTime(a.createdAt)||
    !['QUEUED','SENDING','CONFIRMED','FAILED_CONFIRMED','UNKNOWN_OUTCOME','SKIPPED'].includes(String(a.status))||
    (a.attemptId!==undefined&&!validId(a.attemptId))||
+   (a.status==='QUEUED'&&a.attemptId!==undefined)||
    ((a.status==='SENDING'||a.status==='UNKNOWN_OUTCOME'||a.status==='CONFIRMED')&&
     !validId(a.attemptId))||
    (a.telegramMessageId!==undefined&&(!Number.isSafeInteger(a.telegramMessageId)||

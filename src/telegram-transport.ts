@@ -701,9 +701,9 @@ export class TelegramUpdateApplication {
       plan:this.plan(chatId,screen.text,undefined,screen.keyboard),
       privateGroupAccess:{actorId,scope,epoch:sourceEpoch,expiresAt:now+120000}};
     }
-    // Stage 4 / 09:06 — the recipient's PRIVATE self-service preferences
-    // and local seat requests. No Telegram group post, secret delivery or
-    // callback-delegated authorization is implemented here.
+    // Stage 4 / 09:06 — private opt-in, abuse controls and verified opening.
+    // The only public Telegram message is a content-free owner-approved teaser.
+    // A deep link alone never authorizes the private secret.
     if(kind==='private'&&parseWhisperMemberCommand(text)!==null){
      if(actorId!==chatId||event.forwarded||event.edited||
         event.callbackData!==undefined)
@@ -752,10 +752,9 @@ export class TelegramUpdateApplication {
      return {status:'APPLIED',reason:'WHISPER_MEMBER_SELF_SERVICE',
       plan:this.plan(chatId,screen.text)};
     }
-    // Stage 4 / 09:06 — private OWNER review of unpublished whisper drafts.
-    // Member consent/seat reservations are domain-only; do not create any
-    // group post, private DM or Telegram reveal before a separately audited
-    // delivery flow exists. Unknown/stale callbacks are denied.
+    // Stage 4 / 09:06 — private owner-only draft and announcement review.
+    // Actual group teaser is queued only after independent owner confirmation,
+    // and sent once by the RUN-gated publisher. Unknown callbacks are denied.
     const whisperInput=kind==='private'&&(
       event.callbackData==='mi:1:i:09:06'||
       event.callbackData?.startsWith('wh:1:')||

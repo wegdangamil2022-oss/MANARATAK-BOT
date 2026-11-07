@@ -185,7 +185,7 @@ export interface B6BudgetAttempt {
 export interface BotState {
   /** Opt-in phase 4 group interactions; no active rules in legacy states. */
   phase4Community?:CommunityAutomationState;
-  /** Phase 4 / 09:06 private whisper drafts and seat reservations, no delivery. */
+  /** Phase 4 / 09:06 private whisper content, seat claims and redacted notices. */
   phase4Whispers?:WhisperState;
   /** Phase 4 / 09:07 moderated, private question inbox. No group deliveries. */
   phase4Discussions?:DiscussionState;

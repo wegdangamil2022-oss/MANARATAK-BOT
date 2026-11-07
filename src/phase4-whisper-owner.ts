@@ -43,7 +43,7 @@ async function detail(service:Phase4WhisperService,actor:string,id:string):
  Promise<OwnerInlineScreen|null>{
  const row=await service.ownerView(actor,id);
  if(!row)return null;
- const names={DRAFT:'📝 مسودة تنتظر اعتمادك',OPEN:'✅ معتمدة محليًا، لم تُنشر',
+ const names={DRAFT:'📝 مسودة تنتظر اعتمادك',OPEN:'✅ معتمدة محليًا',
   CLOSED:'🔒 مغلقة ومحذوف محتواها'} as const;
  const type=row.kind==='FIRST_N'?'أول '+row.seats+' مستلمين مؤهلين':
   'إلى مستلم واحد مُحدد';
