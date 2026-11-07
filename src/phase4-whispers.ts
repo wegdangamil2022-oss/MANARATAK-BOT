@@ -648,6 +648,10 @@ export class Phase4WhisperService{
   const first=await this.store.snapshot(),rows=clone(first).messages.filter(m=>m.id===id);
   if(rows.length!==1||rows[0]!.status!=='OPEN'||!rows[0]!.text)
    return {status:'NOT_FOUND'};
+  // An answer command for a non-question must not consume a scarce FIRST_N
+  // seat. Validate the purpose BEFORE the atomic reservation transaction.
+  if(view==='ANSWER'&&(rows[0]!.purpose!=='QUESTION'||!rows[0]!.answerText))
+   return {status:'DENIED'};
   if(!(clone(first).announcements??[]).some(a=>
      a.messageId===id&&a.status==='CONFIRMED'))return {status:'NOT_ANNOUNCED'};
   const result=await this.reserve(memberId,id);
