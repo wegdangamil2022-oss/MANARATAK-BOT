@@ -13,7 +13,9 @@ export interface ForumTopicEducationalSourcePreview{
  readonly group:string;readonly thread:number;readonly topicTitle:string;
  readonly groupVersion:number;readonly topicPaused:boolean;
  readonly categoryCount:number;readonly resourceCount:number;
+ readonly approvedForBroadcastCount:number;
  readonly titles:readonly string[];
+ readonly sources:readonly {id:string;title:string;approvedForBroadcast:boolean}[];
  readonly epoch:string;readonly ownerAuthorized:boolean;
  readonly locallyEligible:boolean;
  readonly disclaimer:'NO_TELEGRAM_DESTINATION_PROOF';
@@ -51,12 +53,21 @@ export function previewForumTopicEducationalSources(s:BotState,p:Policy,
   globalIds.set(r.id,(globalIds.get(r.id)??0)+1);
  for(const r of resources)
   if(globalIds.get(r.id)!==1)return null;
- const titles=resources.sort((a,b)=>a.title.localeCompare(b.title)||
-  a.id.localeCompare(b.id)).slice(0,8).map(r=>allowedText(r.title));
+ const approvedForBroadcast=(r:typeof resources[number])=>
+  typeof r.publicationText==='string'&&
+  r.publicationText.trim().length>=4&&
+  typeof r.publicationTextReviewedBy==='string'&&
+  /^[1-9][0-9]{0,15}$/u.test(r.publicationTextReviewedBy);
+ const selected=resources.sort((a,b)=>a.title.localeCompare(b.title)||
+  a.id.localeCompare(b.id)).slice(0,8);
+ const titles=selected.map(r=>allowedText(r.title));
+ const sources=selected.map(r=>({id:r.id,title:allowedText(r.title),
+  approvedForBroadcast:approvedForBroadcast(r)}));
  return {group:chat,thread,topicTitle:allowedText(topic.title),
   groupVersion:topic.groupVersion,topicPaused:mode==='PAUSED',
   categoryCount:available.length,resourceCount:resources.length,
-  titles,epoch:groupMenuEpochDigest(s,chat,thread),ownerAuthorized:true,
+  approvedForBroadcastCount:resources.filter(approvedForBroadcast).length,
+  titles,sources,epoch:groupMenuEpochDigest(s,chat,thread),ownerAuthorized:true,
   locallyEligible:mode==='INHERIT'&&resources.length>0,
   disclaimer:'NO_TELEGRAM_DESTINATION_PROOF'};
 }
