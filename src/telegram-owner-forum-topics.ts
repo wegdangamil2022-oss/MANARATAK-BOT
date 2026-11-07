@@ -19,6 +19,8 @@ import {previewForumTopicEducationalSources}
 import {TelegramForumTopicControl,validForumTopicControlRoute}
  from './telegram-forum-topic-control.js';
 import {forumTopicActionHistory} from './group-forum-topic-control.js';
+import {TelegramForumTopicBroadcast,validForumBroadcastRoute}
+ from './telegram-forum-topic-broadcast.js';
 
 /** 01-05: local-only topic registration with private owner consent.
  * No Bot API send, createForumTopic, closeForumTopic or permission mutation.
@@ -143,7 +145,7 @@ export function validOwnerForumTopicRoute(value:unknown):boolean{
    POLICY_CANCEL.test(value)||POLICY_HISTORY.test(value)||
    PUB_CHOICE.test(value)||PUB_CONFIRM.test(value)||
    PUB_CANCEL.test(value)||PUB_HISTORY.test(value)||
-   validForumTopicControlRoute(value));
+   validForumTopicControlRoute(value)||validForumBroadcastRoute(value));
 }
 export class OwnerForumTopicEditor{
  constructor(private readonly store:BotStore,private readonly policy:Policy,
@@ -239,6 +241,7 @@ export class OwnerForumTopicEditor{
    '\nلا يسمح هذا السجل بإرسال رسائل أو فرض سياسات مستقلة؛ يلزم التأكد من نوع المجموعة وصلاحية الموضوع الحية.',
    [...(canClose?[[btn('🔒 طلب إغلاق الموضوع','ft:1:u:'+g+':'+t+':c')]]:[]),
     ...(canReopen?[[btn('🔓 طلب إعادة فتح الموضوع','ft:1:u:'+g+':'+t+':o')]]:[]),
+    [btn('📨 سجل نشرات الموضوع','ft:1:6:'+g+':'+t+':0')],
     [btn('🕘 سجل عمليات Telegram للموضوع','ft:1:9:'+g+':'+t+':0')],
     ...(note?[[btn(publication?.published?
       '🛑 سحب إتاحة الملاحظة':'✅ اعتماد الملاحظة للعرض',
@@ -374,7 +377,9 @@ export class OwnerForumTopicEditor{
    'الموارد المنشورة المتاحة في المصدر: '+data.resourceCount+'\n'+
    'أمثلة على المصادر:\n'+(lines.length?lines.join('\n'):'لا توجد موارد مناسبة حاليًا.')+'\n'+
    'هذه معاينة قراءة محلية فقط؛ لا تثبت أن الموضوع موجود أو مفتوح أو أن Telegram يسمح بالنشر إليه.'+
-   '\nلا يُنفّذ نشر أو إرسال تجريبي من هذه الشاشة. فحص الصلاحيات الحية متاح بصورة مستقلة.',
+   '\nلا يرسل هذا الفحص أي رسالة. للنشر المستقل بعد موافقتين، اكتب في خاص البوت: '+
+   '<code>/topicbroadcast '+g+' '+t+' معرف_المورد</code>.'+
+   ' يلزم أن يكون نص المورد المنشور قد تمت مراجعته. فحص حقوق Telegram الحية متاح بصورة مستقلة.',
    [[btn('🔎 فحص صلاحيات Telegram الحية','ft:1:f:'+g+':'+t)],
     [btn('↩️ تفاصيل الموضوع','ft:1:d:'+g+':'+t)]]);
  }
@@ -608,6 +613,9 @@ export class OwnerForumTopicEditor{
   if(!validOwnerForumTopicRoute(data))return null;
   if(validForumTopicControlRoute(data))
    return new TelegramForumTopicControl(this.store,this.policy,
+    this.gateway,this.safety,this.clock).handle(actor,data);
+  if(validForumBroadcastRoute(data))
+   return new TelegramForumTopicBroadcast(this.store,this.policy,
     this.gateway,this.safety,this.clock).handle(actor,data);
   const pub=PUB_CONFIRM.exec(data);
   if(pub)return this.decidePublication(actor,pub[1]!,true);
