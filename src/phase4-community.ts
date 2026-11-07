@@ -21,12 +21,13 @@ export interface CommunitySendProposal{
  readonly kind:CommunityEventKind;readonly policyVersion:number;readonly topicId?:number;
  /** Exactly the content/authorization epoch under which the source was read. */
  readonly sourceEpoch:string;
+ readonly ruleId?:string;
  readonly photoFileId?:string;readonly communityLinks?:CommunityLinkKeyboard;
 }
 /** Read-only administrative explanation, never stored with student text. */
 export type CommunityDiagnostic={status:'REPLIES_DISABLED'|'NO_MATCH'|'QUIET_HOURS'|
  'SOURCE_UNAVAILABLE'|'LECTURE_MODE'|'CAPTION_LIMIT'|'TEMPLATE_INVALID'}|
- {status:'RULE_DISABLED'|'TOPIC_MISMATCH';ruleId:string}|
+ {status:'RULE_DISABLED'|'TOPIC_MISMATCH'|'RULE_OUTSIDE_HOURS';ruleId:string}|
  {status:'MATCH';ruleId:string;preview:string};
 const isGroup=(s:string):boolean=>/^-[1-9]\d{0,15}$/u.test(s)&&Number.isSafeInteger(Number(s));
 const validNow=(n:number):boolean=>Number.isSafeInteger(n)&&n>=0&&n<=8_640_000_000_000_000-120000;
@@ -133,7 +134,8 @@ export class Phase4CommunityService{
    }
    if(kind==='REPLY_ADD'&&current.rules.length>=30)throw Error('COMMUNITY_RULE_CAPACITY');
    if(['REPLY_REMOVE','REPLY_ENABLE','REPLY_DISABLE','REPLY_COOLDOWN',
-      'REPLY_PHOTO_SET','REPLY_PHOTO_CLEAR','REPLY_BUTTON_ADD','REPLY_BUTTONS_CLEAR'].includes(kind)&&
+      'REPLY_PHOTO_SET','REPLY_PHOTO_CLEAR','REPLY_BUTTON_ADD','REPLY_BUTTONS_CLEAR',
+      'REPLY_HOURS_SET','REPLY_HOURS_CLEAR'].includes(kind)&&
       (!request.ruleId||!current.rules.some(r=>r.id===request.ruleId)))
     throw Error('COMMUNITY_RULE_MISSING');
    if(kind==='AUTO_LIMIT_SET'&&(!Number.isInteger(request.autoMessagesPerMinute)||
@@ -200,6 +202,15 @@ export class Phase4CommunityService{
     throw Error('COMMUNITY_COMMAND_INVALID');
    if((kind==='WELCOME_PHOTO_SET'||kind==='FAREWELL_PHOTO_SET')&&
      !validCommunityPhotoId(request.photoFileId))throw Error('COMMUNITY_PHOTO_ID_INVALID');
+   if(kind==='REPLY_HOURS_SET'&&(!Number.isInteger(request.startMinute)||
+     !Number.isInteger(request.endMinute)||request.startMinute===undefined||
+     request.endMinute===undefined||request.startMinute<0||request.endMinute<0||
+     request.startMinute>=1440||request.endMinute>=1440||
+     request.startMinute===request.endMinute))
+     throw Error('COMMUNITY_REPLY_HOURS_INVALID');
+   if(kind==='REPLY_HOURS_CLEAR'&&!current.rules.some(r=>
+     r.id===request.ruleId&&r.activeHours!==undefined))
+     throw Error('COMMUNITY_REPLY_HOURS_MISSING');
    if(kind==='REPLY_PHOTO_SET'&&!validCommunityPhotoId(request.photoFileId))
     throw Error('COMMUNITY_REPLY_PHOTO_INVALID');
    if(kind==='REPLY_PHOTO_CLEAR'&&
@@ -415,6 +426,13 @@ export class Phase4CommunityService{
     case 'REPLY_ENABLE':config.rules.find(r=>r.id===draft.ruleId)!.enabled=true;break;
     case 'REPLY_DISABLE':config.rules.find(r=>r.id===draft.ruleId)!.enabled=false;break;
     case 'REPLY_COOLDOWN':config.rules.find(r=>r.id===draft.ruleId)!.cooldownMs=draft.cooldownMs!;break;
+    case 'REPLY_HOURS_SET':
+     config.rules.find(r=>r.id===draft.ruleId)!.activeHours={
+      startMinute:draft.startMinute!,endMinute:draft.endMinute!};
+     break;
+    case 'REPLY_HOURS_CLEAR':
+     delete config.rules.find(r=>r.id===draft.ruleId)!.activeHours;
+     break;
     case 'REPLY_PHOTO_SET':
      if(!validCommunityPhotoId(draft.photoFileId))throw Error('COMMUNITY_REPLY_PHOTO_INVALID');
      config.rules.find(r=>r.id===draft.ruleId)!.photoFileId=draft.photoFileId!;
@@ -640,8 +658,12 @@ export class Phase4CommunityService{
   if(!config.repliesEnabled)return {status:'REPLIES_DISABLED'};
   if(config.quietHours&&inCommunityQuietHours(config.quietHours,this.clock(),config.utcOffsetMinutes,config.timeZone))
    return {status:'QUIET_HOURS'};
-  const rule=selectCommunityRule(config,sample,topicId);
+  const now=this.clock();
+  if(!validNow(now))throw Error('COMMUNITY_CLOCK_INVALID');
+  const rule=selectCommunityRule(config,sample,topicId,now);
   if(!rule){
+   const outside=selectCommunityRule(config,sample,topicId);
+   if(outside?.activeHours)return {status:'RULE_OUTSIDE_HOURS',ruleId:outside.id};
    // Diagnose disabled and topic-scoped matches without consuming quota.
    if(!/^@\w+/u.test(sample.trimStart())){
     const isCommand=sample.trimStart().startsWith('/');
@@ -654,8 +676,6 @@ export class Phase4CommunityService{
    }
    return {status:'NO_MATCH'};
   }
-  const now=this.clock();
-  if(!validNow(now))throw Error('COMMUNITY_CLOCK_INVALID');
   const input:CommunityInput={kind:'TEXT',chatId,actorId:'1',
    memberName:'الطالب التجريبي',groupName:'مجموعة منارتك التجريبية',
    messageText:sample,...(topicId!==undefined?{topicId}:{})};
@@ -734,8 +754,13 @@ export class Phase4CommunityService{
     if(config.quietHours&&inCommunityQuietHours(config.quietHours,now,config.utcOffsetMinutes,config.timeZone)){
      record('QUIET_HOURS');return null;
     }
-    const rule=selectCommunityRule(config,input.messageText!,input.topicId);
-    if(!rule){record('NO_MATCH');return null;}
+    const rule=selectCommunityRule(config,input.messageText!,input.topicId,now);
+    if(!rule){
+     const outside=selectCommunityRule(config,input.messageText!,input.topicId);
+     if(outside?.activeHours)record('RULE_OUTSIDE_HOURS',outside.id);
+     else record('NO_MATCH');
+     return null;
+    }
     const resolved=resolvedCommunityReply(s,config,rule,input.topicId);
     if(!resolved){record('SOURCE_UNAVAILABLE',rule.id);return null;}
     template=resolved.template;preEscaped=resolved.escaped===true;ruleId=rule.id;
@@ -787,7 +812,8 @@ export class Phase4CommunityService{
    // Reserved means local intent only; the Telegram send may subsequently fail.
    record('RESERVED',ruleId);
    return {text,chatId:input.chatId,actorId:input.actorId,kind:input.kind,
-    policyVersion:config.version,sourceEpoch:groupMenuEpochDigest(s,input.chatId,input.topicId),...(input.topicId!==undefined?{topicId:input.topicId}:{}),
+    policyVersion:config.version,sourceEpoch:groupMenuEpochDigest(s,input.chatId,input.topicId),
+    ...(ruleId?{ruleId}:{}),...(input.topicId!==undefined?{topicId:input.topicId}:{}),
     ...(photoFileId?{photoFileId}:{}),
     ...(communityLinks?{communityLinks}:{})};
   });
@@ -876,6 +902,16 @@ export class Phase4CommunityService{
   if(draft.kind==='REPLY_REMOVE')return 'مراجعة حذف القاعدة: '+clean(draft.ruleId??'');
   if(draft.kind==='REPLY_ENABLE'||draft.kind==='REPLY_DISABLE')
    return 'مراجعة '+(draft.kind==='REPLY_ENABLE'?'تفعيل':'إيقاف')+' القاعدة: '+clean(draft.ruleId??'');
+  if(draft.kind==='REPLY_HOURS_SET')
+   return '<b>🕘 نافذة تشغيل القاعدة</b>\nالقاعدة: <code>'+clean(draft.ruleId??'')+
+    '</code>\nتعمل فقط من '+String(Math.floor(draft.startMinute!/60)).padStart(2,'0')+
+    ':'+String(draft.startMinute!%60).padStart(2,'0')+
+    ' إلى '+String(Math.floor(draft.endMinute!/60)).padStart(2,'0')+
+    ':'+String(draft.endMinute!%60).padStart(2,'0')+
+    '\nبحسب المنطقة الزمنية المعتمدة للمجموعة. يُعاد فحصها قبل إرسال Telegram.';
+  if(draft.kind==='REPLY_HOURS_CLEAR')
+   return '🕘 إلغاء نافذة تشغيل القاعدة <code>'+clean(draft.ruleId??'')+
+    '</code> والعودة إلى ساعات الهدوء العامة دون تغييرها.';
   if(draft.kind==='REPLY_PHOTO_SET')
    return '<b>📷 صورة رد آلي</b>\nالقاعدة: <code>'+clean(draft.ruleId??'')+
     '</code>\nمصدر الصورة: معرف ملف Telegram وصل من المالك؛ لا يُعرض معرف الملف للطلاب. '+
