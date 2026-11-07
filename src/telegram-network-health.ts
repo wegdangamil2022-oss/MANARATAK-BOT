@@ -24,6 +24,7 @@ const labels:Record<NetworkGroupDiagnostic['status'],string>={
  DUPLICATE:'سجلات اعتماد مكررة؛ مرفوضة للاعتماد'
 };
 const local=(g:NetworkGroupDiagnostic)=>
+ g.status==='READY'&&g.locallyPresent!==true?'⚠️':
  g.status==='READY'?'✅':g.status==='REVOKED'?'⛔':g.status==='DUPLICATE'?'⚠️':'🟠';
 export function validOwnerNetworkHealthRoute(data:unknown):boolean{
  return typeof data==='string'&&Buffer.byteLength(data,'utf8')<=64&&
@@ -49,6 +50,8 @@ export class OwnerNetworkHealthEditor{
     'حالة الاعتماد: '+labels[g.status]+'\n'+
     'وجود البوت بالسجل: '+(g.locallyPresent===null?'غير مؤكد':
      g.locallyPresent?'مسجّل محليًا كموجود':'مسجّل محليًا كغير موجود')+'\n'+
+    (g.status==='READY'&&g.locallyPresent!==true?
+     '⚠️ السجل قد يملك اعتمادًا محليًا قديمًا رغم عدم إثبات وجود البوت؛ لا يُعامل كدليل إذن.\n':'')+
     'سياسة الحماية المحلية: '+g.policy+
     (g.policyRevision!==null?' · الإصدار '+g.policyRevision:'')+'\n'+
     'حالة المساعد المحلي: '+esc(g.assistant)+'\n'+
@@ -89,6 +92,8 @@ export class OwnerNetworkHealthEditor{
    'السياسات: OFF '+report.off+' · MONITOR '+report.monitor+
    ' · ENFORCE '+report.enforce+'\n'+
    'بلا سياسة: '+report.noPolicy+' · سياسة غير سليمة: '+report.invalidPolicies+'\n'+
+   'الحضور المحلي: غير موجود '+report.locallyAbsent+
+   ' · غير مؤكد '+report.presenceUnconfirmed+'\n'+
    'التوريث: فعّال '+report.activeFollows+' · موقوف '+report.pausedFollows+'\n'+
    'بلاغات تنتظر: '+report.watchPending+
    ' · مقترحات إجراءات تنتظر: '+report.sanctionPending+'\n'+
