@@ -34,9 +34,13 @@ const validTime=(v:unknown):v is number=>typeof v==='number'&&
 const outcome=(v:unknown):v is ForumBroadcastOutcome=>
  v==='CONFIRMED'||v==='FAILED_CONFIRMED'||v==='UNKNOWN_OUTCOME';
 const sha=(v:unknown)=>createHash('sha256').update(JSON.stringify(v)).digest('hex');
-const clean=(v:unknown,limit:number):v is string=>
+const clean=(v:unknown,limit:number,multiline=false):v is string=>
  typeof v==='string'&&v===v.trim()&&Array.from(v).length>=4&&
- Array.from(v).length<=limit&&!/[\u0000-\u001f\u007f-\u009f\u202a-\u202e\u2066-\u2069]/u.test(v);
+ Array.from(v).length<=limit&&
+ !(multiline?
+  /[\u0000-\u0009\u000b-\u001f\u007f-\u009f\u202a-\u202e\u2066-\u2069]/u:
+  /[\u0000-\u001f\u007f-\u009f\u202a-\u202e\u2066-\u2069]/u
+ ).test(v);
 type Body={phase:'START'|'RESULT';group:string;thread:number;
  groupVersion:number;registration:string;resource:string;
  resourceDigest:string;outcome?:ForumBroadcastOutcome};
@@ -124,7 +128,7 @@ function prepared(s:BotState,p:Policy,owner:string,g:string,t:number,
   forumTopicEducationMode(s,p,g,t,now)!=='INHERIT')return null;
  const resources=s.educationResources.filter(x=>x.id===resourceId),r=resources[0];
  if(resources.length!==1||!r||r.scope!==g||r.status!=='PUBLISHED'||
-  !clean(r.title,160)||!clean(r.publicationText,1700)||
+  !clean(r.title,160)||!clean(r.publicationText,1700,true)||
   typeof r.publicationTextReviewedBy!=='string'||
   !actor(r.publicationTextReviewedBy))return null;
  const categories=s.educationCategories.filter(c=>c.id===r.categoryId),category=categories[0];
