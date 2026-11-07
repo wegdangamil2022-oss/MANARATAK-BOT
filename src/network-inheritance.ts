@@ -3,6 +3,7 @@ import type {BotState,Chat} from './store.js';
 import type {Policy} from './policy.js';
 import type {GroupNetwork} from './group-network-model.js';
 import {networkEmergencyStopped} from './network-emergency-stop.js';
+import {portableNetworkProtectionRules} from './network-policy-portability.js';
 import {isValidProtectionPolicy,isValidGroupProtectionRecord,
  type ProtectionPolicy,type GroupProtectionRecord} from './protection-rules.js';
 import {validNetworkInheritanceLink,validNetworkInheritanceLinks,
@@ -23,7 +24,7 @@ function approvedMember(s:BotState,policy:Policy,actor:string,now:number,network
  return chat;
 }
 const templateAllowed=(p:ProtectionPolicy):boolean=>
- isValidProtectionPolicy(p)&&p.mode!=='ENFORCE'&&p.revision===1&&
+ portableNetworkProtectionRules(p)&&p.mode!=='ENFORCE'&&p.revision===1&&
  p.allowedDomains.length===0&&p.allowedPhrases.length===0&&p.exemptMemberIds.length===0&&
  (!p.ruleExemptions||p.ruleExemptions.length===0);
 /** Must be called by a reviewed per-target owner transaction; only prepares
@@ -46,7 +47,8 @@ export function prepareNetworkInheritance(s:BotState,policy:Policy,actor:string,
   original=origin[0];
  if(origin.length!==1||!original||!isValidGroupProtectionRecord(original)||
   original.chatPolicyVersion!==source.version||original.policy.revision!==sourceRevision||
-  original.updatedAt>now||original.policy.mode==='ENFORCE')return null;
+  original.updatedAt>now||original.policy.mode==='ENFORCE'||
+  !portableNetworkProtectionRules(original.policy))return null;
  const targetRecords=(s.protectionPolicies??[]).filter(x=>x.policy.chatId===targetId);
  if(targetRecords.length!==1||!targetRecords[0]||!isValidGroupProtectionRecord(targetRecords[0])||
   targetRecords[0].chatPolicyVersion!==target.version||
@@ -100,7 +102,8 @@ export function synchronizeNetworkInheritance(s:BotState,policy:Policy,actor:str
    source=sourceRows[0],target=targetRows[0];
   if(!reason&&(sourceRows.length!==1||!source||!isValidGroupProtectionRecord(source)||
    source.chatPolicyVersion!==link.sourceChatVersion||
-   source.updatedAt>now||source.policy.mode==='ENFORCE'||source.policy.revision!==link.sourceRevision+1))
+   source.updatedAt>now||source.policy.mode==='ENFORCE'||
+   !portableNetworkProtectionRules(source.policy)||source.policy.revision!==link.sourceRevision+1))
    reason='SOURCE_STALE';
   if(!reason&&(targetRows.length!==1||!target||!isValidGroupProtectionRecord(target)||
    target.chatPolicyVersion!==link.targetChatVersion||
