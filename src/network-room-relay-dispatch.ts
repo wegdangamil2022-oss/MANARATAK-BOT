@@ -93,7 +93,7 @@ function eligible(s:BotState,p:Policy,pref:NetworkRoomRelayPreference,
 }
 function intact(s:BotState,p:Policy,job:Candidate,now:number):boolean{
  if(!clock(now)||now<job.started||now-job.started>=120_000||
-  now-job.eventAt>=120_000)return false;
+  now-job.eventAt>=120_000||!relaySendLedger(s,now))return false;
  const keys=s.audit.filter(a=>a.updateKey===job.key),row=keys[0];
  if(keys.length!==1||!row||row.actorId!==job.pref.actor||
   row.decision!=='ALLOW'||row.policyVersion!==job.pref.groupVersion||
