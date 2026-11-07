@@ -50,6 +50,7 @@ export class OwnerNetworkRoomBridge{
     (row.roomId!==null?'الغرفة المخوّل بإدارتها: <code>'+row.roomId+'</code>\n':
      'لا نعرض معرّف أي غرفة لا تملك صلاحية إدارتها الحالية.\n')+
     (row.pendingReviews!==null?'حالات تنتظر مراجعة بشرية: '+row.pendingReviews+'\n':'')+
+    (row.overdue72h!==null?'↳ تجاوزت 72 ساعة: '+row.overdue72h+'\n':'')+
     (row.events24h!==null?
      'أحداث إدارية محلية مرئية آخر 24 ساعة: '+row.events24h+'\n':'')+
     (row.truncated?'⚠️ حد العرض 200 حدث؛ العدد قد يكون جزئيًا.\n':'')+
