@@ -94,7 +94,7 @@ export function validWhisperMessage(raw:unknown):raw is WhisperMessage{
   Number(x.closedAt)>=Number(x.approvedAt);
 }
 export function validWhisperState(raw:unknown):raw is WhisperState{
- if(!record(raw)||!exact(raw,['messages','reservations','consents'],['blocks','reports'])||
+ if(!record(raw)||!exact(raw,['messages','reservations','consents'],['blocks','reports','announcements'])||
   !Array.isArray(raw.messages)||raw.messages.length>200||
   !Array.isArray(raw.reservations)||raw.reservations.length>2000||
   !Array.isArray(raw.consents)||raw.consents.length>2000||
