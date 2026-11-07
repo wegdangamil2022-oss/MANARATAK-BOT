@@ -32,6 +32,7 @@ import {validOwnerUploadRoute} from './telegram-owner-upload.js';
 import {validSubscriptionConfigRoute} from './telegram-inline-subscription-config.js';
 import {validPurgeEditorRoute} from './telegram-purge-editor.js';
 import {validOwnerRightsRoute} from './telegram-owner-rights.js';
+import {validOwnerGroupLinkRoute} from './telegram-owner-group-link.js';
 import {validAdminRoleRoute} from './telegram-admin-roles.js';
 import {validCaptchaRoute} from './captcha.js';
 import {validCaptchaRulesRoute} from './captcha-rules.js';
@@ -725,7 +726,7 @@ export function isValidTelegramInlineKeyboard(input:unknown):input is TelegramIn
      !validGroupRulesRoute(button.callback_data)&&
      !validCaptchaRoute(button.callback_data)&&!validCaptchaRulesRoute(button.callback_data)&&!validCaptchaOwnerRoute(button.callback_data)&&!validAdminCleanupOwnerRoute(button.callback_data)&&!validWelcomeOwnerRoute(button.callback_data)&&
      !validAdminRoleRoute(button.callback_data)&&
-     !validOwnerRightsRoute(button.callback_data)&&
+     !validOwnerRightsRoute(button.callback_data)&&!validOwnerGroupLinkRoute(button.callback_data)&&
      !validRuleExemptionRoute(button.callback_data)&&!validRuleWarningPolicyRoute(button.callback_data)&&!validRuleActionRoute(button.callback_data)&&
      !validAdminRoomRoute(button.callback_data)&&!validOncallRoute(button.callback_data)&&!validRoomControlRoute(button.callback_data)&&
      !validModerationRateEditorRoute(button.callback_data)&&
@@ -754,7 +755,7 @@ const navigation=(back:string,home=true)=>{
 export function ownerInlineConnection(data:string):'EDITOR'|'VIEW'|'SPECIFICATION'|null{
  const m=/^mi:1:i:([0-9]{2}):([0-9]{2})$/u.exec(data);if(!m||m[0]!==data)return null;
  const section=ownerInlineSections[Number(m[1])-1];if(!section||Number(m[2])<1||Number(m[2])>section.items.length)return null;
- if(/^mi:1:i:09:0[123]$/u.test(data)||/^mi:1:i:02:0[234]$/u.test(data)||/^mi:1:i:04:0[234]$/u.test(data)||data==='mi:1:i:13:04'||delegationOwnerEntry(data)||/^mi:1:i:01:(?:03|06|07|08|12)$/u.test(data)||data==='mi:1:i:10:16'||data==='mi:1:i:11:03'||studioOwnerEntry(data))return 'EDITOR';
+ if(/^mi:1:i:09:0[123]$/u.test(data)||/^mi:1:i:02:0[234]$/u.test(data)||/^mi:1:i:04:0[234]$/u.test(data)||data==='mi:1:i:13:04'||delegationOwnerEntry(data)||/^mi:1:i:01:(?:02|03|06|07|08|12)$/u.test(data)||data==='mi:1:i:10:16'||data==='mi:1:i:11:03'||studioOwnerEntry(data))return 'EDITOR';
  if(ownerInlineLinkedReadOnly(data)!==null||/^mi:1:i:01:(?:09|10|11)$/u.test(data)||data==='mi:1:i:03:01'||data==='mi:1:i:03:06'||data==='mi:1:i:02:01'||data==='mi:1:i:02:15'||data==='mi:1:i:02:16'||data==='mi:1:i:02:13'||/^mi:1:i:02:(?:0[56789]|12)$/u.test(data))return 'VIEW';
  return 'SPECIFICATION';
 }
