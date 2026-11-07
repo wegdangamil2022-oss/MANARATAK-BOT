@@ -10,6 +10,8 @@ import {OwnerNetworkBulkServiceEditor,validOwnerNetworkBulkServiceRoute}
  from './telegram-network-bulk-services.js';
 import {OwnerNetworkPolicyDiffEditor,validOwnerNetworkPolicyDiffRoute}
  from './telegram-network-differences.js';
+import {OwnerNetworkGroupCopy,validOwnerNetworkGroupCopyRoute}
+ from './telegram-network-group-copy.js';
 import {OwnerNetworkPolicySnapshots,validOwnerNetworkPolicySnapshotRoute}
  from './telegram-network-policy-snapshots.js';
 import {OwnerNetworkPolicyRestore,validOwnerNetworkPolicyRestoreRoute}
@@ -70,7 +72,8 @@ const validClock=(value:number)=>Number.isSafeInteger(value)&&value>=0&&value<=8
 export function validOwnerNetworkRoute(data:unknown):boolean{
  if(typeof data!=='string'||Buffer.byteLength(data,'utf8')>64)return false;
  return data==='mi:1:i:01:03'||home.test(data)||begin.test(data)||validOwnerNetworkWatchRoute(data)||
-   validOwnerNetworkBulkServiceRoute(data)||validOwnerNetworkPolicyDiffRoute(data)||validOwnerNetworkPolicySnapshotRoute(data)||
+   validOwnerNetworkBulkServiceRoute(data)||validOwnerNetworkGroupCopyRoute(data)||
+   validOwnerNetworkPolicyDiffRoute(data)||validOwnerNetworkPolicySnapshotRoute(data)||
    validOwnerNetworkPolicyRestoreRoute(data)||
    validOwnerNetworkSanctionRoute(data)||
   [list,detail,eventPage,eventFiltered,eventGroupPage,policySources,policyPreview,followList,followStop,
@@ -529,7 +532,8 @@ export class OwnerNetworkEditor{
   return ui('<b>🌐 '+escape(n.name)+'</b>\n'+
    'رقم السجل: <code>'+n.id+'</code> · الإصدار: '+n.revision+'\n'+
    'مجموعات فعالة: '+active+' · ارتباطات تحتاج مراجعة: '+stale+'\n'+
-   'المجموعات الفعالة هي المعتمدة بنفس إصدار ارتباطها فقط؛ لا تُنقل إليها حقوق البوت.',
+   'المجموعات الفعالة هي المعتمدة بنفس إصدار ارتباطها فقط؛ لا تُنقل إليها حقوق البوت.\n'+
+   'لنسخ قواعد مراقبة مختارة محليًا إلى مجموعة في الشبكة: <code>/networkcopy '+n.id+'</code>',
    [[btn('👥 إدارة المجموعات','nw:1:g:'+n.id+':0')],
     [btn('📑 سياسات الشبكة المشتركة','nw:1:y:'+n.id+':0')],
     [btn('⏸️ إدارة المتابعة','nw:1:f:'+n.id+':0')],
@@ -1299,6 +1303,10 @@ export class OwnerNetworkEditor{
   if(validOwnerNetworkBulkServiceRoute(data)){
    await this.cancelInput(actor);
    return new OwnerNetworkBulkServiceEditor(this.store,this.policy,this.clock).handle(actor,data);
+  }
+  if(validOwnerNetworkGroupCopyRoute(data)){
+   await this.cancelInput(actor);
+   return new OwnerNetworkGroupCopy(this.store,this.policy,this.clock).handle(actor,data);
   }
   if(validOwnerNetworkPolicyDiffRoute(data)){
    await this.cancelInput(actor);
