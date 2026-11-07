@@ -121,6 +121,7 @@ export class OwnerNetworkReviewInbox{
     'هذا عرض إجمالي لمجموعة معتمدة حاليًا، ولا يمثل ترخيصًا بعقوبة.\n'+
     'فتح البلاغات يخضع لفحص الأذونات مرة أخرى.',
     [[btn('🛡️ البلاغات المركزية','nw:1:w:'+id+':0')],
+     [btn('🏢 غرفة إدارة المجموعة','nw:1:rg:'+id+':'+g.chatId)],
      [btn('↩️ ملخص مراجعات الشبكة','nw:1:iq:'+id+':0)],
      [btn('🌐 بطاقة الشبكة','nw:1:d:'+id)]]);
   }
@@ -134,6 +135,7 @@ export class OwnerNetworkReviewInbox{
   if(p+1<pages)nav.push(btn('➡️ التالي','nw:1:iq:'+id+':'+(p+1)));
   if(nav.length)rows.push(nav);
   rows.push([btn('🛡️ فتح البلاغات','nw:1:w:'+id+':0')],
+   [btn('🏢 جرد غرف الإدارة','nw:1:rl:'+id+':0')],
    [btn('↩️ بطاقة الشبكة','nw:1:d:'+id)]);
   return ui('<b>🧭 صندوق مراجعات الشبكة — للمالك</b>\n'+
    'الشبكة: '+esc(view.networkName)+'\n'+
