@@ -80,6 +80,7 @@ import {OwnerGroupSettings} from './telegram-inline-group-settings.js';
 import {OwnerGroupBulkRestrict} from './telegram-inline-group-bulk-restrict.js';
 import {OwnerNetworkEditor} from './telegram-inline-networks.js';
 import {TelegramNetworkAlertEditor,validNetworkAlertRoute} from './telegram-network-alerts.js';
+import {TelegramNetworkDailyQuietEditor} from './telegram-network-daily-quiet.js';
 import {validOwnerNetworkBulkServiceRoute} from './telegram-network-bulk-services.js';
 import {validOwnerNetworkPolicyDiffRoute} from './telegram-network-differences.js';
 import {validOwnerNetworkPolicySnapshotRoute} from './telegram-network-policy-snapshots.js';
@@ -757,6 +758,16 @@ export class TelegramUpdateApplication {
      return view?{status:'APPLIED',reason:'OWNER_NETWORK_REVIEW_INBOX',
       plan:this.plan(event.actorId,view.text,undefined,view.keyboard)}
       :{status:'DENIED',reason:'OWNER_NETWORK_REVIEW_INBOX_UNAVAILABLE'};
+    }
+    if(event.kind==='private'&&event.actorId===event.chatId&&
+     event.text.startsWith('/networkquiet')&&!event.callbackData){
+     if(event.edited||event.forwarded)
+      return {status:'DENIED',reason:'NETWORK_DAILY_QUIET_ORIGINAL_PRIVATE_ONLY'};
+     const view=await new TelegramNetworkDailyQuietEditor(this.opts.store,this.opts.policy,this.clock)
+      .command(event.actorId,event.text);
+     return view?{status:'APPLIED',reason:'NETWORK_DAILY_QUIET_PREVIEW',
+      plan:this.plan(event.actorId,view.text,undefined,view.keyboard)}
+      :{status:'DENIED',reason:'NETWORK_DAILY_QUIET_INVALID_OR_UNAUTHORIZED'};
     }
     const verification=/^\/verify(?:@([A-Za-z][A-Za-z0-9_]{4,31}))?(?: (-[1-9][0-9]{0,15}))?$/u.exec(event.text);
     if(verification&&(!verification[1]||verification[1].toLowerCase()===this.opts.botUsername.toLowerCase())){
