@@ -54,7 +54,8 @@ export function networkRoomRelayScope(s:BotState,p:Policy,owner:string,
   group.version!==m.version||!group.scopes.includes('moderation')||
   !p.canUseChat(s,groupId,'moderation')||
   !p.has(s,owner,'chat.manage',groupId,now))return null;
- const target=adminRoomNotificationTarget(s,p,groupId,now);
+ // A muted room can still revoke consent; delivery checks quiet separately.
+ const target=adminRoomNotificationTarget(s,p,groupId,now,true);
  if(!target||!id(target.room)||target.room===groupId)return null;
  const rooms=s.chats.filter(c=>c.id===target.room),room=rooms[0];
  if(rooms.length!==1||!room||!room.approved||
