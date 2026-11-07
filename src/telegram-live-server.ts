@@ -21,6 +21,7 @@ import {readTelegramSafetySwitch,createTelegramSafetyGate} from './telegram-safe
 import {ModerationReportNoticeDispatcher} from './moderation-report-notices.js';
 import {NetworkEventAlertDispatcher} from './network-event-alerts.js';
 import {NetworkDailyDigestDispatcher} from './network-daily-digest-dispatch.js';
+import {NetworkRoomRelayDispatcher} from './network-room-relay-dispatch.js';
 import {RuleNoticeDispatcher} from './group-rule-notices.js';
 import {SubscriptionChangeAlertDispatcher} from './subscription-change-alert.js';
 import {SubscriptionRightsMonitor} from './subscription-rights-monitor.js';
@@ -260,6 +261,10 @@ export async function createLiveTelegramServer(config:LiveTelegramConfig,
  const subscriptionRightsMonitor=phase3&&check.phase3TimersEnabled===true?new SubscriptionRightsMonitor(store,policy,membership,Date.now,safetyGate):undefined;
  const oncall=phase3&&check.phase3TimersEnabled===true?new AdminRoomOncallDispatcher(store,policy,new TelegramBotApiTextSender(check.token,request),Date.now,safetyGate):undefined;
  const roomNotices=phase3&&check.phase3TimersEnabled===true?new AdminRoomNoticeDispatcher(store,policy,new TelegramBotApiModerationGateway(check.token,request,safetyGate),new TelegramAdminRoomNoticeSender(check.token,request),Date.now,safetyGate):undefined;
+ const networkRoomRelays=phase3&&check.phase3TimersEnabled===true?
+  new NetworkRoomRelayDispatcher(store,policy,
+   new TelegramBotApiModerationGateway(check.token,request,safetyGate),
+   new TelegramAdminRoomNoticeSender(check.token,request),Date.now,safetyGate):undefined;
  const roomDaily=phase3&&check.phase3TimersEnabled===true?new AdminRoomDailyDispatcher(store,policy,new TelegramBotApiModerationGateway(check.token,request,safetyGate),new TelegramAdminRoomNoticeSender(check.token,request),Date.now,safetyGate):undefined;
  const server=createServer(telegramWebhookListener(app,check.webhookSecret,dispatcher,{},safetyGate,
   new TelegramBotApiCallbackAcker(check.token,request)));
@@ -282,6 +287,7 @@ export async function createLiveTelegramServer(config:LiveTelegramConfig,
    if(subscriptionChangeAlerts)await subscriptionChangeAlerts.drain();
    if(oncall)await oncall.drain();
    if(roomNotices)await roomNotices.drain();
+   if(networkRoomRelays)await networkRoomRelays.drain();
    if(roomDaily)await roomDaily.drain();
    if(result.status==='CLOCK_UNTRUSTED')throw Error('PROTECTION_CLOCK_UNTRUSTED');
   },undefined,()=>process.stderr.write('PROTECTION_MAINTENANCE_FAILED\n'));
