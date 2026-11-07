@@ -3,7 +3,8 @@ import type {BotStore,BotState} from './store.js';
 import type {Policy} from './policy.js';
 import type {OwnerInlineScreen} from './telegram-inline-owner.js';
 import {topicMonitorProof,saveTopicMonitor,ownerTopicMonitor,
- topicMonitorHistory,type TopicMonitorChange,type TopicMonitorRule}
+ topicMonitorHistory,topicMonitorStats,
+ type TopicMonitorChange,type TopicMonitorRule}
  from './group-forum-topic-monitor.js';
 
 /** Owner-private, two-minute, one-shot approval for editorial rule edits.
@@ -87,7 +88,8 @@ export class TelegramOwnerForumMonitor{
   const state=await this.store.snapshot(),at=this.now();
   if(!this.allowed(state,owner,g,t,at))return null;
   const current=ownerTopicMonitor(state,this.policy,owner,g,t,at);
-  if(!current)return null;
+  const stats=topicMonitorStats(state,this.policy,owner,g,t,at);
+  if(!current||!stats)return null;
   const rules=current.rules.map((r,i)=>
    '▫️ '+(i+1)+'. '+escape(describe(r)));
   return screen('<b>🛡 مراقبة المحتوى لهذا الموضوع</b>\n'+
@@ -95,6 +97,10 @@ export class TelegramOwnerForumMonitor{
    'الوضع: '+(current.mode==='MONITOR'?'مراقبة وتدقيق فقط':'متوقف')+
    ' · المراجعة '+current.revision+'\n'+
    'القواعد الخاصة: '+current.rules.length+'/24\n'+
+   'تقرير آخر 24 ساعة (رصد محلي): '+stats.matches+
+   ' تطابق · '+stats.clear+' دون تطابق\n'+
+   'آخر رصد: '+(stats.latestAt===null?'لا يوجد':
+    new Date(stats.latestAt).toISOString().slice(0,16).replace('T',' ')+' UTC')+'\n'+
    (rules.length?rules.join('\n'):'لا توجد قواعد خاصة.')+'\n'+
    'أوامر الإضافة من خاص المالك:\n'+
    '<code>/topicguard '+g+' '+t+' word كلمة</code>\n'+
