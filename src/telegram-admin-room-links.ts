@@ -1,5 +1,5 @@
 import {randomBytes} from 'node:crypto';
-import {AdminRoomLinks,adminRoomRevokeWitness,type AdminRoomMode} from './admin-room-links.js';
+import {AdminRoomLinks,adminRoomRevokeWitness,adminRoomLinkHistory,type AdminRoomMode,type AdminRoomLinkHistoryEventKind} from './admin-room-links.js';
 import {adminRoomOncallQueueSummary} from './admin-room-oncall.js';
 import type {BotStore} from './store.js';
 import type {Policy} from './policy.js';
@@ -7,7 +7,7 @@ import type {OwnerInlineScreen} from './telegram-inline-owner.js';
 import {protectionUIEpoch,type AdminUIAccess} from './protection-ui-access.js';
 import {TelegramBotApiModerationGateway} from './telegram-moderation-gateway.js';
 const TTL=120000,PREFIX='admin-room:revoke-preview:',QUIET='admin-room:quiet-preview:',DAILY='admin-room:daily-preview:',CHECK='admin-room-check:';
-const ROUTE=/^al:1:h:(0|[1-9][0-9]{0,2})$|^al:1:([dgrxpqtso]):([A-Za-z0-9_-]{24})$|^al:1:z:([A-Za-z0-9_-]{24})$/u,NEW_ROUTE=/^al:1:n:(notifications|control|central)$/u,QUIET_CONFIRM=/^al:1:y:([A-Za-z0-9_-]{24})$/u,DAILY_CONFIRM=/^al:1:v:([A-Za-z0-9_-]{24})$/u,REVOKE_FINAL=/^al:1:w:([A-Za-z0-9_-]{24})$/u;
+const ROUTE=/^al:1:h:(0|[1-9][0-9]{0,2})$|^al:1:([dgrxpqtsol]):([A-Za-z0-9_-]{24})$|^al:1:z:([A-Za-z0-9_-]{24})$/u,NEW_ROUTE=/^al:1:n:(notifications|control|central)$/u,QUIET_CONFIRM=/^al:1:y:([A-Za-z0-9_-]{24})$/u,DAILY_CONFIRM=/^al:1:v:([A-Za-z0-9_-]{24})$/u,REVOKE_FINAL=/^al:1:w:([A-Za-z0-9_-]{24})$/u;
 export const validAdminRoomRoute=(v:string)=>ROUTE.exec(v)?.[0]===v||NEW_ROUTE.exec(v)?.[0]===v||QUIET_CONFIRM.exec(v)?.[0]===v||DAILY_CONFIRM.exec(v)?.[0]===v||REVOKE_FINAL.exec(v)?.[0]===v;
 type Screen=OwnerInlineScreen&{access:AdminUIAccess};
 const modes={NOTIFICATIONS:'إشعارات',CONTROL:'تحكم',CENTRAL:'إدارة مركزية'};
@@ -58,6 +58,31 @@ export class TelegramAdminRoomLinks{
    if(match[2]==='s'){
     if(row.status!=='ACTIVE'||row.mode!=='NOTIFICATIONS'||typeof row.daily!=='boolean'||!row.dailyWitness)return null;const token=randomBytes(18).toString('base64url'),created=await this.store.transaction(s=>{const at=this.clock();if(protectionUIEpoch(s,this.policy,actor,at)!==epoch||!Number.isSafeInteger(at)||at<now||at>8640000000000000-TTL)return false;for(const c of s.callbacks)if(c.actorId===actor&&(c.ref.startsWith(PREFIX)||c.ref.startsWith(QUIET)||c.ref.startsWith(DAILY))&&!c.used)c.revoked=true;s.callbacks.push({ref:DAILY+token,action:DAILY+row.id+':'+row.dailyWitness+':'+(row.daily?'0':'1'),chatId:'private',actorId:actor,policyVersion:0,expiresAt:at+TTL,oneShot:true,used:false,revoked:false});return true;});if(!created)return null;
     const state=await this.store.snapshot(),next=protectionUIEpoch(state,this.policy,actor,this.clock());return next?this.view(actor,row.daily?'تأكيد إيقاف الملخص اليومي لهذه الغرفة؟':'تأكيد إرسال ملخص يومي لهذه الغرفة؟ يبدأ بعد 24 ساعة، ويتضمن أعداد البلاغات والتحذيرات فقط، وقد يصل حتى عند تفعيل الوضع الصامت.',{inline_keyboard:[[{text:'✅ تأكيد',callback_data:'al:1:v:'+token}],[{text:'↩️ تفاصيل الطلب',callback_data:'al:1:d:'+row.id}]]},next):null;
+   }
+   if(match[2]==='l'){
+    const state=await this.store.snapshot(),at=this.clock();
+    const history=adminRoomLinkHistory(state,this.policy,actor,row.id,at);
+    if(!history||history.group!==row.group||history.room!==row.room)return null;
+    const labels:Record<AdminRoomLinkHistoryEventKind,string>={
+     REQUEST:'طلب إنشاء الربط',GROUP_APPROVAL:'موافقة المجموعة',
+     ROOM_APPROVAL:'موافقة الغرفة',QUIET_ON:'تفعيل الصمت',
+     QUIET_OFF:'إيقاف الصمت',DAILY_ON:'تفعيل الملخص اليومي',
+     DAILY_OFF:'إيقاف الملخص اليومي',REVOKED:'إلغاء الربط'
+    };
+    const lines=history.events.slice(0,16).map(e=>
+     '▫️ '+new Date(e.at).toISOString().slice(0,16).replace('T',' ')+
+     ' UTC — '+labels[e.kind]+
+     (e.currentlyVerified?'':' (تفويضها غير متحقق حاليًا)'));
+    return this.view(actor,'<b>🕘 سجل تفويض غرفة الإدارة</b>\n'+
+     'المجموعة: <code>'+history.group+'</code>\n'+
+     'الغرفة: <code>'+history.room+'</code>\n'+
+     'الوضع: '+modes[history.mode]+'\n'+
+     'حالة الربط الحالية: '+(history.revoked?'ملغى':history.active?'نشط':'غير نشط')+'\n'+
+     'أحدث '+Math.min(history.total,16)+' من '+history.total+' تغيير مسجل:\n'+
+     lines.join('\n')+'\n'+
+     'سجل محلي محدود؛ يتطلب إدارة المجموعة والغرفة حاليًا، ولا يعرض أسماء الطلاب أو محتوى البلاغات أو يثبت وصول Telegram.',{
+      inline_keyboard:[[{text:'↩️ تفاصيل التفويض',
+       callback_data:'al:1:d:'+row.id}]]},epoch);
    }
    if(match[2]==='o'){
     if(row.status!=='ACTIVE'||row.mode!=='NOTIFICATIONS')return null;
@@ -114,7 +139,11 @@ export class TelegramAdminRoomLinks{
     this.policy.has(before,actor,'chat.manage',row.room,now)){
      buttons.push([{text:'📨 حالة المناوبة',callback_data:'al:1:o:'+row.id}]);
     }
-    if(row.status==='ACTIVE'&&row.mode==='NOTIFICATIONS'&&this.policy.has(before,actor,'chat.manage',row.group,now)&&this.policy.privateFeature(before,'support.use',actor))buttons.push([{text:'👤 مناوبة البلاغات',callback_data:'oc:1:g:'+row.id}]);if(row.status==='ACTIVE'&&typeof row.daily==='boolean')buttons.push([{text:row.daily?'🛑 إيقاف الملخص اليومي':'📅 تفعيل الملخص اليومي',callback_data:'al:1:s:'+row.id}]);if(row.canRevoke)buttons.push([{text:'🛑 قطع التفويض',callback_data:'al:1:x:'+row.id}]);buttons.push([{text:'↩️ الطلبات',callback_data:'al:1:h:0'}]);
+    if(row.status==='ACTIVE'&&row.mode==='NOTIFICATIONS'&&this.policy.has(before,actor,'chat.manage',row.group,now)&&this.policy.privateFeature(before,'support.use',actor))buttons.push([{text:'👤 مناوبة البلاغات',callback_data:'oc:1:g:'+row.id}]);if(row.status==='ACTIVE'&&typeof row.daily==='boolean')buttons.push([{text:row.daily?'🛑 إيقاف الملخص اليومي':'📅 تفعيل الملخص اليومي',callback_data:'al:1:s:'+row.id}]);if(this.policy.has(before,actor,'chat.manage',row.group,now)&&
+     this.policy.has(before,actor,'chat.manage',row.room,now))
+    buttons.push([{text:'🕘 سجل تغييرات التفويض',
+     callback_data:'al:1:l:'+row.id}]);
+   if(row.canRevoke)buttons.push([{text:'🛑 قطع التفويض',callback_data:'al:1:x:'+row.id}]);buttons.push([{text:'↩️ الطلبات',callback_data:'al:1:h:0'}]);
    if(row.status==='ACTIVE'&&row.mode==='CONTROL'&&this.policy.has(before,actor,'chat.manage',row.group,now)&&this.policy.has(before,actor,'chat.manage',row.room,now))buttons.splice(buttons.length-1,0,[{text:'📋 بلاغات غرفة التحكم',callback_data:'rc:1:h:'+row.room+':0'}]);
    return this.view(actor,'<b>تفويض غرفة الإدارة</b>\nالمجموعة: <code>'+row.group+'</code>\nالغرفة: <code>'+row.room+'</code>\nالوضع: '+modes[row.mode]+'\nالحالة: '+statuses[row.status]+(typeof row.quiet==='boolean'?'\nالتنبيهات: '+(row.quiet?'صامتة':'مفعّلة حسب الشروط'):'')+(typeof row.daily==='boolean'?'\nالملخص اليومي: '+(row.daily?'مفعّل':'متوقف'):'')+'\nتنبيهات البلاغات والتحذيرات ونتائج إجراءات الإشراف وتعديلات الأذونات متاحة عند تشغيل العامل وتوفر شروطه. التحكم مستقل عن الإشعارات: استخدم /roomreports في الغرفة لفتح الصندوق الخاص، أو أزرار البلاغات عند ربط الإشعارات بالغرفة نفسها.\nللإدارة المركزية أرسل في الخاص: <code>/centralban '+row.room+' رقم_العضو مدة_بالثواني</code> ثم اختر المجموعات بالأزرار، أو أضف حتى 8 معرّفات مجموعات محددة للأمر لفتح المعاينة مباشرةً.\nتحتاج كل مجموعة تفويض CENTRAL مستقلًا للغرفة وصلاحيتك في الطرفين. فحص الغرفة استشاري.',{inline_keyboard:buttons},epoch);
   }
