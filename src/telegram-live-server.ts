@@ -43,6 +43,7 @@ import {TelegramReplyDispatcher,TelegramBotApiTextSender,TelegramBotApiCallbackA
 import {TelegramBotApiMembershipGateway} from './telegram-membership.js';
 import {TelegramBotApiDocumentDownloader} from './telegram-document-download.js';
 import {SubscriptionGate} from './subscription.js';
+import {subscriptionRequirementMode} from './subscription-integrity.js';
 import {ModerationService,FakeModerationGateway} from './moderation.js';
 import {readTelegramSafetySwitch,createTelegramSafetyGate} from './telegram-safety-switch.js';
 
@@ -264,7 +265,16 @@ export async function createLiveTelegramServer(config:LiveTelegramConfig,
   // Disabled by default because the group has no approved jobs until then.
   const whisperPublisher=new Phase4WhisperAnnouncementDispatcher(store,policy,
    new TelegramBotApiWhisperAnnouncementGateway(check.token,check.botUsername,request),
-   Date.now,safetyGate);
+   Date.now,safetyGate,async(groupId,memberId)=>{
+    if(await membership.verifyMembership(groupId,memberId)!=='VERIFIED')return false;
+    // The channel subscription policy is independently re-read at send time.
+    // STOP/INVALID modes never authorize a student-created group announcement.
+    const current=await store.snapshot(),mode=subscriptionRequirementMode(current,groupId);
+    if(mode==='NONE')return true;
+    if(mode!=='ACTIVE')return false;
+    const result=await subscription.verify(groupId,memberId);
+    return result.status==='MEMBER'||result.status==='NOT_REQUIRED';
+   });
   const guidePublisher=new Phase4GuidePublicationDispatcher(store,policy,
    new TelegramBotApiGuidePostGateway(check.token,request),Date.now,safetyGate);
   // 09:03: no Telegram publication/pinning without independent owner approval.
