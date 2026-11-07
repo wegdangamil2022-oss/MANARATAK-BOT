@@ -20,6 +20,7 @@ export interface NetworkRoomBridgeRow{
  readonly status:NetworkRoomBridgeStatus;
  readonly roomId:string|null;
  readonly events24h:number|null;readonly pendingReviews:number|null;
+ readonly overdue72h:number|null;
  readonly truncated:boolean;
 }
 export interface NetworkRoomBridgeSummary{
@@ -46,6 +47,8 @@ export function networkRoomBridgeSummary(
  if(!reviews)return null;
  const pendingByGroup=new Map(reviews.groups.map(g=>
   [g.chatId,g.watchPending+g.sanctionsPending]));
+ const overdueByGroup=new Map(reviews.groups.map(g=>
+  [g.chatId,g.watchOlder72h+g.sanctionsOlder72h]));
  const rows:NetworkRoomBridgeRow[]=[];
  for(const member of network.members){
   const matches=s.chats.filter(c=>c.id===member.chatId),c=matches[0];
@@ -57,7 +60,8 @@ export function networkRoomBridgeSummary(
   if(!link){
    rows.push({groupId:c.id,groupVersion:c.version,
     status:'UNLINKED',roomId:null,events24h:null,
-    pendingReviews:pendingByGroup.get(c.id)??null,truncated:false});
+    pendingReviews:pendingByGroup.get(c.id)??null,
+    overdue72h:overdueByGroup.get(c.id)??null,truncated:false});
    continue;
   }
   // Read-only proof also binds the current owner's rights over the ROOM.
@@ -67,7 +71,8 @@ export function networkRoomBridgeSummary(
   if(!witness){
    rows.push({groupId:c.id,groupVersion:c.version,
     status:'ROOM_NOT_AUTHORIZED',roomId:null,events24h:null,
-    pendingReviews:pendingByGroup.get(c.id)??null,truncated:false});
+    pendingReviews:pendingByGroup.get(c.id)??null,
+    overdue72h:overdueByGroup.get(c.id)??null,truncated:false});
    continue;
   }
   const events=networkAdministrativeEvents(s,p,actor,now,networkId,{chatId:c.id});
@@ -77,7 +82,8 @@ export function networkRoomBridgeSummary(
   rows.push({groupId:c.id,groupVersion:c.version,
    status:quiet?'QUIET':'ACTIVE',roomId:link.room,
    events24h:events.filter(e=>e.at>now-86_400_000&&e.at<=now).length,
-   pendingReviews:pendingByGroup.get(c.id)??null,truncated:events.length===200});
+   pendingReviews:pendingByGroup.get(c.id)??null,
+   overdue72h:overdueByGroup.get(c.id)??null,truncated:events.length===200});
  }
  rows.sort((a,b)=>a.groupId.localeCompare(b.groupId));
  return {networkId,networkName:network.name,
