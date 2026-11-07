@@ -9,6 +9,44 @@ const hash=(v:unknown)=>createHash('sha256').update(JSON.stringify(v)).digest('h
 const person=(v:unknown):v is string=>typeof v==='string'&&/^[1-9][0-9]{0,15}$/u.test(v)&&Number.isSafeInteger(Number(v));
 const group=(v:unknown):v is string=>typeof v==='string'&&/^-[1-9][0-9]{0,15}$/u.test(v)&&Number.isSafeInteger(Number(v));
 const time=(v:number)=>Number.isSafeInteger(v)&&v>=0&&v<=8640000000000000-86400000;
+/** ADMINLINK-009: persistent one-shot delivery ledger. A malformed or
+ * duplicate attempt/outcome cannot be treated as a clean empty queue.
+ * No report text, member ID or Telegram operation is recovered here.
+ */
+const ONCALL_SEND='admin-room:oncall-send:';
+const ONCALL_SEND_KEY=/^admin-room:oncall-send:([A-Za-z0-9_-]{24}):([a-f0-9]{64}):(primary|fallback)(:outcome)?$/u;
+function oncallSendLedgerSafe(s:BotState,now:number):boolean{
+ if(!time(now))return false;
+ const rows=s.audit.filter(a=>a.updateKey.startsWith(ONCALL_SEND));
+ if(rows.length>4000)return false;
+ const seen=new Set<string>();
+ const starts=new Map<string,(typeof rows)[number]>();
+ const outcomes=new Map<string,(typeof rows)[number]>();
+ for(const row of rows){
+  const match=ONCALL_SEND_KEY.exec(row.updateKey);
+  if(!match||seen.has(row.updateKey)||!person(row.actorId)||
+   !Number.isSafeInteger(row.policyVersion)||row.policyVersion<1||
+   !Number.isSafeInteger(row.at)||row.at<0||row.at>now)return false;
+  seen.add(row.updateKey);
+  const base=match[4]?row.updateKey.slice(0,-8):row.updateKey;
+  if(match[4]){
+   if(row.decision!=='NOOP'||!/^ADMIN_ROOM_ONCALL_(?:CONFIRMED|FAILED_CONFIRMED|UNKNOWN_OUTCOME)$/u.test(row.reason))
+    return false;
+   outcomes.set(base,row);
+  }else{
+   if(row.decision!=='ALLOW'||row.reason!=='ADMIN_ROOM_ONCALL_STARTED:'+match[2])
+    return false;
+   starts.set(base,row);
+  }
+ }
+ for(const [base,row] of outcomes){
+  const start=starts.get(base);
+  if(!start||start.actorId!==row.actorId||
+   start.policyVersion!==row.policyVersion||row.at<start.at)return false;
+ }
+ return true;
+}
+
 export type OncallOptions={primary:string;fallback:string;seconds:number;enabled:boolean};
 export type OncallSetting=OncallOptions&{key:string;group:string;link:string;actor:string;at:number;witness:string;authority:string};
 type Stored=OncallOptions&{link:string;authority:string};
@@ -68,10 +106,12 @@ export class AdminRoomOncallDispatcher{
   if(!Number.isSafeInteger(limit)||limit<1||limit>10)throw Error('ONCALL_LIMIT_INVALID');const safe=async()=>{try{return await this.safety()===true;}catch{return false;}};let count=0;
   for(let i=0;i<limit;i++){
    if(!await safe())break;
-   const job=await this.store.transaction(s=>{const now=this.clock(),a=assignments(s,this.policy,now).find(a=>{const key='admin-room:oncall-send:'+a.id+':'+a.setting.witness+':'+a.stage;return now-(a.stage==='primary'?a.at:a.deadline)<WINDOW&&!s.audit.some(x=>x.updateKey===key)&&!s.audit.some(x=>x.updateKey.startsWith('admin-room:oncall-send:')&&x.actorId===a.actor&&x.at<=now&&x.at>now-60000);});if(!a)return null;
+   const job=await this.store.transaction(s=>{const now=this.clock();
+    if(!oncallSendLedgerSafe(s,now))return null;
+    const a=assignments(s,this.policy,now).find(a=>{const key='admin-room:oncall-send:'+a.id+':'+a.setting.witness+':'+a.stage;return now-(a.stage==='primary'?a.at:a.deadline)<WINDOW&&!s.audit.some(x=>x.updateKey===key)&&!s.audit.some(x=>x.updateKey.startsWith('admin-room:oncall-send:')&&x.actorId===a.actor&&x.at<=now&&x.at>now-60000);});if(!a)return null;
     const key='admin-room:oncall-send:'+a.id+':'+a.setting.witness+':'+a.stage;s.audit.push({updateKey:key,actorId:a.actor,decision:'ALLOW',reason:'ADMIN_ROOM_ONCALL_STARTED:'+a.witness,policyVersion:this.policy.chatRevision(s,a.chat),at:now});return {...a,key,started:now};});
    if(!job)break;
-   const current=(s:BotState,now:number)=>{const rows=s.audit.filter(a=>a.updateKey===job.key),started=rows[0];return time(now)&&now>=job.started&&now-job.started<WINDOW&&assignments(s,this.policy,now).some(a=>a.id===job.id&&a.actor===job.actor&&a.stage===job.stage&&a.witness===job.witness)&&rows.length===1&&!!started&&started.actorId===job.actor&&started.decision==='ALLOW'&&started.reason==='ADMIN_ROOM_ONCALL_STARTED:'+job.witness&&started.policyVersion===this.policy.chatRevision(s,job.chat)&&started.at===job.started&&!s.audit.some(a=>a.updateKey===job.key+':outcome');};
+   const current=(s:BotState,now:number)=>{if(!oncallSendLedgerSafe(s,now))return false;const rows=s.audit.filter(a=>a.updateKey===job.key),started=rows[0];return time(now)&&now>=job.started&&now-job.started<WINDOW&&assignments(s,this.policy,now).some(a=>a.id===job.id&&a.actor===job.actor&&a.stage===job.stage&&a.witness===job.witness)&&rows.length===1&&!!started&&started.actorId===job.actor&&started.decision==='ALLOW'&&started.reason==='ADMIN_ROOM_ONCALL_STARTED:'+job.witness&&started.policyVersion===this.policy.chatRevision(s,job.chat)&&started.at===job.started&&!s.audit.some(a=>a.updateKey===job.key+':outcome');};
    if(!await safe()||!current(await this.store.snapshot(),this.clock()))continue;
    let outcome='UNKNOWN_OUTCOME';try{const result=await this.sender.send({chatId:job.actor,parseMode:'HTML',text:(job.stage==='primary'?'📨 بلاغ بانتظار استلامك كمشرف مناوب.':'🚨 تصعيد بلاغ لم يُستلم خلال المهلة. لا ينفذ التصعيد عقوبة.')+'\nالمجموعة: '+job.chat,inlineMarkup:{inline_keyboard:[[{text:'✅ استلام البلاغ',callback_data:'oc:1:a:'+job.id+':'+job.witness.slice(0,16)}],[{text:'📨 صندوق البلاغات',callback_data:'rp:1:r:0'}]]}});outcome=result.status==='CONFIRMED'&&Number.isSafeInteger(result.messageId)&&result.messageId>0?'CONFIRMED':result.status==='FAILED_CONFIRMED'?'FAILED_CONFIRMED':'UNKNOWN_OUTCOME';}catch{/* never retry */}
    await this.store.transaction(s=>{const now=this.clock();if(!s.audit.some(a=>a.updateKey===job.key+':outcome'))s.audit.push({updateKey:job.key+':outcome',actorId:job.actor,decision:'NOOP',reason:'ADMIN_ROOM_ONCALL_'+(current(s,now)?outcome:'UNKNOWN_OUTCOME'),policyVersion:this.policy.chatRevision(s,job.chat),at:time(now)?now:job.started});});count++;
