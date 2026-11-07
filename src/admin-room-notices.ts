@@ -82,6 +82,39 @@ export class TelegramAdminRoomNoticeSender{
    return response.status>=400&&response.status<500&&v.ok===false&&v.error_code===response.status?'FAILED_CONFIRMED':'UNKNOWN_OUTCOME';
   }catch{return 'UNKNOWN_OUTCOME';}
  }
+ /** NETWORK-006: fixed, identity-free network review alert. Never accepts
+  * report text, student IDs, evidence, or moderation callback buttons.
+  * Caller MUST re-check independent consent and room privacy.
+  */
+ async sendNetworkReview(group:string,room:string,
+  kind:'WATCH_CASE'|'SANCTION_REVIEW',verify:()=>Promise<boolean>):Promise<SendResult>{
+  if(!chat(group)||!chat(room)||group===room||
+   !['WATCH_CASE','SANCTION_REVIEW'].includes(kind)||
+   typeof verify!=='function')return 'NOT_SENT';
+  try{if(await verify()!==true)return 'NOT_SENT';}catch{return 'NOT_SENT';}
+  const text=kind==='WATCH_CASE'?
+   '🛡 مراجعات الشبكة\nتغيّرت حالة بلاغ للمراجعة في المجموعة '+group+
+   '. راجع سجل الشبكة في خاص البوت. ليس هذا إثبات مخالفة أو أمر عقوبة.':
+   '⚖️ مراجعات الشبكة\nتغيّرت حالة اقتراح إجراء بشري في المجموعة '+group+
+   '. افتح سجل المراجعات في خاص البوت؛ لا يُنفَّذ أي حظر أو كتم بهذه الرسالة.';
+  try{
+   const response=await this.#request('https://api.telegram.org/bot'+this.#token+
+    '/sendMessage',{method:'POST',headers:{'content-type':'application/json'},
+    body:JSON.stringify({chat_id:room,text,link_preview_options:{is_disabled:true}}),
+    redirect:'error',signal:AbortSignal.timeout(8000)});
+   const raw=await response.text();if(raw.length>16384)return 'UNKNOWN_OUTCOME';
+   const data:unknown=JSON.parse(raw);if(!obj(data))return 'UNKNOWN_OUTCOME';
+   if(response.ok&&response.status===200&&data.ok===true&&obj(data.result)){
+    const message=data.result;
+    return obj(message.chat)&&message.chat.id===Number(room)&&
+     obj(message.from)&&message.from.id===this.#botId&&message.from.is_bot===true&&
+     typeof message.message_id==='number'&&Number.isSafeInteger(message.message_id)&&
+     message.message_id>0?'CONFIRMED':'UNKNOWN_OUTCOME';
+   }
+   return response.status>=400&&response.status<500&&data.ok===false&&
+    data.error_code===response.status?'FAILED_CONFIRMED':'UNKNOWN_OUTCOME';
+  }catch{return 'UNKNOWN_OUTCOME';}
+ }
  async sendDaily(target:AdminRoomDailyTarget,verify:()=>Promise<boolean>):Promise<SendResult>{
   try{target=structuredClone(target);}catch{return 'NOT_SENT';}
   if(!target?.summary||!['reports','warnings','actions','changes','failures','incidents'].every(k=>Number.isSafeInteger(target.summary[k as keyof typeof target.summary])&&Number(target.summary[k as keyof typeof target.summary])>=0&&Number(target.summary[k as keyof typeof target.summary])<=1000000))return 'NOT_SENT';
