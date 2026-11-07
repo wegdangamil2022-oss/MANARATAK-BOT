@@ -2,6 +2,7 @@ import {randomBytes} from 'node:crypto';
 import type {BotStore,BotState} from './store.js';
 import type {Policy} from './policy.js';
 import type {OwnerInlineScreen} from './telegram-inline-owner.js';
+import {TelegramBotApiModerationGateway} from './telegram-moderation-gateway.js';
 import {forumTopicGroupAccess,localForumTopics,
  forumTopicRegistrationProof,registerLocalForumTopic,validForumTopicTitle,
  forumTopicNote,forumTopicNoteProof,saveLocalForumTopicNote,validForumTopicNote,
@@ -23,6 +24,7 @@ const chat='(-[1-9][0-9]{0,15})',thread='([1-9][0-9]{0,9})',
 const HOME=new RegExp('^ft:1:h:'+page+'$','u');
 const GROUP=new RegExp('^ft:1:g:'+chat+':'+page+'$','u');
 const DETAIL=new RegExp('^ft:1:d:'+chat+':'+thread+'$','u');
+const LIVE=new RegExp('^ft:1:f:'+chat+':'+thread+'$','u');
 const HISTORY=new RegExp('^ft:1:v:'+chat+':'+thread+':'+page+'$','u');
 const CONFIRM=new RegExp('^ft:1:c:'+token+'$','u');
 const CANCEL=new RegExp('^ft:1:x:'+token+'$','u');
@@ -101,6 +103,7 @@ function parsePolicy(value:unknown):PendingPolicy|null{
 export function validOwnerForumTopicRoute(value:unknown):boolean{
  return typeof value==='string'&&Buffer.byteLength(value,'utf8')<=64&&
   (HOME.test(value)||GROUP.test(value)||DETAIL.test(value)||
+   LIVE.test(value)||
    HISTORY.test(value)||
    CONFIRM.test(value)||CANCEL.test(value)||
    NOTE_CONFIRM.test(value)||NOTE_CANCEL.test(value)||
@@ -109,7 +112,9 @@ export function validOwnerForumTopicRoute(value:unknown):boolean{
 }
 export class OwnerForumTopicEditor{
  constructor(private readonly store:BotStore,private readonly policy:Policy,
-  private readonly clock:()=>number=Date.now){}
+  private readonly clock:()=>number=Date.now,
+  private readonly gateway?:TelegramBotApiModerationGateway,
+  private readonly safety:()=>Promise<boolean>=async()=>false){}
  private access(s:BotState,actor:string,now:number):boolean{
   return clock(now)&&person(actor)&&this.policy.isOwner(actor)&&
    this.policy.privateFeature(s,'owner.dashboard',actor);
@@ -184,7 +189,8 @@ export class OwnerForumTopicEditor{
    (note?'\nمراجعة الملاحظة المحلية: '+note.revision:'')+
    '\nلإضافة ملاحظة: <code>/topicnote '+g+' '+t+' النص_التحريري</code>'+
    '\nلا يسمح هذا السجل بإرسال رسائل أو فرض سياسات مستقلة؛ يلزم التأكد من نوع المجموعة وصلاحية الموضوع الحية.',
-   [[btn(education.mode==='PAUSED'?'▶️ استئناف تصفح الموضوع':'⏸ إيقاف التصفح في الموضوع',
+   [[btn('🔎 فحص صلاحيات Telegram الحية','ft:1:f:'+g+':'+t)],
+    [btn(education.mode==='PAUSED'?'▶️ استئناف تصفح الموضوع':'⏸ إيقاف التصفح في الموضوع',
       'ft:1:p:'+g+':'+t+':'+(education.mode==='PAUSED'?'0':'1'))],
     [btn('🕘 سجل مراجعات سياسة التصفح','ft:1:j:'+g+':'+t+':0')],
     [btn('🕘 سجل مراجعات الملاحظة','ft:1:v:'+g+':'+t+':0')],
@@ -293,6 +299,58 @@ export class OwnerForumTopicEditor{
    return this.detail(s,actor,now,p.group,p.thread);
   });
  }
+ /** Advisory live rights only. No topic-close or Telegram send side effect.
+  * The official getChat/getChatMember observations do not prove that the
+  * particular message_thread_id exists or is currently open.
+  */
+ private async live(actor:string,g:string,t:number):Promise<OwnerInlineScreen|null>{
+  const before=await this.store.snapshot(),start=this.clock();
+  const topic=localForumTopics(before,this.policy,actor,g,start)?.find(x=>x.threadId===t);
+  const settings=ownerForumTopicEducationPolicy(before,this.policy,actor,g,t,start);
+  if(!topic||!settings||!this.gateway)return null;
+  const proof=JSON.stringify([topic,settings,
+   before.chats.filter(c=>c.id===g),
+   before.grants.filter(x=>x.chatId===g&&x.actor===actor),
+   before.privateFeatures,before.privateSettingsRevision??0]);
+  const intact=async()=>{
+   const now=this.clock(),state=await this.store.snapshot();
+   if(!clock(now)||now<start||now>=start+TTL||
+    !this.access(state,actor,now))return false;
+   const current=localForumTopics(state,this.policy,actor,g,now)?.find(x=>x.threadId===t);
+   const config=ownerForumTopicEducationPolicy(state,this.policy,actor,g,t,now);
+   return !!current&&!!config&&JSON.stringify([current,config,
+    state.chats.filter(c=>c.id===g),
+    state.grants.filter(x=>x.chatId===g&&x.actor===actor),
+    state.privateFeatures,state.privateSettingsRevision??0])===proof;
+  };
+  const safe=async()=>{try{return await this.safety()===true;}catch{return false;}};
+  const trusted=()=>this.gateway!==undefined&&
+   TelegramBotApiModerationGateway.usesOfficialGroupProfileRead(this.gateway)&&
+   TelegramBotApiModerationGateway.usesOfficialRightsRead(this.gateway);
+  if(!trusted()||!await safe()||!await intact())return null;
+  let kind:'GROUP'|'SUPERGROUP'|'UNKNOWN'='UNKNOWN',
+      right:'GRANTED'|'DENIED'|'UNKNOWN'='UNKNOWN';
+  try{const groupProfile=await this.gateway.inspectGroupProfile(g);
+   kind=groupProfile?.kind??'UNKNOWN';}catch{/* unverified */}
+  if(!trusted()||!await safe()||!await intact())return null;
+  if(kind==='SUPERGROUP'){
+   try{const grant=await this.gateway.inspectBotAdminRights(g);
+    right=grant.manageTopics;}catch{/* unverified */}
+  }
+  if(!trusted()||!await safe()||!await intact())return null;
+  return ui('<b>🔎 فحص صلاحيات مواضيع Telegram</b>\n'+
+   'المجموعة: <code>'+g+'</code>\n'+
+   'رقم الموضوع المحلي: <code>'+t+'</code>\n'+
+   'نوع المجموعة (getChat): '+(kind==='SUPERGROUP'?'مجموعة فائقة':
+    kind==='GROUP'?'مجموعة عادية':'غير مؤكد')+'\n'+
+   'حق البوت في إدارة المواضيع (getChatMember): '+
+   (right==='GRANTED'?'متاح لحظة الفحص':
+    right==='DENIED'?'غير متاح':'غير مؤكد')+'\n'+
+   'هذه قراءة لحظية استشارية؛ لا تكشف ما إذا كان الموضوع نفسه موجودًا أو مفتوحًا، ولا تتحقق من صلاحية المشرف البشري، ولا تصرح بتنفيذ الإغلاق أو النشر.',
+   [[btn('🔄 إعادة الفحص','ft:1:f:'+g+':'+t)],
+    [btn('↩️ تفاصيل الموضوع','ft:1:d:'+g+':'+t)]]);
+ }
+
  private educationHistory(s:BotState,actor:string,now:number,
   g:string,t:number,page:number):OwnerInlineScreen|null{
   const rows=forumTopicEducationHistory(s,this.policy,actor,g,t,now);
@@ -407,6 +465,8 @@ export class OwnerForumTopicEditor{
   if(x)return this.decide(actor,x[1]!,false);
   const s=await this.store.snapshot(),now=this.clock();
   if(!this.access(s,actor,now))return null;
+  const live=LIVE.exec(data);
+  if(live)return this.live(actor,live[1]!,Number(live[2]));
   const h=HOME.exec(data);if(h)return this.home(s,actor,now,Number(h[1]));
   const g=GROUP.exec(data);
   if(g)return this.group(s,actor,now,g[1]!,Number(g[2]));
