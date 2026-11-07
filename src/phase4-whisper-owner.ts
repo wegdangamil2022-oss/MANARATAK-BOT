@@ -2,7 +2,7 @@ import {Phase4WhisperService,type WhisperDraftInput} from './phase4-whispers.js'
 import type {OwnerInlineScreen,TelegramInlineKeyboard} from './telegram-inline-owner.js';
 
 const hex='[a-f0-9]{24}';
-const route=new RegExp('^wh:1:(?:h|l:(?:0|[1-9][0-9]?)|[vaxps]:'+hex+'|c:'+hex+':[12]|r:-[1-9][0-9]{0,15}|[zykj]:'+hex+'|f:(?:0|[1-9][0-9]?)|g:-[1-9][0-9]{0,15}|o:-[1-9][0-9]{0,15}:[01])$','u');
+const route=new RegExp('^wh:1:(?:h|l:(?:0|[1-9][0-9]?)|[vaxps]:'+hex+'|c:'+hex+':[12]|r:-[1-9][0-9]{0,15}|[zykj]:'+hex+'|f:(?:0|[1-9][0-9]?)|t:(?:0|[1-9][0-9]?)|g:-[1-9][0-9]{0,15}|o:-[1-9][0-9]{0,15}:[01])$','u');
 export const validWhisperOwnerRoute=(s:unknown):s is string=>
  typeof s==='string'&&Buffer.byteLength(s,'utf8')<=64&&route.test(s);
 const escape=(s:string)=>s.replace(/&/gu,'&amp;').replace(/</gu,'&lt;')
@@ -98,6 +98,26 @@ export async function whisperOwnerScreen(
   }
   if(cmd?.kind==='REPORTS')input='wh:1:r:'+cmd.chatId;
   if(cmd?.kind==='SETTINGS')input='wh:1:o:'+cmd.chatId+':'+(cmd.enabled?'1':'0');
+  const memberReviewPage=/^wh:1:t:(0|[1-9][0-9]?)$/u.exec(input);
+  if(memberReviewPage){
+   const drafts=await service.pendingMemberDrafts(actor),
+    page=Number(memberReviewPage[1]),pages=Math.max(1,Math.ceil(drafts.length/8));
+   if(page>=pages)return null;
+   const buttons=drafts.slice(page*8,page*8+8).map(d=>[
+    btn('📝 مجموعة '+d.chatId+' · '+(d.kind==='DIRECT'?'لمستلم معين':
+      'أول '+d.seats)+' · ينتهي '+new Date(d.expiresAt).toISOString().slice(11,16),
+    'wh:1:v:'+d.id)]);
+   const nav:{text:string;callback_data:string}[]=[];
+   if(page>0)nav.push(btn('⬅️ السابق','wh:1:t:'+(page-1)));
+   if(page+1<pages)nav.push(btn('التالي ➡️','wh:1:t:'+(page+1)));
+   if(nav.length)buttons.push(nav);
+   buttons.push([list],[home]);
+   return ui('<b>📝 مراجعة مسودات الهمسات المقدمة من الطلاب</b>\n'+
+    'المعلقة حاليًا: '+drafts.length+' · صفحة '+(page+1)+'/'+pages+
+    '\n\nالمراجعة تتم في خاص المالك فقط. افتح المسودة للاطلاع على النص، '+ 
+    'ثم اعتمادها محليًا أو إغلاقها. ولا يُنشر إعلان دون موافقة مستقلة أخرى.',
+    buttons);
+  }
   const groupPage=/^wh:1:f:(0|[1-9][0-9]?)$/u.exec(input);
   if(groupPage){
    const groups=await service.ownerGroups(actor),page=Number(groupPage[1]),
@@ -217,6 +237,7 @@ export async function whisperOwnerScreen(
    if(page>0)nav.push(btn('⬅️ السابق','wh:1:l:'+(page-1)));
    if(page+1<pages)nav.push(btn('التالي ➡️','wh:1:l:'+(page+1)));
    if(nav.length)buttons.push(nav);
+   buttons.push([btn('📝 مسودات الطلاب بانتظار المراجعة','wh:1:t:0')]);
    buttons.push([btn('⚙️ إدارة المجموعات ومسودات الطلاب','wh:1:f:0')]);
    buttons.push([home]);
    return ui('<b>💌 الهمسات الخاصة — القسم 09:06</b>\n'+
