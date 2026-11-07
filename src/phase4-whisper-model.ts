@@ -3,11 +3,22 @@
  * stores no text, user-supplied URL, secret key or outbound retry payload.
  */
 export type WhisperKind='FIRST_N'|'DIRECT'|'EVERYONE'|'ADMINS';
+/** QUESTION is a privately revealed prompt with a second explicit answer view.
+ * GIFT is a source-linked learning resource; no money, files, or rewards.
+ * Undefined purpose is the original simple MESSAGE for old stored rows.
+ */
+export type WhisperPurpose='QUESTION'|'GIFT';
+export type WhisperGiftLicense='CC0-1.0'|'CC-BY-4.0'|'CC-BY-SA-4.0';
+export interface WhisperGift{
+ resourceUrl:string;credit:string;license:WhisperGiftLicense;
+}
 export interface WhisperMessage{
  id:string;chatId:string;chatVersion:number;creatorId:string;
  kind:WhisperKind;seats:number;recipientId?:string;text?:string;
  /** Private member submission: owner explicitly reviews before publication. */
  submittedByMember?:true;approvedBy?:string;
+ /** Educational extensions are owner-authored only, never auto-licensed. */
+ purpose?:WhisperPurpose;answerText?:string;gift?:WhisperGift;
  status:'DRAFT'|'OPEN'|'CLOSED';revision:number;
  createdAt:number;expiresAt:number;approvedAt?:number;closedAt?:number;
 }
@@ -71,6 +82,34 @@ const validRevision=(x:unknown)=>typeof x==='number'&&Number.isSafeInteger(x)&&
  x>=1&&x<=9_999_999_999;
 const validTime=(x:unknown)=>typeof x==='number'&&Number.isSafeInteger(x)&&
  x>=0&&x<=8_640_000_000_000_000-600_000;
+/** Only owner-attested, direct HTTPS resource pages. Reject URL credentials,
+ * query tokens, fragments, IP/localhost addresses and URL shorteners.
+ * This checks URL hygiene, NOT license ownership or publication status.
+ */
+export function validWhisperGiftResourceUrl(x:unknown):x is string{
+ if(typeof x!=='string'||x.length<12||x.length>350||/\s/u.test(x))return false;
+ try{
+  const u=new URL(x);
+  if(u.protocol!=='https:'||u.username||u.password||u.port||u.search||
+     u.hash||!u.hostname.includes('.')||u.hostname.endsWith('.local')||
+     u.hostname.endsWith('.internal')||u.hostname.endsWith('.localhost')||
+     /^\d+(?:\.\d+){3}$/u.test(u.hostname)||u.hostname.includes(':')||
+     !/^[a-z0-9.-]+$/u.test(u.hostname)||
+     u.hostname.split('.').some(p=>p.length<1||p.length>63||
+       !/^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/u.test(p))||
+     ['bit.ly','tinyurl.com','t.co','goo.gl','is.gd','cutt.ly'].includes(u.hostname))
+   return false;
+  return u.pathname.length<=240;
+ }catch{return false;}
+}
+export function validWhisperGift(x:unknown):x is WhisperGift{
+ if(!record(x)||!exact(x,['resourceUrl','credit','license']))return false;
+ return validWhisperGiftResourceUrl(x.resourceUrl)&&
+  typeof x.credit==='string'&&x.credit.length>=3&&x.credit.length<=120&&
+  x.credit.trim()===x.credit&&
+  !/[\u0000-\u001f\u007f\u202a-\u202e\u2066-\u2069]/u.test(x.credit)&&
+  ['CC0-1.0','CC-BY-4.0','CC-BY-SA-4.0'].includes(String(x.license));
+}
 const validText=(x:unknown)=>typeof x==='string'&&
  x.length>=1&&x.length<=800&&x.trim()===x&&
  !/[\u0000-\u001f\u007f\u202a-\u202e\u2066-\u2069]/u.test(x);
@@ -78,7 +117,7 @@ export function validWhisperMessage(raw:unknown):raw is WhisperMessage{
  if(!record(raw)||!exact(raw,
   ['id','chatId','chatVersion','creatorId','kind','seats','status',
    'revision','createdAt','expiresAt'],
-  ['recipientId','text','approvedAt','closedAt','submittedByMember','approvedBy']))return false;
+  ['recipientId','text','approvedAt','closedAt','submittedByMember','approvedBy','purpose','answerText','gift']))return false;
  const x=raw;
  if(!validId(x.id)||!validChat(x.chatId)||!validRevision(x.chatVersion)||
   !validUser(x.creatorId)||!['FIRST_N','DIRECT','EVERYONE','ADMINS'].includes(String(x.kind))||
@@ -89,6 +128,15 @@ export function validWhisperMessage(raw:unknown):raw is WhisperMessage{
   Number(x.expiresAt)<=Number(x.createdAt)||
   Number(x.expiresAt)>Number(x.createdAt)+3_600_000||
   !['DRAFT','OPEN','CLOSED'].includes(String(x.status)))return false;
+ if(x.purpose!==undefined&&!['QUESTION','GIFT'].includes(String(x.purpose)))return false;
+ if(x.purpose==='QUESTION'&&(
+    x.kind!=='FIRST_N'||x.submittedByMember===true||
+    !validText(x.answerText)||x.gift!==undefined))return false;
+ if(x.purpose==='GIFT'&&(
+    x.kind!=='FIRST_N'||x.submittedByMember===true||
+    !validWhisperGift(x.gift)||x.answerText!==undefined))return false;
+ if(x.purpose===undefined&&
+    (x.answerText!==undefined||x.gift!==undefined))return false;
  if(x.submittedByMember!==undefined&&x.submittedByMember!==true)return false;
  if(x.approvedBy!==undefined&&!validUser(x.approvedBy))return false;
  if(x.submittedByMember===true&&x.approvedBy===x.creatorId)return false;
@@ -105,7 +153,8 @@ export function validWhisperMessage(raw:unknown):raw is WhisperMessage{
    (x.submittedByMember!==true||validUser(x.approvedBy))&&
    Number(x.approvedAt)>=Number(x.createdAt)&&
    Number(x.approvedAt)<Number(x.expiresAt)&&x.closedAt===undefined;
- if(x.text!==undefined||!validTime(x.closedAt)||
+ if(x.text!==undefined||x.answerText!==undefined||x.gift!==undefined||
+   !validTime(x.closedAt)||
   Number(x.closedAt)<Number(x.createdAt))return false;
  if(x.approvedAt===undefined)return x.revision===2&&x.approvedBy===undefined;
  if(x.submittedByMember===true&&!validUser(x.approvedBy))return false;
