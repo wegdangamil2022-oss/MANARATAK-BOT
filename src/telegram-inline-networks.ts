@@ -9,6 +9,8 @@ import {decideNetworkEmergency,networkEmergencyStopped} from './network-emergenc
 import {pauseSelectedNetworkPolicyLinks} from './network-bulk-policy-pause.js';
 import {OwnerNetworkBulkServiceEditor,validOwnerNetworkBulkServiceRoute}
  from './telegram-network-bulk-services.js';
+import {OwnerNetworkSelectedPolicyFollow,validOwnerNetworkSelectedFollowRoute}
+ from './telegram-network-policy-select.js';
 import {OwnerNetworkPolicyDiffEditor,validOwnerNetworkPolicyDiffRoute}
  from './telegram-network-differences.js';
 import {OwnerNetworkGroupCopy,validOwnerNetworkGroupCopyRoute}
@@ -74,6 +76,7 @@ export function validOwnerNetworkRoute(data:unknown):boolean{
  if(typeof data!=='string'||Buffer.byteLength(data,'utf8')>64)return false;
  return data==='mi:1:i:01:03'||home.test(data)||begin.test(data)||validOwnerNetworkWatchRoute(data)||
    validOwnerNetworkBulkServiceRoute(data)||validOwnerNetworkGroupCopyRoute(data)||
+   validOwnerNetworkSelectedFollowRoute(data)||
    validOwnerNetworkPolicyDiffRoute(data)||validOwnerNetworkPolicySnapshotRoute(data)||
    validOwnerNetworkPolicyRestoreRoute(data)||
    validOwnerNetworkSanctionRoute(data)||
@@ -185,12 +188,13 @@ export class OwnerNetworkEditor{
   const sources=this.availablePolicySources(s,actor,now,n),pages=Math.max(1,Math.ceil(sources.length/SIZE));
   if(p>=pages)return null;
   const rows=sources.slice(p*SIZE,(p+1)*SIZE).map(x=>
-   [btn('📑 سياسة المجموعة '+x.id,'nw:1:z:'+n.id+':'+x.id+':'+p)]);
+   [btn('📑 كل المؤهلات '+x.id,'nw:1:z:'+n.id+':'+x.id+':'+p),
+    btn('🎯 اختيار مجموعة','nw:1:ps:'+n.id+':'+x.id+':0')]);
   if(p>0)rows.push([btn('⬅️ السابق','nw:1:y:'+id+':'+(p-1))]);
   if(p+1<pages)rows.push([btn('➡️ التالي','nw:1:y:'+id+':'+(p+1))]);
   rows.push([btn('↩️ بطاقة الشبكة','nw:1:d:'+id)]);
   return ui('<b>📑 سياسات شبكة '+escape(n.name)+'</b>\nاختر مصدر مراقبة معتمدًا؛ لا تنقل هذه الميزة عقوبات ولا تفعّل ENFORCE.\n'+
-   (sources.length?'اختر مجموعة لمعاينة النسخ إلى المجموعات بلا سياسة محلية.':'لا توجد مصادر سياسات مؤهلة بعد.')+
+   (sources.length?'اختر «كل المؤهلات» للمعاينة الجماعية، أو «اختيار مجموعة» لتوريث السياسة لمجموعة واحدة دون تغيير البقية.':'لا توجد مصادر سياسات مؤهلة بعد.')+
    '\nالمصادر: '+sources.length+' · صفحة '+(p+1)+'/'+pages,rows);
  }
  private async previewPolicy(actor:string,networkId:string,sourceId:string,p:number):Promise<OwnerInlineScreen|null>{
@@ -1304,6 +1308,10 @@ export class OwnerNetworkEditor{
   if(validOwnerNetworkBulkServiceRoute(data)){
    await this.cancelInput(actor);
    return new OwnerNetworkBulkServiceEditor(this.store,this.policy,this.clock).handle(actor,data);
+  }
+  if(validOwnerNetworkSelectedFollowRoute(data)){
+   await this.cancelInput(actor);
+   return new OwnerNetworkSelectedPolicyFollow(this.store,this.policy,this.clock).handle(actor,data);
   }
   if(validOwnerNetworkGroupCopyRoute(data)){
    await this.cancelInput(actor);
