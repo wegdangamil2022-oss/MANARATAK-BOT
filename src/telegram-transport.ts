@@ -749,6 +749,18 @@ export class TelegramUpdateApplication {
       :{status:'DENIED',reason:'OWNER_NETWORK_GROUP_COPY_UNAVAILABLE'};
     }
     if(event.kind==='private'&&event.actorId===event.chatId&&
+     event.text.startsWith('/networkrooms')&&!event.callbackData){
+     if(!this.opts.policy.isOwner(event.actorId)||event.edited||event.forwarded)
+      return {status:'DENIED',reason:'OWNER_NETWORK_ROOMS_PRIVATE_ORIGINAL_ONLY'};
+     const m=/^\/networkrooms ([a-f0-9]{12})$/u.exec(event.text);
+     if(!m)return {status:'DENIED',reason:'OWNER_NETWORK_ROOMS_INVALID_COMMAND'};
+     const view=await new OwnerNetworkEditor(this.opts.store,this.opts.policy,this.clock)
+      .handle(event.actorId,'nw:1:rl:'+m[1]+':0');
+     return view?{status:'APPLIED',reason:'OWNER_NETWORK_ADMIN_ROOM_INVENTORY',
+      plan:this.plan(event.actorId,view.text,undefined,view.keyboard)}
+      :{status:'DENIED',reason:'OWNER_NETWORK_ROOMS_STALE_OR_UNAVAILABLE'};
+    }
+    if(event.kind==='private'&&event.actorId===event.chatId&&
      event.text.startsWith('/networkhealth')&&!event.callbackData){
      if(!this.opts.policy.isOwner(event.actorId)||event.edited||event.forwarded)
       return {status:'DENIED',reason:'OWNER_NETWORK_HEALTH_ORIGINAL_PRIVATE_ONLY'};
