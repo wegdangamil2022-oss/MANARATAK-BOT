@@ -159,6 +159,36 @@ export class Phase4WhisperService{
    s.phase4Whispers=data;return true;
   });
  }
+ /** Sender-only status for an own member-created draft. No recipient details,
+  * content, reservation IDs or list of who opened are exposed.
+  */
+ async ownStatus(memberId:string,id:string):Promise<
+  {status:'DRAFT'|'OPEN'|'CLOSED';expiresAt:number;
+   announcement:'NOT_POSTED'|'QUEUED'|'SENDING'|'CONFIRMED'|
+     'FAILED_CONFIRMED'|'UNKNOWN_OUTCOME'|'SKIPPED'}|null>{
+  if(!isUser(memberId)||!/^[a-f0-9]{24}$/u.test(id))return null;
+  const s=await this.store.snapshot(),m=clone(s).messages.filter(x=>x.id===id);
+  if(m.length!==1||m[0]!.creatorId!==memberId||
+     m[0]!.submittedByMember!==true)return null;
+  const a=(clone(s).announcements??[]).filter(x=>x.messageId===id);
+  if(a.length>1)return null;
+  return {status:m[0]!.status,expiresAt:m[0]!.expiresAt,
+   announcement:a.length===1?a[0]!.status:'NOT_POSTED'};
+ }
+ /** Owner review inbox sorts pending member submissions by earliest expiry.
+  * It is never offered in public or to ordinary group members.
+  */
+ async pendingMemberDrafts(actor:string):Promise<WhisperMessage[]>{
+  const s=await this.store.snapshot();
+  if(!this.owner(s,actor))return [];
+  const now=this.clock();
+  if(!validClock(now))return [];
+  return clone(s).messages.filter(m=>
+   m.submittedByMember===true&&m.status==='DRAFT'&&m.expiresAt>now&&
+   this.scope(s,actor,m.chatId)===m.chatVersion)
+   .sort((a,b)=>a.expiresAt-b.expiresAt||a.id.localeCompare(b.id))
+   .slice(0,100).map(m=>structuredClone(m));
+ }
  async ownerGroups(actor:string):Promise<string[]>{
   const s=await this.store.snapshot();
   if(!this.owner(s,actor))return [];
