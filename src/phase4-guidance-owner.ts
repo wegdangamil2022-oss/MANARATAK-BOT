@@ -14,25 +14,27 @@ export type GuidanceOwnerCommand=
  {section:'GUIDE'|'FIXED';kind:'HOME'}|
  {section:'GUIDE'|'FIXED';kind:'GROUP';chatId:string}|
  {section:'GUIDE';kind:'EDIT';chatId:string;request:{
-  kind:'GUIDE_INTRO_SET'|'GUIDE_TOPICS_SET'|'GUIDE_INTRO_CLEAR'|'GUIDE_TOPICS_CLEAR';
+  kind:'GUIDE_INTRO_SET'|'GUIDE_TOPICS_SET'|'GUIDE_SERVICES_SET'|'GUIDE_INTRO_CLEAR'|'GUIDE_TOPICS_CLEAR'|'GUIDE_SERVICES_CLEAR';
   text?:string;
  }};
 export function parseGuidanceOwnerCommand(input:string):GuidanceOwnerCommand|null{
  if(input==='/newmemberguide')return {section:'GUIDE',kind:'HOME'};
  if(input==='/groupfixed')return {section:'FIXED',kind:'HOME'};
  if(typeof input!=='string'||input.length>460)return null;
- const set=/^\/(guideset|guidetopics) (-[1-9][0-9]{0,15}) ([^\r\n]+)$/u.exec(input);
+ const set=/^\/(guideset|guidetopics|guideservices) (-[1-9][0-9]{0,15}) ([^\r\n]+)$/u.exec(input);
  if(set&&validGuidanceGroup(set[2]!)){
-  const kind=set[1]==='guideset'?'GUIDE_INTRO_SET':'GUIDE_TOPICS_SET',
+  const kind=set[1]==='guideset'?'GUIDE_INTRO_SET':
+   set[1]==='guidetopics'?'GUIDE_TOPICS_SET':'GUIDE_SERVICES_SET',
    limit=kind==='GUIDE_INTRO_SET'?320:240;
   if(!validCommunityGuideText(set[3],limit))return null;
   return {section:'GUIDE',kind:'EDIT',chatId:set[2]!,
    request:{kind,text:set[3]!}};
  }
- const clear=/^\/(guideclear|guidetopicsclear) (-[1-9][0-9]{0,15})$/u.exec(input);
+ const clear=/^\/(guideclear|guidetopicsclear|guideservicesclear) (-[1-9][0-9]{0,15})$/u.exec(input);
  if(clear&&validGuidanceGroup(clear[2]!))return {
   section:'GUIDE',kind:'EDIT',chatId:clear[2]!,
-  request:{kind:clear[1]==='guideclear'?'GUIDE_INTRO_CLEAR':'GUIDE_TOPICS_CLEAR'}
+  request:{kind:clear[1]==='guideclear'?'GUIDE_INTRO_CLEAR':
+   clear[1]==='guidetopicsclear'?'GUIDE_TOPICS_CLEAR':'GUIDE_SERVICES_CLEAR'}
  };
  if(input.length>90)return null;
  const match=/^\/(newmemberguide|groupfixed) (-[1-9][0-9]{0,15})$/u.exec(input);
@@ -74,8 +76,10 @@ function welcome(d:GuidanceData):OwnerInlineScreen{
   'هذا الدليل للعرض عند طلب الطالب المتحقق من عضويته، ولا يُرسل عند الانضمام تلقائيًا.\n\n'+
   'لإعداد تعريف المجموعة: <code>/guideset '+d.chatId+' تعريف خاص بالمجموعة</code>\n'+
   'لتحديد المجالات: <code>/guidetopics '+d.chatId+' المنح، الدورات، الاختبارات</code>\n'+
+  'لتخصيص الخدمات: <code>/guideservices '+d.chatId+' إرشاد الطلاب ومصادر المنح</code>\n'+
   'لإزالة التعريف: <code>/guideclear '+d.chatId+'</code>\n'+
   'لإزالة المجالات: <code>/guidetopicsclear '+d.chatId+'</code>\n'+
+  'لإزالة الخدمات المخصصة: <code>/guideservicesclear '+d.chatId+'</code>\n'+
   'كل أمر يعرض معاينة خاصة ولا يُطبّق قبل موافقة مستقلة.',
   [[btn('📜 القوانين والرسائل الثابتة',group('3',d.chatId))],
    [btn('✏️ إعدادات الترحيب والروابط','p4c:1:g:'+d.chatId)],

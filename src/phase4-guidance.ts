@@ -99,6 +99,9 @@ export function renderGuidanceWelcome(data:GuidanceData):string{
   (data.config.guideTopics?guidanceEscape(data.config.guideTopics):
    data.educationTopics.length?data.educationTopics.map(x=>'▫ '+guidanceEscape(x)).join('\n'):
    'لم تُحدّد مجالات خاصة بهذه المجموعة بعد.')+'\n\n'+
+  '<b>خدمات المجموعة</b>\n'+
+  (data.config.guideServices?guidanceEscape(data.config.guideServices):
+   'الأسئلة المراجعة وروابط المصادر التعليمية، بحسب ما هو منشور ومتاح في المجموعة.')+'\n\n'+
   '◾ <b>التعرّف على المجموعة</b>: راجع القوانين وروابط المصادر المفعّلة أولًا.\n'+
   '◾ <b>المساعدة التعليمية</b>: استعرض إجابات الأسئلة الشائعة المراجعة ومصادرها، إن توفرت.\n'+
   '◾ <b>الاشتراكات</b>: التزم بمتطلبات المجموعة والقنوات الرسمية المعروضة في قسم الاشتراك.\n\n'+

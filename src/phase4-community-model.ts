@@ -66,7 +66,7 @@ export interface CommunityConfig{
  clockFormat?:CommunityClockFormat;
  calendar?:CommunityCalendar;
  /** Group-specific approved guide paragraphs; independent of welcome automation. */
- guideIntro?:string;guideTopics?:string;
+ guideIntro?:string;guideTopics?:string;guideServices?:string;
  /** Explicitly owner-approved Telegram rules page, never inferred from names. */
  rulesUrl?:string;
  /** Missing in old snapshots means disabled. */
@@ -93,7 +93,7 @@ export type CommunityDraftKind='WELCOME_TEXT'|'FAREWELL_TEXT'|'REPLY_ADD'|'REPLY
  'SERVICE_PROFILE_ON'|'SERVICE_PROFILE_OFF'|
  'REPLY_CLEANUP_ON'|'REPLY_CLEANUP_OFF'|'REPLY_CLEANUP_DELAY'|
  'RULES_LINK_SET'|'RULES_LINK_CLEAR'|
- 'GUIDE_INTRO_SET'|'GUIDE_INTRO_CLEAR'|'GUIDE_TOPICS_SET'|'GUIDE_TOPICS_CLEAR'|
+ 'GUIDE_INTRO_SET'|'GUIDE_INTRO_CLEAR'|'GUIDE_TOPICS_SET'|'GUIDE_TOPICS_CLEAR'|'GUIDE_SERVICES_SET'|'GUIDE_SERVICES_CLEAR'|
  'WELCOME_VARIANT_SET'|'WELCOME_VARIANT_CLEAR'|
  'FAREWELL_VARIANT_SET'|'FAREWELL_VARIANT_CLEAR'|'FAREWELL_REMOVED_ON'|'FAREWELL_REMOVED_OFF'|
  'WELCOME_LOCALIZED'|'FAREWELL_LOCALIZED'|'WELCOME_LOCALIZED_CLEAR'|'FAREWELL_LOCALIZED_CLEAR'|'GROUP_LANGUAGE'|'GROUP_CLOCK'|'GROUP_TIMEZONE'|'GROUP_TIMEZONE_CLEAR'|
@@ -244,7 +244,7 @@ const kinds=new Set<CommunityDraftKind>(['WELCOME_TEXT','FAREWELL_TEXT','REPLY_A
  'SERVICE_PROFILE_ON','SERVICE_PROFILE_OFF',
  'REPLY_CLEANUP_ON','REPLY_CLEANUP_OFF','REPLY_CLEANUP_DELAY',
  'RULES_LINK_SET','RULES_LINK_CLEAR',
- 'GUIDE_INTRO_SET','GUIDE_INTRO_CLEAR','GUIDE_TOPICS_SET','GUIDE_TOPICS_CLEAR',
+ 'GUIDE_INTRO_SET','GUIDE_INTRO_CLEAR','GUIDE_TOPICS_SET','GUIDE_TOPICS_CLEAR','GUIDE_SERVICES_SET','GUIDE_SERVICES_CLEAR',
  'WELCOME_VARIANT_SET','WELCOME_VARIANT_CLEAR',
  'FAREWELL_VARIANT_SET','FAREWELL_VARIANT_CLEAR','FAREWELL_REMOVED_ON','FAREWELL_REMOVED_OFF',
  'WELCOME_LOCALIZED','FAREWELL_LOCALIZED','WELCOME_LOCALIZED_CLEAR','FAREWELL_LOCALIZED_CLEAR','GROUP_LANGUAGE','GROUP_CLOCK','GROUP_TIMEZONE','GROUP_TIMEZONE_CLEAR',
@@ -289,6 +289,7 @@ export function validCommunityConfig(value:unknown):value is CommunityConfig{
   (x.rulesUrl!==undefined&&!validCommunityRulesUrl(x.rulesUrl))||
   (x.guideIntro!==undefined&&!validCommunityGuideText(x.guideIntro,320))||
   (x.guideTopics!==undefined&&!validCommunityGuideText(x.guideTopics,240))||
+  (x.guideServices!==undefined&&!validCommunityGuideText(x.guideServices,240))||
    (x.timeZone!==undefined&&!validCommunityTimeZone(x.timeZone))||
   (x.language!==undefined&&x.language!=='ar'&&x.language!=='en')||
   (x.clockFormat!==undefined&&x.clockFormat!=='12'&&x.clockFormat!=='24')||
@@ -462,6 +463,7 @@ export function validCommunityState(value:unknown):value is CommunityAutomationS
     d.kind==='GROUP_TITLE_SET'?!validCommunityProfileTitle(d.text):
     d.kind==='GUIDE_INTRO_SET'?!validCommunityGuideText(d.text,320):
     d.kind==='GUIDE_TOPICS_SET'?!validCommunityGuideText(d.text,240):
+    d.kind==='GUIDE_SERVICES_SET'?!validCommunityGuideText(d.text,240):
     !validTemplate(d.text)))||
    (d.profileEpoch!==undefined&&(!Number.isSafeInteger(d.profileEpoch)||d.profileEpoch<0||d.profileEpoch>2_000_000_000))||
    (d.trigger!==undefined&&!validText(d.trigger,80))||
@@ -507,8 +509,9 @@ export function validCommunityState(value:unknown):value is CommunityAutomationS
    d.kind==='RULES_LINK_SET'&&!validCommunityRulesUrl(d.text)||
    d.kind==='GUIDE_INTRO_SET'&&!validCommunityGuideText(d.text,320)||
    d.kind==='GUIDE_TOPICS_SET'&&!validCommunityGuideText(d.text,240)||
-   (d.kind==='GUIDE_INTRO_CLEAR'||d.kind==='GUIDE_TOPICS_CLEAR')&&
-    d.text!==undefined||
+   d.kind==='GUIDE_SERVICES_SET'&&!validCommunityGuideText(d.text,240)||
+   (d.kind==='GUIDE_INTRO_CLEAR'||d.kind==='GUIDE_TOPICS_CLEAR'||
+    d.kind==='GUIDE_SERVICES_CLEAR')&&d.text!==undefined||
    (d.kind==='WELCOME_LOCALIZED'||d.kind==='FAREWELL_LOCALIZED')&&
       (!d.language||!validTemplate(d.text))||
    (d.kind==='WELCOME_LOCALIZED_CLEAR'||d.kind==='FAREWELL_LOCALIZED_CLEAR')&&
