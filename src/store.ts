@@ -137,6 +137,12 @@ export interface TelegramReplyJob {
   * without either this or privateGroupAccess are quarantine-only on dispatch.
   */
  privateReplyKind?:'LOCAL'|'GROUP_SCOPED'|'ADMIN_SCOPED'|'LIBRARY_SCOPED'|'STUDIO_SCOPED'|'COMMUNITY_SCOPED';
+ /** Short-lived private whisper delivery witness. A public link is NOT
+  * authority: dispatcher rechecks consent, seat, sender block and OPEN state.
+  * Always deleted together with the private plan before Bot API send.
+  */
+ whisperAccess?:{whisperId:string;reservationId:string;messageRevision:number;
+  consentRevision:number;chatVersion:number;expiresAt:number};
  /** Ephemeral administrative view witness, removed before any outbound attempt. */
  adminUIAccess?:AdminUIAccess;
  /** Short-lived witness for private inline library contents. */
