@@ -7,6 +7,7 @@ import {networkAlertScope,networkAlertEnabled,networkAlertConsentProof,
  setNetworkAlertPreference,type NetworkAlertKind} from './network-event-alerts.js';
 import {networkAlertSilenceUntil,networkAlertSilenceProof,setNetworkAlertSilence}
  from './network-alert-silence.js';
+import {networkManagerDigest,type NetworkDigestHours} from './network-manager-digest.js';
 
 /** Private-chat-only caller. Each recipient consents for *their own* managed
  * group; neither an owner choice nor membership in a network grants access. */
@@ -14,6 +15,7 @@ const net='([a-f0-9]{12})',group='(-[1-9][0-9]{0,15})',page='(0|[1-9][0-9]{0,2})
 const HOME=new RegExp('^na:1:h:'+page+'$','u');
 const GROUPS=new RegExp('^na:1:g:'+net+':'+page+'$','u');
 const DETAIL=new RegExp('^na:1:d:'+net+':'+group+'$','u');
+const DIGEST=new RegExp('^na:1:q:'+net+':'+group+':(6|24)$','u');
 const PREVIEW=new RegExp('^na:1:p:'+net+':'+group+':([wrs])$','u');
 const CONFIRM=/^na:1:c:([A-Za-z0-9_-]{24})$/u;
 const CANCEL=/^na:1:x:([A-Za-z0-9_-]{24})$/u;
@@ -34,7 +36,7 @@ const names:Record<NetworkAlertKind,string>={
 };
 export function validNetworkAlertRoute(value:unknown):boolean{
  return typeof value==='string'&&Buffer.byteLength(value,'utf8')<=64&&
- [HOME,GROUPS,DETAIL,PREVIEW,CONFIRM,CANCEL,SILENCE,SILENCE_CONFIRM,SILENCE_CANCEL].some(x=>x.test(value));
+ [HOME,GROUPS,DETAIL,DIGEST,PREVIEW,CONFIRM,CANCEL,SILENCE,SILENCE_CONFIRM,SILENCE_CANCEL].some(x=>x.test(value));
 }
 interface Preview {network:string;chat:string;kind:NetworkAlertKind;
  proof:string;createdAt:number;enabled:boolean;}
@@ -120,6 +122,8 @@ export class TelegramNetworkAlertEditor{
   rows.push([btn('🔕 صمت ساعة','na:1:z:'+network+':'+chat+':1'),
    btn('🌙 صمت 8 ساعات','na:1:z:'+network+':'+chat+':8')]);
   if(silence>now)rows.push([btn('🔔 إلغاء الصمت','na:1:z:'+network+':'+chat+':0')]);
+  rows.push([btn('🧾 ملخص 6 ساعات','na:1:q:'+network+':'+chat+':6'),
+   btn('📊 ملخص 24 ساعة','na:1:q:'+network+':'+chat+':24')]);
   rows.push([btn('↩️ مجموعات الشبكة','na:1:g:'+network+':0')]);
   const statuses=(Object.keys(names) as NetworkAlertKind[]).map(kind=>
    names[kind]+': '+(networkAlertEnabled(s,this.policy,actor,network,chat,kind,now)?
@@ -129,6 +133,30 @@ export class TelegramNetworkAlertEditor{
    'الصمت المؤقت: '+(silence>now?'مفعّل حتى '+new Date(silence).toISOString().slice(0,16)+' UTC':'غير مفعّل')+'\n'+
    'استلام الرسائل اختياري وشخصي، ولا يُرسل نص البلاغ أو هوية الطالب.\n'+
    'أوقف النوع أو فعّل الصمت المؤقت في أي وقت. لا تُرسل أحداث سابقة لتفعيلك.',rows);
+ }
+ private digest(s:BotState,actor:string,now:number,
+  network:string,chat:string,hours:NetworkDigestHours):OwnerInlineScreen|null{
+  const data=networkManagerDigest(s,this.policy,actor,network,chat,now,hours);
+  if(!data)return null;
+  const status=(active:boolean)=>active?'مفعّل':'متوقف';
+  return ui('<b>🧾 الملخص الإداري للمجموعة</b>\n'+
+   'المجموعة: <code>'+escape(chat)+'</code>\n'+
+   'الفترة: آخر '+hours+' ساعات (UTC)\n'+
+   'من: '+new Date(data.since).toISOString().slice(0,16).replace('T',' ')+'\n'+
+   'إلى: '+new Date(data.at).toISOString().slice(0,16).replace('T',' ')+'\n'+
+   '• بلاغات المراجعة: '+data.watch+'\n'+
+   '• مقترحات العقوبات البشرية: '+data.sanction+'\n'+
+   '• نسخ السياسات: '+data.snapshots+'\n'+
+   'مجموع السجلات المعروضة: '+data.total+'\n'+
+   (data.truncated?'⚠️ تم بلوغ حد عرض 200 حدث؛ الأرقام قد تكون أقل من العدد الحقيقي.\n':'')+
+   'حالة الاشتراكات: بلاغات '+status(data.subscriptions.w)+
+   '، مراجعات '+status(data.subscriptions.r)+
+   '، نسخ '+status(data.subscriptions.s)+'\n'+
+   'الصمت الحالي: '+(data.silenceUntil>now?'حتى '+new Date(data.silenceUntil).toISOString().slice(0,16)+' UTC':'غير مفعّل')+'\n'+
+   'هذه أحدث حالات الأحداث المحلية المرئية، وليست تاريخ جميع انتقالاتها. '+
+   'لا يعرض الملخص هويات الطلاب أو الأدلة أو تفاصيل المخالفات ولا يرسل أي رسالة تلقائيًا.',
+   [[btn('🔄 تحديث الملخص','na:1:q:'+network+':'+chat+':'+hours)],
+    [btn('↩️ تفضيلات المجموعة','na:1:d:'+network+':'+chat)]]);
  }
  private async silencePreview(actor:string,network:string,chat:string,hours:0|1|8):
   Promise<OwnerInlineScreen|null>{
@@ -223,6 +251,7 @@ export class TelegramNetworkAlertEditor{
   const h=HOME.exec(data);if(h)return this.home(s,actor,now,Number(h[1]));
   const g=GROUPS.exec(data);if(g)return this.groups(s,actor,now,g[1]!,Number(g[2]));
   const d=DETAIL.exec(data);if(d)return this.detail(s,actor,now,d[1]!,d[2]!);
+  const q=DIGEST.exec(data);if(q)return this.digest(s,actor,now,q[1]!,q[2]!,Number(q[3]) as NetworkDigestHours);
   return null;
  }
 }
