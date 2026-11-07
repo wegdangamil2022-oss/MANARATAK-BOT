@@ -215,7 +215,8 @@ export class Phase4WhisperService{
  async submitMemberDraft(memberId:string,chatId:string,input:WhisperDraftInput):
  Promise<string|null>{
   const started=this.clock();
-  if(!validClock(started)||!isUser(memberId)||!isGroup(chatId)||!input||
+  if(!validClock(started)||!isUser(memberId)||this.policy.isOwner(memberId)||
+     !isGroup(chatId)||!input||
      !['FIRST_N','DIRECT'].includes(input.kind)||
      input.kind==='FIRST_N'&&(!Number.isSafeInteger(input.seats)||
        input.seats===undefined||input.seats<1||input.seats>3||

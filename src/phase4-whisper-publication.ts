@@ -105,7 +105,8 @@ export class Phase4WhisperAnnouncementDispatcher{
  constructor(private readonly store:BotStore,private readonly policy:Policy,
   private readonly gateway:WhisperAnnouncementGateway,
   private readonly clock:()=>number=Date.now,
-  private readonly safetyGate?:()=>Promise<boolean>){}
+  private readonly safetyGate?:()=>Promise<boolean>,
+  private readonly verifySubmittedAuthor?:(chatId:string,memberId:string)=>Promise<boolean>){}
  private async safe():Promise<boolean>{
   if(!this.safetyGate)return false;
   try{return (await this.safetyGate())===true;}catch{return false;}
@@ -120,6 +121,16 @@ export class Phase4WhisperAnnouncementDispatcher{
   if(!clockOk(this.clock())||!await this.safe())return 'PAUSED';
   let rights=false;
   try{rights=await this.gateway.canPost(rows[0]!.chatId);}catch{/* fail closed */}
+  // Member submissions require fresh verified group membership before
+  // announcing publicly, even after the owner approved the text.
+  const submitted=(snap.phase4Whispers?.messages??[]).filter(m=>
+    m.id===rows[0]!.messageId);
+  let authorEligible=false;
+  if(submitted.length===1&&submitted[0]!.submittedByMember===true&&
+     this.verifySubmittedAuthor){
+   try{authorEligible=await this.verifySubmittedAuthor(
+     submitted[0]!.chatId,submitted[0]!.creatorId)===true;}catch{/*deny*/}
+  }
   const claim=await this.store.transaction(async s=>{
    const matches=s.phase4Whispers?.announcements?.filter(a=>a.id===id)??[];
    if(matches.length!==1)throw Error('WHISPER_ANNOUNCEMENT_AMBIGUOUS');
@@ -134,6 +145,7 @@ export class Phase4WhisperAnnouncementDispatcher{
     now-item.createdAt<=180000&&m&&messages.length===1&&
     m.status==='OPEN'&&m.text!==undefined&&m.approvedAt!==undefined&&
     now<m.expiresAt&&(m.approvedBy??m.creatorId)===item.ownerId&&
+    (m.submittedByMember!==true||authorEligible)&&
     m.chatId===item.chatId&&m.chatVersion===item.chatVersion&&
     this.policy.isOwner(item.ownerId)&&
     this.policy.has(s,item.ownerId,'chat.manage',item.chatId,now)&&
