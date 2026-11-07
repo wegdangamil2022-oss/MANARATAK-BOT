@@ -3,11 +3,15 @@ import {validWhisperGiftResourceUrl} from './phase4-whisper-model.js';
 import type {OwnerInlineScreen,TelegramInlineKeyboard} from './telegram-inline-owner.js';
 
 const hex='[a-f0-9]{24}';
-const route=new RegExp('^wh:1:(?:h|l:(?:0|[1-9][0-9]?)|[vaxps]:'+hex+'|c:'+hex+':[12]|r:-[1-9][0-9]{0,15}|[zykj]:'+hex+'|f:(?:0|[1-9][0-9]?)|t:(?:0|[1-9][0-9]?)|b:(?:0|[1-9][0-9]?)|u:-[1-9][0-9]{0,15}|n:-[1-9][0-9]{0,15}:[fdamtqg]|g:-[1-9][0-9]{0,15}|o:-[1-9][0-9]{0,15}:[01])$','u');
+const route=new RegExp('^wh:1:(?:h|l:(?:0|[1-9][0-9]?)|[vaxps]:'+hex+'|rv:'+hex+':(?:0|[1-9][0-9]?)|c:'+hex+':[12]|r:-[1-9][0-9]{0,15}|[zykj]:'+hex+'|f:(?:0|[1-9][0-9]?)|t:(?:0|[1-9][0-9]?)|b:(?:0|[1-9][0-9]?)|u:-[1-9][0-9]{0,15}|n:-[1-9][0-9]{0,15}:[fdamtqg]|g:-[1-9][0-9]{0,15}|o:-[1-9][0-9]{0,15}:[01])$','u');
 export const validWhisperOwnerRoute=(s:unknown):s is string=>
  typeof s==='string'&&Buffer.byteLength(s,'utf8')<=64&&route.test(s);
 const escape=(s:string)=>s.replace(/&/gu,'&amp;').replace(/</gu,'&lt;')
  .replace(/>/gu,'&gt;').replace(/"/gu,'&quot;').replace(/'/gu,'&#39;');
+const brief=(s:string,max=160)=>{const chars=Array.from(s);
+ return escape(chars.slice(0,max).join(''))+
+   (chars.length>max?'… (المعاينة مقتطعة، افتح الصفحات لقراءة الكل)':'');
+};
 const btn=(text:string,callback_data:string)=>({text,callback_data});
 const ui=(text:string,rows:{text:string;callback_data:string}[][]):OwnerInlineScreen=>({
  text,keyboard:{inline_keyboard:rows} as TelegramInlineKeyboard
@@ -105,9 +109,9 @@ async function detail(service:Phase4WhisperService,actor:string,id:string):
   'الحالة: '+names[row.status]+'\n'+
   'تاريخ الانتهاء: '+new Date(row.expiresAt).toISOString()+'\n'+
   (row.status==='DRAFT'?
-   '\n<b>نص المسودة:</b>\n'+escape(row.text??'')+'\n'+
+   '\n<b>نص المسودة:</b>\n'+brief(row.text??'')+'\n'+
    (row.purpose==='QUESTION'?
-    '\n<b>نموذج الإجابة الخاص:</b>\n'+escape(row.answerText??'')+'\n':'')+
+    '\n<b>نموذج الإجابة الخاص:</b>\n'+brief(row.answerText??'')+'\n':'')+
    (row.purpose==='GIFT'&&row.gift?
     '\n<b>المورد:</b> '+escape(row.gift.resourceUrl)+
     '\n<b>النسب:</b> '+escape(row.gift.credit)+
@@ -122,7 +126,10 @@ async function detail(service:Phase4WhisperService,actor:string,id:string):
    publication==='FAILED_CONFIRMED'?'رفض Telegram النشر':'استبعد النظام الإعلان')+
   '\n⚠️ إعلان المجموعة لا يحتوي نص الهمسة. حجز المقعد لا يثبت التسليم أو القراءة.';
  const actions:{text:string;callback_data:string}[][]=[];
- if(row.status==='DRAFT')actions.push([btn('✅ اعتماد المسودة محليًا','wh:1:a:'+id)]);
+ if(row.status==='DRAFT'){
+  actions.push([btn('📖 مراجعة المحتوى كاملًا على صفحات','wh:1:rv:'+id+':0')]);
+  actions.push([btn('✅ اعتماد المسودة محليًا','wh:1:a:'+id)]);
+ }
  if(row.status==='OPEN'&&publication==='NOT_POSTED')
   actions.push([btn('📣 معاينة نشر إعلان المجموعة','wh:1:p:'+id)]);
  if(row.status!=='CLOSED')actions.push([btn('🔒 إغلاق وحذف النص','wh:1:x:'+id)]);
@@ -369,6 +376,38 @@ export async function whisperOwnerScreen(
     '\nبلاغات المجموعة: <code>/whisperreports GROUP_ID</code>',buttons);
   }
   if(!validWhisperOwnerRoute(input))return null;
+  const reviewPage=/^wh:1:rv:([a-f0-9]{24}):(0|[1-9][0-9]?)$/u.exec(input);
+  if(reviewPage){
+   const draft=await service.ownerView(actor,reviewPage[1]!);
+   if(!draft||draft.status!=='DRAFT'||!draft.text)return null;
+   const blocks=['متن الهمسة:\n'+draft.text];
+   if(draft.purpose==='QUESTION')
+    blocks.push('نموذج الإجابة الخاصة:\n'+(draft.answerText??''));
+   if(draft.purpose==='GIFT'&&draft.gift)
+    blocks.push('رابط المورد:\n'+draft.gift.resourceUrl+
+      '\nنسب العمل:\n'+draft.gift.credit+
+      '\nالترخيص الذي أقر به المالك:\n'+draft.gift.license);
+   if(draft.kind==='TEAM')
+    blocks.push('أعضاء الفريق المصرح لهم:\n'+(draft.recipientIds??[]).join(', '));
+   const full=Array.from(blocks.join('\n\n'));
+   // Each Unicode chunk is bounded before HTML escaping: even all '&' or
+   // apostrophes cannot exceed Telegram's 4096-byte message budget.
+   const size=220,page=Number(reviewPage[2]),pages=Math.max(1,Math.ceil(full.length/size));
+   if(page>=pages||pages>40)return null;
+   const part=escape(full.slice(page*size,(page+1)*size).join(''));
+   const nav:{text:string;callback_data:string}[]=[];
+   if(page>0)nav.push(btn('⬅️ السابق',
+    'wh:1:rv:'+draft.id+':'+(page-1)));
+   if(page+1<pages)nav.push(btn('التالي ➡️',
+    'wh:1:rv:'+draft.id+':'+(page+1)));
+   const buttons:{text:string;callback_data:string}[][]=[];
+   if(nav.length)buttons.push(nav);
+   buttons.push([btn('↩️ تفاصيل ومراجعة الاعتماد','wh:1:v:'+draft.id)],[list]);
+   return ui('<b>📖 المراجعة الكاملة لمسودة همسة</b>\n'+
+    'المجموعة: <code>'+draft.chatId+'</code> · صفحة '+(page+1)+'/'+pages+
+    '\nهذه الصفحات في خاص المالك فقط. لا يُنشر النص أو المصدر في المجموعة.\n\n'+
+    '<code>'+part+'</code>',buttons);
+  }
   const publishPreview=/^wh:1:p:([a-f0-9]{24})$/u.exec(input);
   if(publishPreview){
    const message=await service.ownerView(actor,publishPreview[1]!);
