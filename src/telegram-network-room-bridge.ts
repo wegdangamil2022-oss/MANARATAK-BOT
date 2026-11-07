@@ -57,7 +57,8 @@ export class OwnerNetworkRoomBridge{
     'والغرفة بنمط NOTIFICATIONS. \n'+
     'هذه قراءة محلية، ولا تثبت صلاحيات Telegram الحية، '+
     'ولا ترسل بلاغات أو بيانات طلاب إلى الغرفة.',
-    [[btn('🏢 إدارة روابط الغرف','al:1:h:0')],
+    [[btn('🔔 موافقة توجيه مراجعات الشبكة','nw:1:rh:'+id+':0')],
+     [btn('🏢 إدارة روابط الغرف','al:1:h:0')],
      [btn('➕ طلب ربط إشعارات جديد','al:1:n:notifications')],
      [btn('🔔 أحداث المجموعة في الشبكة','nw:1:ev:'+id+':0')],
      [btn('↩️ غرف الشبكة','nw:1:rl:'+id+':0)]]);
@@ -74,6 +75,7 @@ export class OwnerNetworkRoomBridge{
   if(pageNo+1<pages)nav.push(btn('➡️ التالي','nw:1:rl:'+id+':'+(pageNo+1)));
   if(nav.length)rows.push(nav);
   rows.push([btn('➕ ربط غرفة إشعارات','al:1:n:notifications')]);
+  rows.push([btn('🔔 مراجعة تفويض الإشعارات للغرف','nw:1:rh:'+id+':0')]);
   rows.push([btn('🏢 إدارة الغرف','al:1:h:0'),
    btn('🔔 أحداث الشبكة','nw:1:ev:'+id+':0')]);
   rows.push([btn('↩️ بطاقة الشبكة','nw:1:d:'+id)]);
@@ -87,7 +89,7 @@ export class OwnerNetworkRoomBridge{
    'لا يوجد ربط إشعارات: '+report.unlinked+
    ' · غرفة بلا تفويض صالح لهذا المالك: '+report.unauthorizedRooms+'\n'+
    'كل مجموعة وغرفة تحتاجان تفويضًا مستقلًا؛ الشبكة لا تمنح أي صلاحية.\n'+
-   'عرض محلي للقراءة فقط. لا رسائل ولا صلاحيات Telegram جديدة.',
+   'عرض حالة الربط للقراءة فقط. لتفعيل إرسال أحداث مراجعات الشبكة يلزم تفويض ثالث مستقل من المالك.',
    rows);
  }
 }
