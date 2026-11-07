@@ -244,9 +244,16 @@ export class Phase4WhisperService{
    if(items.length!==1||!row||row.status!=='DRAFT')
     throw Error('WHISPER_DRAFT_NOT_FOUND');
    if(this.scope(s,actor,row.chatId)!==row.chatVersion||
-    row.creatorId!==actor)throw Error('WHISPER_DENIED');
+    (row.submittedByMember!==true&&row.creatorId!==actor))
+    throw Error('WHISPER_DENIED');
    if(now<row.createdAt||now>=row.expiresAt)throw Error('WHISPER_DRAFT_EXPIRED');
-   row.status='OPEN';row.revision=2;row.approvedAt=now;
+   if(row.submittedByMember===true){
+    const settings=(data.settings??[]).filter(x=>x.chatId===row.chatId);
+    if(settings.length!==1||!settings[0]!.memberDraftsEnabled||
+       settings[0]!.chatVersion!==row.chatVersion)
+     throw Error('WHISPER_MEMBERS_DISABLED');
+   }
+   row.status='OPEN';row.revision=2;row.approvedAt=now;row.approvedBy=actor;
    s.phase4Whispers=data;
    return structuredClone(row);
   });
@@ -264,7 +271,8 @@ export class Phase4WhisperService{
    if(items.length!==1||!row||row.status!=='OPEN'||!row.text||
       !row.approvedAt||now<row.approvedAt||now>=row.expiresAt)
     throw Error('WHISPER_ANNOUNCE_NOT_READY');
-   if(row.creatorId!==actor||this.scope(s,actor,row.chatId)!==row.chatVersion)
+   if((row.approvedBy??row.creatorId)!==actor||
+      this.scope(s,actor,row.chatId)!==row.chatVersion)
     throw Error('WHISPER_ANNOUNCE_DENIED');
    if((data.announcements??[]).some(a=>a.messageId===id))
     throw Error('WHISPER_ANNOUNCEMENT_EXISTS');
@@ -284,7 +292,7 @@ export class Phase4WhisperService{
  async announcementStatus(actor:string,id:string):Promise<
   'NOT_POSTED'|'QUEUED'|'SENDING'|'CONFIRMED'|'FAILED_CONFIRMED'|'UNKNOWN_OUTCOME'|'SKIPPED'>{
   const s=await this.store.snapshot(),m=clone(s).messages.filter(x=>x.id===id);
-  if(m.length!==1||m[0]!.creatorId!==actor||
+  if(m.length!==1||
      this.scope(s,actor,m[0]!.chatId)!==m[0]!.chatVersion)
    throw Error('WHISPER_DENIED');
   const rows=clone(s).announcements?.filter(a=>a.messageId===id)??[];
@@ -298,8 +306,8 @@ export class Phase4WhisperService{
    const data=clone(s),matches=data.messages.filter(x=>x.id===id),row=matches[0];
    if(matches.length!==1||!row||row.status==='CLOSED'||
     expectedRevision!==undefined&&row.revision!==expectedRevision)return false;
-   if(this.scope(s,actor,row.chatId)!==row.chatVersion||
-    row.creatorId!==actor)throw Error('WHISPER_DENIED');
+   if(this.scope(s,actor,row.chatId)!==row.chatVersion)
+    throw Error('WHISPER_DENIED');
    row.closedAt=Math.max(row.createdAt,now);
    row.revision=row.status==='DRAFT'?2:3;
    row.status='CLOSED';delete row.text;
@@ -584,6 +592,9 @@ export class Phase4WhisperService{
   const now=this.clock();if(!validClock(now))return 0;
   return this.store.transaction(s=>{
    const data=clone(s);let total=0,redacted=0;
+   const draftCount=data.settingsDrafts?.length??0;
+   data.settingsDrafts=(data.settingsDrafts??[]).filter(x=>
+    x.createdAt<=now&&x.expiresAt>now);
    // A private whisper's plaintext must never remain queued after its
    // short witness expires, even if Telegram safety STOP prevents sending.
    // Do not mark attempted SENDING jobs retryable or redact unrelated DMs.
@@ -623,6 +634,7 @@ export class Phase4WhisperService{
    data.blocks=(data.blocks??[]).filter(b=>
     b.updatedAt<=now&&(b.enabled||now-b.updatedAt<86400000));
    if(total||redacted||data.messages.length!==before||
+      (data.settingsDrafts?.length??0)!==draftCount||
       (data.reports?.length??0)!==(s.phase4Whispers?.reports?.length??0)||
       (data.blocks?.length??0)!==(s.phase4Whispers?.blocks?.length??0)||
       (data.announcements?.length??0)!==(s.phase4Whispers?.announcements?.length??0))
@@ -633,8 +645,8 @@ export class Phase4WhisperService{
  /** Owner-only private preview. Never expose a stored text in public UI. */
  async ownerView(actor:string,id:string):Promise<WhisperMessage|null>{
   const s=await this.store.snapshot(),rows=clone(s).messages.filter(x=>x.id===id),row=rows[0];
-  if(rows.length!==1||!row||this.scope(s,actor,row.chatId)!==row.chatVersion||
-   row.creatorId!==actor)return null;
+  if(rows.length!==1||!row||this.scope(s,actor,row.chatId)!==row.chatVersion)
+   return null;
   return structuredClone(row);
  }
  /** Public metadata never reveals secret, recipient ID, or who reserved a seat.
