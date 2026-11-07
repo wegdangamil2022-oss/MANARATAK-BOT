@@ -1,3 +1,4 @@
+import {fileURLToPath} from 'node:url';
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {mkdtemp,rm,writeFile,readFile,symlink,chmod,lstat} from 'node:fs/promises';
@@ -20,7 +21,7 @@ async function fixture(engine:'sqlite'|'json'='json'){
  const service=()=>new ModerationPurgeService(new BotStore(file,{engine}),new Policy(new BotStore(file,{engine}),OWNER,clock),new FakePurgeGateway(),clock);
  return {dir,file,engine,store,service,close:()=>rm(dir,{recursive:true,force:true})};
 }
-const exec=promisify(execFile),cli=new URL('../src/retention-review-cli.js',import.meta.url).pathname;
+const exec=promisify(execFile),cli=fileURLToPath(new URL('../src/retention-review-cli.js',import.meta.url));
 for(const engine of ['json','sqlite'] as const){
  test(`retention local runner ${engine}: strict flags, no defaults or credential arguments`,()=>{
   const file=resolve('/tmp','manaratak-local-review.state');

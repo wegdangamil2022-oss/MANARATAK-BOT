@@ -101,3 +101,14 @@ test('partial word mode is explicit, normalized, phrase-exemption bounded and st
  const invalid=structuredClone(cfg) as any;invalid.rules[0].match='PREFIX';assert.equal(isValidProtectionPolicy(invalid),false);
  invalid.rules[0].kind='PHRASE';invalid.rules[0].match='PARTIAL';assert.equal(isValidProtectionPolicy(invalid),false);
 });
+
+test('hidden separators respect script joining, phrase exceptions and independent links',()=>{
+ const cfg=policy([{id:'hidden',kind:'HIDDEN',enabled:true,action:'REVIEW'},{id:'links',kind:'LINK',hosts:'*',enabled:true,action:'DELETE'}]);
+ for(const c of ['\u200b','\u2060','\ufeff','\u202e','\u2066'])assert.equal(evaluateProtectionRules(cfg,message('إع'+c+'لان')).status,'MATCH');
+ for(const text of ['نص عربي طبيعي','می\u200cروم','a\u200db','\ufeffنص','مثال \u202e نص','\u200bكلمة','كلمة\u200b','إِعْلان'])assert.equal(evaluateProtectionRules(cfg,message(text)).status,'CLEAR',text);
+ cfg.allowedPhrases=['شرح إعلان'];
+ assert.equal(evaluateProtectionRules(cfg,message('شرح إع\u200bلان')).status,'CLEAR');
+ assert.deepEqual(evaluateProtectionRules(cfg,message('شرح إع\u200bلان و دف\u2060ع https://evil.test')).matchedRuleIds,['hidden','links']);
+ cfg.rules[0]!.enabled=false;assert.equal(evaluateProtectionRules(cfg,message('إع\u200bلان')).status,'CLEAR');
+ assert.equal(evaluateProtectionRules({...cfg,rules:[{id:'h',kind:'HIDDEN',enabled:true,action:'REVIEW',value:'extra'}]},message('نص')).status,'INVALID_POLICY');
+});

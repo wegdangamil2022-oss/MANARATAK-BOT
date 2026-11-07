@@ -91,13 +91,15 @@ test('B4 multipart: orphaned SENDING on restart is UNKNOWN and cannot auto-retry
  const f=await create();try{
   await f.service().stage(base());
   let release!:()=>void;const waiting=new Promise<void>(resolve=>release=resolve);
-  f.pause(()=>waiting);
+  let started!:()=>void;const sending=new Promise<void>(resolve=>started=resolve);
+  f.pause(()=>{started();return waiting;});
   const pending=f.service().dispatchNext('delivery-1');
-  for(let i=0;i<40;i++){if((await f.service().inspect('delivery-1')).parts[0]?.status==='SENDING')break;await new Promise(x=>setTimeout(x,3));}
+  try{
+  await sending;
   const restarted=f.service();
   assert.equal(await restarted.recoverPending(),1);
   assert.equal((await restarted.dispatchNext('delivery-1')).status,'BLOCKED');
-  release();await pending;
+  }finally{release();await pending;}
   assert.equal(f.calls.length,1);
  }finally{await f.dispose();}
 });

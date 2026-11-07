@@ -6,6 +6,9 @@ import type {EducationAdminFacade,VerifiedAdminContext} from './education-admin.
 import {menuLabels,type TelegramReplyKeyboard} from './telegram-menu.js';
 import {OwnerTelegramGroupMenu,isOwnerGroupText} from './telegram-owner-groups.js';
 import {summarizeSubscriptionIntegrity} from './subscription-integrity.js';
+import {summarizeSubscriptionActivity} from './subscription-activity-summary.js';
+import {summarizeSubscriptionChannelIncidents} from './subscription-channel-incidents.js';
+import {summarizeChannelUnavailability} from './subscription-channel-unavailable.js';
 import {OwnerTelegramLibraryMenu,isOwnerLibraryText} from './telegram-owner-library.js';
 import {OwnerTelegramCategoryMenu,isOwnerCategoryText} from './telegram-owner-categories.js';
 import {OwnerTelegramFAQMenu,isOwnerFAQText} from './telegram-owner-faq.js';
@@ -528,6 +531,7 @@ export class OwnerTelegramMenu{
    // Owner UI is a read-only projection of current saved policy state, not
    // a substitute for the protected SQLite host audit or Telegram rights.
    const report=summarizeSubscriptionIntegrity(state);
+   const now=this.clock(),activity=summarizeSubscriptionActivity(state,now),incidents=summarizeSubscriptionChannelIncidents(state,this.policy,now),unavailable=summarizeChannelUnavailability(state,now),manualUnavailable=summarizeChannelUnavailability(state,now,'MANUAL'),resolved=activity.member+activity.notMember,deliveryTotal=activity.deliveryConfirmed+activity.deliveryUnresolved;
    return screen('<b>سلامة قواعد الاشتراك 🛡</b>\n'
     +'النطاق: '+report.stage+'\n'
     +'النتيجة المحلية: '+report.status+'\n'
@@ -540,6 +544,11 @@ export class OwnerTelegramMenu{
     +'القنوات المطلوبة المكررة: '+report.duplicateChannels+'\n'
     +'قواعد تتجاوز الحد: '+report.overLimitRules+'\n'
     +(report.reasons.length?'أسباب التنبيه: '+report.reasons.join(', ')+'\n':'')
+    +'\n<b>نتائج التحقق المسجلة خلال 24 ساعة</b>\n'
+    +(activity.available?'المتحقق منها: '+resolved+' · مكتمل: '+activity.member+' · غير مكتمل: '+activity.notMember+'\nنسبة النجاح بين النتائج المحسومة: '+(resolved?(100*activity.member/resolved).toFixed(1)+'٪':'لا توجد نتائج محسومة')+'\nتعذر التحقق: '+activity.unavailable+' · غير مطلوب: '+activity.notRequired+' · مرفوض: '+activity.denied+'\n':'العداد غير متاح بسبب الوقت.\n')
+    +(activity.available?'تأكيد Telegram لتسليم نتيجة التحقق: '+activity.deliveryConfirmed+' من '+deliveryTotal+' ('+(deliveryTotal?(100*activity.deliveryConfirmed/deliveryTotal).toFixed(1)+'٪':'لا توجد نتائج')+'). دون تأكيد محفوظ: '+activity.deliveryUnresolved+'.\n':'')
+    +(incidents.available?'\n<b>رصد القنوات المسجل خلال 24 ساعة</b>\nرصد فقد الإشراف: '+incidents.observations+' · تنبيه معلق: '+incidents.pending+' · تنبيه مؤكد: '+incidents.delivered+'\nتنبيه فشل: '+incidents.failed+' · نتيجة تنبيه غير محسومة: '+incidents.unknown+' · تنبيه أُلغي: '+incidents.cancelled+'\nتعذر فحوص الإشراف الآلية المسجلة: '+(unavailable.available?(unavailable.saturated?'على الأقل ':'')+unavailable.count:'العداد غير متاح')+'\nتعذر فحوص الإشراف اليدوية المسجلة: '+(manualUnavailable.available?(manualUnavailable.saturated?'على الأقل ':'')+manualUnavailable.count:'العداد غير متاح')+'\nهذا عدد فحوص وملاحظات تاريخية لا عدد قنوات حالية؛ قد تتكرر القناة. تعذر الفحص لا يثبت فقد الإشراف، والفترة التقريبية قد تشمل خمس دقائق إضافية.\n':'')
+    +'العداد لنتائج الفحوص المسجلة المتاحة، وقد يشمل إعادة فحص العضو نفسه؛ ليس عدد الطلاب. تأكيد التسليم لا يثبت قراءة النتيجة أو فتح صفحة الاشتراك، ونسبة الوصول غير متاحة. تعذر التحقق قد ينشأ من القناة أو الإعداد أو الاتصال ولا يثبت مخالفة.\n'
     +'هذا فحص للحالة المحفوظة فقط، وليس تحققًا حيًا من Telegram.\n'
     +'لا يمكن تفعيل البوت أو تعديل شروط الاشتراك من تقرير الفحص.',
     [ownerMenuLabels.groups,ownerMenuLabels.settings]);

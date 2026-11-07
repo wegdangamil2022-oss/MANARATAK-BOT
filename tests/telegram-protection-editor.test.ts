@@ -88,7 +88,7 @@ for(const engine of ['json','sqlite'] as const){
    const next=first.plan!.inlineMarkup!.inline_keyboard.flat().find(b=>b.callback_data.startsWith('pr:1:y:')&&b.callback_data.endsWith(':1'))!;
    assert.ok(next);const second=await f.app().handle(cb(4,next.callback_data));
    const choices=second.plan!.inlineMarkup!.inline_keyboard.flat().filter(b=>b.callback_data.startsWith('pr:1:n:'));
-   assert.equal(choices.length,5);assert.ok(isValidTelegramInlineKeyboard(second.plan!.inlineMarkup));
+   assert.equal(choices.length,7);assert.ok(choices.some(b=>b.text.includes('vCard')));assert.ok(isValidTelegramInlineKeyboard(second.plan!.inlineMarkup));
    const contact=choices[1]!;assert.match(contact.text,/اتصال/);
    const added=await f.app().handle(cb(5,contact.callback_data));
    assert.equal(added.status,'APPLIED');
@@ -98,6 +98,20 @@ for(const engine of ['json','sqlite'] as const){
    const list=await f.app().handle(cb(7,route(added,'pr:1:l:')));
    const detail=await f.app().handle(cb(8,route(list,'pr:1:r:')));
    assert.match(detail.plan!.text,/اتصال/);assert.equal(detail.plan!.inlineMarkup!.inline_keyboard.flat().some(b=>b.callback_data.startsWith('pr:1:v:')),false);
+  }finally{await f.close();}
+ });
+ test('hidden-control picker creates a disabled review rule and supports return navigation ('+engine+')',async()=>{
+  const f=await fixture();try{
+   const home=await f.app().handle(cb(900,'pr:1:h'));
+   const group=await f.app().handle(cb(901,route(home,'pr:1:g:')));
+   const first=await f.app().handle(cb(902,route(group,'pr:1:y:')));
+   const second=await f.app().handle(cb(903,route(first,'pr:1:y:')));
+   const button=second.plan!.inlineMarkup!.inline_keyboard.flat().find(b=>b.text.includes('الإخفاء'));assert.ok(button);
+   const added=await f.app().handle(cb(904,button.callback_data));assert.equal(added.status,'APPLIED');
+   const cfg=(await f.store.snapshot()).protectionPolicies![0]!.policy;
+   assert.equal(cfg.rules[0]!.kind,'HIDDEN');assert.equal(cfg.rules[0]!.enabled,false);assert.equal(cfg.rules[0]!.action,'REVIEW');
+   const list=await f.app().handle(cb(905,route(added,'pr:1:l:')));
+   assert.equal(list.status,'APPLIED');assert.ok(isValidTelegramInlineKeyboard(list.plan!.inlineMarkup));
   }finally{await f.close();}
  });
  test('allow-list controls validate domain and phrase inputs without persisting invalid values ('+engine+')',async()=>{
@@ -399,6 +413,35 @@ for(const engine of ['json','sqlite'] as const){
    const audit=(await f.store.snapshot()).audit;
    assert.equal(audit.filter(a=>a.reason.startsWith('PROTECTION_MONITOR_MATCH')).length,1);
    assert.equal(audit.filter(a=>a.reason==='PROTECTION_MONITOR_INPUT_UNAVAILABLE').length,1);
+  }finally{await f.close();}
+ });
+ test('hidden-control monitoring covers text, captions and edits without persisting payloads ('+engine+')',async()=>{
+  const f=await fixture();try{
+   await new GroupProtectionPolicyService(f.store,f.policy,()=>NOW).save('100',{chatId:CHAT,revision:1,mode:'MONITOR',rules:[{id:'hidden',kind:'HIDDEN',enabled:true,action:'REVIEW'}],allowedDomains:[],allowedPhrases:[],exemptMemberIds:[]},f.policy.chatRevision(await f.store.snapshot(),CHAT),0);
+   const base={message_id:760,chat:{id:Number(CHAT),type:'supergroup'},from:{id:300,is_bot:false}};
+   const incoming={update_id:760,message:{...base,text:'PRIVATE\u200bSOURCE'}};
+   await f.app().handle(incoming);await f.app().handle(incoming);
+   await f.app().handle({update_id:761,message:{...base,message_id:761,photo:[{file_id:'HIDDEN_PRIVATE_FILE'}],caption:'إع\u2060لان'}});
+   await f.app().handle({update_id:762,edited_message:{...base,edit_date:Math.floor(NOW/1000),text:'دف\u202eع'}});
+   await f.app().handle({update_id:763,message:{...base,message_id:763,text:'می\u200cروم'}});
+   const state=await f.store.snapshot();assert.equal(state.audit.filter(a=>a.reason.startsWith('PROTECTION_MONITOR_MATCH')).length,3);
+   assert.equal(JSON.stringify(state).includes('SOURCE'),false);assert.equal(JSON.stringify(state).includes('HIDDEN_PRIVATE_FILE'),false);
+  }finally{await f.close();}
+ });
+ test('phone-number and vCard rules observe incoming text, captions and edits without persisting sensitive data ('+engine+')',async()=>{
+  const f=await fixture();try{
+   await new GroupProtectionPolicyService(f.store,f.policy,()=>NOW).save('100',{chatId:CHAT,revision:1,mode:'MONITOR',rules:[{id:'phone',kind:'PHONE',enabled:true,action:'REVIEW'}],allowedDomains:[],allowedPhrases:[],exemptMemberIds:[]},f.policy.chatRevision(await f.store.snapshot(),CHAT),0);
+   const base={message_id:700,chat:{id:Number(CHAT),type:'supergroup'},from:{id:300,is_bot:false}};
+   await f.app().handle({update_id:700,message:{...base,text:'اتصل 712345678',entities:[{type:'phone_number',offset:5,length:9}]}});
+   await f.app().handle({update_id:701,message:{...base,photo:[{file_id:'private-file-id'}],caption:'هاتف +967 712 345 678'}});
+   await f.app().handle({update_id:702,edited_message:{...base,edit_date:Math.floor(NOW/1000),text:'BEGIN:VCARD\nFN:PRIVATE NAME\nEND:VCARD'}});
+   await f.app().handle({update_id:703,message:{...base,document:{file_id:'private-file-id',file_name:'private-person.VCF',mime_type:'application/octet-stream'}}});
+   await f.app().handle({update_id:704,message:{...base,document:{file_id:'private-file-id',file_name:'other.dat',mime_type:'text/vcard'}}});
+   await f.app().handle({update_id:705,message:{...base,document:{file_id:'private-file-id',file_name:'normal.pdf',mime_type:'application/pdf'}}});
+   await f.app().handle({update_id:706,message:{...base,text:'اتصل',entities:[{type:'text_link',offset:0,length:4,url:'tel:+967712345678'}]}});
+   await f.app().handle({update_id:707,message:{...base,text:'اتصل',entities:[{type:'text_link',offset:0,length:4,url:'tel:+123'}]}});
+   await f.app().handle({update_id:708,message:{...base,contact:{phone_number:'PRIVATE_CONTACT_PHONE',first_name:'PRIVATE_CONTACT_NAME',vcard:'PRIVATE_CONTACT_VCARD'}}});
+   const state=await f.store.snapshot();assert.equal(state.audit.filter(a=>a.reason.startsWith('PROTECTION_MONITOR_MATCH')).length,7);assert.equal(state.audit.filter(a=>a.reason==='PROTECTION_MONITOR_INPUT_UNAVAILABLE').length,1);for(const value of ['712345678','PRIVATE NAME','private-file-id','private-person.VCF','PRIVATE_CONTACT_PHONE','PRIVATE_CONTACT_NAME','PRIVATE_CONTACT_VCARD'])assert.equal(JSON.stringify(state).includes(value),false);
   }finally{await f.close();}
  });
  test('revoked groups and protected operators do not enter incoming text analysis ('+engine+')',async()=>{
@@ -755,6 +798,31 @@ for(const engine of ['json','sqlite'] as const){
    assert.equal((await service.save('100',{...old,revision:old.revision+1,mode:'MONITOR',rules:old.rules.map(r=>({...r,enabled:true}))},f.policy.chatRevision(await f.store.snapshot(),CHAT),old.revision)).status,'SAVED');
    await f.app().handle({update_id:14,message:{message_id:14,chat:{id:Number(CHAT),type:'supergroup'},from:{id:300,is_bot:false},text:'زيارة',entities:[{type:'text_link',offset:0,length:5,url:'https://sch0ol.edu'}]}});
    const state=await f.store.snapshot();assert.ok(state.audit.some(a=>a.reason.startsWith('PROTECTION_MONITOR_MATCH:')));assert.equal(JSON.stringify(state).includes('sch0ol.edu'),false);
+  }finally{await f.close();}
+ });
+ test('rule-specific exception buttons run through private transport and reject changed policies ('+engine+')',async()=>{
+  const f=await fixture();try{
+   const service=new GroupProtectionPolicyService(f.store,f.policy,()=>NOW),chatRevision=f.policy.chatRevision(await f.store.snapshot(),CHAT),config={chatId:CHAT,revision:1,mode:'MONITOR' as const,rules:[{id:'sample',kind:'WORD' as const,value:'spam',enabled:true,action:'WARN' as const}],allowedDomains:[],allowedPhrases:[],exemptMemberIds:[]};assert.equal((await service.save('100',config,chatRevision,0)).status,'SAVED');
+   const open=async(id:number)=>{const h=await f.app().handle(cb(id,'pr:1:h')),g=await f.app().handle(cb(id+1,route(h,'pr:1:g:'))),l=await f.app().handle(cb(id+2,route(g,'pr:1:l:')));return f.app().handle(cb(id+3,route(l,'pr:1:r:')));};
+   let d=await open(201);const begin=await f.app().handle(cb(205,route(d,'pr:1:G:')));assert.equal(begin.status,'APPLIED');await f.app().handle(cb(206,'pr:1:h'));assert.equal((await f.app().handle(msg(207,'300 60'))).reason==='PROTECTION_RULE_SAVED',false);assert.equal((await f.store.snapshot()).protectionPolicies![0]!.policy.ruleExemptions,undefined);
+   d=await open(208);await f.app().handle(cb(212,route(d,'pr:1:G:')));const current=(await f.store.snapshot()).protectionPolicies![0]!.policy;assert.equal((await service.save('100',{...current,revision:current.revision+1,rules:[{...config.rules[0]!,value:'other'}]},chatRevision,current.revision)).status,'SAVED');assert.equal((await f.app().handle(msg(213,'300 60'))).status,'DENIED');assert.equal((await f.store.snapshot()).protectionPolicies![0]!.policy.ruleExemptions,undefined);
+   d=await open(214);await f.app().handle(cb(218,route(d,'pr:1:G:')));assert.equal((await f.app().handle(msg(219,'300 60'))).reason,'PROTECTION_RULE_SAVED');const group=await f.app().handle(cb(220,'pr:1:h')),card=await f.app().handle(cb(221,route(group,'pr:1:g:'))),picker=card.plan!.inlineMarkup!.inline_keyboard.flat().find(b=>b.text.includes('استثناءات القواعد'))!;assert.ok(picker);const list=await f.app().handle(cb(222,picker.callback_data)),preview=await f.app().handle(cb(223,route(list,'pr:1:q:')));assert.equal((await f.app().handle(cb(224,route(preview,'pr:1:k:')))).status,'APPLIED');assert.deepEqual((await f.store.snapshot()).protectionPolicies![0]!.policy.ruleExemptions,[]);
+  }finally{await f.close();}
+ });
+ test('protected username rule supports editing, testing, navigation and sender privacy ('+engine+')',async()=>{
+  const f=await fixture();try{
+   const home=await f.app().handle(cb(101,'mi:1:i:02:09')),group=await f.app().handle(cb(102,route(home,'pr:1:g:')));assert.equal((await f.app().handle(cb(103,route(group,'pr:1:M:')))).status,'APPLIED');
+   assert.equal((await f.app().handle(msg(104,'bad name | 123456'))).reason,'PROTECTION_EDITOR_INPUT_REJECTED');const saved=await f.app().handle(msg(105,'@manaratak | 123456'));assert.equal(saved.status,'APPLIED');
+   const rule=(await f.store.snapshot()).protectionPolicies![0]!.policy.rules[0]!;assert.equal(rule.kind,'USERNAME');assert.equal(rule.enabled,false);assert.equal(rule.action,'REVIEW');
+   await f.app().handle(cb(106,route(saved,'pr:1:t:')));const sample=await f.app().handle(msg(107,'معرف: manaratack'));assert.match(sample.plan!.text,/معرف مشابه مع رقم مختلف/u);
+   const old=(await f.store.snapshot()).protectionPolicies![0]!.policy,service=new GroupProtectionPolicyService(f.store,f.policy,()=>NOW);assert.equal((await service.save('100',{...old,revision:old.revision+1,mode:'MONITOR',rules:old.rules.map(r=>({...r,enabled:true}))},f.policy.chatRevision(await f.store.snapshot(),CHAT),old.revision)).status,'SAVED');
+   const send=(id:number,member:number,username:string)=>f.app().handle({update_id:id,message:{message_id:id,chat:{id:Number(CHAT),type:'supergroup'},from:{id:member,is_bot:false,username},text:'hello'}});
+   await send(108,123456,'manaratack');assert.equal((await f.store.snapshot()).audit.filter(a=>a.reason.startsWith('PROTECTION_MONITOR_MATCH:')).length,0);await send(109,300,'manaratack');let state=await f.store.snapshot();assert.equal(state.audit.filter(a=>a.reason.startsWith('PROTECTION_MONITOR_MATCH:')).length,1);assert.equal(JSON.stringify(state).includes('manaratack'),false);
+   await f.app().handle({update_id:110,message:{message_id:110,chat:{id:Number(CHAT),type:'supergroup'},from:{id:301,is_bot:false,username:'manaratak_'},photo:[{file_id:'test',file_unique_id:'one',width:10,height:10}]}});state=await f.store.snapshot();assert.equal(state.audit.filter(a=>a.reason.startsWith('PROTECTION_MONITOR_MATCH:')).length,2);assert.equal(JSON.stringify(state).includes('manaratak_'),false);
+   await f.app().handle({update_id:117,edited_message:{message_id:117,edit_date:1700000001,chat:{id:Number(CHAT),type:'supergroup'},from:{id:302,is_bot:false,username:'manaratac'},text:'hello'}});state=await f.store.snapshot();assert.equal(state.audit.filter(a=>a.reason.startsWith('PROTECTION_MONITOR_MATCH:')).length,3);assert.equal(JSON.stringify(state).includes('manaratac'),false);
+   await f.app().handle({update_id:118,message:{message_id:118,chat:{id:Number(CHAT),type:'supergroup'},from:{id:303,is_bot:false,username:'invalid\n'},text:'hello'}});state=await f.store.snapshot();assert.equal(state.audit.filter(a=>a.reason.startsWith('PROTECTION_MONITOR_MATCH:')).length,3);
+   const h=await f.app().handle(cb(111,'pr:1:h')),g=await f.app().handle(cb(112,route(h,'pr:1:g:'))),l=await f.app().handle(cb(113,route(g,'pr:1:l:'))),d=await f.app().handle(cb(114,route(l,'pr:1:r:')));assert.ok(route(d,'pr:1:e:'));assert.ok(route(d,'pr:1:d:'));assert.ok(route(d,'pr:1:v:'));
+   await f.app().handle(cb(115,route(d,'pr:1:v:')));assert.equal((await f.app().handle(msg(116,'manaratak2 | 123456'))).status,'APPLIED');const changed=(await f.store.snapshot()).protectionPolicies![0]!.policy.rules[0]!;assert.equal(changed.kind,'USERNAME');assert.equal(changed.id,rule.id);assert.equal(changed.enabled,true);
   }finally{await f.close();}
  });
  test('protected name rule checks the observed sender and never stores the observed name ('+engine+')',async()=>{

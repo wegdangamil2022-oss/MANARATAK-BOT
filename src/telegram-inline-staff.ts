@@ -1,3 +1,4 @@
+import {warningActive} from './group-rule-warning-policy.js';
 import {TelegramProtectionEditor} from './telegram-protection-editor.js';
 import type {BotStore,Chat,BotState} from './store.js';
 import type {Policy} from './policy.js';
@@ -81,7 +82,7 @@ export async function renderStaffInline(store:BotStore,policy:Policy,actor:strin
  if(!chat||chat.version!==route.version||
     !all.slice(route.page*PAGE_SIZE,(route.page+1)*PAGE_SIZE).some(c=>c.id===chat.id))
   return null;
- const warnings=state.warnings.filter(w=>w.chatId===chat.id&&w.active).length;
+ const warnings=state.warnings.filter(w=>w.chatId===chat.id&&warningActive(w,now)).length;
  const moderation=state.moderationReasons.filter(m=>m.chatId===chat.id&&m.active).length;
  const savedOperations=groupModerationOperations(state,chat.id);
  const digest=moderationAuditDigest(savedOperations);

@@ -1,0 +1,89 @@
+import {createHash} from 'node:crypto';
+import type {BotState,BotStore} from './store.js';
+import type {Policy} from './policy.js';
+import {CaptchaService} from './captcha.js';
+import {CaptchaRuleGate} from './captcha-rules.js';
+import {subscriptionRequirementMode} from './subscription-integrity.js';
+import {subscriptionVerificationEpoch} from './subscription-verification-access.js';
+
+const ROOT='onboarding:welcome:';
+const sha=(value:unknown)=>createHash('sha256').update(JSON.stringify(value)).digest('hex');
+const person=(v:string)=>/^[1-9][0-9]{0,15}$/u.exec(v)?.[0]===v&&Number.isSafeInteger(Number(v));
+const group=(v:string)=>/^-[1-9][0-9]{0,15}$/u.exec(v)?.[0]===v&&Number.isSafeInteger(Number(v));
+const validTime=(v:number)=>Number.isSafeInteger(v)&&v>=0&&v<=8640000000000000-120000;
+
+/** Records the FIRST private welcome for a fully verified, unrestricted member.
+ * This is a private reply to a user-initiated check. It NEVER sends a message,
+ * infers Telegram membership, changes moderation, or makes an owner decision. */
+export class VerifiedOnboardingWelcome{
+ private readonly rules:CaptchaRuleGate;
+ constructor(private readonly store:BotStore,private readonly policy:Policy,
+  private readonly captcha:CaptchaService,private readonly clock:()=>number){
+  this.rules=new CaptchaRuleGate(store,policy,captcha,async()=> 'UNKNOWN',clock);
+ }
+ private proof(s:BotState,chat:string,member:string,now:number,kind:'SUBSCRIPTION'|'STANDALONE'):string|null{
+  const mode=subscriptionRequirementMode(s,chat);
+  if(!group(chat)||!person(member)||!validTime(now)||this.policy.isOwner(member)||
+     this.policy.has(s,member,'chat.manage',chat,now)||
+     !this.policy.canUseChat(s,chat,'verification')||!this.policy.canUseChat(s,chat,'navigation')||
+     (kind==='SUBSCRIPTION'?mode!=='ACTIVE':mode!=='NONE'&&mode!=='PAUSED'))return null;
+  const captcha=this.captcha.status(s,chat,member),rules=this.rules.status(s,chat,member);
+  if(!['PASSED','NOT_REQUIRED'].includes(captcha)||!['ACCEPTED','NOT_REQUIRED'].includes(rules))return null;
+  if(s.moderationReasons.some(r=>r.chatId===chat&&r.memberId===member&&r.active)||
+     s.moderationOperations.some(o=>o.chatId===chat&&o.memberId===member&&
+      ['INTENT','STARTED','UNKNOWN_OUTCOME'].includes(o.status)))return null;
+  const policyEpoch=subscriptionVerificationEpoch(s,this.policy,member,chat,now);
+  if(!policyEpoch)return null;
+  // Identity is the joining member's own CAPTCHA setting/revision, NOT
+  // the mutable moderation state. An independent sanction or a later channel
+  // re-check must never send a second "first-time" welcome.
+  const challenge=this.captcha.challenge(s,chat,member),settings=this.captcha.settings(s,chat),
+   revision=this.policy.chatRevision(s,chat);
+  const session=challenge?.reference??(captcha==='PASSED'&&settings?.enabled
+   ?'captcha_'+sha([chat,member,settings.revision,revision]).slice(0,24)
+   :'CAPTCHA_NOT_REQUIRED');
+  return sha(['PRIVATE_WELCOME_V1',chat,member,revision,session]);
+ }
+ /** Call only after SubscriptionGate has verified MEMBER through Telegram.
+  * If any gate changes while the reply is being built, the claim is denied.
+  * A forged or duplicate audit key cannot re-enable a welcome. */
+ async claim(chat:string,member:string,verificationEpoch:string):Promise<boolean>{
+  const started=this.clock();
+  if(!validTime(started)||typeof verificationEpoch!=='string'||
+     !/^[a-f0-9]{64}$/u.test(verificationEpoch))return false;
+  return this.store.transaction(s=>{
+   const now=this.clock();
+   if(!validTime(now)||now<started||now>=started+120000||
+      subscriptionVerificationEpoch(s,this.policy,member,chat,now)!==verificationEpoch)return false;
+   const digest=this.proof(s,chat,member,now,'SUBSCRIPTION');
+   if(!digest)return false;
+   const key=ROOT+digest;
+   if(s.audit.some(a=>a.updateKey===key))return false;
+   s.audit.push({actorId:member,updateKey:key,decision:'ALLOW',
+    reason:'VERIFIED_PRIVATE_WELCOME:'+digest,policyVersion:this.policy.chatRevision(s,chat),at:now});
+   return true;
+  });
+ }
+ /** Called solely from the private CAPTCHA callback after CaptchaService.view
+  * performed a fresh group membership read. No subscription can be active.
+  * The expected challenge epoch keeps this a completion of the current journey,
+  * not a permission inferred from a stale reply or another member's callback. */
+ async claimStandalone(chat:string,member:string,expectedChallengeEpoch:string):Promise<boolean>{
+  const started=this.clock();
+  if(!validTime(started)||typeof expectedChallengeEpoch!=='string'||
+     !/^[a-f0-9]{64}$/u.test(expectedChallengeEpoch))return false;
+  const before=await this.store.snapshot();
+  if(subscriptionRequirementMode(before,chat)!=='NONE'&&
+     subscriptionRequirementMode(before,chat)!=='PAUSED'||this.captcha.challenge(before,chat,member)?.epoch!==expectedChallengeEpoch)return false;
+  return this.store.transaction(s=>{
+   const now=this.clock(),challenge=this.captcha.challenge(s,chat,member);
+   if(!validTime(now)||now<started||now>=started+120000||
+      challenge?.epoch!==expectedChallengeEpoch)return false;
+   const digest=this.proof(s,chat,member,now,'STANDALONE');
+   if(!digest||s.audit.some(a=>a.updateKey===ROOT+digest))return false;
+   s.audit.push({actorId:member,updateKey:ROOT+digest,decision:'ALLOW',
+    reason:'VERIFIED_PRIVATE_WELCOME:'+digest,policyVersion:this.policy.chatRevision(s,chat),at:now});
+   return true;
+  });
+ }
+}

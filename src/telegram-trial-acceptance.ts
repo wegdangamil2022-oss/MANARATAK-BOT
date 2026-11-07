@@ -57,10 +57,10 @@ export async function inspectTelegramTrialAcceptanceReadOnly(
  if(!valid(options))throw Error('TRIAL_ACCEPTANCE_INVALID_INPUT');
  let live:BotState;
  try{live=await BotStore.snapshotSqliteReadOnly(options.stateFile);}
- catch{throw Error('TRIAL_ACCEPTANCE_INVALID_STATE');}
+ catch(error){throw new Error('TRIAL_ACCEPTANCE_INVALID_STATE',{cause:error instanceof Error&&error.message==='TELEGRAM_OUTBOX_STATE_INVALID'?error:undefined});}
  let backup:BotState;
  try{backup=await BotStore.snapshotSqliteReadOnly(options.backupFile);}
- catch{throw Error('TRIAL_ACCEPTANCE_INVALID_BACKUP');}
+ catch(error){throw new Error('TRIAL_ACCEPTANCE_INVALID_BACKUP',{cause:error instanceof Error&&error.message==='TELEGRAM_OUTBOX_STATE_INVALID'?error:undefined});}
  // A filesystem hard link to the primary database is NOT an independent
  // backup. Compare device/inode after read-only validation; never trust a
  // distinct pathname alone as evidence of rollback protection.

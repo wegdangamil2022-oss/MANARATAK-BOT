@@ -7,6 +7,10 @@ type Reply={status:'OK';value:unknown}|{status:'DENIED'}|{status:'RATE';millisec
  * service. An API true means request acknowledgement, never proof of physical
  * deletion. No automatic retry or external evidence verification is offered. */
 export class TelegramBotApiPurgeGateway implements PurgeGateway{
+ static isOfficial(value:unknown):value is TelegramBotApiPurgeGateway{
+  if(!value||typeof value!=='object'||!(#token in value)||Object.getPrototypeOf(value)!==TelegramBotApiPurgeGateway.prototype)return false;
+  const gateway=value as TelegramBotApiPurgeGateway;return gateway.canDelete===officialMethods.canDelete&&gateway.deleteMessage===officialMethods.deleteMessage&&gateway.verifyEvidence===officialMethods.verifyEvidence;
+ }
  readonly #token:string;readonly #botId:number;readonly #request:typeof fetch;
  readonly #gate:()=>Promise<boolean>;
  constructor(token:string,request:typeof fetch=fetch,gate:()=>Promise<boolean>=async()=>false){
@@ -56,3 +60,5 @@ export class TelegramBotApiPurgeGateway implements PurgeGateway{
  }
  async verifyEvidence(_evidence:PurgeEvidence):Promise<boolean>{return false;}
 }
+const officialMethods=Object.freeze({canDelete:TelegramBotApiPurgeGateway.prototype.canDelete,deleteMessage:TelegramBotApiPurgeGateway.prototype.deleteMessage,verifyEvidence:TelegramBotApiPurgeGateway.prototype.verifyEvidence});
+Object.freeze(TelegramBotApiPurgeGateway);

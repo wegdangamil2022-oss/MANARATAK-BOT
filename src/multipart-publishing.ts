@@ -1,5 +1,6 @@
 import { randomUUID, createHash } from 'node:crypto';
-import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { renameStateAtomically } from './atomic-json-rename.js';
 import { dirname } from 'node:path';
 import type { PublicationRenderPart, PublicationRenderPlan } from './publication-preview-plan.js';
 
@@ -57,7 +58,7 @@ export class MultipartTestStore {
       const result=await fn(s);
       await mkdir(dirname(this.path),{recursive:true});
       const temp=`${this.path}.${randomUUID()}.tmp`;
-      try{await writeFile(temp,JSON.stringify(s),'utf8');await rename(temp,this.path);}catch(e){try{const fs=await import('node:fs/promises');await fs.unlink(temp);}catch{/* already moved */}throw e;}
+      try{await writeFile(temp,JSON.stringify(s),'utf8');await renameStateAtomically(temp,this.path);}catch(e){try{const fs=await import('node:fs/promises');await fs.unlink(temp);}catch{/* already moved */}throw e;}
       return result;
     }finally{release();if(lockMap.get(this.path)===current)lockMap.delete(this.path);}
   }

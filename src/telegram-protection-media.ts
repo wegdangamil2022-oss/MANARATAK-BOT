@@ -1,5 +1,5 @@
 import type {ProtectionMessageType} from './protection-rules.js';
-export interface ProtectionMedia{type:Exclude<ProtectionMessageType,'TEXT'>;caption:string;entities?:unknown;}
+export interface ProtectionMedia{type:Exclude<ProtectionMessageType,'TEXT'>;caption:string;entities?:unknown;vcardFile?:true;}
 const object=(v:unknown):v is Record<string,unknown>=>v!==null&&typeof v==='object'&&!Array.isArray(v);
 const files={photo:'PHOTO',video:'VIDEO',animation:'ANIMATION',sticker:'STICKER',document:'DOCUMENT',audio:'AUDIO',voice:'VOICE',video_note:'VIDEO_NOTE'} as const;
 const present=(msg:Record<string,unknown>,field:string)=>Object.hasOwn(msg,field);
@@ -32,5 +32,6 @@ export function protectionMediaFromMessage(msg:Record<string,unknown>):{status:'
    type='POLL';
   }
  }
- return {status:'MEDIA',media:{type,caption:typeof msg.caption==='string'?msg.caption:'',...(msg.caption_entities!==undefined?{entities:msg.caption_entities}:{})}};
+ const vcardFile=field==='document'&&object(value)&&(typeof value.mime_type==='string'&&['text/vcard','text/x-vcard','application/vcard'].includes(value.mime_type.toLowerCase())||typeof value.file_name==='string'&&value.file_name.length<=255&&!/[\u0000-\u001f\u007f]/u.test(value.file_name)&&value.file_name.toLowerCase().endsWith('.vcf'));
+ return {status:'MEDIA',media:{type,caption:typeof msg.caption==='string'?msg.caption:'',...(msg.caption_entities!==undefined?{entities:msg.caption_entities}:{}),...(vcardFile?{vcardFile:true as const}:{})}};
 }

@@ -1,11 +1,14 @@
+import {recordTopicMonitor} from './group-forum-topic-monitor.js';
+import {warningActive} from './group-rule-warning-policy.js';
 import {createHash} from 'node:crypto';
 import {advanceFloodWindow} from './protection-flood.js';
-import {protectionEntityLinks} from './protection-message-entities.js';
+import {protectionEntityLinks,protectionHasPhoneEntity,protectionMentionCount} from './protection-message-entities.js';
 import {BotStore,type BotState} from './store.js';
 import type {Policy} from './policy.js';
+import {pauseNetworkInheritanceForLocalEdit,synchronizeNetworkInheritance} from './network-inheritance.js';
 import type {ProtectionEnforcer,ProtectionDelivery} from './protection-enforcement.js';
 import type {ProtectionAction} from './protection-rules.js';
-import {normalizeProtectionText,isValidProtectionPolicy,protectionMemberExempt,evaluateProtectionRules,type GroupProtectionRecord,type ProtectionEvaluation,type ProtectionMessage} from './protection-rules.js';
+import {normalizeProtectionText,isValidProtectionPolicy,protectionMemberExempt,evaluateProtectionRules,protectionRuleFingerprint,type GroupProtectionRecord,type ProtectionEvaluation,type ProtectionMessage} from './protection-rules.js';
 type Inspection={status:'DENIED'|'UNCONFIGURED'|'STALE'}|{status:'CONFIGURED';record:GroupProtectionRecord;enforcementConnected:boolean};
 const clockValid=(n:number)=>Number.isSafeInteger(n)&&n>=0&&n<=8640000000000000;
 /** Owner/delegated operator control of one group's local rules. Saving a
@@ -15,7 +18,7 @@ export class GroupProtectionPolicyService{
  deletionConnected():boolean{return this.enforcer?.supports('DELETE')===true;}
  canEnforce(config:GroupProtectionRecord['policy']):boolean{
   return Boolean(this.enforcer&&config.rules.filter(r=>r.enabled).every(r=>this.enforcer!.supports(r.action))&&
-   (!config.flood?.enabled||this.enforcer.supports(config.flood.action))&&(!config.escalation?.enabled||this.enforcer.supports('MUTE'))&&(!config.raid?.enabled||this.enforcer.supportsRaid?.()===true)&&(!config.night?.enabled||this.enforcer.supportsRaid?.()===true)&&(!config.joinRaid?.enabled||this.enforcer.supportsRaid?.()===true));
+   (!config.flood?.enabled||this.enforcer.supports(config.flood.action))&&(!config.escalation?.enabled||this.enforcer.supports('MUTE')&&((config.escalation.muteSeconds??60)===60||this.enforcer.supportsMuteDuration?.(config.escalation.muteSeconds!)===true))&&(!config.raid?.enabled||this.enforcer.supportsRaid?.()===true)&&(!config.night?.enabled||this.enforcer.supportsRaid?.()===true)&&(!config.joinRaid?.enabled||this.enforcer.supportsRaid?.()===true));
  }
  private allowed(state:BotState,actor:string,chat:string,now:number):boolean{
   return clockValid(now)&&this.policy.canUseChat(state,chat,'moderation')&&this.policy.has(state,actor,'chat.manage',chat,now);
@@ -41,11 +44,19 @@ export class GroupProtectionPolicyService{
    if(this.policy.chatRevision(state,candidate.chatId)!==expectedChatRevision)return {status:'STALE' as const};
    const rows=(state.protectionPolicies??[]).filter(r=>r.policy.chatId===candidate.chatId),old=rows[0];
    if(rows.length>1||(old?.policy.revision??0)!==expectedRevision||old&&(old.updatedAt>now||old.chatPolicyVersion!==expectedChatRevision))return {status:'STALE' as const};
+   if(candidate.ruleExemptions){
+    for(const exemption of candidate.ruleExemptions){const existing=old?.policy.ruleExemptions?.some(e=>JSON.stringify(e)===JSON.stringify(exemption));if(!existing&&(exemption.grantedBy!==actor||exemption.createdAt>now||now-exemption.createdAt>300000))return {status:'INVALID' as const};}
+    // A changed rule permanently ends its old exemptions, even if someone
+    // later changes the rule text back to its previous value.
+    candidate.ruleExemptions=candidate.ruleExemptions.filter(e=>{const rule=candidate.rules.find(r=>r.id===e.ruleId);return !!rule&&protectionRuleFingerprint(rule)===e.ruleDigest;});
+   }
    const record:GroupProtectionRecord={policy:candidate,chatPolicyVersion:expectedChatRevision,updatedBy:actor,updatedAt:now};
    state.protectionPolicies??=[];
    if(old)state.protectionPolicies[state.protectionPolicies.indexOf(old)]=record;
    else state.protectionPolicies.push(record);
    if(state.protectionFloodWindows)state.protectionFloodWindows=state.protectionFloodWindows.filter(w=>w.chatId!==candidate.chatId);
+   pauseNetworkInheritanceForLocalEdit(state,'POLICY',candidate.chatId);
+   synchronizeNetworkInheritance(state,this.policy,actor,now,'POLICY',candidate.chatId);
    state.audit.push({actorId:actor,updateKey:'protection:policy:'+candidate.chatId+':'+candidate.revision,
     decision:'ALLOW',reason:'PROTECTION_POLICY_SAVED_'+candidate.mode,policyVersion:expectedChatRevision,at:now});
    return {status:'SAVED' as const,revision:candidate.revision};
@@ -98,15 +109,26 @@ export class GroupProtectionPolicyService{
  }
  /** Record-only incoming TEXT monitor. Authorization precedes body/entity
   * evaluation; observations retain no sender identity or message contents. */
- async observeIncomingText(member:string,chat:string,text:string,entities:unknown,updateKey:string,countTraffic=true,delivery?:ProtectionDelivery,displayName?:string):Promise<string>{
-  return this.observeIncomingMessage({chatId:chat,memberId:member,type:'TEXT',text,...(displayName?{displayName}:{})},entities,updateKey,countTraffic,delivery);
+ async observeIncomingText(member:string,chat:string,text:string,entities:unknown,updateKey:string,countTraffic=true,delivery?:ProtectionDelivery,displayName?:string,username?:string,
+  topicId?:number):Promise<string>{
+  return this.observeIncomingMessage({chatId:chat,memberId:member,type:'TEXT',text,...(displayName?{displayName}:{}),...(username?{username}:{})},entities,updateKey,countTraffic,delivery,topicId);
  }
- async observeIncomingMessage(message:ProtectionMessage,entities:unknown,updateKey:string,countTraffic=true,delivery?:ProtectionDelivery):Promise<string>{
+ async observeIncomingMessage(message:ProtectionMessage,entities:unknown,updateKey:string,
+  countTraffic=true,delivery?:ProtectionDelivery,topicId?:number):Promise<string>{
   const {chatId:chat,memberId:member}=message;
   if(!/^b3-webhook:[A-Za-z0-9_-]{1,80}:[0-9]+$/u.test(updateKey))return 'DENIED';
   const prepared=await this.store.transaction(state=>{
    const now=this.clock();
    if(!clockValid(now)||!this.policy.canUseChat(state,chat,'moderation'))return 'DENIED';
+   // Independent topical MONITOR ONLY. It neither substitutes nor overrides
+   // the existing group-wide enforcement and its exemption/sanction rules.
+   if(topicId!==undefined){
+    const body=message.text??message.caption??'';
+    const links=typeof body==='string'&&body.length<=4096?
+     protectionEntityLinks(body,entities):null;
+    recordTopicMonitor(state,this.policy,
+     {...message,...(links!==null?{links}:{})},topicId,updateKey,now);
+   }
    const record=state.protectionPolicies?.find(r=>r.policy.chatId===chat);
    if(!record||record.policy.mode==='OFF')return 'DISABLED';
    if(record.policy.mode==='ENFORCE'&&!this.canEnforce(record.policy))return 'ENFORCEMENT_NOT_CONNECTED';
@@ -117,7 +139,7 @@ export class GroupProtectionPolicyService{
    if(state.audit.some(a=>a.updateKey===key))return 'DUPLICATE';
    const body=message.text??message.caption??'';
    const links=typeof body==='string'&&body.length<=4096?protectionEntityLinks(body,entities):null;
-   const result=links===null?null:evaluateProtectionRules(record.policy,{...message,links,quoteCount:Array.isArray(entities)?new Set(entities.filter(e=>e&&typeof e==='object'&&['blockquote','expandable_blockquote'].includes(e.type)).map(e=>e.offset+':'+e.length)).size:0,mentionCount:Array.isArray(entities)?new Set(entities.filter(e=>e&&typeof e==='object'&&['mention','text_mention'].includes(e.type)).map(e=>e.offset+':'+e.length)).size:0},now);
+   const result=links===null?null:evaluateProtectionRules(record.policy,{...message,links,quoteCount:Array.isArray(entities)?new Set(entities.filter(e=>e&&typeof e==='object'&&['blockquote','expandable_blockquote'].includes(e.type)).map(e=>e.offset+':'+e.length)).size:0,mentionCount:protectionMentionCount(body,entities),phoneEntity:protectionHasPhoneEntity(body,entities)},now);
    if(!result||result.status==='INVALID_MESSAGE'||result.status==='INVALID_POLICY'){
     state.audit.push({updateKey:key,decision:'NOOP',reason:'PROTECTION_MONITOR_INPUT_UNAVAILABLE',policyVersion:record.chatPolicyVersion,at:now});
     return 'UNAVAILABLE';
@@ -137,7 +159,7 @@ export class GroupProtectionPolicyService{
    const escalation=record.policy.escalation;
    const warningSource=escalation?.enabled?JSON.stringify(state.warnings.filter(w=>w.chatId===chat&&w.memberId===member)):null;
    const previousAction=action;
-   if(matches&&action==='WARN'&&escalation?.enabled&&state.warnings.filter(w=>w.chatId===chat&&w.memberId===member&&w.active&&w.at<=now&&w.at>now-escalation.windowMs).length>=escalation.afterWarnings)action='MUTE';
+   if(matches&&action==='WARN'&&escalation?.enabled&&state.warnings.filter(w=>w.chatId===chat&&w.memberId===member&&warningActive(w,now)&&w.at<=now&&w.at>now-escalation.windowMs).length>=escalation.afterWarnings)action='MUTE';
    if(raid)action='REVIEW';
    if(matches||raid)state.audit.push({updateKey:key,decision:'NOOP',
     reason:(record.policy.mode==='ENFORCE'?'PROTECTION_ENFORCEMENT_CLAIM:':'PROTECTION_MONITOR_MATCH:')+'revision='+record.policy.revision+';action='+action+';rules='+matches,
@@ -149,14 +171,14 @@ export class GroupProtectionPolicyService{
   const current=(state:BotState)=>{
    const now=this.clock(),rows=state.protectionPolicies?.filter(r=>r.policy.chatId===chat)??[];
    return clockValid(now)&&now>=prepared.at&&now<prepared.at+5000&&rows.length===1&&
-    JSON.stringify(rows[0])===JSON.stringify(prepared.record)&&(!prepared.floodExceeded||prepared.floodSource===JSON.stringify(state.protectionFloodWindows?.find(w=>w.chatId===chat&&w.memberId===member)??null)&&this.floodThreshold(state,prepared.record,member,now))&&(!prepared.raid||this.raidThreshold(state,prepared.record,now))&&(!prepared.escalated||state.warnings.filter(w=>w.chatId===chat&&w.memberId===member&&w.active&&w.at<=now&&w.at>now-prepared.record.policy.escalation!.windowMs).length>=prepared.record.policy.escalation!.afterWarnings)&&(prepared.warningSource===null||prepared.warningSource===JSON.stringify(state.warnings.filter(w=>w.chatId===chat&&w.memberId===member)))&&this.allowed(state,prepared.record.updatedBy,chat,now)&&
+    JSON.stringify(rows[0])===JSON.stringify(prepared.record)&&(!prepared.floodExceeded||prepared.floodSource===JSON.stringify(state.protectionFloodWindows?.find(w=>w.chatId===chat&&w.memberId===member)??null)&&this.floodThreshold(state,prepared.record,member,now))&&(!prepared.raid||this.raidThreshold(state,prepared.record,now))&&(!prepared.escalated||state.warnings.filter(w=>w.chatId===chat&&w.memberId===member&&warningActive(w,now)&&w.at<=now&&w.at>now-prepared.record.policy.escalation!.windowMs).length>=prepared.record.policy.escalation!.afterWarnings)&&(prepared.warningSource===null||prepared.warningSource===JSON.stringify(state.warnings.filter(w=>w.chatId===chat&&w.memberId===member)))&&this.allowed(state,prepared.record.updatedBy,chat,now)&&
     prepared.record.chatPolicyVersion===this.policy.chatRevision(state,chat)&&
     !this.policy.isOwner(member)&&!this.policy.has(state,member,'chat.manage',chat,now)&&!protectionMemberExempt(prepared.record.policy,member,now);
   };
   // The durable claim precedes the external authority reads. A lost/failed
   // attempt is not replayed by redelivery, even after a process restart.
   let status:string;
-  try{status=prepared.raid?await this.enforcer!.executeRaid!(prepared.record.updatedBy,chat,prepared.record.policy.raid!.lockSeconds,current):await this.enforcer!.execute(prepared.record.updatedBy,chat,member,prepared.action as ProtectionAction,prepared.key,current,delivery);}
+  try{status=prepared.raid?await this.enforcer!.executeRaid!(prepared.record.updatedBy,chat,prepared.record.policy.raid!.lockSeconds,current):await this.enforcer!.execute(prepared.record.updatedBy,chat,member,prepared.action as ProtectionAction,prepared.key,current,delivery,prepared.escalated?(prepared.record.policy.escalation?.muteSeconds??60):undefined);}
   catch{status='UNAVAILABLE';}
   await this.store.transaction(state=>{state.audit.push({updateKey:prepared.key+':result',decision:'NOOP',
    reason:'PROTECTION_ENFORCEMENT_RESULT:'+(['ADDED','NO_CHANGE','APPLIED','DENIED','BLOCKED_PENDING','BLOCKED_UNKNOWN','FAILED_CONFIRMED','UNKNOWN_OUTCOME','REVIEW','CONFIRMED','ACKNOWLEDGED'].includes(status)?status:'UNAVAILABLE'),

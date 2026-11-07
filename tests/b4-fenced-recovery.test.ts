@@ -1,3 +1,4 @@
+import {fileURLToPath} from 'node:url';
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {mkdtemp,rm} from 'node:fs/promises';
@@ -142,7 +143,7 @@ test('B4 auth: destination-only editor cannot reconcile UNKNOWN part, even with 
 
 const exec=promisify(execFile);
 async function recoverInWorker(file:string,campaignId:string):Promise<number>{
- const path=new URL('./b4-sqlite-worker.js',import.meta.url).pathname;
+ const path=fileURLToPath(new URL('./b4-sqlite-worker.js',import.meta.url));
  const {stdout}=await exec(process.execPath,[path,'recover',file,campaignId]);
  return Number(stdout.trim().replace(/^RECOVERED:/,''));
 }

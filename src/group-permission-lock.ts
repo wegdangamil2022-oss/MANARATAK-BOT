@@ -1,4 +1,5 @@
 import {createHash,randomBytes} from 'node:crypto';
+import {enqueueAdminRoomOperationNotice} from './admin-room-notices.js';
 import type {BotState,BotStore} from './store.js';
 import type {Policy} from './policy.js';
 import {GROUP_LOCK_MODES,equalGroupPermissions,lockedGroupPermissions,validGroupPermissions,type GroupLockMode,type GroupPermissionJob} from './group-permission-model.js';
@@ -63,7 +64,7 @@ export class GroupPermissionLockService{
     s.groupPermissionJobs??=[];s.groupPermissionJobs.push({...reserved,id:randomBytes(18).toString('base64url'),status:'UNKNOWN_OUTCOME',attemptId});return 'UNKNOWN_OUTCOME' as const;
    }
    if(outcome==='CONFIRMED'&&(sourceCurrent&&!sourceCurrent(s)||epoch(s,this.policy,actor,j.chatId,this.clock(),j.id)!==j.sourceEpoch))outcome='UNKNOWN_OUTCOME';j.status=outcome;
-   s.audit.push({actorId:actor,updateKey:'group-permissions:'+j.id,decision:outcome==='CONFIRMED'?'ALLOW':'DENY',reason:'GROUP_PERMISSIONS_'+outcome,policyVersion:j.scopeVersion,at:this.clock()});return outcome;
+   s.audit.push({actorId:actor,updateKey:'group-permissions:'+j.id,decision:outcome==='CONFIRMED'?'ALLOW':'DENY',reason:'GROUP_PERMISSIONS_'+outcome,policyVersion:j.scopeVersion,at:this.clock()});enqueueAdminRoomOperationNotice(s,this.policy,j,this.clock());return outcome;
   });
  }
 }
