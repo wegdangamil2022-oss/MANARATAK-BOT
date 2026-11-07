@@ -319,6 +319,8 @@ export class Phase4CommunityService{
     case 'WELCOME_ON':config.welcome.enabled=true;break;
     case 'PRIVATE_WELCOME_ON':config.privateWelcomeEnabled=true;break;
     case 'PRIVATE_WELCOME_OFF':config.privateWelcomeEnabled=false;break;
+    case 'WELCOME_MEMBER_LANG_ON':config.welcomeMemberLanguageEnabled=true;break;
+    case 'WELCOME_MEMBER_LANG_OFF':config.welcomeMemberLanguageEnabled=false;break;
     case 'WELCOME_OFF':config.welcome.enabled=false;break;
     case 'FAREWELL_ON':config.farewell.enabled=true;break;
     case 'FAREWELL_OFF':config.farewell.enabled=false;break;
@@ -615,6 +617,8 @@ export class Phase4CommunityService{
    !/^b3-webhook:[A-Za-z0-9_-]{1,80}:\d+$/u.test(updateKey)||
    input.edited||input.forwarded||input.fromBot||
    (input.joinKind!==undefined&&(input.kind!=='JOIN'||!validCommunityJoinKind(input.joinKind)))||
+   (input.memberLanguage!==undefined&&
+     (input.kind!=='JOIN'||!['ar','en'].includes(input.memberLanguage)))||
    (input.leaveKind!==undefined&&(input.kind!=='LEAVE'||!validCommunityLeaveKind(input.leaveKind))))return null;
   if(input.kind==='TEXT'&&(!input.messageText||input.messageText.length>4096))return null;
   const key=hex('P4:EVENT:'+updateKey);
@@ -654,7 +658,8 @@ export class Phase4CommunityService{
     }
     template=selectCommunityGreeting(config,input.kind==='JOIN'?'welcome':'farewell',
      input.kind==='JOIN'?input.joinKind:undefined,
-     input.kind==='LEAVE'?input.leaveKind:undefined);
+     input.kind==='LEAVE'?input.leaveKind:undefined,
+     input.kind==='JOIN'?input.memberLanguage:undefined);
     photoFileId=target.photoFileId;
     communityLinks=communityLinkKeyboard(target.buttons);
    }else{
@@ -695,7 +700,9 @@ export class Phase4CommunityService{
    let text:string;
    try{text=preEscaped?template:renderCommunityTemplate(template,input,
      now+(config.timeZone?0:config.utcOffsetMinutes*60000),config.rulesUrl??'',
-     {language:config.language??'ar',clockFormat:config.clockFormat??'24',
+     {language:input.kind==='JOIN'&&config.welcomeMemberLanguageEnabled===true&&
+       input.memberLanguage?input.memberLanguage:config.language??'ar',
+      clockFormat:config.clockFormat??'24',
       calendar:config.calendar??'gregorian',...(config.timeZone?{timeZone:config.timeZone}:{})});}
    catch{record('TEMPLATE_INVALID',ruleId);return null;}
    if(photoFileId&&Buffer.byteLength(text,'utf8')>1024){
@@ -740,6 +747,8 @@ export class Phase4CommunityService{
    return '<b>حذف جميع أزرار الرابط</b> من '+(draft.kind==='WELCOME_BUTTONS_CLEAR'?'الترحيب':'الوداع');
   if(draft.kind==='PRIVATE_WELCOME_ON')return 'تفعيل رابط ترحيب خاص اختياري بعد الانضمام.\nلا يرسل البوت رسالة للعضو دون فتحه الخاص بنفسه؛ يتطلب عضوية حقيقية وانضمامًا حديثًا.\nالرسالة العامة ما تزال ظاهرة لأعضاء المجموعة.';
   if(draft.kind==='PRIVATE_WELCOME_OFF')return 'إيقاف رابط الترحيب الخاص وإبطال رسائل الخاص المعلقة ذات الإعداد القديم.\nلا يعطل الترحيب العام.';
+  if(draft.kind==='WELCOME_MEMBER_LANG_ON')return 'تفعيل لغة ترحيب العضو عند توفر لغة عربية أو إنجليزية موثوقة من Telegram.\nعند عدم توفرها تُستخدم لغة المجموعة، وتبقى قوالب أنواع الدخول أعلى أولوية.';
+  if(draft.kind==='WELCOME_MEMBER_LANG_OFF')return 'إيقاف اختيار لغة الترحيب حسب العضو والعودة إلى لغة المجموعة المعتمدة.';
   if(draft.kind==='FAREWELL_VARIANT_SET')return '<b>معاينة وداع حسب المغادرة: '+
    safe(draft.leaveKind??'')+'</b>\n'+safe(draft.text??'')+'\nلن يُرسل حتى تفعيل الوداع.';
   if(draft.kind==='FAREWELL_VARIANT_CLEAR')return '<b>مسح وداع نوع المغادرة: '+

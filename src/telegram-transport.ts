@@ -112,7 +112,7 @@ import {parseB6ExplicitMention} from './b6-telegram-mention.js';
 import type {ModerationService} from './moderation.js';
 import {Phase4CommunityService} from './phase4-community.js';
 import {phase4CommunityScreen,parsePhase4CommunityCommand} from './phase4-community-ui.js';
-import type {CommunityInput,CommunityJoinKind,CommunityLeaveKind} from './phase4-community-model.js';
+import type {CommunityInput,CommunityJoinKind,CommunityLeaveKind,CommunityLanguage} from './phase4-community-model.js';
 import {validCommunityPhotoId} from './phase4-community-rich.js';
 import type {ModerationPurgeService} from './moderation-purge.js';
 import {isReplyDeleteCommand,previewReplyDelete,handleReplyDeleteCallback} from './telegram-reply-delete.js';
@@ -174,10 +174,16 @@ export interface TelegramApplicationOptions {
   community?:Phase4CommunityService;
 }
 
-type Event = {updateId: number; actorId: string; chatId: string; kind: 'private' | 'group'; text: string; communityKind?:'JOIN'|'LEAVE'; communityJoinKind?:CommunityJoinKind; communityLeaveKind?:CommunityLeaveKind; communityChange?:'TITLE_CHANGED'|'PHOTO_CHANGED'|'PHOTO_REMOVED'; serviceSentAtMs?:number; communityMemberId?:string; memberName?:string; groupName?:string; topicId?:number; entities?:unknown; messageId?:number; replyTo?:unknown; document?: IncomingDocument; protectionMedia?:ProtectionMedia; edited?:true; forwarded?:true; callbackData?:string; callbackQueryId?:string; callbackMessageId?:number};
+type Event = {updateId: number; actorId: string; chatId: string; kind: 'private' | 'group'; text: string; communityKind?:'JOIN'|'LEAVE'; communityJoinKind?:CommunityJoinKind; communityLeaveKind?:CommunityLeaveKind; communityMemberLanguage?:CommunityLanguage; communityChange?:'TITLE_CHANGED'|'PHOTO_CHANGED'|'PHOTO_REMOVED'; serviceSentAtMs?:number; communityMemberId?:string; memberName?:string; groupName?:string; topicId?:number; entities?:unknown; messageId?:number; replyTo?:unknown; document?: IncomingDocument; protectionMedia?:ProtectionMedia; edited?:true; forwarded?:true; callbackData?:string; callbackQueryId?:string; callbackMessageId?:number};
 const isObject=(x:unknown):x is Record<string,unknown>=>Boolean(x)&&typeof x==='object'&&!Array.isArray(x);
 const positiveId=(x:unknown): x is number=>typeof x==='number'&&Number.isSafeInteger(x)&&x>0;
 const chatId=(x:unknown): x is number=>typeof x==='number'&&Number.isSafeInteger(x)&&x!==0;
+/** A joiner's language hint is optional, sanitized and never persisted. */
+const telegramCommunityLanguage=(value:unknown):CommunityLanguage|undefined=>{
+ if(typeof value!=='string'||!/^(?:ar|en)(?:-[A-Za-z0-9]{2,8}){0,3}$/iu.test(value))
+  return undefined;
+ return value.slice(0,2).toLowerCase() as CommunityLanguage;
+};
 export function escapeTelegramHtml(text:string):string {
   return text.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
 }
@@ -259,6 +265,7 @@ function eventFrom(value:unknown):{event?:Event;reason:string} {
    const joining=oldAbsent&&newPresent,leaving=oldPresent&&newAbsent;
    if(!joining&&!leaving)return {reason:'UNSUPPORTED_EVENT'};
    const user=after.user;
+   const memberLanguage=joining?telegramCommunityLanguage(user.language_code):undefined;
    const memberName=typeof user.first_name==='string'&&user.first_name.trim()?
       user.first_name.trim().slice(0,75):'عضو';
    return {reason:'VALID',event:{updateId:value.update_id as number,actorId:String(cm.from.id),
@@ -268,6 +275,7 @@ function eventFrom(value:unknown):{event?:Event;reason:string} {
        cm.from.id===user.id?'SELF' as const:'ADDED' as const}:
       {communityLeaveKind:after.status==='kicked'||cm.from.id!==user.id?'REMOVED' as const:'SELF' as const}),
      communityMemberId:String(user.id),memberName,
+     ...(memberLanguage?{communityMemberLanguage:memberLanguage}:{}),
      groupName:typeof cm.chat.title==='string'?cm.chat.title:'المجموعة',
      serviceSentAtMs:(cm.date as number)*1000}};
   }
@@ -336,10 +344,14 @@ function eventFrom(value:unknown):{event?:Event;reason:string} {
       human.length>1?'BATCH':msg.from.id===first.id?'SELF':'ADDED';
    const communityLeaveKind:CommunityLeaveKind|undefined=left===undefined?undefined:
       msg.from.id===first.id?'SELF':'REMOVED';
+   // A batch may contain many languages: do not guess from the first member.
+   const memberLanguage=members!==undefined&&human.length===1?
+      telegramCommunityLanguage(first.language_code):undefined;
    return {event:{updateId:value.update_id as number,actorId:String(msg.from.id),
      chatId:String(msg.chat.id),kind,text:'',communityKind:members!==undefined?'JOIN':'LEAVE',
      communityMemberId:String(first.id),memberName,
      ...(communityJoinKind?{communityJoinKind}:{}),
+     ...(memberLanguage?{communityMemberLanguage:memberLanguage}:{}),
      ...(communityLeaveKind?{communityLeaveKind}:{}),messageId:msg.message_id as number,
      ...(msg.date!==undefined?{serviceSentAtMs:(msg.date as number)*1000}:{}),
      groupName:typeof msg.chat.title==='string'?msg.chat.title:'المجموعة',
@@ -570,6 +582,8 @@ export class TelegramUpdateApplication {
       memberName:event.memberName??'عضو',groupName:event.groupName??'المجموعة',
       ...(event.text?{messageText:event.text}:{}),
       ...(event.communityJoinKind?{joinKind:event.communityJoinKind}:{}),
+      ...(event.communityKind==='JOIN'&&event.communityMemberLanguage?
+       {memberLanguage:event.communityMemberLanguage}:{}),
       ...(event.communityLeaveKind?{leaveKind:event.communityLeaveKind}:{}),
       ...(event.topicId!==undefined?{topicId:event.topicId}:{})};
     const proposal=await this.opts.community.propose(input,

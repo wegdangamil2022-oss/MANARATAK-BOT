@@ -40,6 +40,8 @@ export interface CommunityConfig{
  chatId:string;version:number;welcome:CommunityGreeting;farewell:CommunityGreeting;
  /** Optional templates per trusted join source; fallback to localized welcome. */
  welcomeByJoin?:Partial<Record<CommunityJoinKind,string>>;
+ /** Disabled by default: use Telegram User.language_code only when confidently ar/en. */
+ welcomeMemberLanguageEnabled?:boolean;
  /** Optional farewell variants; never inferred from students' text. */
  farewellByLeave?:Partial<Record<CommunityLeaveKind,string>>;
  /** Removal/ban notices are off by default to avoid unwanted disclosures. */
@@ -82,7 +84,7 @@ export interface CommunityConfig{
 }
 export type CommunityDraftKind='WELCOME_TEXT'|'FAREWELL_TEXT'|'REPLY_ADD'|'REPLY_REMOVE'|
  'WELCOME_ON'|'WELCOME_OFF'|'FAREWELL_ON'|'FAREWELL_OFF'|'REPLIES_ON'|'REPLIES_OFF'|
- 'PRIVATE_WELCOME_ON'|'PRIVATE_WELCOME_OFF'|
+ 'PRIVATE_WELCOME_ON'|'PRIVATE_WELCOME_OFF'|'WELCOME_MEMBER_LANG_ON'|'WELCOME_MEMBER_LANG_OFF'|
  'GROUP_PROFILE_ON'|'GROUP_PROFILE_OFF'|'GROUP_TITLE_SET'|'GROUP_PHOTO_SET'|'GROUP_PHOTO_REMOVE'|
  'REPLY_ENABLE'|'REPLY_DISABLE'|'REPLY_COOLDOWN'|'AUTO_LIMIT_SET'|
  'QUIET_HOURS_SET'|'QUIET_HOURS_CLEAR'|'TOPIC_COOLDOWN_SET'|'TOPIC_COOLDOWN_CLEAR'|
@@ -171,6 +173,8 @@ export interface CommunityAutomationState{
 export interface CommunityInput{
  kind:CommunityEventKind;chatId:string;actorId:string;
  memberName:string;groupName:string;messageText?:string;joinKind?:CommunityJoinKind;leaveKind?:CommunityLeaveKind;
+ /** Transient trusted Telegram language hint; not kept in receipts. */
+ memberLanguage?:CommunityLanguage;
  topicId?:number;edited?:boolean;forwarded?:boolean;fromBot?:boolean;
 }
 const validGroup=(s:unknown):s is string=>typeof s==='string'&&/^-[1-9]\d{0,15}$/u.test(s)&&Number.isSafeInteger(Number(s));
@@ -231,7 +235,7 @@ export function inCommunityQuietHours(hours:CommunityQuietHours,now:number,utcOf
   minute>=hours.startMinute||minute<hours.endMinute;
 }
 const kinds=new Set<CommunityDraftKind>(['WELCOME_TEXT','FAREWELL_TEXT','REPLY_ADD','REPLY_REMOVE',
- 'WELCOME_ON','WELCOME_OFF','PRIVATE_WELCOME_ON','PRIVATE_WELCOME_OFF',
+ 'WELCOME_ON','WELCOME_OFF','PRIVATE_WELCOME_ON','PRIVATE_WELCOME_OFF','WELCOME_MEMBER_LANG_ON','WELCOME_MEMBER_LANG_OFF',
  'GROUP_PROFILE_ON','GROUP_PROFILE_OFF','GROUP_TITLE_SET','GROUP_PHOTO_SET','GROUP_PHOTO_REMOVE','FAREWELL_ON','FAREWELL_OFF','REPLIES_ON','REPLIES_OFF',
  'REPLY_ENABLE','REPLY_DISABLE','REPLY_COOLDOWN','AUTO_LIMIT_SET',
  'QUIET_HOURS_SET','QUIET_HOURS_CLEAR','TOPIC_COOLDOWN_SET','TOPIC_COOLDOWN_CLEAR',
@@ -272,6 +276,7 @@ export function validCommunityConfig(value:unknown):value is CommunityConfig{
        !Number.isInteger(row.cooldownMs)||row.cooldownMs<1000||row.cooldownMs>600000)||
      new Set(x.topicCooldowns.map(row=>row.topicId)).size!==x.topicCooldowns.length))||
   (x.privateWelcomeEnabled!==undefined&&typeof x.privateWelcomeEnabled!=='boolean')||
+  (x.welcomeMemberLanguageEnabled!==undefined&&typeof x.welcomeMemberLanguageEnabled!=='boolean')||
   (x.farewellOnRemoval!==undefined&&typeof x.farewellOnRemoval!=='boolean')||
   (x.farewellByLeave!==undefined&&(!x.farewellByLeave||typeof x.farewellByLeave!=='object'||
     Array.isArray(x.farewellByLeave)||
@@ -565,8 +570,11 @@ export function matchCommunityRule(rule:CommunityReplyRule,text:string):boolean{
 /** A localized greeting overrides the legacy template only for the language
  * expressly chosen for this group; otherwise use the existing safe fallback. */
 export function selectCommunityGreeting(config:CommunityConfig,kind:'welcome'|'farewell',
- joinKind?:CommunityJoinKind,leaveKind?:CommunityLeaveKind):string{
- const entry=config[kind],language=config.language??'ar';
+ joinKind?:CommunityJoinKind,leaveKind?:CommunityLeaveKind,
+ memberLanguage?:CommunityLanguage):string{
+ const entry=config[kind];
+ const language=kind==='welcome'&&config.welcomeMemberLanguageEnabled===true&&
+  (memberLanguage==='ar'||memberLanguage==='en')?memberLanguage:config.language??'ar';
  if(kind==='welcome'&&joinKind&&validCommunityJoinKind(joinKind)&&
    config.welcomeByJoin?.[joinKind])return config.welcomeByJoin[joinKind];
  if(kind==='farewell'&&leaveKind&&validCommunityLeaveKind(leaveKind)&&
