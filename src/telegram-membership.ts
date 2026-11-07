@@ -72,6 +72,21 @@ export class TelegramBotApiMembershipGateway implements MembershipGateway {
    default:return 'UNKNOWN';
   }
  }
+ /** Strong role check for Phase 4 admin-only whisper opens. Requires the
+  * BOT to be a Telegram administrator and a fresh official getChatMember
+  * result for the RECIPIENT. Group-title or username are never authority.
+  */
+ async verifyAdminMembership(chatId:string,userId:string):Promise<MembershipStatus>{
+  if(!channel(chatId)||!id(userId))return 'UNKNOWN';
+  if(!await this.canVerifyChannel(chatId))return 'UNKNOWN';
+  const record=await this.query(chatId,userId);
+  if(!record||record.user.is_bot===true)return 'UNKNOWN';
+  switch(record.status){
+   case 'administrator':case 'creator':return 'VERIFIED';
+   case 'member':case 'restricted':case 'left':case 'kicked':return 'NOT_MEMBER';
+   default:return 'UNKNOWN';
+  }
+ }
  /** For private conversations referencing protected group-scoped resources:
   * do not infer membership from a chat ID, bot username or API error.
   */
