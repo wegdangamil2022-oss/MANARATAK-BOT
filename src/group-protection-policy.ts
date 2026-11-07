@@ -122,8 +122,13 @@ export class GroupProtectionPolicyService{
    if(!clockValid(now)||!this.policy.canUseChat(state,chat,'moderation'))return 'DENIED';
    // Independent topical MONITOR ONLY. It neither substitutes nor overrides
    // the existing group-wide enforcement and its exemption/sanction rules.
-   if(topicId!==undefined)
-    recordTopicMonitor(state,this.policy,message,topicId,updateKey,now);
+   if(topicId!==undefined){
+    const body=message.text??message.caption??'';
+    const links=typeof body==='string'&&body.length<=4096?
+     protectionEntityLinks(body,entities):null;
+    recordTopicMonitor(state,this.policy,
+     {...message,...(links!==null?{links}:{})},topicId,updateKey,now);
+   }
    const record=state.protectionPolicies?.find(r=>r.policy.chatId===chat);
    if(!record||record.policy.mode==='OFF')return 'DISABLED';
    if(record.policy.mode==='ENFORCE'&&!this.canEnforce(record.policy))return 'ENFORCEMENT_NOT_CONNECTED';
