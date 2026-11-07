@@ -32,6 +32,9 @@ export interface WhisperConsent{
 /** Member-controlled suppression: only the member may add/remove a block.
  * No public author/blocklist query is provided. */
 export interface WhisperBlock{
+ /** Optional to preserve old persisted blocks; generated on first private
+  * owner lookup and never exposed as an authorization for another member. */
+ id?:string;
  chatId:string;chatVersion:number;memberId:string;senderId:string;
  enabled:boolean;revision:number;updatedAt:number;
 }
@@ -227,13 +230,17 @@ export function validWhisperState(raw:unknown):raw is WhisperState{
  if(new Set(consents.map(c=>c.chatId+':'+c.memberId)).size!==consents.length)return false;
  const blocks=raw.blocks??[];
  if(blocks.some(x=>!record(x)||!exact(x,
-   ['chatId','chatVersion','memberId','senderId','enabled','revision','updatedAt'])||
+   ['chatId','chatVersion','memberId','senderId','enabled','revision','updatedAt'],
+   ['id'])||
+   (x.id!==undefined&&!validId(x.id))||
    !validChat(x.chatId)||!validRevision(x.chatVersion)||!validUser(x.memberId)||
    !validUser(x.senderId)||x.memberId===x.senderId||
    typeof x.enabled!=='boolean'||!validRevision(x.revision)||
    !validTime(x.updatedAt)))return false;
  if(new Set((blocks as WhisperBlock[]).map(x=>
-   x.chatId+':'+x.memberId+':'+x.senderId)).size!==blocks.length)return false;
+   x.chatId+':'+x.memberId+':'+x.senderId)).size!==blocks.length||
+   new Set((blocks as WhisperBlock[]).filter(x=>x.id).map(x=>x.id)).size!==
+    (blocks as WhisperBlock[]).filter(x=>x.id).length)return false;
  const settings=raw.settings??[];
  if(settings.some(x=>!record(x)||!exact(x,
   ['chatId','chatVersion','version','memberDraftsEnabled','updatedAt'])||

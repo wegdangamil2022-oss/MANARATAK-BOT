@@ -30,7 +30,7 @@ const approvedChat=(s:BotState,p:Policy,chatId:string)=>{
  return c&&c.approved&&c.version>=1&&c.scopes.includes('navigation')&&
   p.canUseChat(s,chatId,'navigation')?c:null;
 };
-const newId=(items:readonly {id:string}[])=>{
+const newId=(items:readonly {id?:string}[])=>{
  let id='';
  do{id=randomBytes(12).toString('hex');}
  while(items.some(r=>r.id===id));
@@ -560,13 +560,14 @@ export class Phase4WhisperService{
    const row=rows[0];
    if(row){
     if(now<row.updatedAt||row.revision>=9_999_999_999)return false;
+    if(!row.id)row.id=newId(data.blocks??[]);
     row.revision++;row.updatedAt=now;row.enabled=enabled;
    }else{
     const chat=getChat(s,chatId);
     if(!chat||chat.version<1)return false;
     data.blocks??=[];
-    data.blocks.push({chatId,chatVersion:chat.version,memberId,
-     senderId,enabled,revision:1,updatedAt:now});
+    data.blocks.push({id:newId(data.blocks),chatId,chatVersion:chat.version,
+     memberId,senderId,enabled,revision:1,updatedAt:now});
    }
    if(enabled){
     const whispers=new Set(data.messages.filter(m=>
@@ -580,6 +581,43 @@ export class Phase4WhisperService{
  /** Block the author of a particular reserved whisper without disclosing
   * that author's Telegram ID to the member. No matching seat means deny.
   */
+ /** A member can privately list their own blocks without exposing the
+  * author IDs. The list mints opaque IDs for legacy persisted rows.
+  */
+ async myBlocks(memberId:string,page=0):Promise<{
+  total:number;entries:Array<{id:string;chatId:string;updatedAt:number}>}|null>{
+  if(!isUser(memberId)||!Number.isInteger(page)||page<0||page>399)
+   return null;
+  return this.store.transaction(s=>{
+   const data=clone(s),blocks=(data.blocks??[]).filter(b=>
+    b.memberId===memberId&&b.enabled);
+   let changed=false;
+   for(const item of blocks)if(!item.id){
+    item.id=newId(data.blocks??[]);changed=true;
+   }
+   if(changed)s.phase4Whispers=data;
+   const ordered=blocks.sort((a,b)=>b.updatedAt-a.updatedAt||
+     a.chatId.localeCompare(b.chatId));
+   return {total:ordered.length,entries:ordered.slice(page*5,page*5+5)
+     .map(b=>({id:b.id!,chatId:b.chatId,updatedAt:b.updatedAt}))};
+  });
+ }
+ /** Opaque token is tied to the member who created the block. It cannot
+  * be replayed by a different Telegram account.
+  */
+ async unblockOwn(memberId:string,id:string):Promise<boolean>{
+  const now=this.clock();
+  if(!isUser(memberId)||!/^[a-f0-9]{24}$/u.test(id)||!validClock(now))
+   return false;
+  return this.store.transaction(s=>{
+   const data=clone(s),rows=(data.blocks??[]).filter(b=>b.id===id);
+   if(rows.length!==1||rows[0]!.memberId!==memberId||
+      !rows[0]!.enabled||rows[0]!.updatedAt>now||
+      rows[0]!.revision>=9_999_999_999)return false;
+   rows[0]!.enabled=false;rows[0]!.revision++;rows[0]!.updatedAt=now;
+   s.phase4Whispers=data;return true;
+  });
+ }
  async blockWhisper(memberId:string,id:string):Promise<boolean>{
   if(!isUser(memberId)||!/^[a-f0-9]{24}$/u.test(id))return false;
   const state=await this.store.snapshot(),data=clone(state);
