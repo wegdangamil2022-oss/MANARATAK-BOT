@@ -81,7 +81,7 @@ import {lectureOwnerScreen} from './phase4-lecture-owner.js';
 import {Phase4EngagementReportsService} from './phase4-engagement-reports.js';
 import {engagementOwnerScreen} from './phase4-engagement-owner.js';
 import {phase4SettingsOwnerScreen} from './phase4-settings-owner.js';
-import {Phase4GuidanceService,parseGuidanceMemberCommand} from './phase4-guidance.js';
+import {Phase4GuidanceService,parseGuidanceMemberCommand,parseGuidanceMemberCallback} from './phase4-guidance.js';
 import {phase4GuidanceOwnerScreen} from './phase4-guidance-owner.js';
 import {OwnerInlineGroupControls} from './telegram-inline-group-controls.js';
 import {renderOwnerInlineDelegations,delegationOwnerEntry} from './telegram-inline-delegations.js';
@@ -659,10 +659,15 @@ export class TelegramUpdateApplication {
     const {actorId,chatId,kind,text}=event;
     // 09:02/09:03: group-scoped student reading, private and explicitly requested.
     // No Telegram group ID or text command is proof of membership.
-    const guidanceMemberCommand=parseGuidanceMemberCommand(text);
+    const memberGuidanceCallback=event.callbackData?.startsWith('gm:1:')===true;
+    const guidanceMemberCommand=memberGuidanceCallback?
+     parseGuidanceMemberCallback(event.callbackData!):
+     parseGuidanceMemberCommand(text);
+    if(memberGuidanceCallback&&!guidanceMemberCommand)
+     return {status:'DENIED',reason:'PHASE4_GUIDANCE_CALLBACK_INVALID'};
     if(guidanceMemberCommand){
      if(kind!=='private'||actorId!==chatId||event.edited||event.forwarded||
-      event.callbackData!==undefined||!this.opts.community)
+      (event.callbackData!==undefined&&!memberGuidanceCallback)||!this.opts.community)
       return {status:'DENIED',reason:'PHASE4_GUIDANCE_PRIVATE_ONLY'};
      let denied:string|null;
      try{denied=await this.authorizePrivateGroupBrowse(guidanceMemberCommand.chatId,actorId);}
@@ -675,20 +680,20 @@ export class TelegramUpdateApplication {
      if(!this.opts.policy.canUseChat(beforeGuide,scope,'navigation'))
       return {status:'DENIED',reason:'PHASE4_GUIDANCE_CHAT_REVOKED'};
      const sourceEpoch=privateGroupEpochDigest(beforeGuide,scope);
-     const html=await new Phase4GuidanceService(this.opts.store,this.opts.policy,
-      this.opts.community).member(scope,guidanceMemberCommand.kind,
+     const screen=await new Phase4GuidanceService(this.opts.store,this.opts.policy,
+      this.opts.community).memberScreen(scope,guidanceMemberCommand.kind,
       guidanceMemberCommand.kind==='FAQ'?
        guidanceMemberCommand.faqId:undefined,
       guidanceMemberCommand.kind==='FAQ_INDEX'||guidanceMemberCommand.kind==='NOTES_INDEX'?
        guidanceMemberCommand.page:undefined);
-     if(!html)return {status:'DENIED',reason:'PHASE4_GUIDANCE_SOURCE_UNAVAILABLE'};
+     if(!screen)return {status:'DENIED',reason:'PHASE4_GUIDANCE_SOURCE_UNAVAILABLE'};
      const afterGuide=await this.opts.store.snapshot(),now=this.clock();
      if(privateGroupEpochDigest(afterGuide,scope)!==sourceEpoch||
        !this.opts.policy.canUseChat(afterGuide,scope,'navigation')||
        !Number.isSafeInteger(now)||now<0||now>8_640_000_000_000_000-120000)
       return {status:'DENIED',reason:'PHASE4_GUIDANCE_SOURCE_CHANGED'};
      return {status:'APPLIED',reason:'PHASE4_GUIDANCE_MEMBER',
-      plan:this.plan(chatId,html),
+      plan:this.plan(chatId,screen.text,undefined,screen.keyboard),
       privateGroupAccess:{actorId,scope,epoch:sourceEpoch,expiresAt:now+120000}};
     }
     // Stage 4 / 09:06 — the recipient's PRIVATE self-service preferences
