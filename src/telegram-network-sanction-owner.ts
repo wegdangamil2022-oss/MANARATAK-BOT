@@ -47,6 +47,8 @@ const blockName:Record<string,string>={
  UNRESOLVED_LOCAL:'توجد عملية إشراف معلقة أو غير مؤكدة',
  ACTIVE_LOCAL_REASON:'يوجد سبب إشراف نشط على الوجهة',
  LOCAL_LEDGER_UNSAFE:'سجل الإشراف المحلي يحتاج مراجعة',
+ NETWORK_STOPPED:'الشبكة في حالة طوارئ؛ لا يُسمح بفحص نقل العقوبة',
+ NETWORK_STATE_UNSAFE:'سجل الشبكة أو الطوارئ غير سليم',
  UNTRUSTED_OBSERVER:'مصدر فحص Telegram غير موثوق',
  TELEGRAM_NOT_GROUP:'المصدر أو الوجهة ليس مجموعة Telegram مؤكدة',
  SOURCE_NOT_VERIFIED:'لم تُثبت العقوبة المطلوبة في مجموعة المصدر',
@@ -81,6 +83,7 @@ export class OwnerNetworkSanctionEditor {
   return createHash('sha256').update(JSON.stringify([
    s.groupNetworks??[],s.chats,s.grants,s.networkWatchCases??[],
    s.networkSanctionReviews??[],s.moderationOperations,s.moderationReasons,
+   s.networkEmergencyControls??[],s.networkInheritance??[],
    s.privateFeatures,s.privateSettingsRevision??null
   ])).digest('hex');
  }
