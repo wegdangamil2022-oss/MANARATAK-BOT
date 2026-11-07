@@ -4,7 +4,7 @@ import type {CommunityDraftKind,ReplyMatch,CommunityLanguage,CommunityCalendar,C
 import {validCommunityRulesUrl,validCommunityTimeZone,validCommunityFAQId,validCommunityProfileTitle} from './phase4-community-model.js';
 import {validCommunityLinkButton,validCommunityPhotoId} from './phase4-community-rich.js';
 const group=/^-[1-9]\d{0,15}$/u,hex=/^[a-f0-9]{24}$/u;
-const route=/^p4c:1:(?:q:-[1-9]\d{0,15}|i:-[1-9]\d{0,15}|ac:-[1-9]\d{0,15}:[1-8]|b:-[1-9]\d{0,15}(?::[sami])?|m:-[1-9]\d{0,15}(?::[sr])?|p:-[1-9]\d{0,15}|f:-[1-9]\d{0,15}:(?:0|[1-9]\d{0,2})|s:-[1-9]\d{0,15}|k:-[1-9]\d{0,15}|z:-[1-9]\d{0,15}|n:-[1-9]\d{0,15}|a:-[1-9]\d{0,15}|y:-[1-9]\d{0,15}(?::[1-9]\d{0,9})?|l:(?:0|[1-9]\d{0,2})|g:-[1-9]\d{0,15}|h:-[1-9]\d{0,15}|v:-[1-9]\d{0,15}:[wf]|j:-[1-9]\d{0,15}:[wf]:[pb]|r:-[1-9]\d{0,15}:(?:0|[1-9]\d{0,2})|t:-[1-9]\d{0,15}:[wfrsgbdpujlvmh]:[01]|d:-[1-9]\d{0,15}:[a-f0-9]{12}|e:-[1-9]\d{0,15}:[a-f0-9]{12}:[01]|u:-[1-9]\d{0,15}:(?:ar|en)|o:-[1-9]\d{0,15}:(?:12|24):[gh]|[cx]:[a-f0-9]{24})$/u;
+const route=/^p4c:1:(?:q:-[1-9]\d{0,15}|i:-[1-9]\d{0,15}|ac:-[1-9]\d{0,15}:[1-8]|b:-[1-9]\d{0,15}(?::[sami])?|m:-[1-9]\d{0,15}(?::[sr])?|p:-[1-9]\d{0,15}|f:-[1-9]\d{0,15}:(?:0|[1-9]\d{0,2})|s:-[1-9]\d{0,15}|[sr]l:-[1-9]\d{0,15}|[sr]d:-[1-9]\d{0,15}:(?:30|60|120|300|600|1800)|k:-[1-9]\d{0,15}|z:-[1-9]\d{0,15}|n:-[1-9]\d{0,15}|a:-[1-9]\d{0,15}|y:-[1-9]\d{0,15}(?::[1-9]\d{0,9})?|l:(?:0|[1-9]\d{0,2})|g:-[1-9]\d{0,15}|h:-[1-9]\d{0,15}|v:-[1-9]\d{0,15}:[wf]|j:-[1-9]\d{0,15}:[wf]:[pb]|r:-[1-9]\d{0,15}:(?:0|[1-9]\d{0,2})|t:-[1-9]\d{0,15}:[wfrsgbdpujlvmh]:[01]|d:-[1-9]\d{0,15}:[a-f0-9]{12}|e:-[1-9]\d{0,15}:[a-f0-9]{12}:[01]|u:-[1-9]\d{0,15}:(?:ar|en)|o:-[1-9]\d{0,15}:(?:12|24):[gh]|[cx]:[a-f0-9]{24})$/u;
 export const validPhase4CommunityRoute=(s:unknown):s is string=>typeof s==='string'&&
  Buffer.byteLength(s,'utf8')<=64&&route.test(s);
 const esc=(s:string):string=>s.replace(/&/gu,'&amp;').replace(/</gu,'&lt;')
@@ -369,7 +369,8 @@ export async function phase4CommunityScreen(service:Phase4CommunityService,actor
     [btn('🧹 '+(c.serviceCleanup?.enabled?'إيقاف':'تفعيل')+' تنظيف رسائل الخدمة','p4c:1:t:'+id+':s:'+(c.serviceCleanup?.enabled?'0':'1'))],
     [btn('⚙️ أنواع تنظيف رسائل الخدمة','p4c:1:s:'+id)],
     [btn('📋 المهام وحالات الحذف','sc4:1:g:'+id)],
-   [btn('📋 سجل مهام الرسائل الخدمية','sc4:1:g:'+id)],
+    [btn('⏳ مهلة رسائل الخدمة','p4c:1:sl:'+id)],
+    [btn('🧼 مهلة ردود البوت','p4c:1:rl:'+id)],
     [btn('🧼 '+(c.replyCleanup?.enabled?'إيقاف':'تفعيل')+' حذف ردود البوت','p4c:1:t:'+id+':b:'+(c.replyCleanup?.enabled?'0':'1'))],
     [btn('📝 '+(c.changeLogEnabled?'إيقاف':'تفعيل')+' سجل تغييرات المجموعة','p4c:1:t:'+id+':g:'+(c.changeLogEnabled?'0':'1'))],
     [btn('🕘 تغييرات اسم/صورة المجموعة','p4c:1:h:'+id)],
@@ -543,6 +544,41 @@ export async function phase4CommunityScreen(service:Phase4CommunityService,actor
     [btn('❌ إلغاء','p4c:1:x:'+draft.id)],
     [btn('↩️ السقف الحالي','p4c:1:i:'+draft.chatId)]])};
  }
+ const cleanupDelayMenu=/^p4c:1:([sr])l:(-[1-9]\d{0,15})$/u.exec(data);
+ if(cleanupDelayMenu){
+  const kind=cleanupDelayMenu[1]!,groupId=cleanupDelayMenu[2]!,
+   config=await service.view(actorId,groupId),serviceMode=kind==='s';
+  const current=serviceMode?config.serviceCleanup?.delayMs??120000:
+   config.replyCleanup?.delayMs??120000;
+  const buttons=[30,60,120,300,600,1800].map(seconds=>[
+   btn((current===seconds*1000?'✅ ':'⏱️ ')+
+    (seconds<60?seconds+' ثانية':seconds/60+' دقائق'),
+    'p4c:1:'+kind+'d:'+groupId+':'+seconds)]);
+  if(!serviceMode)buttons.unshift([btn(
+   config.replyCleanup?.enabled?'⛔ إيقاف تنظيف ردود البوت':'✅ تفعيل تنظيف ردود البوت',
+   'p4c:1:t:'+groupId+':b:'+(config.replyCleanup?.enabled?'0':'1'))]);
+  buttons.push([btn('↩️ إعدادات تنظيف المجموعة',serviceMode?
+   'p4c:1:s:'+groupId:'p4c:1:g:'+groupId)]);
+  return {text:'<b>⏳ مدة حذف '+(serviceMode?'رسائل الخدمة':'ردود البوت المؤقتة')+'</b>\n'+
+   'المجموعة: <code>'+groupId+'</code>\n'+
+   'المهلة الحالية: '+current/1000+' ثانية.\n'+
+   'مهام الحذف السابقة لا تُعاد جدولة مواعيدها.\n'+
+   'اختيار قيمة جديدة يتطلب معاينة وموافقة منفصلتين في الخاص.',
+   keyboard:k(buttons)};
+ }
+ const cleanupDelayChoice=/^p4c:1:([sr])d:(-[1-9]\d{0,15}):(30|60|120|300|600|1800)$/u.exec(data);
+ if(cleanupDelayChoice){
+  const groupId=cleanupDelayChoice[2]!,kind=cleanupDelayChoice[1]!,
+   seconds=Number(cleanupDelayChoice[3]);
+  const draft=await service.pending(actorId,{
+   kind:kind==='s'?'SERVICE_CLEANUP_DELAY':'REPLY_CLEANUP_DELAY',
+   delayMs:seconds*1000},groupId);
+  return {text:service.preview(draft)+
+   '\n\nلا تُطبق المهلة إلا بعد تأكيد المالك خلال دقيقتين.',
+   keyboard:k([[btn('✅ اعتماد المهلة','p4c:1:c:'+draft.id)],
+    [btn('❌ إلغاء','p4c:1:x:'+draft.id)],
+    [btn('↩️ اختيار مهلة أخرى','p4c:1:'+kind+'l:'+groupId)]])};
+ }
  const serviceCleanupMenu=/^p4c:1:s:(-[1-9]\d{0,15})$/u.exec(data);
  if(serviceCleanupMenu){
   const id=serviceCleanupMenu[1]!,config=await service.view(actorId,id);
@@ -558,6 +594,9 @@ export async function phase4CommunityScreen(service:Phase4CommunityService,actor
     'p4c:1:t:'+id+':l:'+(leave?'0':'1'))],
    [btn((profile?'⛔ إيقاف':'✅ تفعيل')+' تنظيف تغيير الاسم/الصورة',
     'p4c:1:t:'+id+':m:'+(profile?'0':'1'))],
+   [btn('⏳ اختيار مهلة رسائل الخدمة','p4c:1:sl:'+id)],
+   [btn('🧼 مدة حذف ردود البوت','p4c:1:rl:'+id)],
+   [btn('📋 سجل محاولات الحذف','sc4:1:g:'+id)],
    [btn('↩️ إعدادات المجموعة','p4c:1:g:'+id)]
   ];
   return {text:'<b>🧹 تنظيف رسائل خدمة الدخول والمغادرة</b>\nالمجموعة: <code>'+id+'</code>'+
