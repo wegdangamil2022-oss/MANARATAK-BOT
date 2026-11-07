@@ -7,7 +7,7 @@ import {Phase4WhisperService} from './phase4-whispers.js';
 export type WhisperMemberCommand=
  |{kind:'ON'|'OFF';chatId:string}
  |{kind:'RESERVE';id:string}
- |{kind:'OPEN';id:string}
+ |{kind:'OPEN'|'ANSWER';id:string}
  |{kind:'BLOCK';id:string}
  |{kind:'UNBLOCK';chatId:string;senderId:string}
  |{kind:'REPORT';id:string;reason:'SPAM'|'HARASSMENT'|'PERSONAL_DATA'|'OTHER'}
@@ -47,6 +47,8 @@ export function parseWhisperMemberCommand(value:string):WhisperMemberCommand|nul
   reason:report[2]! as 'SPAM'|'HARASSMENT'|'PERSONAL_DATA'|'OTHER'};
  const open=/^(?:\/start wh_|\/whisperopen )([a-f0-9]{24})$/u.exec(value);
  if(open)return {kind:'OPEN',id:open[1]!};
+ const answer=/^\/whisperanswer ([a-f0-9]{24})$/u.exec(value);
+ if(answer)return {kind:'ANSWER',id:answer[1]!};
  const reserve=/^\/whisperseat ([a-f0-9]{24})$/u.exec(value);
  if(reserve)return {kind:'RESERVE',id:reserve[1]!};
  return null;
@@ -57,6 +59,7 @@ export interface WhisperMemberScreen{
  readonly privateSecret?:{
   scope:string;whisperId:string;reservationId:string;
   messageRevision:number;consentRevision:number;chatVersion:number;expiresAt:number;
+  view:'CONTENT'|'ANSWER';
  };
 }
 /** Called only after Telegram verifies sender === private chat. This helper
@@ -130,8 +133,9 @@ export async function whisperMemberScreen(
    return {text:ok?'🚩 سُجل البلاغ الخاص للمراجعة. احتفظ النظام بنوع الإساءة فقط، دون نسخ نص الهمسة.':
     'هذا البلاغ غير متاح أو سبق إرساله، أو لا يوجد حجز مثبت باسمك لهذه الهمسة.'};
   }
-  if(request.kind==='OPEN'){
-   const opened=await service.open(actor,request.id);
+  if(request.kind==='OPEN'||request.kind==='ANSWER'){
+   const opened=await service.open(actor,request.id,
+    request.kind==='ANSWER'?'ANSWER':'CONTENT');
    if(opened.status!=='READY'){
     const errors:Record<string,string>={
      NOT_ANNOUNCED:'إعلان الهمسة لم يؤكده Telegram؛ لا يمكن فتح المحتوى حتى النشر المؤكد.',
@@ -145,7 +149,13 @@ export async function whisperMemberScreen(
    }
    const escaped=opened.text.replace(/&/gu,'&amp;').replace(/</gu,'&lt;')
     .replace(/>/gu,'&gt;').replace(/"/gu,'&quot;').replace(/'/gu,'&#39;');
-   const body='<b>💌 محتوى الهمسة في الخاص فقط</b>\n'+escaped+
+   const heading=opened.view==='ANSWER'?'💡 إجابة السؤال التعليمية':
+    opened.purpose==='QUESTION'?'❓ همسة سؤال تعليمي':
+    opened.purpose==='GIFT'?'🎁 هدية مورد تعليمي':'💌 محتوى الهمسة في الخاص فقط';
+   const answerHint=opened.purpose==='QUESTION'&&opened.view==='CONTENT'?
+    '\n\nلعرض نموذج الإجابة بعد الاطلاع على السؤال: <code>/whisperanswer '+
+      request.id+'</code>':'';
+   const body='<b>'+heading+'</b>\n'+escaped+answerHint+
     '\n\n🔐 لا يضمن هذا العرض منع النسخ أو لقطة الشاشة، وليس مشفّرًا طرفيًا.'+
     '\nللبلاغ: <code>/whisperreport '+request.id+' SPAM</code>'+
     '\nلحظر المرسل: <code>/whisperblockid '+request.id+'</code>';
@@ -155,7 +165,7 @@ export async function whisperMemberScreen(
     scope:opened.scope,whisperId:request.id,
     reservationId:opened.reservationId,messageRevision:opened.messageRevision,
     consentRevision:opened.consentRevision,chatVersion:opened.chatVersion,
-    expiresAt:opened.expiresAt
+    expiresAt:opened.expiresAt,view:opened.view
    }};
   }
   if(request.kind!=='RESERVE')return null;
