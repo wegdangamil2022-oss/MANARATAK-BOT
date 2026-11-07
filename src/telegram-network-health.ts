@@ -59,6 +59,7 @@ export class OwnerNetworkHealthEditor{
     'المعلومات محلية فقط، ولا تثبت عضوية Telegram أو حقوق المشرف الحية.\n'+
     'هذا العرض لا يفعّل الحماية ولا يعيد تشغيل روابط موقوفة.',
     [[btn('🛡️ البلاغات المركزية','nw:1:w:'+id+':0')],
+     [btn('🏢 غرفة إدارة المجموعة','nw:1:rg:'+id+':'+g.id)],
      [btn('🩺 تشخيص الشبكة','nw:1:hh:'+id+':0)],
      [btn('🌐 بطاقة الشبكة','nw:1:d:'+id)]]);
   }
@@ -74,6 +75,7 @@ export class OwnerNetworkHealthEditor{
    btn('🛑 إيقاف خدمات الشبكة','nw:1:sh:'+id)]);
   items.push([btn('🎯 إدارة توريث السياسات','nw:1:f:'+id+':0'),
    btn('🧭 صندوق المراجعات','nw:1:iq:'+id+':0)]);
+  items.push([btn('🏢 جرد غرف الإدارة','nw:1:rl:'+id+':0')]);
   items.push([btn('🌐 بطاقة الشبكة','nw:1:d:'+id)]);
   return ui('<b>🩺 لوحة التشخيص المحلي للشبكة</b>\n'+
    'الشبكة: '+esc(report.networkName)+' · الإصدار '+report.networkRevision+'\n'+
