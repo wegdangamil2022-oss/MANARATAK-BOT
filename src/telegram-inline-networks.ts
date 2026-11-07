@@ -22,7 +22,7 @@ import {OwnerNetworkPolicyRestore,validOwnerNetworkPolicyRestoreRoute}
 import {OwnerNetworkWatchEditor,validOwnerNetworkWatchRoute} from './telegram-network-watch-owner.js';
 import {OwnerNetworkSanctionEditor,validOwnerNetworkSanctionRoute,
  type NetworkSanctionRemoteRead} from './telegram-network-sanction-owner.js';
-import {isValidProtectionPolicy,type ProtectionPolicy} from './protection-rules.js';
+import {isValidProtectionPolicy,isValidGroupProtectionRecord,type ProtectionPolicy} from './protection-rules.js';
 import type {Policy} from './policy.js';
 import type {OwnerInlineScreen} from './telegram-inline-owner.js';
 
@@ -158,13 +158,15 @@ export class OwnerNetworkEditor{
  /** Only explicit owner-reviewed MONITOR/OFF policy templates can be a
   * network source. Each source and target needs current group rights. */
  private availablePolicySources(s:BotState,actor:string,now:number,n:GroupNetwork):Chat[]{
-  if(networkEmergencyStopped(s,n.id))return [];
+  if(!this.auth(s,actor,now)||!validGroupNetwork(n)||n.updatedAt>now||
+   networkEmergencyStopped(s,n.id))return [];
   const allowed=approved(s,this.policy,actor,now);
   return allowed.filter(c=>n.members.some(m=>m.chatId===c.id&&m.version===c.version)&&
    c.scopes.includes('moderation')&&this.policy.canUseChat(s,c.id,'moderation')&&
    (s.protectionPolicies??[]).filter(r=>r.policy.chatId===c.id).length===1&&
    (s.protectionPolicies??[]).some(r=>r.policy.chatId===c.id&&
     r.chatPolicyVersion===c.version&&r.updatedAt<=now&&
+    isValidGroupProtectionRecord(r)&&
     portableNetworkProtectionRules(r.policy)&&r.policy.mode!=='ENFORCE'));
  }
  private targetPolicyCandidates(s:BotState,actor:string,now:number,n:GroupNetwork,sourceId:string):Chat[]{
