@@ -3,6 +3,8 @@ import type {BotState} from './store.js';
 import type {Policy} from './policy.js';
 import {networkAlertScope} from './network-event-alerts.js';
 import {networkAlertEventSilenced} from './network-alert-silence.js';
+import {networkEmergencyStopped,validNetworkEmergencyControls}
+ from './network-emergency-stop.js';
 import {networkManagerDigest,type NetworkManagerDigest} from './network-manager-digest.js';
 
 /** NETWORK-006: opt-in one-per-local-calendar-day administrative digest.
@@ -132,7 +134,7 @@ export function dueNetworkDailyDigests(s:BotState,p:Policy,now:number):
  NetworkDailyDigestDue[]|null{
  if(!time(now))return null;
  const rows=all(s);
- if(!rows)return null;
+ if(!rows||!validNetworkEmergencyControls(s.networkEmergencyControls??[]))return null;
  const current=new Map<string,Preference>();
  const ordered=[...rows].sort((a,b)=>b.at-a.at||a.key.localeCompare(b.key));
  const seen=new Map<string,number>();
@@ -150,6 +152,7 @@ export function dueNetworkDailyDigests(s:BotState,p:Policy,now:number):
  }
  const results:NetworkDailyDigestDue[]=[];
  for(const pref of current.values()){
+  if(networkEmergencyStopped(s,pref.network))continue;
   const localNow=now+pref.offsetMinutes*60_000,
    day=Math.floor(localNow/86_400_000),
    scheduledAt=day*86_400_000+pref.minute*60_000-pref.offsetMinutes*60_000;
