@@ -302,10 +302,14 @@ export function validWhisperState(raw:unknown):raw is WhisperState{
   return false;
  for(const item of announced as WhisperAnnouncement[]){
   const matches=(raw.messages as WhisperMessage[]).filter(x=>x.id===item.messageId);
+  // A moderated student whisper has TWO distinct principals: the actual
+  // student author and the approved publishing owner. Never conflate them.
+  // Older owner-only whispers may not have approvedBy, so fall back to
+  // creatorId ONLY for those original records.
   if(matches.length!==1||matches[0]!.chatId!==item.chatId||
-    matches[0]!.creatorId!==item.ownerId||
     matches[0]!.chatVersion!==item.chatVersion||
-    (matches[0]!.approvedBy??matches[0]!.creatorId)!==item.ownerId||
+    (matches[0]!.approvedBy??(
+      matches[0]!.submittedByMember===true?'':matches[0]!.creatorId))!==item.ownerId||
     matches[0]!.approvedAt===undefined||
     item.createdAt<matches[0]!.approvedAt)
    return false;
