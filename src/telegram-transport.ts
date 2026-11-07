@@ -706,7 +706,8 @@ export class TelegramUpdateApplication {
      !event.callbackData&&event.text==='/topics'){
      if(!this.opts.policy.isOwner(event.actorId)||event.edited||event.forwarded)
       return {status:'DENIED',reason:'OWNER_FORUM_PRIVATE_ORIGINAL_ONLY'};
-     const view=await new OwnerForumTopicEditor(this.opts.store,this.opts.policy,this.clock)
+     const view=await new OwnerForumTopicEditor(this.opts.store,this.opts.policy,this.clock,
+       this.opts.moderationRights?.gateway,this.opts.moderationRights?.safety)
       .handle(event.actorId,'ft:1:h:0');
      return view?{status:'APPLIED',reason:'OWNER_FORUM_LOCAL_INVENTORY',
       plan:this.plan(event.actorId,view.text,undefined,view.keyboard)}:
@@ -718,7 +719,8 @@ export class TelegramUpdateApplication {
       return {status:'DENIED',reason:'OWNER_FORUM_PRIVATE_ORIGINAL_ONLY'};
      const m=/^\/topicnote (-[1-9][0-9]{0,15}) ([1-9][0-9]{0,9}) (.+)$/u.exec(event.text);
      if(!m)return {status:'DENIED',reason:'OWNER_FORUM_NOTE_INVALID'};
-     const view=await new OwnerForumTopicEditor(this.opts.store,this.opts.policy,this.clock)
+     const view=await new OwnerForumTopicEditor(this.opts.store,this.opts.policy,this.clock,
+       this.opts.moderationRights?.gateway,this.opts.moderationRights?.safety)
       .prepareNote(event.actorId,m[1]!,Number(m[2]),m[3]!);
      return view?{status:'APPLIED',reason:'OWNER_FORUM_NOTE_PREVIEW',
       plan:this.plan(event.actorId,view.text,undefined,view.keyboard)}:
@@ -730,7 +732,8 @@ export class TelegramUpdateApplication {
       return {status:'DENIED',reason:'OWNER_FORUM_PRIVATE_ORIGINAL_ONLY'};
      const m=/^\/topicregister (-[1-9][0-9]{0,15}) ([1-9][0-9]{0,9}) (.+)$/u.exec(event.text);
      if(!m)return {status:'DENIED',reason:'OWNER_FORUM_REGISTRATION_INVALID'};
-     const view=await new OwnerForumTopicEditor(this.opts.store,this.opts.policy,this.clock)
+     const view=await new OwnerForumTopicEditor(this.opts.store,this.opts.policy,this.clock,
+       this.opts.moderationRights?.gateway,this.opts.moderationRights?.safety)
       .prepare(event.actorId,m[1]!,Number(m[2]),m[3]!);
      return view?{status:'APPLIED',reason:'OWNER_FORUM_REGISTRATION_PREVIEW',
       plan:this.plan(event.actorId,view.text,undefined,view.keyboard)}:
@@ -899,7 +902,8 @@ export class TelegramUpdateApplication {
      if(validOncallRoute(event.callbackData)){const view=await new TelegramOncall(this.opts.store,this.opts.policy,this.clock).handle(actorId,event.callbackData);return view?{status:'APPLIED',reason:'ONCALL_VIEW',adminUIAccess:view.access,plan:this.plan(actorId,view.text,undefined,view.keyboard,event.callbackMessageId)}:{status:'DENIED',reason:'ONCALL_UNAVAILABLE'};}
      if(event.callbackData.startsWith('ft:1:')||
       event.callbackData==='mi:1:i:01:05'){
-      const view=await new OwnerForumTopicEditor(this.opts.store,this.opts.policy,this.clock)
+      const view=await new OwnerForumTopicEditor(this.opts.store,this.opts.policy,this.clock,
+       this.opts.moderationRights?.gateway,this.opts.moderationRights?.safety)
        .handle(actorId,event.callbackData);
       return view?{status:'APPLIED',reason:'OWNER_FORUM_LOCAL_INVENTORY',
        plan:this.plan(actorId,view.text,undefined,view.keyboard,event.callbackMessageId)}:
