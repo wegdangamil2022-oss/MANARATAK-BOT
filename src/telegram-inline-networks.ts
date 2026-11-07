@@ -4,6 +4,7 @@ import type {BotStore,BotState,Chat} from './store.js';
 import type {GroupNetwork} from './group-network-model.js';
 import {validNetworkName} from './group-network-model.js';
 import {prepareNetworkInheritance,pauseNetworkInheritanceByOwner} from './network-inheritance.js';
+import {portableNetworkProtectionRules} from './network-policy-portability.js';
 import {decideNetworkEmergency,networkEmergencyStopped} from './network-emergency-stop.js';
 import {pauseSelectedNetworkPolicyLinks} from './network-bulk-policy-pause.js';
 import {OwnerNetworkBulkServiceEditor,validOwnerNetworkBulkServiceRoute}
@@ -160,7 +161,7 @@ export class OwnerNetworkEditor{
    (s.protectionPolicies??[]).filter(r=>r.policy.chatId===c.id).length===1&&
    (s.protectionPolicies??[]).some(r=>r.policy.chatId===c.id&&
     r.chatPolicyVersion===c.version&&r.updatedAt<=now&&
-    isValidProtectionPolicy(r.policy)&&r.policy.mode!=='ENFORCE'));
+    portableNetworkProtectionRules(r.policy)&&r.policy.mode!=='ENFORCE'));
  }
  private targetPolicyCandidates(s:BotState,actor:string,now:number,n:GroupNetwork,sourceId:string):Chat[]{
   const current=approved(s,this.policy,actor,now);
