@@ -816,7 +816,7 @@ export class BotStore {
     groupMenuAccess?:TelegramReplyJob['groupMenuAccess'],
     privateGroupAccess?:TelegramReplyJob['privateGroupAccess'],
     adminUIAccess?:TelegramReplyJob['adminUIAccess'],privateLibraryAccess?:TelegramReplyJob['privateLibraryAccess'],studioScoped=false,communityAccess?:TelegramReplyJob['communityAccess'],communityClose?:CommunityMessageReceipt,
-    communityAutomation?:TelegramReplyJob['communityAutomation']): Promise<void> {
+    communityAutomation?:TelegramReplyJob['communityAutomation'],whisperAccess?:TelegramReplyJob['whisperAccess']): Promise<void> {
     await this.transaction(s => {
       const update = s.updates.find(x => x.key === key);
       if (!update || update.status !== 'CLAIMED') throw new Error('Update not claimed');
@@ -834,6 +834,7 @@ export class BotStore {
           ...(groupMenuAccess?{groupMenuAccess:structuredClone(groupMenuAccess)}:{}),
           ...(communityAutomation?{communityAutomation:structuredClone(communityAutomation)}:{}),
           ...(privateGroupAccess?{privateGroupAccess:structuredClone(privateGroupAccess)}:{}),
+          ...(whisperAccess?{whisperAccess:structuredClone(whisperAccess)}:{}),
           ...(adminUIAccess?{adminUIAccess:structuredClone(adminUIAccess)}:{}),
           ...(communityAccess?{communityAccess:structuredClone(communityAccess)}:{}),
           ...(communityClose?{communityClose:structuredClone(communityClose)}:{}),

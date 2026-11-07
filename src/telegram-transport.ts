@@ -153,6 +153,7 @@ type ProcessedReply={status:TelegramResult['status'];reason:string;plan?:Telegra
  groupMenuAccess?:TelegramReplyJob['groupMenuAccess'];
  communityAutomation?:TelegramReplyJob['communityAutomation'];
  privateGroupAccess?:TelegramReplyJob['privateGroupAccess'];
+ whisperAccess?:TelegramReplyJob['whisperAccess'];
  adminUIAccess?:TelegramReplyJob['adminUIAccess'];
  privateLibraryAccess?:TelegramReplyJob['privateLibraryAccess'];communityAccess?:TelegramReplyJob['communityAccess'];communityClose?:TelegramReplyJob['communityClose']};
 export interface TelegramApplicationOptions {
@@ -729,6 +730,25 @@ export class TelegramUpdateApplication {
      const screen=await whisperMemberScreen(new Phase4WhisperService(
       this.opts.store,this.opts.policy,this.clock,verify),actorId,text);
      if(!screen)return {status:'DENIED',reason:'WHISPER_MEMBER_COMMAND_INVALID'};
+     if(screen.privateSecret){
+      const secret=screen.privateSecret,scope=secret.scope;
+      const after=await this.opts.store.snapshot(),now=this.clock();
+      const chat=after.chats.filter(c=>c.id===scope&&c.approved&&c.present&&
+        c.scopes.includes('navigation'));
+      if(!Number.isSafeInteger(now)||now>=secret.expiresAt||
+         chat.length!==1||chat[0]!.version!==secret.chatVersion||
+         !this.opts.policy.canUseChat(after,scope,'navigation'))
+       return {status:'DENIED',reason:'WHISPER_DELIVERY_PROOF_CHANGED'};
+      return {status:'APPLIED',reason:'WHISPER_PRIVATE_DELIVERY_PLANNED',
+       plan:this.plan(chatId,screen.text),
+       privateGroupAccess:{actorId,scope,
+        epoch:privateGroupEpochDigest(after,scope),expiresAt:secret.expiresAt},
+       whisperAccess:{whisperId:secret.whisperId,
+        reservationId:secret.reservationId,
+        messageRevision:secret.messageRevision,
+        consentRevision:secret.consentRevision,
+        chatVersion:secret.chatVersion,expiresAt:secret.expiresAt}};
+     }
      return {status:'APPLIED',reason:'WHISPER_MEMBER_SELF_SERVICE',
       plan:this.plan(chatId,screen.text)};
     }
@@ -739,7 +759,7 @@ export class TelegramUpdateApplication {
     const whisperInput=kind==='private'&&(
       event.callbackData==='mi:1:i:09:06'||
       event.callbackData?.startsWith('wh:1:')||
-      /^\/whispers(?:$|\s)|^\/whisper(?:first|direct)(?:$|\s)/u.test(text));
+      /^\/whispers(?:$|\s)|^\/whisper(?:first|direct|reports)(?:$|\s)/u.test(text));
     if(whisperInput){
      if(!this.opts.policy.isOwner(actorId)||actorId!==chatId)
       return {status:'DENIED',reason:'WHISPER_OWNER_ONLY'};
@@ -2210,9 +2230,9 @@ export class TelegramUpdateApplication {
     // Commit the decision and outbound reply intent in one durable transaction.
     // No external call occurs before the outbox row exists.
     await this.opts.store.finish(key,audit,handled.plan,handled.groupQuestionAccess,
-     handled.groupMenuAccess,handled.privateGroupAccess,handled.adminUIAccess,handled.privateLibraryAccess,studioInput&&!!handled.adminUIAccess,handled.communityAccess,handled.communityClose,handled.communityAutomation);
+     handled.groupMenuAccess,handled.privateGroupAccess,handled.adminUIAccess,handled.privateLibraryAccess,studioInput&&!!handled.adminUIAccess,handled.communityAccess,handled.communityClose,handled.communityAutomation,handled.whisperAccess);
     // Temporary actor IDs are only stored in the guarded queue, never returned.
-    const {groupQuestionAccess:_,groupMenuAccess:__,privateGroupAccess:___,adminUIAccess:____,privateLibraryAccess:_____,communityAccess:______,communityClose:_______,communityAutomation:________,...publicResult}=handled;
+    const {groupQuestionAccess:_,groupMenuAccess:__,privateGroupAccess:___,whisperAccess:_________,adminUIAccess:____,privateLibraryAccess:_____,communityAccess:______,communityClose:_______,communityAutomation:________,...publicResult}=handled;
     const visible=publicResult.plan?{...publicResult,deliveryKey:key}:publicResult;
     return event.callbackQueryId?{...visible,callbackQueryId:event.callbackQueryId}:visible;
   }
