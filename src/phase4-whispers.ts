@@ -156,6 +156,14 @@ export class Phase4WhisperService{
    s.phase4Whispers=data;return true;
   });
  }
+ async ownerGroups(actor:string):Promise<string[]>{
+  const s=await this.store.snapshot();
+  if(!this.owner(s,actor))return [];
+  return [...new Set(s.chats.filter(c=>c.approved&&c.present&&
+   c.scopes.includes('navigation')&&isGroup(c.id))
+   .map(c=>c.id))].sort().filter(id=>
+    s.chats.filter(c=>c.id===id).length===1&&this.scope(s,actor,id)!==null);
+ }
  async groupSettings(actor:string,chatId:string):Promise<
   {memberDraftsEnabled:boolean;version:number}|null>{
   const s=await this.store.snapshot();
