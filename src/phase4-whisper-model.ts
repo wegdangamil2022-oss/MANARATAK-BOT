@@ -158,7 +158,8 @@ export function validWhisperState(raw:unknown):raw is WhisperState{
   if(matches.length!==1||matches[0]!.chatId!==item.chatId||
     matches[0]!.creatorId!==item.ownerId||
     matches[0]!.chatVersion!==item.chatVersion||
-    matches[0]!.status==='DRAFT'||item.createdAt<matches[0]!.approvedAt!)
+    matches[0]!.approvedAt===undefined||
+    item.createdAt<matches[0]!.approvedAt)
    return false;
  }
  const reports=raw.reports??[];
@@ -179,9 +180,9 @@ export function validWhisperState(raw:unknown):raw is WhisperState{
   const matching=messages.filter(x=>x.id===report.messageId);
   if(matching.length!==1||!matching[0]||matching[0].creatorId===report.reporterId)
    return false;
-  // Only a recipient who actually acquired a seat can report its message.
-  if(!(raw.reservations as WhisperReservation[]).some(x=>
-     x.messageId===report.messageId&&x.memberId===report.reporterId))return false;
+  // Report creation requires a HELD seat. A later opt-out or block can
+  // release the seat; the previously accepted reason-only report persists
+  // without becoming a new authority to view content.
  }
  return true;
 }
