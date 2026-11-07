@@ -36,7 +36,7 @@ const HOME=new RegExp('^ft:1:h:'+page+'$','u');
 const GROUP=new RegExp('^ft:1:g:'+chat+':'+page+'$','u');
 const DETAIL=new RegExp('^ft:1:d:'+chat+':'+thread+'$','u');
 const LIVE=new RegExp('^ft:1:f:'+chat+':'+thread+'$','u');
-const SOURCE_PREVIEW=new RegExp('^ft:1:m:'+chat+':'+thread+'$','u');
+const SOURCE_PREVIEW=new RegExp('^ft:1:m:'+chat+':'+thread+':'+page+'$','u');
 const HISTORY=new RegExp('^ft:1:v:'+chat+':'+thread+':'+page+'$','u');
 const CONFIRM=new RegExp('^ft:1:c:'+token+'$','u');
 const CANCEL=new RegExp('^ft:1:x:'+token+'$','u');
@@ -252,7 +252,7 @@ export class OwnerForumTopicEditor{
       'ft:1:q:'+g+':'+t+':'+(publication?.published?'0':'1'))]]:[]),
     ...(note?[[btn('🕘 سجل اعتماد نشر الملاحظات',
      'ft:1:b:'+g+':'+t+':0')]]:[]),
-    [btn('📚 معاينة مصادر النشر للموضوع','ft:1:m:'+g+':'+t)],
+    [btn('📚 معاينة مصادر النشر للموضوع','ft:1:m:'+g+':'+t+':0')],
     [btn('🔎 فحص صلاحيات Telegram الحية','ft:1:f:'+g+':'+t)],
     [btn(education.mode==='PAUSED'?'▶️ استئناف تصفح الموضوع':'⏸ إيقاف التصفح في الموضوع',
       'ft:1:p:'+g+':'+t+':'+(education.mode==='PAUSED'?'0':'1'))],
@@ -367,12 +367,12 @@ export class OwnerForumTopicEditor{
   * The official getChat/getChatMember observations do not prove that the
   * particular message_thread_id exists or is currently open.
   */
- private sourcePreview(s:BotState,actor:string,now:number,g:string,t:number):
+ private sourcePreview(s:BotState,actor:string,now:number,g:string,t:number,p:number):
  OwnerInlineScreen|null{
-  const data=previewForumTopicEducationalSources(s,this.policy,actor,g,t,now);
+  const data=previewForumTopicEducationalSources(s,this.policy,actor,g,t,now,p);
   if(!data)return null;
   const lines=data.sources.map((source,i)=>
-   '▫️ '+(i+1)+'. '+esc(source.title)+
+   '▫️ '+(p*8+i+1)+'. '+esc(source.title)+
    ' · <code>'+source.id+'</code>'+
    (source.approvedForBroadcast?' · لديه نص منشور مراجَع':' · غير جاهز للنشر'));
   return ui('<b>📚 معاينة مصادر النشر إلى موضوع Forum</b>\n'+
@@ -380,14 +380,17 @@ export class OwnerForumTopicEditor{
    'الاسم المحلي: '+esc(data.topicTitle)+'\n'+
    'حالة التصفح: '+(data.topicPaused?'متوقف':'يتبع سياسة المجموعة')+'\n'+
    'التصنيفات المعتمدة المرئية في الموضوع: '+data.categoryCount+'\n'+
-   'الموارد المنشورة المتاحة في المصدر: '+data.resourceCount+'\n'+
+   'الموارد المنشورة المتاحة في المصدر: '+data.resourceCount+
+   ' · صفحة '+(data.page+1)+'/'+data.pages+'\n'+
    'منها موارد ذات نص نشر مراجَع: '+data.approvedForBroadcastCount+'\n'+
    'أمثلة على المصادر:\n'+(lines.length?lines.join('\n'):'لا توجد موارد مناسبة حاليًا.')+'\n'+
    'هذه معاينة قراءة محلية فقط؛ لا تثبت أن الموضوع موجود أو مفتوح أو أن Telegram يسمح بالنشر إليه.'+
    '\nلا يرسل هذا الفحص أي رسالة. للنشر المستقل بعد موافقتين، اكتب في خاص البوت: '+
    '<code>/topicbroadcast '+g+' '+t+' معرف_المورد</code>.'+
    ' يلزم أن يكون نص المورد المنشور قد تمت مراجعته. فحص حقوق Telegram الحية متاح بصورة مستقلة.',
-   [[btn('🔎 فحص صلاحيات Telegram الحية','ft:1:f:'+g+':'+t)],
+   [...(data.page>0?[[btn('⬅️ السابق','ft:1:m:'+g+':'+t+':'+(data.page-1))]]:[]),
+    ...(data.page+1<data.pages?[[btn('➡️ التالي','ft:1:m:'+g+':'+t+':'+(data.page+1))]]:[]),
+    [btn('🔎 فحص صلاحيات Telegram الحية','ft:1:f:'+g+':'+t)],
     [btn('↩️ تفاصيل الموضوع','ft:1:d:'+g+':'+t)]]);
  }
 
@@ -649,7 +652,8 @@ export class OwnerForumTopicEditor{
   const s=await this.store.snapshot(),now=this.clock();
   if(!this.access(s,actor,now))return null;
   const sources=SOURCE_PREVIEW.exec(data);
-  if(sources)return this.sourcePreview(s,actor,now,sources[1]!,Number(sources[2]));
+  if(sources)return this.sourcePreview(s,actor,now,sources[1]!,
+   Number(sources[2]),Number(sources[3]));
   const live=LIVE.exec(data);
   if(live)return this.live(actor,live[1]!,Number(live[2]));
   const h=HOME.exec(data);if(h)return this.home(s,actor,now,Number(h[1]));
