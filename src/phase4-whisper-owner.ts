@@ -3,7 +3,7 @@ import {validWhisperGiftResourceUrl} from './phase4-whisper-model.js';
 import type {OwnerInlineScreen,TelegramInlineKeyboard} from './telegram-inline-owner.js';
 
 const hex='[a-f0-9]{24}';
-const route=new RegExp('^wh:1:(?:h|l:(?:0|[1-9][0-9]?)|[vaxps]:'+hex+'|rv:'+hex+':(?:0|[1-9][0-9]?)|c:'+hex+':[12]|r:-[1-9][0-9]{0,15}|[zykj]:'+hex+'|f:(?:0|[1-9][0-9]?)|t:(?:0|[1-9][0-9]?)|b:(?:0|[1-9][0-9]?)|u:-[1-9][0-9]{0,15}|n:-[1-9][0-9]{0,15}:[fdamtqg]|g:-[1-9][0-9]{0,15}|o:-[1-9][0-9]{0,15}:[01])$','u');
+const route=new RegExp('^wh:1:(?:h|l:(?:0|[1-9][0-9]?)|[vaxps]:'+hex+'|rv:'+hex+':(?:0|[1-9][0-9]?)|p[cd]:'+hex+'|c:'+hex+':[12]|r:-[1-9][0-9]{0,15}|i:-[1-9][0-9]{0,15}|[zykj]:'+hex+'|f:(?:0|[1-9][0-9]?)|t:(?:0|[1-9][0-9]?)|b:(?:0|[1-9][0-9]?)|u:-[1-9][0-9]{0,15}|n:-[1-9][0-9]{0,15}:[fdamtqg]|g:-[1-9][0-9]{0,15}|o:-[1-9][0-9]{0,15}:[01])$','u');
 export const validWhisperOwnerRoute=(s:unknown):s is string=>
  typeof s==='string'&&Buffer.byteLength(s,'utf8')<=64&&route.test(s);
 const escape=(s:string)=>s.replace(/&/gu,'&amp;').replace(/</gu,'&lt;')
@@ -132,6 +132,8 @@ async function detail(service:Phase4WhisperService,actor:string,id:string):
  }
  if(row.status==='OPEN'&&publication==='NOT_POSTED')
   actions.push([btn('📣 معاينة نشر إعلان المجموعة','wh:1:p:'+id)]);
+ if(publication==='QUEUED')
+  actions.push([btn('🛑 معاينة إلغاء الإعلان المعلّق','wh:1:pc:'+id)]);
  if(row.status!=='CLOSED')actions.push([btn('🔒 إغلاق وحذف النص','wh:1:x:'+id)]);
  actions.push([list],[home]);
  return ui(text,actions);
@@ -268,8 +270,36 @@ export async function whisperOwnerScreen(
     [[btn(settings.memberDraftsEnabled?'⛔ معاينة إيقاف مسودات الطلاب':
       '✅ معاينة تفعيل مسودات الطلاب',
       'wh:1:o:'+groupId+':'+(settings.memberDraftsEnabled?'0':'1'))],
+     [btn('📊 تشخيص الهمسات (إحصاءات منقحة)','wh:1:i:'+groupId)],
      [btn('🚩 البلاغات','wh:1:r:'+groupId)],
      [btn('↩️ المجموعات','wh:1:f:0')],[list]]);
+  }
+  const diagnostics=/^wh:1:i:(-[1-9][0-9]{0,15})$/u.exec(input);
+  if(diagnostics){
+   const id=diagnostics[1]!,d=await service.groupDiagnostics(actor,id);
+   if(!d)return null;
+   return ui('<b>📊 الهمسات — تشخيص خاص بالمالك</b>\n'+
+    'المجموعة: <code>'+id+'</code>\n'+
+    'سجلات محفوظة: '+d.total+' · مسودات: '+d.drafts+
+    ' · معتمدة: '+d.open+' · مغلقة: '+d.closed+
+    '\nمسودات طلاب تنتظر المراجعة: '+d.studentDrafts+
+    '\nأسئلة تعليمية: '+d.questions+' · هدايا موارد: '+d.gifts+
+    ' · فرق محددة: '+d.team+
+    '\n\n<b>📣 نشر إعلان المجموعة</b>\n'+
+    'في الطابور: '+d.queued+' · محاولة إرسال: '+d.sending+
+    '\nأكّد Telegram نشرها: '+d.confirmed+
+    ' · نتيجة مجهولة: '+d.unknown+
+    '\nرفض مؤكّد: '+d.providerRejected+' · استُبعد: '+d.skipped+
+    '\n\n<b>🔐 احتفاظ وخصوصية</b>\n'+
+    'حجوزات مقاعد حالية: '+d.seats+
+    '\nقبول Telegram لإرسال خاص: '+d.privateSendsAccepted+
+    ' (لا يدل على قراءة)\nبلاغات مفتوحة: '+d.openReports+
+    ' · مراجَعة: '+d.reviewedReports+
+    '\nحظر مفعّل: '+d.activeBlocks+
+    '\n\nالأعداد مأخوذة من السجلات الحالية بعد سياسات الاحتفاظ،'+
+    ' ولا تعرض نصًا خاصًا ولا أسماء المستلمين أو المبلّغين.',
+    [[btn('↩️ إعدادات المجموعة','wh:1:g:'+id)],
+     [btn('📝 مراجعة مسودات الطلاب','wh:1:t:0')],[list]]);
   }
   const settingPreview=/^wh:1:o:(-[1-9][0-9]{0,15}):([01])$/u.exec(input);
   if(settingPreview){
@@ -407,6 +437,28 @@ export async function whisperOwnerScreen(
     'المجموعة: <code>'+draft.chatId+'</code> · صفحة '+(page+1)+'/'+pages+
     '\nهذه الصفحات في خاص المالك فقط. لا يُنشر النص أو المصدر في المجموعة.\n\n'+
     '<code>'+part+'</code>',buttons);
+  }
+  const cancelPublicationPreview=/^wh:1:pc:([a-f0-9]{24})$/u.exec(input);
+  if(cancelPublicationPreview){
+   const message=await service.ownerView(actor,cancelPublicationPreview[1]!);
+   if(!message||await service.announcementStatus(actor,message.id)!=='QUEUED')
+    return null;
+   return ui('<b>🛑 معاينة إلغاء نشر إعلان الهمسة</b>\n'+
+    'المجموعة: <code>'+message.chatId+'</code>\n'+
+    'المعرّف الداخلي: <code>'+message.id+'</code>\n'+
+    'يُلغى الطلب فقط إذا لم يبدأ عامل Telegram أي محاولة إرسال.'+
+    ' لن تُحذف رسائل سبق أن أرسلها Telegram، ولا تُعيد هذه العملية نشرًا لاحقًا.',
+    [[btn('✅ تأكيد إلغاء الإعلان قبل الإرسال',
+      'wh:1:pd:'+message.id)],
+     [btn('↩️ رجوع دون إلغاء','wh:1:v:'+message.id)]]);
+  }
+  const cancelPublicationConfirm=/^wh:1:pd:([a-f0-9]{24})$/u.exec(input);
+  if(cancelPublicationConfirm){
+   const cancelled=await service.cancelQueuedAnnouncement(actor,
+    cancelPublicationConfirm[1]!);
+   return cancelled?detail(service,actor,cancelPublicationConfirm[1]!):
+    ui('🔒 لم يعد هذا الإعلان قابلًا للإلغاء قبل الإرسال. راجع حالته دون إعادة المحاولة.',
+     [[list]]);
   }
   const publishPreview=/^wh:1:p:([a-f0-9]{24})$/u.exec(input);
   if(publishPreview){
