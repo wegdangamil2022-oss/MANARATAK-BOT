@@ -14,6 +14,8 @@ import {ownerForumTopicEducationPolicy,forumTopicEducationProof,
 import {ownerForumNotePublication,forumNotePublicationProof,
  changeForumNotePublication,forumNotePublicationHistory,
  type ForumTopicNotePublicationAction} from './group-forum-note-publication.js';
+import {previewForumTopicEducationalSources}
+ from './group-forum-publication-preflight.js';
 
 /** 01-05: local-only topic registration with private owner consent.
  * No Bot API send, createForumTopic, closeForumTopic or permission mutation.
@@ -29,6 +31,7 @@ const HOME=new RegExp('^ft:1:h:'+page+'$','u');
 const GROUP=new RegExp('^ft:1:g:'+chat+':'+page+'$','u');
 const DETAIL=new RegExp('^ft:1:d:'+chat+':'+thread+'$','u');
 const LIVE=new RegExp('^ft:1:f:'+chat+':'+thread+'$','u');
+const SOURCE_PREVIEW=new RegExp('^ft:1:m:'+chat+':'+thread+'$','u');
 const HISTORY=new RegExp('^ft:1:v:'+chat+':'+thread+':'+page+'$','u');
 const CONFIRM=new RegExp('^ft:1:c:'+token+'$','u');
 const CANCEL=new RegExp('^ft:1:x:'+token+'$','u');
@@ -129,7 +132,7 @@ function parsePublication(value:unknown):PendingPublication|null{
 export function validOwnerForumTopicRoute(value:unknown):boolean{
  return typeof value==='string'&&Buffer.byteLength(value,'utf8')<=64&&
   (HOME.test(value)||GROUP.test(value)||DETAIL.test(value)||
-   LIVE.test(value)||
+   LIVE.test(value)||SOURCE_PREVIEW.test(value)||
    HISTORY.test(value)||
    CONFIRM.test(value)||CANCEL.test(value)||
    NOTE_CONFIRM.test(value)||NOTE_CANCEL.test(value)||
@@ -227,6 +230,7 @@ export class OwnerForumTopicEditor{
       'ft:1:q:'+g+':'+t+':'+(publication?.published?'0':'1'))]]:[]),
     ...(note?[[btn('🕘 سجل اعتماد نشر الملاحظات',
      'ft:1:b:'+g+':'+t+':0')]]:[]),
+    [btn('📚 معاينة مصادر النشر للموضوع','ft:1:m:'+g+':'+t)],
     [btn('🔎 فحص صلاحيات Telegram الحية','ft:1:f:'+g+':'+t)],
     [btn(education.mode==='PAUSED'?'▶️ استئناف تصفح الموضوع':'⏸ إيقاف التصفح في الموضوع',
       'ft:1:p:'+g+':'+t+':'+(education.mode==='PAUSED'?'0':'1'))],
@@ -341,6 +345,25 @@ export class OwnerForumTopicEditor{
   * The official getChat/getChatMember observations do not prove that the
   * particular message_thread_id exists or is currently open.
   */
+ private sourcePreview(s:BotState,actor:string,now:number,g:string,t:number):
+ OwnerInlineScreen|null{
+  const data=previewForumTopicEducationalSources(s,this.policy,actor,g,t,now);
+  if(!data)return null;
+  const lines=data.titles.map((name,i)=>
+   '▫️ '+(i+1)+'. '+esc(name));
+  return ui('<b>📚 معاينة مصادر النشر إلى موضوع Forum</b>\n'+
+   'المجموعة: <code>'+g+'</code> · الموضوع: <code>'+t+'</code>\n'+
+   'الاسم المحلي: '+esc(data.topicTitle)+'\n'+
+   'حالة التصفح: '+(data.topicPaused?'متوقف':'يتبع سياسة المجموعة')+'\n'+
+   'التصنيفات المعتمدة المرئية في الموضوع: '+data.categoryCount+'\n'+
+   'الموارد المنشورة المتاحة في المصدر: '+data.resourceCount+'\n'+
+   'أمثلة على المصادر:\n'+(lines.length?lines.join('\n'):'لا توجد موارد مناسبة حاليًا.')+'\n'+
+   'هذه معاينة قراءة محلية فقط؛ لا تثبت أن الموضوع موجود أو مفتوح أو أن Telegram يسمح بالنشر إليه.'+
+   '\nلا يُنفّذ نشر أو إرسال تجريبي من هذه الشاشة. فحص الصلاحيات الحية متاح بصورة مستقلة.',
+   [[btn('🔎 فحص صلاحيات Telegram الحية','ft:1:f:'+g+':'+t)],
+    [btn('↩️ تفاصيل الموضوع','ft:1:d:'+g+':'+t)]]);
+ }
+
  private async live(actor:string,g:string,t:number):Promise<OwnerInlineScreen|null>{
   const before=await this.store.snapshot(),start=this.clock();
   const topic=localForumTopics(before,this.policy,actor,g,start)?.find(x=>x.threadId===t);
@@ -592,6 +615,8 @@ export class OwnerForumTopicEditor{
   if(x)return this.decide(actor,x[1]!,false);
   const s=await this.store.snapshot(),now=this.clock();
   if(!this.access(s,actor,now))return null;
+  const sources=SOURCE_PREVIEW.exec(data);
+  if(sources)return this.sourcePreview(s,actor,now,sources[1]!,Number(sources[2]));
   const live=LIVE.exec(data);
   if(live)return this.live(actor,live[1]!,Number(live[2]));
   const h=HOME.exec(data);if(h)return this.home(s,actor,now,Number(h[1]));
