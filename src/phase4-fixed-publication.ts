@@ -16,7 +16,7 @@ const hash=(text:string)=>createHash('sha256')
  .update('MANARATAK:09:03:PUBLIC-FIXED:v1:\n').update(text,'utf8').digest('hex');
 /** No rule trigger, filtered word, moderation action or private student data
  * is ever included in the public 09:03 announcement. */
-const publicBody=(state:Parameters<typeof guidanceContext>[0],
+export const publicBody=(state:Parameters<typeof guidanceContext>[0],
  policy:Policy,chatId:string):{body:string;version:number}|null=>{
  const data=guidanceContext(state,policy,chatId);
  if(!data)return null;
