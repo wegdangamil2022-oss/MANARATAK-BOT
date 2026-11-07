@@ -4,12 +4,16 @@ import type {Policy} from './policy.js';
 import type {NetworkSanctionReview} from './network-sanction-review-model.js';
 import {networkSanctionReviewAccessible} from './network-sanction-review.js';
 import {moderationLedgerSafeForDispatch} from './moderation-review-integrity.js';
+import {validNetworkEmergencyControls,networkEmergencyStopped}
+ from './network-emergency-stop.js';
+import {validGroupNetwork} from './group-network-model.js';
 import {TelegramBotApiModerationGateway} from './telegram-moderation-gateway.js';
 
 /** Local state classification, NOT authorization to contact or mutate Telegram.
  * No status here authorizes a live restriction, even after remote observations. */
 export type NetworkTransferLocalBlock='REVIEW_NOT_CURRENT'|'PROTECTED_LOCAL'|
- 'UNRESOLVED_LOCAL'|'ACTIVE_LOCAL_REASON'|'LOCAL_LEDGER_UNSAFE';
+ 'UNRESOLVED_LOCAL'|'ACTIVE_LOCAL_REASON'|'LOCAL_LEDGER_UNSAFE'|
+ 'NETWORK_STOPPED'|'NETWORK_STATE_UNSAFE';
 export type NetworkTransferLocalResult=
  {status:'BLOCKED';reason:NetworkTransferLocalBlock}|
  {status:'MAY_OBSERVE';review:NetworkSanctionReview};
@@ -22,6 +26,16 @@ export function inspectNetworkTransferLocal(
  const row=networkSanctionReviewAccessible(s,policy,actor,now,reviewId);
  if(!row||row.status!=='REVIEWED_ONLY'||row.reviewedAt===undefined||
   row.reviewedAt>now)return {status:'BLOCKED',reason:'REVIEW_NOT_CURRENT'};
+ // A reviewed decision cannot override a network-wide STOP or malformed
+ // emergency history. Do not even query Telegram on an unsafe local state.
+ if(!validNetworkEmergencyControls(s.networkEmergencyControls??[]))
+  return {status:'BLOCKED',reason:'NETWORK_STATE_UNSAFE'};
+ const networks=(s.groupNetworks??[]).filter(n=>n.id===row.networkId);
+ if(networks.length!==1||!networks[0]||!validGroupNetwork(networks[0])||
+  networks[0].revision!==row.networkRevision)
+  return {status:'BLOCKED',reason:'NETWORK_STATE_UNSAFE'};
+ if(networkEmergencyStopped(s,row.networkId))
+  return {status:'BLOCKED',reason:'NETWORK_STOPPED'};
  // The owner and locally delegated moderators are protected even when a
  // remote Telegram snapshot transiently labels them ordinary members.
  if(row.subjectId===actor||row.subjectId===policy.ownerId||
@@ -47,6 +61,7 @@ function localEpoch(s:BotState):string{
  return createHash('sha256').update(JSON.stringify([
   s.chats,s.grants,s.groupNetworks??[],s.networkWatchCases??[],
   s.networkSanctionReviews??[],s.moderationOperations,s.moderationReasons,
+  s.networkEmergencyControls??[],s.networkInheritance??[],
   s.privateFeatures,s.privateSettingsRevision??0
  ])).digest('hex');
 }
