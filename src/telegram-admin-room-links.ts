@@ -1,12 +1,13 @@
 import {randomBytes} from 'node:crypto';
 import {AdminRoomLinks,adminRoomRevokeWitness,type AdminRoomMode} from './admin-room-links.js';
+import {adminRoomOncallQueueSummary} from './admin-room-oncall.js';
 import type {BotStore} from './store.js';
 import type {Policy} from './policy.js';
 import type {OwnerInlineScreen} from './telegram-inline-owner.js';
 import {protectionUIEpoch,type AdminUIAccess} from './protection-ui-access.js';
 import {TelegramBotApiModerationGateway} from './telegram-moderation-gateway.js';
 const TTL=120000,PREFIX='admin-room:revoke-preview:',QUIET='admin-room:quiet-preview:',DAILY='admin-room:daily-preview:',CHECK='admin-room-check:';
-const ROUTE=/^al:1:h:(0|[1-9][0-9]{0,2})$|^al:1:([dgrxpqts]):([A-Za-z0-9_-]{24})$|^al:1:z:([A-Za-z0-9_-]{24})$/u,NEW_ROUTE=/^al:1:n:(notifications|control|central)$/u,QUIET_CONFIRM=/^al:1:y:([A-Za-z0-9_-]{24})$/u,DAILY_CONFIRM=/^al:1:v:([A-Za-z0-9_-]{24})$/u,REVOKE_FINAL=/^al:1:w:([A-Za-z0-9_-]{24})$/u;
+const ROUTE=/^al:1:h:(0|[1-9][0-9]{0,2})$|^al:1:([dgrxpqtso]):([A-Za-z0-9_-]{24})$|^al:1:z:([A-Za-z0-9_-]{24})$/u,NEW_ROUTE=/^al:1:n:(notifications|control|central)$/u,QUIET_CONFIRM=/^al:1:y:([A-Za-z0-9_-]{24})$/u,DAILY_CONFIRM=/^al:1:v:([A-Za-z0-9_-]{24})$/u,REVOKE_FINAL=/^al:1:w:([A-Za-z0-9_-]{24})$/u;
 export const validAdminRoomRoute=(v:string)=>ROUTE.exec(v)?.[0]===v||NEW_ROUTE.exec(v)?.[0]===v||QUIET_CONFIRM.exec(v)?.[0]===v||DAILY_CONFIRM.exec(v)?.[0]===v||REVOKE_FINAL.exec(v)?.[0]===v;
 type Screen=OwnerInlineScreen&{access:AdminUIAccess};
 const modes={NOTIFICATIONS:'إشعارات',CONTROL:'تحكم',CENTRAL:'إدارة مركزية'};
@@ -58,6 +59,28 @@ export class TelegramAdminRoomLinks{
     if(row.status!=='ACTIVE'||row.mode!=='NOTIFICATIONS'||typeof row.daily!=='boolean'||!row.dailyWitness)return null;const token=randomBytes(18).toString('base64url'),created=await this.store.transaction(s=>{const at=this.clock();if(protectionUIEpoch(s,this.policy,actor,at)!==epoch||!Number.isSafeInteger(at)||at<now||at>8640000000000000-TTL)return false;for(const c of s.callbacks)if(c.actorId===actor&&(c.ref.startsWith(PREFIX)||c.ref.startsWith(QUIET)||c.ref.startsWith(DAILY))&&!c.used)c.revoked=true;s.callbacks.push({ref:DAILY+token,action:DAILY+row.id+':'+row.dailyWitness+':'+(row.daily?'0':'1'),chatId:'private',actorId:actor,policyVersion:0,expiresAt:at+TTL,oneShot:true,used:false,revoked:false});return true;});if(!created)return null;
     const state=await this.store.snapshot(),next=protectionUIEpoch(state,this.policy,actor,this.clock());return next?this.view(actor,row.daily?'تأكيد إيقاف الملخص اليومي لهذه الغرفة؟':'تأكيد إرسال ملخص يومي لهذه الغرفة؟ يبدأ بعد 24 ساعة، ويتضمن أعداد البلاغات والتحذيرات فقط، وقد يصل حتى عند تفعيل الوضع الصامت.',{inline_keyboard:[[{text:'✅ تأكيد',callback_data:'al:1:v:'+token}],[{text:'↩️ تفاصيل الطلب',callback_data:'al:1:d:'+row.id}]]},next):null;
    }
+   if(match[2]==='o'){
+    if(row.status!=='ACTIVE'||row.mode!=='NOTIFICATIONS')return null;
+    const state=await this.store.snapshot(),at=this.clock();
+    const report=adminRoomOncallQueueSummary(state,this.policy,actor,row.group,at);
+    if(!report||report.room!==row.room)return null;
+    const oldest=report.oldestPendingAt===null?'لا توجد حالات معلقة':
+     Math.floor((at-report.oldestPendingAt)/60000)+' دقيقة';
+    const next=report.earliestDeadline===null?'لا يوجد موعد تصعيد قريب':
+     Math.max(0,Math.floor((report.earliestDeadline-at)/60000))+' دقيقة';
+    return this.view(actor,'<b>📨 لوحة المناوبة — قراءة محلية</b>\n'+
+     'المجموعة: <code>'+report.group+'</code>\n'+
+     'غرفة الإشعارات: <code>'+report.room+'</code>\n'+
+     'إعداد المناوبة: '+(report.configured?report.enabled?'مفعّل':'متوقف':'غير مضبوط')+'\n'+
+     'بلاغات دون إقرار: '+report.pending+'\n'+
+     'بانتظار المناوب الأساسي: '+report.primaryWaiting+'\n'+
+     'تجاوزت المهلة وانتقلت للبديل: '+report.fallbackOverdue+'\n'+
+     'عمر أقدم بلاغ معلّق: '+oldest+'\n'+
+     'أقرب موعد تصعيد: '+next+'\n'+
+     'لا تظهر هوية طالب أو محتوى بلاغ أو رمز قبول. حالة السجل المحلي ليست دليل وصول Telegram، ولا يُنفّذ أي إجراء تلقائي.',{
+      inline_keyboard:[[{text:'👤 إعدادات المناوبة',callback_data:'oc:1:g:'+row.id}],
+       [{text:'↩️ تفاصيل التفويض',callback_data:'al:1:d:'+row.id}]]},epoch);
+   }
    if(match[2]==='t'){
     if(row.status!=='ACTIVE'||row.mode!=='NOTIFICATIONS')return null;const summary=await this.service.summary(actor,row.id);if(!summary)return null;
     return this.view(actor,'<b>ملخص المجموعة خلال 24 ساعة</b>\nالمجموعة: <code>'+summary.group+'</code>\nالبلاغات المسجلة: '+summary.reports+'\nالتحذيرات المسجلة: '+summary.warnings+'\nالإجراءات المؤكدة: '+summary.actions+'\nتعديلات الأذونات: '+summary.changes+'\nرفض التنفيذ: '+summary.failures+'\nالنتائج غير المحسومة: '+summary.incidents+'\nيُحتسب السجل المحفوظ، بما فيه التحذيرات الملغاة، ولا تظهر هويات الأعضاء أو محتوى الرسائل. هذا عرض عند الطلب وليس إرسالًا دوريًا.',{inline_keyboard:[[{text:'↩️ تفاصيل الطلب',callback_data:'al:1:d:'+row.id}]]},epoch);
@@ -86,7 +109,12 @@ export class TelegramAdminRoomLinks{
     if(!row.canRevoke)return null;const token=randomBytes(18).toString('base64url'),created=await this.store.transaction(s=>{const at=this.clock(),witness=adminRoomRevokeWitness(s,this.policy,actor,row.id,at);if(!witness||protectionUIEpoch(s,this.policy,actor,at)!==epoch||!Number.isSafeInteger(at)||at<now||at>8640000000000000-TTL)return false;for(const c of s.callbacks)if(c.actorId===actor&&c.ref.startsWith(PREFIX)&&!c.used)c.revoked=true;s.callbacks.push({ref:PREFIX+token,action:PREFIX+row.id+':'+witness+':'+at+':1',chatId:'private',actorId:actor,policyVersion:0,expiresAt:at+TTL,oneShot:true,used:false,revoked:false});return true;});if(!created)return null;
     const state=await this.store.snapshot(),next=protectionUIEpoch(state,this.policy,actor,this.clock());return next?this.view(actor,'<b>التأكيد الأول لقطع الربط</b>\nالمجموعة: <code>'+row.group+'</code>\nالغرفة: <code>'+row.room+'</code>\nالوضع: '+modes[row.mode]+'\nتابع إلى التأكيد النهائي أو ارجع لإلغاء الطلب.',{inline_keyboard:[[{text:'✅ التأكيد الأول — متابعة',callback_data:'al:1:z:'+token}],[{text:'↩️ إلغاء والرجوع',callback_data:'al:1:d:'+row.id}]]},next):null;
    }
-   const buttons:{text:string;callback_data:string}[][]=[];if(row.canApproveGroup)buttons.push([{text:'✅ موافقة المجموعة',callback_data:'al:1:g:'+row.id}]);if(row.canApproveRoom)buttons.push([{text:'✅ موافقة الغرفة',callback_data:'al:1:r:'+row.id}]);buttons.push([{text:'🔎 فحص الغرفة',callback_data:'al:1:p:'+row.id}]);if(row.status==='ACTIVE'&&typeof row.quiet==='boolean')buttons.push([{text:row.quiet?'🔔 استئناف التنبيهات':'🔕 الوضع الصامت',callback_data:'al:1:q:'+row.id}],[{text:'📊 ملخص آخر 24 ساعة',callback_data:'al:1:t:'+row.id}]);if(row.status==='ACTIVE'&&row.mode==='NOTIFICATIONS'&&this.policy.has(before,actor,'chat.manage',row.group,now)&&this.policy.privateFeature(before,'support.use',actor))buttons.push([{text:'👤 مناوبة البلاغات',callback_data:'oc:1:g:'+row.id}]);if(row.status==='ACTIVE'&&typeof row.daily==='boolean')buttons.push([{text:row.daily?'🛑 إيقاف الملخص اليومي':'📅 تفعيل الملخص اليومي',callback_data:'al:1:s:'+row.id}]);if(row.canRevoke)buttons.push([{text:'🛑 قطع التفويض',callback_data:'al:1:x:'+row.id}]);buttons.push([{text:'↩️ الطلبات',callback_data:'al:1:h:0'}]);
+   const buttons:{text:string;callback_data:string}[][]=[];if(row.canApproveGroup)buttons.push([{text:'✅ موافقة المجموعة',callback_data:'al:1:g:'+row.id}]);if(row.canApproveRoom)buttons.push([{text:'✅ موافقة الغرفة',callback_data:'al:1:r:'+row.id}]);buttons.push([{text:'🔎 فحص الغرفة',callback_data:'al:1:p:'+row.id}]);if(row.status==='ACTIVE'&&typeof row.quiet==='boolean')buttons.push([{text:row.quiet?'🔔 استئناف التنبيهات':'🔕 الوضع الصامت',callback_data:'al:1:q:'+row.id}],[{text:'📊 ملخص آخر 24 ساعة',callback_data:'al:1:t:'+row.id}]);if(row.status==='ACTIVE'&&row.mode==='NOTIFICATIONS'&&
+    this.policy.has(before,actor,'chat.manage',row.group,now)&&
+    this.policy.has(before,actor,'chat.manage',row.room,now)){
+     buttons.push([{text:'📨 حالة المناوبة',callback_data:'al:1:o:'+row.id}]);
+    }
+    if(row.status==='ACTIVE'&&row.mode==='NOTIFICATIONS'&&this.policy.has(before,actor,'chat.manage',row.group,now)&&this.policy.privateFeature(before,'support.use',actor))buttons.push([{text:'👤 مناوبة البلاغات',callback_data:'oc:1:g:'+row.id}]);if(row.status==='ACTIVE'&&typeof row.daily==='boolean')buttons.push([{text:row.daily?'🛑 إيقاف الملخص اليومي':'📅 تفعيل الملخص اليومي',callback_data:'al:1:s:'+row.id}]);if(row.canRevoke)buttons.push([{text:'🛑 قطع التفويض',callback_data:'al:1:x:'+row.id}]);buttons.push([{text:'↩️ الطلبات',callback_data:'al:1:h:0'}]);
    if(row.status==='ACTIVE'&&row.mode==='CONTROL'&&this.policy.has(before,actor,'chat.manage',row.group,now)&&this.policy.has(before,actor,'chat.manage',row.room,now))buttons.splice(buttons.length-1,0,[{text:'📋 بلاغات غرفة التحكم',callback_data:'rc:1:h:'+row.room+':0'}]);
    return this.view(actor,'<b>تفويض غرفة الإدارة</b>\nالمجموعة: <code>'+row.group+'</code>\nالغرفة: <code>'+row.room+'</code>\nالوضع: '+modes[row.mode]+'\nالحالة: '+statuses[row.status]+(typeof row.quiet==='boolean'?'\nالتنبيهات: '+(row.quiet?'صامتة':'مفعّلة حسب الشروط'):'')+(typeof row.daily==='boolean'?'\nالملخص اليومي: '+(row.daily?'مفعّل':'متوقف'):'')+'\nتنبيهات البلاغات والتحذيرات ونتائج إجراءات الإشراف وتعديلات الأذونات متاحة عند تشغيل العامل وتوفر شروطه. التحكم مستقل عن الإشعارات: استخدم /roomreports في الغرفة لفتح الصندوق الخاص، أو أزرار البلاغات عند ربط الإشعارات بالغرفة نفسها.\nللإدارة المركزية أرسل في الخاص: <code>/centralban '+row.room+' رقم_العضو مدة_بالثواني</code> ثم اختر المجموعات بالأزرار، أو أضف حتى 8 معرّفات مجموعات محددة للأمر لفتح المعاينة مباشرةً.\nتحتاج كل مجموعة تفويض CENTRAL مستقلًا للغرفة وصلاحيتك في الطرفين. فحص الغرفة استشاري.',{inline_keyboard:buttons},epoch);
   }
