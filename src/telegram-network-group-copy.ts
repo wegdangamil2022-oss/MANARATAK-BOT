@@ -4,6 +4,7 @@ import type {Policy} from './policy.js';
 import type {OwnerInlineScreen} from './telegram-inline-owner.js';
 import {validGroupNetwork} from './group-network-model.js';
 import {isValidGroupProtectionRecord} from './protection-rules.js';
+import {networkGroupCopyHistory} from './network-group-copy-history.js';
 import {previewNetworkGroupCopy,applyNetworkGroupCopy,
  type NetworkCopyPart,type NetworkCopyField} from './network-group-copy.js';
 
@@ -16,6 +17,8 @@ const sources=new RegExp('^nw:1:cl:'+net+':'+page+'$','u');
 const targets=new RegExp('^nw:1:ct:'+net+':'+group+':'+page+'$','u');
 const choose=new RegExp('^nw:1:cs:'+net+':'+group+':'+group+'$','u');
 const preview=new RegExp('^nw:1:cv:'+net+':'+group+':'+group+':([rfbjaes])$','u');
+const history=new RegExp('^nw:1:ck:'+net+':'+page+'$','u');
+const historyDetail=new RegExp('^nw:1:cd:'+net+':([A-Za-z0-9_-]{24})$','u');
 const confirm=/^nw:1:cc:([A-Za-z0-9_-]{24})$/u;
 const cancel=/^nw:1:cx:([A-Za-z0-9_-]{24})$/u;
 const time=(now:number)=>Number.isSafeInteger(now)&&now>=0&&now<=8_640_000_000_000_000-TTL;
@@ -56,7 +59,7 @@ function decode(raw:string):Pending|null{
 }
 export function validOwnerNetworkGroupCopyRoute(data:unknown):boolean{
  return typeof data==='string'&&Buffer.byteLength(data,'utf8')<=64&&
-  [sources,targets,choose,preview,confirm,cancel].some(re=>re.test(data));
+  [sources,targets,choose,preview,confirm,cancel,history,historyDetail].some(re=>re.test(data));
 }
 export class OwnerNetworkGroupCopy{
  constructor(private readonly store:BotStore,private readonly policy:Policy,
@@ -96,6 +99,7 @@ export class OwnerNetworkGroupCopy{
   if(p)nav.push(btn('⬅️ السابق','nw:1:cl:'+id+':'+(p-1)));
   if(p+1<pages)nav.push(btn('➡️ التالي','nw:1:cl:'+id+':'+(p+1)));
   if(nav.length)rows.push(nav);
+  rows.push([btn('🕘 سجل نسخ إعدادات الشبكة','nw:1:ck:'+id+':0')]);
   rows.push([btn('↩️ بطاقة الشبكة','nw:1:d:'+id)]);
   return ui('<b>🔄 نسخ إعدادات المراقبة بين المجموعات</b>\n'+
    'الشبكة: '+esc(network.name)+' · صفحة '+(p+1)+'/'+pages+'\n'+
@@ -143,6 +147,46 @@ export class OwnerNetworkGroupCopy{
    'لا تظهر إلا الخيارات التي تملك فرقًا حقيقيًا وتنجح في فحص سلامة المجموعتين.\n'+
    'وضع الوجهة سيبقى OFF أو MONITOR؛ لا تنسخ رموز السر أو معرّفات الأعضاء والقنوات.\n'+
    'إعداد «وقت الليل» غير قابل للنقل: قد تختلف المنطقة الزمنية بين المجموعتين.',rows);
+ }
+ private historyScreen(s:BotState,actor:string,now:number,
+  id:string,p:number):OwnerInlineScreen|null{
+  const net=this.network(s,id,now),history=networkGroupCopyHistory(s,this.policy,actor,id,now);
+  if(!net||!history)return null;
+  const pages=Math.max(1,Math.ceil(history.length/SIZE));
+  if(p>=pages)return null;
+  const rows:{text:string;callback_data:string}[][]=history
+   .slice(p*SIZE,(p+1)*SIZE)
+   .map(entry=>[btn('🕘 '+entry.targetId+' · إصدار '+entry.committedRevision,
+    'nw:1:cd:'+id+':'+entry.nonce)]);
+  const nav:{text:string;callback_data:string}[]=[];
+  if(p>0)nav.push(btn('⬅️ السابق','nw:1:ck:'+id+':'+(p-1)));
+  if(p+1<pages)nav.push(btn('➡️ التالي','nw:1:ck:'+id+':'+(p+1)));
+  if(nav.length)rows.push(nav);
+  rows.push([btn('↩️ نسخ إعدادات جديدة','nw:1:cl:'+id+':0'),
+   btn('🌐 الشبكة','nw:1:d:'+id)]);
+  return ui('<b>🕘 سجل نسخ الإعدادات داخل الشبكة</b>\n'+
+   'الشبكة: '+esc(net.name)+'\n'+
+   'عمليات موثقة بإيصال تأكيد: '+history.length+' · صفحة '+(p+1)+'/'+pages+'\n'+
+   'يقتصر العرض على آخر 200 عملية ذات سجل وإيصال صالحين؛ ليس سجل Telegram الحي.\n'+
+   (history.length?'اختر عملية لرؤية المصدر والوجهة والحقول المختارة.':
+    'لا توجد عمليات نسخ محلية موثقة لهذه الشبكة.'),rows);
+ }
+ private historyDetails(s:BotState,actor:string,now:number,
+  id:string,nonce:string):OwnerInlineScreen|null{
+  const history=networkGroupCopyHistory(s,this.policy,actor,id,now);
+  if(!history)return null;
+  const row=history.find(x=>x.nonce===nonce);
+  if(!row)return null;
+  return ui('<b>🧾 عملية نسخ إعدادات محلية معتمدة</b>\n'+
+   'الوقت (UTC): '+new Date(row.at).toISOString().slice(0,19).replace('T',' ')+'\n'+
+   'المصدر: <code>'+row.sourceId+'</code>\n'+
+   'الوجهة: <code>'+row.targetId+'</code>\n'+
+   'نوع المعاينة المؤكدة: '+labels[row.parts]+'\n'+
+   'إصدار سياسة الوجهة قبل النسخ: '+row.targetRevision+'\n'+
+   'الإصدار المحفوظ بعد النسخ: '+row.committedRevision+'\n'+
+   'هذا إثبات قرار محلي فقط؛ لا يظهر نص القواعد أو معرّفات أعضاء، '+
+   'ولا يمثل تنفيذ حذف أو كتم داخل Telegram.',
+   [[btn('↩️ سجل عمليات الشبكة','nw:1:ck:'+id+':0)]]);
  }
  private async review(actor:string,netId:string,sourceId:string,targetId:string,
   parts:NetworkCopyPart):Promise<OwnerInlineScreen|null>{
@@ -216,7 +260,8 @@ export class OwnerNetworkGroupCopy{
     'الحقول المنسوخة: '+result.fields.map(x=>fieldLabels[x]).join('، ')+'\n'+
     'روابط التوريث التي توقفت: '+result.pausedLinks+'\n'+
     'لا نسخ لاستثناءات الأعضاء ولا تشغيل عقوبة Telegram.',
-    [[btn('↩️ بطاقة الشبكة','nw:1:d:'+saved.netId)],
+    [[btn('🕘 سجل عمليات النسخ','nw:1:ck:'+saved.netId+':0)],
+     [btn('↩️ بطاقة الشبكة','nw:1:d:'+saved.netId)],
      [btn('📋 شبكاتي','nw:1:p:0')]]);
   });
  }
@@ -234,6 +279,10 @@ export class OwnerNetworkGroupCopy{
   const chooseMatch=choose.exec(data);
   if(chooseMatch)return this.selectionScreen(s,actor,now,
    chooseMatch[1]!,chooseMatch[2]!,chooseMatch[3]!);
+  const h=history.exec(data);
+  if(h)return this.historyScreen(s,actor,now,h[1]!,Number(h[2]));
+  const detail=historyDetail.exec(data);
+  if(detail)return this.historyDetails(s,actor,now,detail[1]!,detail[2]!);
   return null;
  }
 }
