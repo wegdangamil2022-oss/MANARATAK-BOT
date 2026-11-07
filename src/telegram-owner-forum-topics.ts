@@ -182,6 +182,55 @@ export class OwnerForumTopicEditor{
      [btn('↩️ مواضيع المجموعة','ft:1:g:'+g+':0)]]);
   });
  }
+ /** Human-authored topic notes remain owner-private and unpublished. */
+ async prepareNote(actor:string,g:string,t:number,note:string):Promise<OwnerInlineScreen|null>{
+  return this.store.transaction(s=>{
+   const now=this.clock();
+   if(!this.access(s,actor,now)||!id(g)||!topicId(t)||
+    !validForumTopicNote(note))return null;
+   const proof=forumTopicNoteProof(s,this.policy,actor,g,t,note,now);
+   const version=forumTopicGroupAccess(s,this.policy,actor,g,now);
+   if(!proof||version===null)return null;
+   const pending=s.callbacks.filter(c=>c.actorId===actor&&
+    c.ref.startsWith(NOTE_PREFIX)&&!c.used&&!c.revoked&&c.expiresAt>now);
+   if(pending.length>=100)return null;
+   const nonce=randomBytes(18).toString('base64url'),ref=NOTE_PREFIX+nonce;
+   if(s.callbacks.some(c=>c.ref===ref))return null;
+   for(const c of pending)c.revoked=true;
+   const value:PendingNote={group:g,thread:t,note,proof,createdAt:now,version};
+   s.callbacks.push({ref,action:NOTE_PREFIX+JSON.stringify(value),
+    actorId:actor,chatId:'private',policyVersion:version,
+    oneShot:true,used:false,revoked:false,expiresAt:now+TTL});
+   return ui('<b>🔎 مراجعة ملاحظة موضوع محلية</b>\n'+
+    'المجموعة: <code>'+g+'</code>\n'+
+    'الموضوع: <code>'+t+'</code>\n'+
+    'النص: '+esc(note)+'\n'+
+    'ملاحظة تحريرية للمالك فقط؛ لا تظهر تلقائيًا للطلاب أو ترسل إلى Telegram.\n'+
+    'موافقة خاصة لمرة واحدة، صالحة لدقيقتين.',
+    [[btn('✅ حفظ الملاحظة محليًا','ft:1:n:'+nonce)],
+     [btn('✖ إلغاء','ft:1:z:'+nonce)],
+     [btn('↩️ الموضوع','ft:1:d:'+g+':'+t)]]);
+  });
+ }
+ private async decideNote(actor:string,nonce:string,apply:boolean):
+ Promise<OwnerInlineScreen|null>{
+  return this.store.transaction(s=>{
+   const now=this.clock(),ref=NOTE_PREFIX+nonce,
+    rows=s.callbacks.filter(c=>c.ref===ref),c=rows[0];
+   if(!this.access(s,actor,now)||rows.length!==1||!c||
+    c.actorId!==actor||c.chatId!=='private'||!c.oneShot||
+    c.used||c.revoked||!clock(c.expiresAt)||
+    c.expiresAt<=now||c.expiresAt>now+TTL)return null;
+   const p=parseNote(c.action);
+   if(!p||p.createdAt>now||c.expiresAt!==p.createdAt+TTL||
+    c.policyVersion!==p.version)return null;
+   if(apply&&!saveLocalForumTopicNote(s,this.policy,actor,
+    p.group,p.thread,p.note,now,p.proof))return null;
+   c.used=true;
+   return this.detail(s,actor,now,p.group,p.thread);
+  });
+ }
+
  private async decide(actor:string,nonce:string,apply:boolean):
  Promise<OwnerInlineScreen|null>{
   return this.store.transaction(s=>{
@@ -207,6 +256,10 @@ export class OwnerForumTopicEditor{
   if(!person(actor)||!this.policy.isOwner(actor))return null;
   if(data==='mi:1:i:01:05')data='ft:1:h:0';
   if(!validOwnerForumTopicRoute(data))return null;
+  const n=NOTE_CONFIRM.exec(data);
+  if(n)return this.decideNote(actor,n[1]!,true);
+  const z=NOTE_CANCEL.exec(data);
+  if(z)return this.decideNote(actor,z[1]!,false);
   const c=CONFIRM.exec(data);
   if(c)return this.decide(actor,c[1]!,true);
   const x=CANCEL.exec(data);
