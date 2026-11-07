@@ -1,10 +1,12 @@
+import {createHash,randomBytes} from 'node:crypto';
 import {BotStore,type BotState} from './store.js';
 import {Policy} from './policy.js';
 import {Phase4CommunityService,type DraftRequest} from './phase4-community.js';
 import type {CommunityDraft} from './phase4-community-model.js';
 import {visibleEducationCategory} from './education-category-policy.js';
-import {defaultCommunityConfig,validCommunityConfig,validCommunityRulesUrl,
- validCommunityFAQId,type CommunityConfig,type CommunityReplyRule} from './phase4-community-model.js';
+import {defaultCommunityConfig,emptyCommunityState,validCommunityConfig,validCommunityRulesUrl,
+ validCommunityFAQId,type CommunityConfig,type CommunityReplyRule,
+ type CommunityGuidePostDraft,type CommunityGuidePostJob} from './phase4-community-model.js';
 import {reviewedGroupFAQAnswer} from './phase4-community-sources.js';
 import {publicFolderGroups} from './telegram-community-folders.js';
 import {communityFolderURL} from './community-folder-model.js';
@@ -79,6 +81,12 @@ function context(s:BotState,policy:Policy,chatId:string):GuidanceData|null{
 const link=(label:string,url:string)=>'<a href="'+guidanceEscape(url)+'">'+
  guidanceEscape(label)+'</a>';
 const number=(n:number)=>n===0?'لا توجد بعد':String(n);
+const guideHash=(value:string)=>createHash('sha256').update(value,'utf8').digest('hex');
+const validClock=(n:number)=>Number.isSafeInteger(n)&&n>=0&&n<=8_640_000_000_000_000-120000;
+const guideId=(id:string)=>/^[a-f0-9]{24}$/u.test(id);
+const guidePublishLimit=3400;
+export {context as guidanceContext};
+
 function rulesLink(data:GuidanceData):string{
  const url=data.config.rulesUrl;
  return validCommunityRulesUrl(url)?link('📜 فتح صفحة القوانين المعتمدة',url):
@@ -204,6 +212,113 @@ export class Phase4GuidanceService{
   if(kind==='FAQ_INDEX'||kind==='NOTES_INDEX')return renderGuidanceIndex(data,kind,page);
   if(kind==='FAQ'&&faqId!==undefined)return renderGuidanceFAQ(state,chatId,faqId);
   return null;
+ }
+ /** A guide post is a one-off, owner-initiated publication. Unlike a
+  * welcome automation, merely configuring a guide never queues a send. */
+ async preparePublication(actor:string,chatId:string):Promise<
+  {draft:CommunityGuidePostDraft;preview:string}>{
+  if(!this.policy.isOwner(actor)||!validGuidanceGroup(chatId))
+   throw Error('GUIDE_PUBLISH_OWNER_ONLY');
+  return this.store.transaction(s=>{
+   const now=Date.now();
+   if(!validClock(now))throw Error('GUIDE_PUBLISH_CLOCK');
+   const data=context(s,this.policy,chatId);
+   const chat=s.chats.filter(c=>c.id===chatId&&c.approved&&c.present&&
+     c.scopes.includes('navigation'));
+   if(!data||chat.length!==1||!this.policy.has(s,actor,'chat.manage',chatId))
+    throw Error('GUIDE_PUBLISH_UNAVAILABLE');
+   const preview=renderGuidanceWelcome(data);
+   if(Buffer.byteLength(preview,'utf8')>guidePublishLimit)
+    throw Error('GUIDE_PUBLISH_MESSAGE_TOO_LONG');
+   const state=s.phase4Community??=emptyCommunityState();
+   const existing=state.guidePostJobs??[];
+   if(existing.some(j=>j.chatId===chatId&&
+     ['QUEUED','SENDING','UNKNOWN_OUTCOME'].includes(j.status)))
+    throw Error('GUIDE_PUBLISH_PENDING_REVIEW');
+   const drafts=(state.guidePostDrafts??[]).filter(d=>
+     d.expiresAt>now&&d.createdAt<=now&&d.actorId!==actor);
+   if(drafts.length>=50)throw Error('GUIDE_PUBLISH_DRAFT_CAPACITY');
+   const draft:CommunityGuidePostDraft={
+    id:randomBytes(12).toString('hex'),actorId:actor,chatId,
+    chatVersion:chat[0]!.version,configVersion:data.config.version,
+    contentDigest:guideHash(preview),createdAt:now,expiresAt:now+120000
+   };
+   state.guidePostDrafts=[...drafts,draft];
+   return {draft:structuredClone(draft),preview};
+  });
+ }
+ async confirmPublication(actor:string,id:string):Promise<CommunityGuidePostJob>{
+  if(!this.policy.isOwner(actor)||!guideId(id))throw Error('GUIDE_PUBLISH_OWNER_ONLY');
+  return this.store.transaction(s=>{
+   const now=Date.now();
+   if(!validClock(now))throw Error('GUIDE_PUBLISH_CLOCK');
+   const st=s.phase4Community,matching=st?.guidePostDrafts?.filter(d=>d.id===id)??[];
+   if(matching.length!==1||matching[0]!.actorId!==actor)
+    throw Error('GUIDE_PUBLISH_DRAFT_NOT_FOUND');
+   const draft=matching[0]!;
+   if(now<draft.createdAt||now>=draft.expiresAt)throw Error('GUIDE_PUBLISH_EXPIRED');
+   const data=context(s,this.policy,draft.chatId);
+   const chats=s.chats.filter(c=>c.id===draft.chatId&&c.approved&&c.present&&
+     c.scopes.includes('navigation'));
+   if(chats.length!==1||!data||!this.policy.has(s,actor,'chat.manage',draft.chatId)||
+     chats[0]!.version!==draft.chatVersion||
+     data.config.version!==draft.configVersion)
+    throw Error('GUIDE_PUBLISH_STALE');
+   const visible=renderGuidanceWelcome(data);
+   if(Buffer.byteLength(visible,'utf8')>guidePublishLimit||
+     guideHash(visible)!==draft.contentDigest)
+    throw Error('GUIDE_PUBLISH_CONTENT_CHANGED');
+   const active=st!.guidePostJobs??[];
+   if(active.some(j=>j.chatId===draft.chatId&&
+     ['QUEUED','SENDING','UNKNOWN_OUTCOME'].includes(j.status)))
+    throw Error('GUIDE_PUBLISH_PENDING_REVIEW');
+   const kept=active.filter(j=>
+     ['QUEUED','SENDING','UNKNOWN_OUTCOME'].includes(j.status)||
+     now>=j.approvedAt&&now-j.approvedAt<7*86400000);
+   if(kept.length>=250)throw Error('GUIDE_PUBLISH_JOB_CAPACITY');
+   const job:CommunityGuidePostJob={
+    id:randomBytes(12).toString('hex'),actorId:actor,chatId:draft.chatId,
+    chatVersion:draft.chatVersion,configVersion:draft.configVersion,
+    contentDigest:draft.contentDigest,approvedAt:now,status:'QUEUED'};
+   st!.guidePostDrafts=(st!.guidePostDrafts??[]).filter(d=>d.id!==draft.id);
+   st!.guidePostJobs=[...kept,job];
+   s.audit.push({updateKey:'p4-guide-publish:'+draft.id,actorId:actor,
+    decision:'ALLOW',reason:'GUIDE_PUBLICATION_QUEUED',
+    policyVersion:job.configVersion,at:now});
+   return structuredClone(job);
+  });
+ }
+ async cancelPublicationDraft(actor:string,id:string):Promise<boolean>{
+  if(!this.policy.isOwner(actor)||!guideId(id))return false;
+  return this.store.transaction(s=>{
+   const drafts=s.phase4Community?.guidePostDrafts??[];
+   if(drafts.filter(d=>d.id===id&&d.actorId===actor).length!==1)return false;
+   s.phase4Community!.guidePostDrafts=drafts.filter(d=>d.id!==id);
+   return true;
+  });
+ }
+ async publicationStatus(actor:string,chatId:string):Promise<CommunityGuidePostJob|null>{
+  if(!this.policy.isOwner(actor))return null;
+  const data=await this.ownerGroup(actor,chatId);
+  if(!data)return null;
+  const rows=(await this.store.snapshot()).phase4Community?.guidePostJobs??[];
+  const group=rows.filter(x=>x.chatId===chatId).sort((a,b)=>
+    b.approvedAt-a.approvedAt||b.id.localeCompare(a.id));
+  return group.length?structuredClone(group[0]!):null;
+ }
+ async cancelQueuedPublication(actor:string,id:string):Promise<boolean>{
+  if(!this.policy.isOwner(actor)||!guideId(id))return false;
+  return this.store.transaction(s=>{
+   const jobs=s.phase4Community?.guidePostJobs?.filter(x=>x.id===id)??[];
+   if(jobs.length!==1||jobs[0]!.actorId!==actor||jobs[0]!.status!=='QUEUED'||
+     !this.policy.has(s,actor,'chat.manage',jobs[0]!.chatId))return false;
+   jobs[0]!.status='SKIPPED';
+   const now=Date.now();
+   s.audit.push({updateKey:'p4-guide-cancel:'+id,actorId:actor,
+    decision:'ALLOW',reason:'GUIDE_PUBLICATION_CANCELLED',
+    policyVersion:jobs[0]!.configVersion,at:now});
+   return true;
+  });
  }
  /** Owner-only wrapper. Existing community drafts provide 2-minute TTL,
   * approval-epoch check, stale policy protection and durable audit. */
