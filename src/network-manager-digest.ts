@@ -4,6 +4,8 @@ import {networkAlertScope,networkAlertEnabled,type NetworkAlertKind}
  from './network-event-alerts.js';
 import {networkAlertSilenceUntil} from './network-alert-silence.js';
 import {networkAdministrativeEvents} from './network-administrative-events.js';
+import {networkDailyQuietCurrent,type NetworkDailyQuietChoice}
+ from './network-alert-daily-quiet.js';
 
 /** NETWORK-006: strictly scoped, read-only 6/24h administrative summaries.
  * This is an on-demand snapshot, not automatic delivery, moderation authority
@@ -17,7 +19,7 @@ export interface NetworkManagerDigest{
  readonly settingsCopy:number;readonly selectedFollows:number;
  readonly total:number;readonly truncated:boolean;
  readonly subscriptions:Readonly<Record<NetworkAlertKind,boolean>>;
- readonly silenceUntil:number;
+ readonly silenceUntil:number;readonly dailyQuiet:NetworkDailyQuietChoice;
 }
 const clock=(v:unknown):v is number=>typeof v==='number'&&Number.isSafeInteger(v)&&
  v>=86_400_000&&v<=8_640_000_000_000_000;
@@ -33,10 +35,12 @@ const network=(v:unknown):v is string=>typeof v==='string'&&/^[a-f0-9]{12}$/u.te
 export function networkManagerDigest(s:BotState,p:Policy,actor:string,
  net:string,group:string,now:number,hours:NetworkDigestHours):NetworkManagerDigest|null{
  if(!clock(now)||!network(net)||!id(group)||(hours!==6&&hours!==24)||
-  !networkAlertScope(s,p,actor,net,group,now)||
   !p.privateFeature(s,'owner.dashboard',p.ownerId))return null;
+ const scope=networkAlertScope(s,p,actor,net,group,now);
+ if(!scope)return null;
  const silence=networkAlertSilenceUntil(s,p,actor,net,group,now);
- if(silence===null)return null;
+ const dailyQuiet=networkDailyQuietCurrent(s,actor,net,group,now,scope);
+ if(silence===null||!dailyQuiet)return null;
  const results=networkAdministrativeEvents(s,p,p.ownerId,now,net,{chatId:group});
  if(!results)return null;
  const since=now-hours*3_600_000;
@@ -55,5 +59,5 @@ export function networkManagerDigest(s:BotState,p:Policy,actor:string,
    w:networkAlertEnabled(s,p,actor,net,group,'w',now),
    r:networkAlertEnabled(s,p,actor,net,group,'r',now),
    s:networkAlertEnabled(s,p,actor,net,group,'s',now)
-  },silenceUntil:silence};
+  },silenceUntil:silence,dailyQuiet};
 }
