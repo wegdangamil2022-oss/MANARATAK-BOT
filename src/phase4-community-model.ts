@@ -23,6 +23,10 @@ export interface CommunityReplyRule{
  id:string;trigger:string;response:string;match:ReplyMatch;
  enabled:boolean;cooldownMs:number;topicId?:number;
  source?:CommunityReplySource;sourceFaqId?:string;
+ /** Owner-reviewed Telegram file_id, never a URL or user-uploaded message. */
+ photoFileId?:string;
+ /** Optional strictly validated HTTPS buttons, no arbitrary callback routes. */
+ buttons?:CommunityLinkButton[];
 }
 export interface CommunityGreeting{
  enabled:boolean;text:string;
@@ -87,6 +91,7 @@ export type CommunityDraftKind='WELCOME_TEXT'|'FAREWELL_TEXT'|'REPLY_ADD'|'REPLY
  'PRIVATE_WELCOME_ON'|'PRIVATE_WELCOME_OFF'|'WELCOME_MEMBER_LANG_ON'|'WELCOME_MEMBER_LANG_OFF'|
  'GROUP_PROFILE_ON'|'GROUP_PROFILE_OFF'|'GROUP_TITLE_SET'|'GROUP_PHOTO_SET'|'GROUP_PHOTO_REMOVE'|
  'REPLY_ENABLE'|'REPLY_DISABLE'|'REPLY_COOLDOWN'|'AUTO_LIMIT_SET'|
+ 'REPLY_PHOTO_SET'|'REPLY_PHOTO_CLEAR'|'REPLY_BUTTON_ADD'|'REPLY_BUTTONS_CLEAR'|
  'QUIET_HOURS_SET'|'QUIET_HOURS_CLEAR'|'TOPIC_COOLDOWN_SET'|'TOPIC_COOLDOWN_CLEAR'|
  'CHANGE_LOG_ON'|'CHANGE_LOG_OFF'|'DECISION_LOG_ON'|'DECISION_LOG_OFF'|'SERVICE_CLEANUP_ON'|'SERVICE_CLEANUP_OFF'|'SERVICE_CLEANUP_DELAY'|
  'SERVICE_JOIN_ON'|'SERVICE_JOIN_OFF'|'SERVICE_LEAVE_ON'|'SERVICE_LEAVE_OFF'|
@@ -281,6 +286,7 @@ const kinds=new Set<CommunityDraftKind>(['WELCOME_TEXT','FAREWELL_TEXT','REPLY_A
  'WELCOME_ON','WELCOME_OFF','PRIVATE_WELCOME_ON','PRIVATE_WELCOME_OFF','WELCOME_MEMBER_LANG_ON','WELCOME_MEMBER_LANG_OFF',
  'GROUP_PROFILE_ON','GROUP_PROFILE_OFF','GROUP_TITLE_SET','GROUP_PHOTO_SET','GROUP_PHOTO_REMOVE','FAREWELL_ON','FAREWELL_OFF','REPLIES_ON','REPLIES_OFF',
  'REPLY_ENABLE','REPLY_DISABLE','REPLY_COOLDOWN','AUTO_LIMIT_SET',
+ 'REPLY_PHOTO_SET','REPLY_PHOTO_CLEAR','REPLY_BUTTON_ADD','REPLY_BUTTONS_CLEAR',
  'QUIET_HOURS_SET','QUIET_HOURS_CLEAR','TOPIC_COOLDOWN_SET','TOPIC_COOLDOWN_CLEAR',
  'CHANGE_LOG_ON','CHANGE_LOG_OFF','DECISION_LOG_ON','DECISION_LOG_OFF','SERVICE_CLEANUP_ON','SERVICE_CLEANUP_OFF','SERVICE_CLEANUP_DELAY',
  'SERVICE_JOIN_ON','SERVICE_JOIN_OFF','SERVICE_LEAVE_ON','SERVICE_LEAVE_OFF',
@@ -368,7 +374,9 @@ export function validCommunityConfig(value:unknown):value is CommunityConfig{
    rule.cooldownMs<1000||rule.cooldownMs>86400000||
    (rule.topicId!==undefined&&!validTopic(rule.topicId))||
    (rule.source!==undefined&&!['NOTE','RULES','FAQ'].includes(rule.source))||
-   (rule.source==='FAQ'?!validCommunityFAQId(rule.sourceFaqId):rule.sourceFaqId!==undefined))return false;
+   (rule.source==='FAQ'?!validCommunityFAQId(rule.sourceFaqId):rule.sourceFaqId!==undefined)||
+   (rule.photoFileId!==undefined&&!validCommunityPhotoId(rule.photoFileId))||
+   (rule.buttons!==undefined&&!validCommunityLinkButtons(rule.buttons)))return false;
   const triggerKey=JSON.stringify([rule.topicId??0,normalizeCommunityMatch(rule.trigger),rule.match]);
   if(ids.has(rule.id)||triggers.has(triggerKey))return false;
   ids.add(rule.id);triggers.add(triggerKey);
@@ -671,7 +679,10 @@ export function validCommunityState(value:unknown):value is CommunityAutomationS
    d.kind==='GROUP_PHOTO_SET'&&!validCommunityPhotoId(d.photoFileId)||
    d.kind==='REPLY_ADD'&&(!d.trigger||!d.match||
       (d.source===undefined||d.source==='NOTE')&&!validTemplate(d.text))||
-   (['REPLY_REMOVE','REPLY_ENABLE','REPLY_DISABLE','REPLY_COOLDOWN'] as string[]).includes(d.kind)&&!d.ruleId||
+   (['REPLY_REMOVE','REPLY_ENABLE','REPLY_DISABLE','REPLY_COOLDOWN',
+      'REPLY_PHOTO_SET','REPLY_PHOTO_CLEAR','REPLY_BUTTON_ADD','REPLY_BUTTONS_CLEAR'] as string[]).includes(d.kind)&&!d.ruleId||
+   d.kind==='REPLY_PHOTO_SET'&&!validCommunityPhotoId(d.photoFileId)||
+   d.kind==='REPLY_BUTTON_ADD'&&!validCommunityLinkButtons([{text:d.buttonText??'',url:d.buttonUrl??''}])||
    d.kind==='REPLY_COOLDOWN'&&d.cooldownMs===undefined||
    d.kind==='AUTO_LIMIT_SET'&&d.autoMessagesPerMinute===undefined||
    d.kind==='QUIET_HOURS_SET'&&(!validMinute(d.startMinute)||!validMinute(d.endMinute)||d.startMinute===d.endMinute)||
