@@ -158,6 +158,19 @@ const validPrivateGroupAccess=(v:unknown):v is NonNullable<TelegramReplyJob['pri
   typeof a.expiresAt==='number'&&Number.isSafeInteger(a.expiresAt)&&
   a.expiresAt>=0&&a.expiresAt<=8_640_000_000_000_000;
 };
+const validWhisperAccess=(v:unknown):v is NonNullable<TelegramReplyJob['whisperAccess']>=>{
+ if(!v||typeof v!=='object'||Array.isArray(v))return false;
+ const a=v as Record<string,unknown>;
+ return Object.keys(a).length===6&&
+  Object.keys(a).every(k=>['whisperId','reservationId','messageRevision',
+    'consentRevision','chatVersion','expiresAt'].includes(k))&&
+  typeof a.whisperId==='string'&&/^[a-f0-9]{24}$/u.test(a.whisperId)&&
+  typeof a.reservationId==='string'&&/^[a-f0-9]{24}$/u.test(a.reservationId)&&
+  ['messageRevision','consentRevision','chatVersion'].every(k=>
+    Number.isSafeInteger(a[k])&&Number(a[k])>=1)&&
+  Number.isSafeInteger(a.expiresAt)&&Number(a.expiresAt)>0&&
+  Number(a.expiresAt)<=8_640_000_000_000_000-600000;
+};
 export function validTelegramReplyJob(v:unknown):v is TelegramReplyJob{
  if(!v||typeof v!=='object'||Array.isArray(v))return false;
  const j=v as Record<string,unknown>;
@@ -179,6 +192,14 @@ export function validTelegramReplyJob(v:unknown):v is TelegramReplyJob{
    ['JOIN','LEAVE','TEXT'].includes(String((j.communityAutomation as {kind?:unknown}).kind))&&
    Number.isSafeInteger((j.communityAutomation as {configVersion?:unknown}).configVersion)&&
    Number((j.communityAutomation as {configVersion?:unknown}).configVersion)>=1
+  ))&&
+  (j.whisperAccess===undefined||(
+    j.status==='QUEUED'&&j.privateReplyKind==='GROUP_SCOPED'&&
+    validPrivateGroupAccess(j.privateGroupAccess)&&
+    validWhisperAccess(j.whisperAccess)&&
+    validPlan(j.plan)&&!j.plan.chatId.startsWith('-')&&
+    j.plan.chatId===j.privateGroupAccess.actorId&&
+    j.groupReplyKind===undefined&&j.communityAutomation===undefined
   ))&&
   ((j.plan as TelegramReplyPlan|undefined)?.messageThreadId===undefined||j.groupReplyKind==='GENERAL'&&validGroupReplyAccess(j.groupMenuAccess))&&
   (j.status==='QUEUED'?validPlan(j.plan):(j.plan===undefined||validPlan(j.plan)))&&
@@ -397,7 +418,32 @@ export class TelegramReplyDispatcher {
      }catch{automationDenied=true;}
     }
    }
-   const forbidden=closeDenied||noGroupProof||noPrivateProvenance||adminDenied||libraryDenied||communityDenied||automationDenied||(!!access&&(
+   const whisper=job.whisperAccess,whisperScope=dm?.scope;
+   let whisperDenied=false;
+   if(whisper){
+    const rows=s.phase4Whispers?.messages.filter(m=>m.id===whisper.whisperId)??[],
+     m=rows[0];
+    const announcements=s.phase4Whispers?.announcements?.filter(a=>
+      a.messageId===whisper.whisperId&&a.status==='CONFIRMED')??[];
+    const consents=s.phase4Whispers?.consents.filter(c=>
+      c.chatId===whisperScope&&c.memberId===plan.chatId)??[];
+    const reservations=s.phase4Whispers?.reservations.filter(r=>
+      r.id===whisper.reservationId&&r.memberId===plan.chatId&&
+      r.messageId===whisper.whisperId)??[];
+    const blocks=s.phase4Whispers?.blocks?.filter(b=>b.chatId===whisperScope&&
+      b.memberId===plan.chatId&&b.senderId===m?.creatorId&&b.enabled)??[];
+    whisperDenied=!whisperScope||!m||rows.length!==1||
+     m.status!=='OPEN'||m.text===undefined||now>=m.expiresAt||
+     now>=whisper.expiresAt||m.chatId!==whisperScope||
+     m.chatVersion!==whisper.chatVersion||
+     m.revision!==whisper.messageRevision||
+     announcements.length!==1||consents.length!==1||
+     !consents[0]!.enabled||consents[0]!.revision!==whisper.consentRevision||
+     consents[0]!.chatVersion!==whisper.chatVersion||
+     reservations.length!==1||reservations[0]!.status!=='HELD'||
+     blocks.length>0;
+   }
+   const forbidden=closeDenied||whisperDenied||noGroupProof||noPrivateProvenance||adminDenied||libraryDenied||communityDenied||automationDenied||(!!access&&(
     !groupPrecheck?.allowed||
     groupPrecheck.kind!==accessKind||
     groupPrecheck.access.actorId!==access.actorId||
@@ -418,7 +464,7 @@ export class TelegramReplyDispatcher {
     job.accessDenialCode=noGroupProof||noPrivateProvenance?
      'LEGACY_UNVERIFIABLE':groupUnavailable?'GROUP_UNAVAILABLE':'ACCESS_RECHECK_FAILED';
     job.status='FAILED_CONFIRMED';delete job.communityClose;
-    delete job.plan;delete job.adminUIAccess;delete job.privateLibraryAccess;delete job.communityAccess;delete job.groupQuestionAccess;delete job.groupMenuAccess;delete job.privateGroupAccess;delete job.privateReplyKind;delete job.groupReplyKind;delete job.communityAutomation;job.redactedAt=this.clock();
+    delete job.plan;delete job.adminUIAccess;delete job.privateLibraryAccess;delete job.communityAccess;delete job.groupQuestionAccess;delete job.groupMenuAccess;delete job.privateGroupAccess;delete job.whisperAccess;delete job.privateReplyKind;delete job.groupReplyKind;delete job.communityAutomation;job.redactedAt=this.clock();
     return {status:'FAILED_CONFIRMED' as const};
    }
    const attemptId=randomUUID();
@@ -432,7 +478,7 @@ export class TelegramReplyDispatcher {
    job.status='SENDING';job.attemptId=attemptId;job.startedAt=at;
    // Remove the durable body *before* the external call. The immediate local
    // copy goes to the sender, but a crash leaves no replayable payload.
-   delete job.plan;delete job.adminUIAccess;delete job.privateLibraryAccess;delete job.communityAccess;delete job.groupQuestionAccess;delete job.groupMenuAccess;delete job.privateGroupAccess;delete job.privateReplyKind;delete job.groupReplyKind;delete job.communityAutomation;job.redactedAt=at;
+   delete job.plan;delete job.adminUIAccess;delete job.privateLibraryAccess;delete job.communityAccess;delete job.groupQuestionAccess;delete job.groupMenuAccess;delete job.privateGroupAccess;delete job.whisperAccess;delete job.privateReplyKind;delete job.groupReplyKind;delete job.communityAutomation;job.redactedAt=at;
    delete job.communityClose;
    return {status:'SEND' as const,attemptId,plan,communityReceipt,automationForCleanup};
   });
