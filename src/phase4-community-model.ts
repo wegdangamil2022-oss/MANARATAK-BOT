@@ -135,11 +135,19 @@ export interface CommunityServiceChange{
  /** Hash of chat and Telegram service message id, prevents duplicate updates. */
  messageDigest?:string;
 }
-export type CommunityCleanupStatus='QUEUED'|'SENDING'|'CONFIRMED'|'FAILED_CONFIRMED'|'UNKNOWN_OUTCOME'|'SKIPPED';
+export type CommunityCleanupStatus='QUEUED'|'SENDING'|'CONFIRMED'|
+ 'FAILED_CONFIRMED'|'UNKNOWN_OUTCOME'|'REVIEWED_UNKNOWN'|'SKIPPED';
 export interface CommunityCleanupJob{
  key:string;chatId:string;chatVersion:number;policyVersion:number;
  messageId:number;kind:CommunityServiceKind|'AUTOMATIC_REPLY';observedAt:number;dueAt:number;
  status:CommunityCleanupStatus;attemptId?:string;
+}
+/** Owner-only confirmation for cancelling cleanup or annotating uncertainty. */
+export interface CommunityCleanupReviewDraft{
+ id:string;actorId:string;chatId:string;chatVersion:number;configVersion:number;
+ action:'CANCEL_ONE'|'REVIEW_ONE'|'CANCEL_GROUP';
+ targetKey?:string;queueDigest?:string;targetCount?:number;
+ createdAt:number;expiresAt:number;
 }
 export type CommunityProfileStatus='QUEUED'|'SENDING'|'CONFIRMED'|'FAILED_CONFIRMED'|'UNKNOWN_OUTCOME'|'SKIPPED';
 /** Never copy a Telegram group title into the public change-audit record. A
@@ -200,6 +208,8 @@ export interface CommunityAutomationState{
  /** Event audit contains kind and opaque digests only, never titles or images. */
  serviceChanges?:CommunityServiceChange[];
  cleanupJobs?:CommunityCleanupJob[];
+ /** 09:04 owner-reviewed cancellation/reconciliation, off by default. */
+ cleanupReviewDrafts?:CommunityCleanupReviewDraft[];
  decisionLog?:CommunityDecision[];
  privateWelcomes?:CommunityPrivateWelcome[];
 }
@@ -374,6 +384,7 @@ export function validCommunityState(value:unknown):value is CommunityAutomationS
   !Array.isArray(v.receipts)||v.receipts.length>2500||
   (v.serviceChanges!==undefined&&(!Array.isArray(v.serviceChanges)||v.serviceChanges.length>1000))||
   (v.cleanupJobs!==undefined&&(!Array.isArray(v.cleanupJobs)||v.cleanupJobs.length>1000))||
+  (v.cleanupReviewDrafts!==undefined&&(!Array.isArray(v.cleanupReviewDrafts)||v.cleanupReviewDrafts.length>50))||
   (v.decisionLog!==undefined&&(!Array.isArray(v.decisionLog)||v.decisionLog.length>1000))||
   (v.privateWelcomes!==undefined&&(!Array.isArray(v.privateWelcomes)||v.privateWelcomes.length>2500))||
   (v.profileJobs!==undefined&&(!Array.isArray(v.profileJobs)||v.profileJobs.length>500))||
@@ -576,7 +587,7 @@ export function validCommunityState(value:unknown):value is CommunityAutomationS
  }
  if(v.cleanupJobs){
   const keys=new Set<string>();
-  const statuses=new Set<CommunityCleanupStatus>(['QUEUED','SENDING','CONFIRMED','FAILED_CONFIRMED','UNKNOWN_OUTCOME','SKIPPED']);
+  const statuses=new Set<CommunityCleanupStatus>(['QUEUED','SENDING','CONFIRMED','FAILED_CONFIRMED','UNKNOWN_OUTCOME','REVIEWED_UNKNOWN','SKIPPED']);
   for(const row of v.cleanupJobs){
    if(!row||typeof row!=='object'||typeof row.key!=='string'||
     !/^[a-f0-9]{64}$/u.test(row.key)||keys.has(row.key)||!validGroup(row.chatId)||
@@ -588,9 +599,29 @@ export function validCommunityState(value:unknown):value is CommunityAutomationS
     !statuses.has(row.status)||
     (row.attemptId!==undefined&&(typeof row.attemptId!=='string'||!/^[a-f0-9]{24}$/u.test(row.attemptId)))||
     (row.status==='QUEUED'&&row.attemptId!==undefined)||
-    (row.status==='SENDING'&&!row.attemptId))return false;
+    (['SENDING','UNKNOWN_OUTCOME','REVIEWED_UNKNOWN'].includes(row.status)&&!row.attemptId))return false;
    keys.add(row.key);
   }
+ }
+ const cleanupReviewIds=new Set<string>();
+ for(const d of v.cleanupReviewDrafts??[]){
+  if(!d||typeof d!=='object'||Array.isArray(d)||
+     Object.keys(d).some(k=>!['id','actorId','chatId','chatVersion','configVersion',
+       'action','targetKey','queueDigest','targetCount','createdAt','expiresAt'].includes(k))||
+     typeof d.id!=='string'||!/^[a-f0-9]{24}$/u.test(d.id)||
+     cleanupReviewIds.has(d.id)||!validActor(d.actorId)||!validGroup(d.chatId)||
+     !Number.isSafeInteger(d.chatVersion)||d.chatVersion<1||
+     !Number.isSafeInteger(d.configVersion)||d.configVersion<1||
+     !['CANCEL_ONE','REVIEW_ONE','CANCEL_GROUP'].includes(d.action)||
+     !validClock(d.createdAt)||!validClock(d.expiresAt)||
+     d.expiresAt<=d.createdAt||d.expiresAt-d.createdAt>120000||
+     (d.action==='CANCEL_GROUP'?
+       d.targetKey!==undefined||typeof d.queueDigest!=='string'||
+       !/^[a-f0-9]{64}$/u.test(d.queueDigest)||
+       !Number.isSafeInteger(d.targetCount)||d.targetCount<1||d.targetCount>1000:
+       typeof d.targetKey!=='string'||!/^[a-f0-9]{64}$/u.test(d.targetKey)||
+       d.queueDigest!==undefined||d.targetCount!==undefined))return false;
+  cleanupReviewIds.add(d.id);
  }
  const draftIds=new Set<string>();
  for(const d of v.drafts){
