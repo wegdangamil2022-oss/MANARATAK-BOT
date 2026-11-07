@@ -81,6 +81,7 @@ import {OwnerGroupBulkRestrict} from './telegram-inline-group-bulk-restrict.js';
 import {OwnerNetworkEditor} from './telegram-inline-networks.js';
 import {TelegramNetworkAlertEditor,validNetworkAlertRoute} from './telegram-network-alerts.js';
 import {TelegramNetworkDailyQuietEditor} from './telegram-network-daily-quiet.js';
+import {TelegramNetworkDailyDigestEditor} from './telegram-network-digest.js';
 import {validOwnerNetworkBulkServiceRoute} from './telegram-network-bulk-services.js';
 import {validOwnerNetworkPolicyDiffRoute} from './telegram-network-differences.js';
 import {validOwnerNetworkPolicySnapshotRoute} from './telegram-network-policy-snapshots.js';
@@ -758,6 +759,16 @@ export class TelegramUpdateApplication {
      return view?{status:'APPLIED',reason:'OWNER_NETWORK_REVIEW_INBOX',
       plan:this.plan(event.actorId,view.text,undefined,view.keyboard)}
       :{status:'DENIED',reason:'OWNER_NETWORK_REVIEW_INBOX_UNAVAILABLE'};
+    }
+    if(event.kind==='private'&&event.actorId===event.chatId&&
+     event.text.startsWith('/networkdigest')&&!event.callbackData){
+     if(event.edited||event.forwarded)
+      return {status:'DENIED',reason:'NETWORK_DAILY_DIGEST_ORIGINAL_PRIVATE_ONLY'};
+     const view=await new TelegramNetworkDailyDigestEditor(
+      this.opts.store,this.opts.policy,this.clock).command(event.actorId,event.text);
+     return view?{status:'APPLIED',reason:'NETWORK_DAILY_DIGEST_PREVIEW',
+      plan:this.plan(event.actorId,view.text,undefined,view.keyboard)}
+      :{status:'DENIED',reason:'NETWORK_DAILY_DIGEST_INVALID_OR_UNAUTHORIZED'};
     }
     if(event.kind==='private'&&event.actorId===event.chatId&&
      event.text.startsWith('/networkquiet')&&!event.callbackData){
