@@ -700,6 +700,18 @@ export class TelegramUpdateApplication {
       {status:'DENIED',reason:'OWNER_FORUM_UNAVAILABLE'};
     }
     if(event.kind==='private'&&event.actorId===event.chatId&&
+     !event.callbackData&&event.text.startsWith('/topicnote')){
+     if(!this.opts.policy.isOwner(event.actorId)||event.edited||event.forwarded)
+      return {status:'DENIED',reason:'OWNER_FORUM_PRIVATE_ORIGINAL_ONLY'};
+     const m=/^\/topicnote (-[1-9][0-9]{0,15}) ([1-9][0-9]{0,9}) (.+)$/u.exec(event.text);
+     if(!m)return {status:'DENIED',reason:'OWNER_FORUM_NOTE_INVALID'};
+     const view=await new OwnerForumTopicEditor(this.opts.store,this.opts.policy,this.clock)
+      .prepareNote(event.actorId,m[1]!,Number(m[2]),m[3]!);
+     return view?{status:'APPLIED',reason:'OWNER_FORUM_NOTE_PREVIEW',
+      plan:this.plan(event.actorId,view.text,undefined,view.keyboard)}:
+      {status:'DENIED',reason:'OWNER_FORUM_NOTE_UNAVAILABLE'};
+    }
+    if(event.kind==='private'&&event.actorId===event.chatId&&
      !event.callbackData&&event.text.startsWith('/topicregister')){
      if(!this.opts.policy.isOwner(event.actorId)||event.edited||event.forwarded)
       return {status:'DENIED',reason:'OWNER_FORUM_PRIVATE_ORIGINAL_ONLY'};
