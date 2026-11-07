@@ -149,9 +149,36 @@ export class Phase4ServiceCleanupDispatcher{
  }
  async runDue(limit=8):Promise<{attempted:number;results:CommunityCleanupDispatchResult[]}>{
   if(!Number.isSafeInteger(limit)||limit<1||limit>20)throw Error('COMMUNITY_CLEANUP_LIMIT_INVALID');
-  const snap=await this.store.snapshot(),now=this.clock();
+  const initial=await this.store.snapshot(),now=this.clock();
   if(!Number.isSafeInteger(now)||now<0||now>8_640_000_000_000_000)
    return {attempted:0,results:[]};
+  // Expired queued deletions cannot be executed by dispatch() (two-hour
+  // safety window). Mark them SKIPPED even while the safety gate is STOP,
+  // so old work never blocks capacity or appears permanently pending.
+  // A bounded pass keeps this privacy maintenance cheap for SQLite.
+  const expired=(initial.phase4Community?.cleanupJobs??[])
+   .filter(j=>j.status==='QUEUED'&&j.observedAt<=now&&
+     now-j.observedAt>2*3600000).slice(0,40).map(j=>j.key);
+  const oldFinal=(initial.phase4Community?.cleanupJobs??[])
+   .filter(j=>!['QUEUED','SENDING','UNKNOWN_OUTCOME'].includes(j.status)&&
+     j.observedAt<=now&&now-j.observedAt>=7*86400000)
+   .slice(0,40).map(j=>j.key);
+  if(expired.length||oldFinal.length){
+   await this.store.transaction(state=>{
+    const current=this.clock();
+    if(!Number.isSafeInteger(current)||current<now)return;
+    const jobs=state.phase4Community?.cleanupJobs;
+    if(!jobs)return;
+    const expire=new Set(expired),prune=new Set(oldFinal);
+    for(const job of jobs)if(expire.has(job.key)&&job.status==='QUEUED'&&
+      job.observedAt<=current&&current-job.observedAt>2*3600000)
+     job.status='SKIPPED';
+    state.phase4Community!.cleanupJobs=jobs.filter(j=>
+      !prune.has(j.key)||['QUEUED','SENDING','UNKNOWN_OUTCOME'].includes(j.status)||
+      j.observedAt>current||current-j.observedAt<7*86400000);
+   });
+  }
+  const snap=expired.length||oldFinal.length?await this.store.snapshot():initial;
   // Prevent one noisy group from starving other approved groups. Old work is
   // inspected by dispatch() but never blindly retried after a remote ambiguity.
   const due=(snap.phase4Community?.cleanupJobs??[])
