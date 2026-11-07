@@ -132,6 +132,16 @@ export class TelegramBotApiModerationGateway implements ModerationGateway{
     !('allowed' in a)&&!('call' in a)&&!('getMember' in a);
   }catch{return false;}
  }
+ /** Original-provider provenance for one-shot, reviewed Forum publication. */
+ static usesOfficialForumBroadcast(gateway:unknown):boolean{
+  try{
+   if(!this.usesOfficialTopicControl(gateway))return false;
+   const adapter=gateway as TelegramBotApiModerationGateway;
+   return TelegramBotApiModerationGateway.prototype.sendForumEducation===
+    officialGatewayMethods.sendForumEducation&&
+    adapter.sendForumEducation===officialGatewayMethods.sendForumEducation;
+  }catch{return false;}
+ }
  static usesOfficialGroupLinkRead(gateway:unknown):boolean{
   try{
    if(!this.usesOfficialGroupProfileRead(gateway))return false;
@@ -395,6 +405,47 @@ export class TelegramBotApiModerationGateway implements ModerationGateway{
   * Telegram has no getForumTopic endpoint; successful HTTP true is the
   * operation acknowledgement, not evidence of prior thread state.
   */
+ /** One explicitly approved group-topic publication. This is neither a
+  * general broadcast nor a retryable Telegram send.
+  * The reply must independently echo our exact chat and topic identity.
+  */
+ async sendForumEducation(chatId:string,threadId:number,actorId:string,
+  body:string,current:()=>Promise<boolean>):Promise<RestrictionOutcome>{
+  if(!validGroup(chatId)||!Number.isSafeInteger(threadId)||
+   threadId<=1||threadId>2147483647||!validUser(actorId)||
+   Number(actorId)===this.#botId||typeof body!=='string'||
+   body.length<12||Buffer.byteLength(body,'utf8')>3_700||
+   /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f\u202a-\u202e\u2066-\u2069]/u.test(body)||
+   typeof current!=='function')return 'FAILED_CONFIRMED';
+  if(!await this.#allowed())return 'FAILED_CONFIRMED';
+  if(await this.inspectForumStatus(chatId)!=='FORUM'||
+   (await this.inspectBotAdminRights(chatId)).manageTopics!=='GRANTED'||
+   await this.inspectForumActorRights(chatId,actorId)!=='GRANTED')
+   return 'FAILED_CONFIRMED';
+  let valid=false;
+  try{valid=await current()===true;}catch{/* denied */}
+  if(!valid||!await this.#allowed())return 'FAILED_CONFIRMED';
+  if(await this.inspectForumStatus(chatId)!=='FORUM'||
+   (await this.inspectBotAdminRights(chatId)).manageTopics!=='GRANTED'||
+   await this.inspectForumActorRights(chatId,actorId)!=='GRANTED')
+   return 'FAILED_CONFIRMED';
+  try{if(!await current()||!await this.#allowed())return 'FAILED_CONFIRMED';}
+  catch{return 'FAILED_CONFIRMED';}
+  const reply=await this.#call('sendMessage',{
+   chat_id:chatId,message_thread_id:threadId,text:body,
+   protect_content:true,link_preview_options:{is_disabled:true}
+  });
+  if(reply.status==='CLIENT_DENIED')return 'FAILED_CONFIRMED';
+  if(reply.status!=='HTTP_OK'||!object(reply.value))return 'UNKNOWN_OUTCOME';
+  const result=reply.value;
+  if(!object(result.chat)||result.chat.id!==Number(chatId)||
+   !object(result.from)||result.from.id!==this.#botId||
+   result.from.is_bot!==true||
+   result.message_thread_id!==threadId||
+   !Number.isSafeInteger(result.message_id)||Number(result.message_id)<1)
+   return 'UNKNOWN_OUTCOME';
+  return 'CONFIRMED';
+ }
  async applyForumTopicAction(chatId:string,threadId:number,
   actorId:string,command:'CLOSE'|'REOPEN',
   current:()=>Promise<boolean>):Promise<RestrictionOutcome>{
@@ -648,6 +699,7 @@ const officialGatewayMethods=Object.freeze({
  inspectForumStatus:TelegramBotApiModerationGateway.prototype.inspectForumStatus,
  inspectForumActorRights:TelegramBotApiModerationGateway.prototype.inspectForumActorRights,
  applyForumTopicAction:TelegramBotApiModerationGateway.prototype.applyForumTopicAction,
+ sendForumEducation:TelegramBotApiModerationGateway.prototype.sendForumEducation,
  inspectGroupLinkEligibility:TelegramBotApiModerationGateway.prototype.inspectGroupLinkEligibility
 });
 // Prevent rebinding the static origin-check functions after their definition.
