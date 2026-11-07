@@ -11,6 +11,7 @@ import {defaultCommunityConfig,emptyCommunityState,validCommunityConfig,validCom
 import {reviewedGroupFAQAnswer} from './phase4-community-sources.js';
 import {publicFolderGroups} from './telegram-community-folders.js';
 import {communityFolderURL} from './community-folder-model.js';
+import type {TelegramInlineKeyboard} from './telegram-inline-owner.js';
 
 /** Sections 09:02/09:03 reuse owner-approved material, never copy students' messages.
  * Member rendering is ONLY called after a fresh Telegram membership/subscription
@@ -38,6 +39,22 @@ export function parseGuidanceMemberCommand(input:string):GuidanceMemberCommand|n
   chatId:index[2]!,page:Number(index[3]??1)
  };
  const faq=/^\/groupfaq (-[1-9][0-9]{0,15}) ([a-f0-9]{8}-(?:[a-f0-9]{4}-){3}[a-f0-9]{12})$/u.exec(input);
+ return faq&&validGuidanceGroup(faq[1]!)&&validCommunityFAQId(faq[2])?
+  {kind:'FAQ',chatId:faq[1]!,faqId:faq[2]!}:null;
+}
+/** Callback routing is only navigation data, never a membership grant. */
+export function parseGuidanceMemberCallback(input:string):GuidanceMemberCommand|null{
+ if(typeof input!=='string'||Buffer.byteLength(input,'utf8')>64)return null;
+ const route=/^gm:1:([grfn]):(-[1-9][0-9]{0,15})(?::([1-9][0-9]?))?$/u.exec(input);
+ if(route&&validGuidanceGroup(route[2]!)){
+  if(route[1]==='g'||route[1]==='r')
+   return route[3]===undefined?{kind:route[1]==='g'?'GUIDE':'RULES',
+    chatId:route[2]!}:null;
+  if(route[3]===undefined)return null;
+  return {kind:route[1]==='f'?'FAQ_INDEX':'NOTES_INDEX',
+   chatId:route[2]!,page:Number(route[3])};
+ }
+ const faq=/^gm:1:q:(-[1-9][0-9]{0,15}):([a-f0-9]{8}-(?:[a-f0-9]{4}-){3}[a-f0-9]{12})$/u.exec(input);
  return faq&&validGuidanceGroup(faq[1]!)&&validCommunityFAQId(faq[2])?
   {kind:'FAQ',chatId:faq[1]!,faqId:faq[2]!}:null;
 }
@@ -195,11 +212,60 @@ export function renderGuidanceFAQ(s:BotState,chatId:string,id:string):string|nul
  if(q.length!==1||q[0]!.status!=='APPROVED')return null;
  const answer=reviewedGroupFAQAnswer(s,chatId,id);
  if(answer===null)return null;
- return '<b>📚 إجابة من مصدر تعليمي منشور</b>\n'+
+ const heading='<b>📚 إجابة من مصدر تعليمي منشور</b>\n'+
   'المجموعة: <code>'+chatId+'</code>\n'+
   '<b>السؤال:</b> '+guidanceEscape(q[0]!.question.slice(0,240))+'\n'+
-  '<b>الإجابة:</b> '+guidanceEscape(answer)+'\n\n'+
-  'المصدر: منشور تعليمي مُعتمد ومرئي لهذه المجموعة. هذه المعلومات لا تُعدّ وعدًا بقبول أو منحة.';
+  '<b>الإجابة:</b> ';
+ const ending='\n\nالمصدر: منشور تعليمي مُعتمد ومرئي لهذه المجموعة. هذه المعلومات لا تُعدّ وعدًا بقبول أو منحة.';
+ const available=3900-Buffer.byteLength(heading+ending,'utf8');
+ if(available<=0)return null;
+ let used=0,body='';
+ for(const ch of answer){
+  const clean=guidanceEscape(ch),bytes=Buffer.byteLength(clean,'utf8');
+  if(used+bytes>available)break;
+  body+=clean;used+=bytes;
+ }
+ return heading+body+ending;
+}
+/** Plain Telegram callback buttons; membership/subscription is reverified by
+ * the transport on EVERY selection, and the reply uses a fresh group epoch. */
+export function guidanceMemberKeyboard(data:GuidanceData,
+ kind:GuidanceMemberCommand['kind'],page=1):TelegramInlineKeyboard{
+ const group=data.chatId;
+ const button=(text:string,route:string)=>({text,callback_data:route});
+ const rows:{text:string;callback_data:string}[][]=[];
+ if(kind==='GUIDE'){
+  rows.push([button('📜 القوانين والملاحظات','gm:1:r:'+group)]);
+  rows.push([button('📚 الأسئلة الشائعة','gm:1:f:'+group+':1'),
+   button('📝 الملاحظات','gm:1:n:'+group+':1')]);
+ }else if(kind==='RULES'){
+  rows.push([button('📚 جميع الأسئلة','gm:1:f:'+group+':1'),
+   button('📝 جميع الملاحظات','gm:1:n:'+group+':1')]);
+  rows.push([button('🧭 دليل العضو الجديد','gm:1:g:'+group)]);
+ }else if(kind==='FAQ_INDEX'){
+  const pages=Math.max(1,Math.ceil(data.faqs.length/4));
+  for(const faq of data.faqs.slice((page-1)*4,page*4))
+   rows.push([button('📖 '+faq.question.slice(0,38),'gm:1:q:'+group+':'+faq.id)]);
+  const nav:{text:string;callback_data:string}[]=[];
+  if(page>1)nav.push(button('⬅️ السابق','gm:1:f:'+group+':'+(page-1)));
+  if(page<pages)nav.push(button('التالي ➡️','gm:1:f:'+group+':'+(page+1)));
+  if(nav.length)rows.push(nav);
+  rows.push([button('📜 القوانين والملاحظات','gm:1:r:'+group)]);
+ }else if(kind==='NOTES_INDEX'){
+  const pages=Math.max(1,Math.ceil(data.notes.length/4));
+  const nav:{text:string;callback_data:string}[]=[];
+  if(page>1)nav.push(button('⬅️ السابق','gm:1:n:'+group+':'+(page-1)));
+  if(page<pages)nav.push(button('التالي ➡️','gm:1:n:'+group+':'+(page+1)));
+  if(nav.length)rows.push(nav);
+  rows.push([button('📜 القوانين والملاحظات','gm:1:r:'+group)]);
+ }else{
+  rows.push([button('📚 قائمة الأسئلة','gm:1:f:'+group+':1')]);
+  rows.push([button('📜 قوانين المجموعة','gm:1:r:'+group)]);
+ }
+ return {inline_keyboard:rows};
+}
+export interface GuidanceMemberScreen{
+ readonly text:string;readonly keyboard:TelegramInlineKeyboard;
 }
 export class Phase4GuidanceService{
  constructor(private readonly store:BotStore,private readonly policy:Policy,
@@ -224,14 +290,19 @@ export class Phase4GuidanceService{
   */
  async member(chatId:string,kind:'GUIDE'|'RULES'|'FAQ'|'FAQ_INDEX'|'NOTES_INDEX',
   faqId?:string,page=1):Promise<string|null>{
+  return (await this.memberScreen(chatId,kind,faqId,page))?.text??null;
+ }
+ async memberScreen(chatId:string,kind:GuidanceMemberCommand['kind'],
+  faqId?:string,page=1):Promise<GuidanceMemberScreen|null>{
   const state=await this.store.snapshot();
   const data=context(state,this.policy,chatId);
   if(!data)return null;
-  if(kind==='GUIDE')return renderGuidanceWelcome(data);
-  if(kind==='RULES')return renderGuidanceRules(data);
-  if(kind==='FAQ_INDEX'||kind==='NOTES_INDEX')return renderGuidanceIndex(data,kind,page);
-  if(kind==='FAQ'&&faqId!==undefined)return renderGuidanceFAQ(state,chatId,faqId);
-  return null;
+  const text=kind==='GUIDE'?renderGuidanceWelcome(data):
+   kind==='RULES'?renderGuidanceRules(data):
+   kind==='FAQ_INDEX'||kind==='NOTES_INDEX'?renderGuidanceIndex(data,kind,page):
+   kind==='FAQ'&&faqId!==undefined?renderGuidanceFAQ(state,chatId,faqId):null;
+  if(!text||Buffer.byteLength(text,'utf8')>4096)return null;
+  return {text,keyboard:guidanceMemberKeyboard(data,kind,page)};
  }
  /** A guide post is a one-off, owner-initiated publication. Unlike a
   * welcome automation, merely configuring a guide never queues a send. */
